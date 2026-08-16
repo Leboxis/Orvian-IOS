@@ -19,20 +19,25 @@ struct FileGridView: View {
     /// Filtre client des éléments affichés (barre de recherche de l'Accueil).
     var searchText: String = ""
 
-    /// Remonte l'offset de scroll (minY du contenu) pour la barre de recherche.
-    var onScrollOffset: ((CGFloat) -> Void)?
+    /// Remonte true quand l'utilisateur a défilé vers le bas (dépassé le haut).
+    var onScrolledPastTop: ((Bool) -> Void)?
 
     var body: some View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 18, pinnedViews: []) {
+                if onScrolledPastTop != nil {
+                    Color.clear
+                        .frame(height: 1)
+                        .onScrollVisibilityChange(threshold: 0.01) { visible in
+                            onScrolledPastTop?(!visible)
+                        }
+                }
                 content
             }
             .padding(.horizontal, DS.gridMargin)
             .padding(.top, 6)
             .padding(.bottom, 110) // barre flottante
-            .background(offsetReader)
         }
-        .coordinateSpace(name: "gridScroll")
         .background(Color(uiColor: .systemGroupedBackground))
         .refreshable {
             await viewModel.reload()
@@ -40,20 +45,6 @@ struct FileGridView: View {
         .task {
             await viewModel.loadIfNeeded()
             onInitialLoad?(viewModel.items)
-        }
-        .onPreferenceChange(ScrollOffsetKey.self) { value in
-            onScrollOffset?(value)
-        }
-    }
-
-    /// Lit la position verticale du contenu (0 = en haut, > 0 = tiré vers
-    /// le bas, < 0 = descendant dans la liste).
-    private var offsetReader: some View {
-        GeometryReader { geo in
-            Color.clear.preference(
-                key: ScrollOffsetKey.self,
-                value: geo.frame(in: .named("gridScroll")).minY
-            )
         }
     }
 
@@ -144,6 +135,12 @@ struct FileGridView: View {
             onToggleFavorite: {
                 Task { await viewModel.toggleFavorite(file) }
             },
+            onDelete: {
+                Task { await viewModel.trash(file) }
+            },
+            onRename: { newName in
+                Task { await viewModel.rename(file, name: newName) }
+            },
             action: {
                 if file.isDirectory {
                     onOpenDirectory?(file)
@@ -222,13 +219,5 @@ struct FileGridView: View {
         case .favorites: return "Aucun favori"
         case .category: return "Aucun fichier avec ce tag"
         }
-    }
-}
-
-/// Préférence remontée par l'offset de scroll du contenu.
-private struct ScrollOffsetKey: PreferenceKey {
-    static var defaultValue: CGFloat = 0
-    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
-        value = nextValue()
     }
 }

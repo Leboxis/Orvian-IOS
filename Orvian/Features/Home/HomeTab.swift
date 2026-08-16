@@ -91,7 +91,7 @@ struct DirectoryView: View {
     @State private var busyMessage = ""
     @State private var addError: String?
     @State private var searchText = ""
-    @State private var scrollOffset: CGFloat = 0
+    @State private var scrolledPastTop = false
     @FocusState private var searchFocused: Bool
 
     private let router: ViewerRouter
@@ -128,7 +128,7 @@ struct DirectoryView: View {
                 onInitialLoad?(items)
             },
             searchText: searchText,
-            onScrollOffset: showsSearchBar ? { scrollOffset = $0 } : nil
+            onScrolledPastTop: showsSearchBar ? { scrolledPastTop = $0 } : nil
         )
         .navigationTitle(crumbs.isEmpty ? directory.name : crumbs.last ?? directory.name)
         .navigationBarTitleDisplayMode(.inline)
@@ -171,12 +171,10 @@ struct DirectoryView: View {
         }
     }
 
-    /// La barre n'apparaît qu'en défilant vers le bas : tiré vers le bas
-    /// (avant le déclenchement du refresh) ou en descendant dans la liste.
-    /// Elle ne capte le toucher que hors de la zone de tirage, le
-    /// pull-to-refresh continue donc de fonctionner.
+    /// La barre n'apparaît qu'en défilant dans le contenu du dossier
+    /// (pas lors du tirage en haut, le refresh est indépendant).
     private var searchBarVisible: Bool {
-        searchFocused || !searchText.isEmpty || scrollOffset > 4 || scrollOffset < -80
+        searchFocused || !searchText.isEmpty || scrolledPastTop
     }
 
     private var searchBar: some View {
@@ -203,10 +201,10 @@ struct DirectoryView: View {
         .background(Color(uiColor: .secondarySystemBackground), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
         .padding(.horizontal, DS.gridMargin)
         .padding(.vertical, 6)
+        .frame(maxWidth: .infinity)
         .background(.bar)
         .frame(height: searchBarVisible ? nil : 0)
         .opacity(searchBarVisible ? 1 : 0)
-        .allowsHitTesting(searchBarVisible && scrollOffset <= 0)
         .clipped()
         .animation(.snappy(duration: 0.25), value: searchBarVisible)
     }

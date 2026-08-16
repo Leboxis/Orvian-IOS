@@ -1,15 +1,22 @@
 import SwiftUI
 
 /// Carte de fichier : miniature, étoile favori, nom, taille.
+/// Tap → fiche détails. Appui long → menu contextuel (favori, renommer, supprimer).
 struct FileCardView: View {
     let file: DriveFile
     let driveId: Int
     var enabled = true
     var onToggleFavorite: (() -> Void)?
+    var onDelete: (() -> Void)?
+    var onRename: ((String) -> Void)?
     var action: () -> Void
 
     @State private var thumbnail: UIImage?
     @State private var thumbnailLoaded = false
+    @State private var showDetail = false
+    @State private var showDeleteConfirm = false
+    @State private var showRenameAlert = false
+    @State private var renameText = ""
 
     private var kind: FileKind { file.fileKind }
 
@@ -20,7 +27,7 @@ struct FileCardView: View {
     }
 
     var body: some View {
-        Button(action: action) {
+        Button { showDetail = true } label: {
             VStack(spacing: 5) {
                 thumbnailArea
                     .overlay(alignment: .topTrailing) { favoriteBadge }
@@ -47,6 +54,58 @@ struct FileCardView: View {
         }
         .buttonStyle(.plain)
         .disabled(!enabled)
+        .contextMenu {
+            Button {
+                onToggleFavorite?()
+            } label: {
+                Label(
+                    file.isFavorite == true ? "Retirer des favoris" : "Ajouter aux favoris",
+                    systemImage: file.isFavorite == true ? "star.slash" : "star"
+                )
+            }
+            if onRename != nil {
+                Button {
+                    renameText = file.name
+                    showRenameAlert = true
+                } label: {
+                    Label("Renommer", systemImage: "pencil")
+                }
+            }
+            if onDelete != nil {
+                Button(role: .destructive) {
+                    showDeleteConfirm = true
+                } label: {
+                    Label("Supprimer", systemImage: "trash")
+                }
+            }
+        }
+        .sheet(isPresented: $showDetail) {
+            FileDetailSheet(
+                file: file,
+                driveId: driveId,
+                onOpen: action,
+                onToggleFavorite: onToggleFavorite,
+                onDelete: onDelete,
+                onRename: onRename
+            )
+        }
+        .alert("Supprimer", isPresented: $showDeleteConfirm) {
+            Button("Supprimer", role: .destructive) { onDelete?() }
+            Button("Annuler", role: .cancel) {}
+        } message: {
+            Text("« \(file.name) » sera déplacé dans la corbeille.")
+        }
+        .alert("Renommer", isPresented: $showRenameAlert) {
+            TextField("Nouveau nom", text: $renameText)
+            Button("Renommer") {
+                let trimmed = renameText.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !trimmed.isEmpty { onRename?(trimmed) }
+                renameText = ""
+            }
+            Button("Annuler", role: .cancel) { renameText = "" }
+        } message: {
+            Text("Ancien nom : \(file.name)")
+        }
         .task(id: file.id) {
             await loadThumbnail()
         }
@@ -174,6 +233,261 @@ struct FileCardView: View {
             }
         } else {
             thumbnailLoaded = true
+        }
+    }
+}
+
+// MARK: - Fiche détails
+
+/// Fiche affichée au tap sur un élément du drive : infos, tags, favori,
+/// et bouton Ouvrir.
+struct FileDetailSheet: View {
+    let file: DriveFile
+    let driveId: Int
+    let onOpen: () -> Void
+    let onToggleFavorite: (() -> Void)?
+    let onDelete: (() -> Void)?
+    let onRename: ((String) -> Void)?
+
+    @Environment(\.dismiss) private var dismiss
+    @State private var categories: [Category] = []
+    @State private var appliedCategoryIds: Set<Int>
+    @State private var showDeleteConfirm = false
+    @State private var showRenameAlert = false
+    @State private var renameText = ""
+
+    private let service = KDriveService()
+
+    init(
+        file: DriveFile,
+        driveId: Int,
+        onOpen: @escaping () -> Void,
+        onToggleFavorite: (() -> Void)?,
+        onDelete: (() -> Void)?,
+        onRename: ((String) -> Void)?
+    ) {
+        self.file = file
+        self.driveId = driveId
+        self.onOpen = onOpen
+        self.onToggleFavorite = onToggleFavorite
+        self.onDelete = onDelete
+        self.onRename = onRename
+        _appliedCategoryIds = State(initialValue: Set((file.categories ?? []).compactMap { $0.category?.id }))
+    }
+
+    var body: some View {
+        NavigationStack {
+            List {
+                Section {
+                    HStack {
+                        Spacer()
+                        thumbnailPreview
+                            .frame(width: 80, height: 80)
+                        Spacer()
+                    }
+                    .listRowBackground(Color.clear)
+                }
+
+                Section("Informations") {
+                    labeledRow("Type", file.isDirectory ? "Dossier" : file.fileKind.label)
+                    if let size = file.size, !file.isDirectory {
+                        labeledRow("Taille", ByteFormatter.string(fromBytes: size))
+                    }
+                    labeledRow("Ajouté", dateText(file.addedAt))
+                    labeledRow("Modifié", dateText(file.lastModifiedAt))
+                    if !file.isDirectory {
+                        Button {
+                            onToggleFavorite?()
+                        } label: {
+                            HStack {
+                                Text("Favori")
+                                    .foregroundStyle(.primary)
+                                Spacer()
+                                Image(systemName: file.isFavorite == true ? "star.fill" : "star")
+                                    .foregroundStyle(file.isFavorite == true ? .yellow : .secondary)
+                            }
+                        }
+                    }
+                }
+
+                Section("Tags") {
+                    if categories.isEmpty {
+                        Text("Aucun tag disponible")
+                            .foregroundStyle(.secondary)
+                    } else {
+                        ForEach(categories) { category in
+                            Button {
+                                Task { await toggleCategory(category) }
+                            } label: {
+                                HStack {
+                                    Circle()
+                                        .fill(Color(hex: category.color) ?? .gray)
+                                        .frame(width: 10, height: 10)
+                                    Text(category.name)
+                                        .foregroundStyle(.primary)
+                                    Spacer()
+                                    if appliedCategoryIds.contains(category.id) {
+                                        Image(systemName: "checkmark")
+                                            .foregroundStyle(.accent)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                Section {
+                    Button {
+                        dismiss()
+                        onOpen()
+                    } label: {
+                        Label(file.isDirectory ? "Ouvrir le dossier" : "Ouvrir", systemImage: file.isDirectory ? "folder" : "play.fill")
+                    }
+                }
+            }
+            .navigationTitle(file.name)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button("Fermer") { dismiss() }
+                }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Menu {
+                        if let onToggleFavorite {
+                            Button {
+                                onToggleFavorite()
+                            } label: {
+                                Label(
+                                    file.isFavorite == true ? "Retirer des favoris" : "Ajouter aux favoris",
+                                    systemImage: file.isFavorite == true ? "star.slash" : "star"
+                                )
+                            }
+                        }
+                        if let onRename {
+                            Button {
+                                renameText = file.name
+                                showRenameAlert = true
+                            } label: {
+                                Label("Renommer", systemImage: "pencil")
+                            }
+                        }
+                        if let onDelete {
+                            Button(role: .destructive) {
+                                showDeleteConfirm = true
+                            } label: {
+                                Label("Supprimer", systemImage: "trash")
+                            }
+                        }
+                    } label: {
+                        Image(systemName: "ellipsis.circle")
+                    }
+                }
+            }
+            .alert("Supprimer", isPresented: $showDeleteConfirm) {
+                Button("Supprimer", role: .destructive) { onDelete?() }
+                Button("Annuler", role: .cancel) {}
+            } message: {
+                Text("« \(file.name) » sera déplacé dans la corbeille.")
+            }
+            .alert("Renommer", isPresented: $showRenameAlert) {
+                TextField("Nouveau nom", text: $renameText)
+                Button("Renommer") {
+                    let trimmed = renameText.trimmingCharacters(in: .whitespacesAndNewlines)
+                    if !trimmed.isEmpty { onRename?(trimmed) }
+                    renameText = ""
+                }
+                Button("Annuler", role: .cancel) { renameText = "" }
+            } message: {
+                Text("Ancien nom : \(file.name)")
+            }
+            .task { await loadCategories() }
+        }
+    }
+
+    @ViewBuilder
+    private var thumbnailPreview: some View {
+        let shape = RoundedRectangle(cornerRadius: 12, style: .continuous)
+        if file.isDirectory {
+            ZStack {
+                Rectangle().fill((file.color.flatMap { Color(hex: $0) } ?? file.fileKind.tint).opacity(0.12))
+                Image(systemName: "folder.fill")
+                    .font(.system(size: 36, weight: .light))
+                    .foregroundStyle(file.color.flatMap { Color(hex: $0) } ?? file.fileKind.tint)
+            }
+            .clipShape(shape)
+            .overlay { shape.strokeBorder(.black.opacity(0.05), lineWidth: 0.5) }
+        } else {
+            AsyncThumbnail(driveId: driveId, fileId: file.id, shape: shape)
+        }
+    }
+
+    private func labeledRow(_ label: String, _ value: String) -> some View {
+        HStack {
+            Text(label)
+                .foregroundStyle(.secondary)
+            Spacer()
+            Text(value)
+                .foregroundStyle(.primary)
+        }
+    }
+
+    private func dateText(_ timestamp: Double?) -> String {
+        guard let ts = timestamp else { return "—" }
+        let date = Date(timeIntervalSince1970: ts)
+        return date.formatted(date: .abbreviated, time: .shortened)
+    }
+
+    private func loadCategories() async {
+        if let cats = try? await service.categories(driveId: driveId) {
+            categories = cats
+        }
+    }
+
+    private func toggleCategory(_ category: Category) async {
+        let isApplying = !appliedCategoryIds.contains(category.id)
+        if isApplying {
+            appliedCategoryIds.insert(category.id)
+        } else {
+            appliedCategoryIds.remove(category.id)
+        }
+        do {
+            if isApplying {
+                try await service.addCategory(driveId: driveId, fileId: file.id, categoryId: category.id)
+            } else {
+                try await service.removeCategory(driveId: driveId, fileId: file.id, categoryId: category.id)
+            }
+        } catch {
+            if isApplying {
+                appliedCategoryIds.remove(category.id)
+            } else {
+                appliedCategoryIds.insert(category.id)
+            }
+        }
+    }
+}
+
+/// Charge une miniature de manière asynchrone pour un affichage ponctuel.
+private struct AsyncThumbnail<S: InsettableShape>: View {
+    let driveId: Int
+    let fileId: Int
+    let shape: S
+
+    @State private var image: UIImage?
+
+    var body: some View {
+        ZStack {
+            if let image {
+                Image(uiImage: image)
+                    .resizable()
+                    .scaledToFill()
+            } else {
+                ProgressView()
+            }
+        }
+        .clipShape(shape)
+        .overlay { shape.strokeBorder(.black.opacity(0.05), lineWidth: 0.5) }
+        .task {
+            image = await ThumbnailProvider.shared.thumbnail(driveId: driveId, fileId: fileId, pixels: 200)
         }
     }
 }

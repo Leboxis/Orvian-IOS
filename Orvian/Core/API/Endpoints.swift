@@ -128,4 +128,14 @@ extension Endpoint {
             ]
         )
     }
+
+    /// Supprimer un fichier (le déplacer dans la corbeille).
+    static func trash(driveId: Int, fileId: Int) -> Endpoint {
+        Endpoint(path: "/2/drive/\(driveId)/files/\(fileId)")
+    }
+
+    /// Renommer un fichier ou dossier.
+    static func rename(driveId: Int, fileId: Int) -> Endpoint {
+        Endpoint(path: "/2/drive/\(driveId)/files/\(fileId)/rename")
+    }
 }

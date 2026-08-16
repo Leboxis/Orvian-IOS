@@ -114,4 +114,17 @@ struct KDriveService {
             contentType: mimeType.isEmpty ? "application/octet-stream" : mimeType
         )
     }
+
+    // MARK: - Suppression & renommage
+
+    /// Déplace un fichier ou dossier dans la corbeille.
+    func trash(driveId: Int, fileId: Int) async throws {
+        try await api.sendEmpty(.trash(driveId: driveId, fileId: fileId), method: "DELETE")
+    }
+
+    /// Renomme un fichier ou dossier.
+    func rename(driveId: Int, fileId: Int, name: String) async throws {
+        let body = try JSONEncoder().encode(["name": name])
+        try await api.post(.rename(driveId: driveId, fileId: fileId), body: body, contentType: "application/json")
+    }
 }

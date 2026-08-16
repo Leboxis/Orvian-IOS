@@ -84,6 +84,26 @@ final class FileGridViewModel {
         }
     }
 
+    // MARK: - Suppression & renommage
+
+    func trash(_ file: DriveFile) async {
+        do {
+            try await service.trash(driveId: driveId, fileId: file.id)
+            items.removeAll { $0.id == file.id }
+        } catch {
+            errorMessage = "Suppression impossible : \((error as? APIError)?.errorDescription ?? error.localizedDescription)"
+        }
+    }
+
+    func rename(_ file: DriveFile, name: String) async {
+        do {
+            try await service.rename(driveId: driveId, fileId: file.id, name: name)
+            await reload()
+        } catch {
+            errorMessage = "Renommage impossible : \((error as? APIError)?.errorDescription ?? error.localizedDescription)"
+        }
+    }
+
     // MARK: - Groupes (Actualité par jour, Média par mois)
 
     struct Group: Identifiable {

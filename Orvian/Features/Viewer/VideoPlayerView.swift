@@ -147,11 +147,14 @@ struct VideoPlayerView: View {
             Slider(value: scrubBinding, in: 0...max(duration, 1)) { editing in
                 isScrubbing = editing
                 if !editing {
-                    seek(to: scrubValue)
+                    seek(to: scrubValue, precise: true)
                 }
             }
             .tint(.white)
             .controlSize(.large)
+            .onChange(of: scrubValue) { _, newValue in
+                if isScrubbing { seek(to: newValue) }
+            }
 
             Text(timeText(duration))
                 .font(.caption2.monospacedDigit())
@@ -212,7 +215,6 @@ struct VideoPlayerView: View {
                 .font(.system(size: 15, weight: .semibold))
                 .foregroundStyle(.white)
                 .padding(10)
-                .background(.ultraThinMaterial, in: Circle())
         }
         .accessibilityLabel("Fermer")
     }
@@ -295,9 +297,10 @@ struct VideoPlayerView: View {
         isPlaying.toggle()
     }
 
-    private func seek(to seconds: Double) {
+    private func seek(to seconds: Double, precise: Bool = false) {
         guard let player else { return }
-        player.seek(to: CMTime(seconds: seconds, preferredTimescale: 600), toleranceBefore: .zero, toleranceAfter: .zero)
+        let tolerance: CMTime = precise ? .zero : .indefinite
+        player.seek(to: CMTime(seconds: seconds, preferredTimescale: 600), toleranceBefore: tolerance, toleranceAfter: tolerance)
         currentTime = seconds
     }
 

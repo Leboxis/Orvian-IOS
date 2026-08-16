@@ -113,6 +113,22 @@ enum FileKind: String, CaseIterable {
         }
     }
 
+    var label: String {
+        switch self {
+        case .folder: return "Dossier"
+        case .image: return "Image"
+        case .video: return "Vidéo"
+        case .audio: return "Audio"
+        case .pdf: return "PDF"
+        case .text: return "Document texte"
+        case .spreadsheet: return "Tableur"
+        case .presentation: return "Présentation"
+        case .archive: return "Archive"
+        case .code: return "Code"
+        case .other: return "Fichier"
+        }
+    }
+
     /// Teinte par type — volontairement désaturées et douces.
     var tint: Color {
         switch self {

@@ -222,18 +222,19 @@ private struct CategoryGridCell: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(spacing: 10) {
             Image(systemName: "tag.fill")
                 .font(.system(size: 16, weight: .semibold))
                 .foregroundStyle(.white)
                 .frame(width: 36, height: 36)
                 .background(tint, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
 
-            VStack(alignment: .leading, spacing: 2) {
+            VStack(spacing: 2) {
                 Text(category.name)
                     .font(.subheadline.weight(.semibold))
                     .foregroundStyle(.primary)
                     .lineLimit(2)
+                    .multilineTextAlignment(.center)
                 if let uses = category.userUses, uses > 0 {
                     Text("\(uses) élément\(uses > 1 ? "s" : "")")
                         .font(.caption)
@@ -241,9 +242,13 @@ private struct CategoryGridCell: View {
                 }
             }
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .frame(maxWidth: .infinity)
         .padding(12)
-        .background(.background, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .background(Color(uiColor: .secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .strokeBorder(.quaternary, lineWidth: 0.5)
+        }
         .shadow(color: .black.opacity(0.05), radius: 4, x: 0, y: 2)
         .contentShape(Rectangle())
     }
