@@ -39,11 +39,10 @@ struct AddMenuButton: View {
             }
         } label: {
             Image(systemName: "plus")
-                .font(.system(size: 17, weight: .semibold))
-                .foregroundStyle(.white)
+                .font(.system(size: 18, weight: .semibold))
+                .foregroundStyle(Color.accentColor)
                 .frame(width: 32, height: 32)
-                .background(Color.accentColor, in: Circle())
-                .shadow(color: .black.opacity(0.15), radius: 4, y: 1)
+                .contentShape(Rectangle())
         }
         .disabled(isBusy)
         .accessibilityLabel("Ajouter")

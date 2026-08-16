@@ -2,9 +2,10 @@ import SwiftUI
 import AVFoundation
 import AVKit
 
-/// Lecteur vidéo personnalisé : les barres (titre + fermer en haut,
+/// Lecteur vidéo personnalisé : les barres (titre + boutons en haut,
 /// transport en bas) sont hors de la zone de lecture de la vidéo.
-/// Contrôles : play/pause, barre de progression, muet, AirPlay, favori, tags.
+/// Haut : AirPlay (RP), tag, favori à gauche — muet + fermer à droite.
+/// Bas : play/pause, progression agrandie, vitesse de lecture.
 struct VideoPlayerView: View {
     let file: DriveFile
     let driveId: Int
@@ -19,6 +20,7 @@ struct VideoPlayerView: View {
     @State private var duration: Double = 0
     @State private var isScrubbing = false
     @State private var scrubValue: Double = 0
+    @State private var playbackRate: Float = 1
 
     // Son
     @State private var isMuted = false
@@ -71,26 +73,29 @@ struct VideoPlayerView: View {
     // MARK: - Barre du haut (hors zone vidéo)
 
     private var topBar: some View {
-        HStack(spacing: 12) {
-            Spacer()
+        ZStack {
+            HStack(spacing: 12) {
+                AirPlayButton()
+                    .frame(width: 30, height: 30)
+                tagMenu
+                favoriteButton
+                Spacer()
+            }
             Text(file.name)
                 .font(.footnote.weight(.medium))
                 .foregroundStyle(.white)
                 .lineLimit(1)
+                .minimumScaleFactor(0.6)
                 .padding(.horizontal, 14)
                 .padding(.vertical, 6)
                 .background(.black.opacity(0.25), in: Capsule())
-            Spacer()
-            Button {
-                dismiss()
-            } label: {
-                Image(systemName: "xmark")
-                    .font(.system(size: 15, weight: .semibold))
-                    .foregroundStyle(.white)
-                    .padding(10)
-                    .background(.ultraThinMaterial, in: Circle())
+                .padding(.horizontal, 120)
+                .frame(maxWidth: .infinity)
+            HStack(spacing: 12) {
+                Spacer()
+                muteButton
+                closeButton
             }
-            .accessibilityLabel("Fermer")
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 6)
@@ -133,17 +138,7 @@ struct VideoPlayerView: View {
 
     private var bottomBar: some View {
         HStack(spacing: 8) {
-            Button {
-                togglePlay()
-            } label: {
-                Image(systemName: isPlaying ? "pause.fill" : "play.fill")
-                    .font(.system(size: 17, weight: .semibold))
-                    .foregroundStyle(.white)
-                    .frame(width: 36, height: 36)
-                    .background(.white.opacity(0.12), in: Circle())
-            }
-            .disabled(player == nil)
-            .accessibilityLabel(isPlaying ? "Pause" : "Lecture")
+            playButton
 
             Text(timeText(currentTime))
                 .font(.caption2.monospacedDigit())
@@ -156,39 +151,96 @@ struct VideoPlayerView: View {
                 }
             }
             .tint(.white)
+            .controlSize(.large)
 
             Text(timeText(duration))
                 .font(.caption2.monospacedDigit())
                 .foregroundStyle(.white.opacity(0.8))
 
-            AirPlayButton()
-                .frame(width: 30, height: 30)
-
-            Button {
-                Task { await toggleFavorite() }
-            } label: {
-                Image(systemName: isFavorite ? "star.fill" : "star")
-                    .font(.system(size: 16, weight: .medium))
-                    .foregroundStyle(isFavorite ? .yellow : .white)
-                    .frame(width: 30, height: 30)
-            }
-            .accessibilityLabel(isFavorite ? "Retirer des favoris" : "Ajouter aux favoris")
-
-            tagMenu
-
-            Button {
-                isMuted.toggle()
-                player?.isMuted = isMuted
-            } label: {
-                Image(systemName: isMuted ? "speaker.slash.fill" : "speaker.wave.2.fill")
-                    .font(.system(size: 16, weight: .medium))
-                    .foregroundStyle(.white)
-                    .frame(width: 30, height: 30)
-            }
-            .accessibilityLabel(isMuted ? "Réactiver le son" : "Couper le son")
+            speedMenu
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 10)
+    }
+
+    // MARK: - Boutons
+
+    private var playButton: some View {
+        Button {
+            togglePlay()
+        } label: {
+            Image(systemName: isPlaying ? "pause.fill" : "play.fill")
+                .font(.system(size: 17, weight: .semibold))
+                .foregroundStyle(.white)
+                .frame(width: 36, height: 36)
+                .background(.white.opacity(0.12), in: Circle())
+        }
+        .disabled(player == nil)
+        .accessibilityLabel(isPlaying ? "Pause" : "Lecture")
+    }
+
+    private var favoriteButton: some View {
+        Button {
+            Task { await toggleFavorite() }
+        } label: {
+            Image(systemName: isFavorite ? "star.fill" : "star")
+                .font(.system(size: 16, weight: .medium))
+                .foregroundStyle(isFavorite ? .yellow : .white)
+                .frame(width: 30, height: 30)
+        }
+        .accessibilityLabel(isFavorite ? "Retirer des favoris" : "Ajouter aux favoris")
+    }
+
+    private var muteButton: some View {
+        Button {
+            isMuted.toggle()
+            player?.isMuted = isMuted
+        } label: {
+            Image(systemName: isMuted ? "speaker.slash.fill" : "speaker.wave.2.fill")
+                .font(.system(size: 16, weight: .medium))
+                .foregroundStyle(.white)
+                .frame(width: 30, height: 30)
+        }
+        .accessibilityLabel(isMuted ? "Réactiver le son" : "Couper le son")
+    }
+
+    private var closeButton: some View {
+        Button {
+            dismiss()
+        } label: {
+            Image(systemName: "xmark")
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundStyle(.white)
+                .padding(10)
+                .background(.ultraThinMaterial, in: Circle())
+        }
+        .accessibilityLabel("Fermer")
+    }
+
+    /// Vitesse de lecture : petite pastille en bas à droite.
+    private var speedMenu: some View {
+        Menu {
+            ForEach(SpeedOption.allCases) { option in
+                Button {
+                    setPlaybackRate(option.rate)
+                } label: {
+                    HStack {
+                        Text(option.title)
+                        Spacer()
+                        if option.rate == playbackRate {
+                            Image(systemName: "checkmark")
+                        }
+                    }
+                }
+            }
+        } label: {
+            Text(SpeedOption(rawValue: playbackRate)?.title ?? "1x")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.white)
+                .frame(width: 36, height: 36)
+                .background(.white.opacity(0.12), in: Circle())
+        }
+        .accessibilityLabel("Vitesse de lecture")
     }
 
     /// Menu des catégories (tags) du drive : coche celles appliquées à la vidéo.
@@ -249,6 +301,14 @@ struct VideoPlayerView: View {
         currentTime = seconds
     }
 
+    private func setPlaybackRate(_ rate: Float) {
+        playbackRate = rate
+        player?.defaultRate = rate
+        if player?.timeControlStatus == .playing {
+            player?.rate = rate
+        }
+    }
+
     // MARK: - Favori & tags
 
     private func toggleFavorite() async {
@@ -304,6 +364,7 @@ struct VideoPlayerView: View {
         let newPlayer = AVPlayer(url: url)
         newPlayer.automaticallyWaitsToMinimizeStalling = true
         newPlayer.isMuted = isMuted
+        newPlayer.defaultRate = playbackRate
 
         guard !Task.isCancelled else {
             newPlayer.pause()
@@ -368,6 +429,25 @@ struct VideoPlayerView: View {
 }
 
 // MARK: - Vues UIKit embarquées
+
+/// Vitesses de lecture proposées par la pastille en bas à droite.
+private enum SpeedOption: Float, CaseIterable, Identifiable {
+    case slow = 0.5
+    case threeQuarters = 0.75
+    case normal = 1.0
+    case oneAndQuarter = 1.25
+    case oneAndHalf = 1.5
+    case double = 2.0
+
+    var id: Float { rawValue }
+    var rate: Float { rawValue }
+
+    var title: String {
+        let value = rawValue
+        if value == value.rounded() { return "\(Int(value))x" }
+        return String(format: "%gx", value).replacingOccurrences(of: ".", with: ",")
+    }
+}
 
 /// Couche de rendu AVPlayerLayer (sans contrôles natifs).
 private struct PlayerLayerView: UIViewRepresentable {

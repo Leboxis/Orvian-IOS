@@ -14,12 +14,26 @@ struct TagsView: View {
     @State private var errorMessage: String?
     @State private var path = NavigationPath()
     @State private var trail: [String] = []
+    /// Affichage des catégories : grille (défaut) ou liste.
+    @AppStorage("tagsLayout") private var layout = CategoryLayout.grid
 
     private let service = KDriveService()
 
     var body: some View {
         NavigationStack(path: $path) {
             root
+                .toolbar {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Button {
+                            withAnimation(.snappy(duration: 0.25)) {
+                                layout = layout == .grid ? .list : .grid
+                            }
+                        } label: {
+                            Image(systemName: layout == .grid ? "list.bullet" : "square.grid.2x2")
+                        }
+                        .accessibilityLabel(layout == .grid ? "Afficher en liste" : "Afficher en grille")
+                    }
+                }
                 .navigationDestination(for: Category.self) { category in
                     CategoryFilesView(
                         category: category,
@@ -65,12 +79,41 @@ struct TagsView: View {
                     title: "Aucun tag",
                     message: "Les catégories créées dans kDrive apparaîtront ici."
                 )
+            } else if layout == .grid {
+                grid
             } else {
                 list
             }
         }
         .navigationTitle("Tag")
         .navigationBarTitleDisplayMode(.large)
+    }
+
+    private var grid: some View {
+        ScrollView {
+            LazyVGrid(columns: gridColumns, spacing: DS.gridSpacing) {
+                ForEach(categories) { category in
+                    Button {
+                        path.append(category)
+                        trail.append(category.name)
+                    } label: {
+                        CategoryGridCell(category: category)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .padding(.horizontal, DS.gridMargin)
+            .padding(.top, 6)
+            .padding(.bottom, 110)
+        }
+        .background(Color(uiColor: .systemGroupedBackground))
+        .refreshable {
+            await load(force: true)
+        }
+    }
+
+    private var gridColumns: [GridItem] {
+        Array(repeating: GridItem(.flexible(), spacing: DS.gridSpacing), count: 2)
     }
 
     private var list: some View {
@@ -168,6 +211,48 @@ private struct CategoryRow: View {
         .shadow(color: .black.opacity(0.05), radius: 4, x: 0, y: 2)
         .contentShape(Rectangle())
     }
+}
+
+/// Carte de catégorie pour le mode grille.
+private struct CategoryGridCell: View {
+    let category: Category
+
+    private var tint: Color {
+        Color(hex: category.color) ?? .accentColor
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Image(systemName: "tag.fill")
+                .font(.system(size: 16, weight: .semibold))
+                .foregroundStyle(.white)
+                .frame(width: 36, height: 36)
+                .background(tint, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(category.name)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.primary)
+                    .lineLimit(2)
+                if let uses = category.userUses, uses > 0 {
+                    Text("\(uses) élément\(uses > 1 ? "s" : "")")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(12)
+        .background(.background, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .shadow(color: .black.opacity(0.05), radius: 4, x: 0, y: 2)
+        .contentShape(Rectangle())
+    }
+}
+
+/// Modes d'affichage des catégories dans l'onglet Tag.
+enum CategoryLayout: String {
+    case list
+    case grid
 }
 
 /// Grille des fichiers d'une catégorie.

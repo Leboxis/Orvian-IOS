@@ -6,26 +6,20 @@ struct HomeTab: View {
     let router: ViewerRouter
 
     @State private var path: [DriveFile] = []
-    /// Ouvre automatiquement le premier dossier de la racine au lancement.
-    @State private var didAutoOpen = false
+    /// Premier dossier de la racine, ouvert automatiquement au lancement.
+    /// Une fois défini, il remplace la racine « Accueil » : aucun moyen de
+    /// revenir dessus (pas de flèche retour ni de geste de balayage).
+    @State private var startDirectory: DriveFile?
 
     var body: some View {
         NavigationStack(path: $path) {
-            DirectoryView(
-                directory: DriveFile.root(name: "Accueil"),
-                driveId: driveId,
-                crumbs: [],
-                router: router,
-                onOpenFolder: { folder in
-                    path.append(folder)
-                },
-                onInitialLoad: { items in
-                    guard !didAutoOpen else { return }
-                    guard let firstFolder = items.first(where: \.isDirectory) else { return }
-                    didAutoOpen = true
-                    path.append(firstFolder)
+            Group {
+                if let startDirectory {
+                    rootDirectory(startDirectory)
+                } else {
+                    rootDirectory(DriveFile.root(name: "Accueil"))
                 }
-            )
+            }
             .navigationDestination(for: DriveFile.self) { directory in
                 let index = path.firstIndex(where: { $0.id == directory.id })
                 let crumbs = index.map { Array(path[...$0].map(\.name)) } ?? []
@@ -34,12 +28,31 @@ struct HomeTab: View {
                     driveId: driveId,
                     crumbs: crumbs,
                     router: router,
+                    showsSearchBar: true,
                     onOpenFolder: { folder in
                         path.append(folder)
                     }
                 )
             }
         }
+    }
+
+    private func rootDirectory(_ directory: DriveFile) -> some View {
+        DirectoryView(
+            directory: directory,
+            driveId: driveId,
+            crumbs: [],
+            router: router,
+            showsSearchBar: true,
+            onOpenFolder: { folder in
+                path.append(folder)
+            },
+            onInitialLoad: { items in
+                guard startDirectory == nil else { return }
+                guard let firstFolder = items.first(where: \.isDirectory) else { return }
+                startDirectory = firstFolder
+            }
+        )
     }
 }
 
@@ -70,11 +83,16 @@ struct DirectoryView: View {
     let directory: DriveFile
     let driveId: Int
     let crumbs: [String]
+    /// Affiche la barre de recherche (onglet Accueil uniquement).
+    let showsSearchBar: Bool
 
     @State private var viewModel: FileGridViewModel
     @State private var addBusy = false
     @State private var busyMessage = ""
     @State private var addError: String?
+    @State private var searchText = ""
+    @State private var scrollOffset: CGFloat = 0
+    @FocusState private var searchFocused: Bool
 
     private let router: ViewerRouter
     private let onOpenFolder: (DriveFile) -> Void
@@ -85,6 +103,7 @@ struct DirectoryView: View {
         driveId: Int,
         crumbs: [String],
         router: ViewerRouter,
+        showsSearchBar: Bool = false,
         onOpenFolder: @escaping (DriveFile) -> Void,
         onInitialLoad: (([DriveFile]) -> Void)? = nil
     ) {
@@ -92,6 +111,7 @@ struct DirectoryView: View {
         self.driveId = driveId
         self.crumbs = crumbs
         self.router = router
+        self.showsSearchBar = showsSearchBar
         self.onOpenFolder = onOpenFolder
         self.onInitialLoad = onInitialLoad
         _viewModel = State(initialValue: FileGridViewModel(source: .directory(directory.id), driveId: driveId))
@@ -100,6 +120,8 @@ struct DirectoryView: View {
     var body: some View {
         FileGridView(
             viewModel: viewModel,
+            searchText: searchText,
+            onScrollOffset: showsSearchBar ? { scrollOffset = $0 } : nil,
             onOpenDirectory: onOpenFolder,
             onOpenFile: { file, siblings in
                 router.open(file, siblings: siblings)
@@ -110,6 +132,11 @@ struct DirectoryView: View {
         )
         .navigationTitle(crumbs.isEmpty ? directory.name : crumbs.last ?? directory.name)
         .navigationBarTitleDisplayMode(.inline)
+        .safeAreaInset(edge: .top, spacing: 0) {
+            if showsSearchBar {
+                searchBar
+            }
+        }
         .safeAreaInset(edge: .top, spacing: 0) {
             if !crumbs.isEmpty {
                 VStack(spacing: 0) {
@@ -142,6 +169,46 @@ struct DirectoryView: View {
         } message: {
             Text(addError ?? "")
         }
+    }
+
+    /// La barre n'apparaît qu'en défilant vers le bas : tiré vers le bas
+    /// (avant le déclenchement du refresh) ou en descendant dans la liste.
+    /// Elle ne capte le toucher que hors de la zone de tirage, le
+    /// pull-to-refresh continue donc de fonctionner.
+    private var searchBarVisible: Bool {
+        searchFocused || !searchText.isEmpty || scrollOffset > 4 || scrollOffset < -80
+    }
+
+    private var searchBar: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "magnifyingglass")
+                .font(.system(size: 15, weight: .medium))
+                .foregroundStyle(.secondary)
+            TextField("Rechercher dans ce dossier", text: $searchText)
+                .focused($searchFocused)
+                .autocorrectionDisabled()
+                .submitLabel(.search)
+            if !searchText.isEmpty {
+                Button {
+                    searchText = ""
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .foregroundStyle(.secondary)
+                }
+                .accessibilityLabel("Effacer la recherche")
+            }
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 8)
+        .background(Color(uiColor: .secondarySystemBackground), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .padding(.horizontal, DS.gridMargin)
+        .padding(.vertical, 6)
+        .background(.bar)
+        .frame(height: searchBarVisible ? nil : 0)
+        .opacity(searchBarVisible ? 1 : 0)
+        .allowsHitTesting(searchBarVisible && scrollOffset <= 0)
+        .clipped()
+        .animation(.snappy(duration: 0.25), value: searchBarVisible)
     }
 
     private var addErrorBinding: Binding<Bool> {

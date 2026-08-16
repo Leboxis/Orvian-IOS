@@ -16,6 +16,12 @@ struct FileGridView: View {
     /// Appelé une fois le premier chargement terminé (items à jour).
     var onInitialLoad: (([DriveFile]) -> Void)?
 
+    /// Filtre client des éléments affichés (barre de recherche de l'Accueil).
+    var searchText: String = ""
+
+    /// Remonte l'offset de scroll (minY du contenu) pour la barre de recherche.
+    var onScrollOffset: ((CGFloat) -> Void)?
+
     var body: some View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 18, pinnedViews: []) {
@@ -24,7 +30,9 @@ struct FileGridView: View {
             .padding(.horizontal, DS.gridMargin)
             .padding(.top, 6)
             .padding(.bottom, 110) // barre flottante
+            .background(offsetReader)
         }
+        .coordinateSpace(name: "gridScroll")
         .background(Color(uiColor: .systemGroupedBackground))
         .refreshable {
             await viewModel.reload()
@@ -33,9 +41,32 @@ struct FileGridView: View {
             await viewModel.loadIfNeeded()
             onInitialLoad?(viewModel.items)
         }
+        .onPreferenceChange(ScrollOffsetKey.self) { value in
+            onScrollOffset?(value)
+        }
+    }
+
+    /// Lit la position verticale du contenu (0 = en haut, > 0 = tiré vers
+    /// le bas, < 0 = descendant dans la liste).
+    private var offsetReader: some View {
+        GeometryReader { geo in
+            Color.clear.preference(
+                key: ScrollOffsetKey.self,
+                value: geo.frame(in: .named("gridScroll")).minY
+            )
+        }
     }
 
     // MARK: - Contenu
+
+    private var isSearching: Bool {
+        !searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    private var filteredItems: [DriveFile] {
+        guard isSearching else { return viewModel.items }
+        return viewModel.items.filter { $0.name.localizedCaseInsensitiveContains(searchText) }
+    }
 
     @ViewBuilder
     private var content: some View {
@@ -45,14 +76,21 @@ struct FileGridView: View {
             errorState(message)
         } else if viewModel.items.isEmpty {
             emptyState
-        } else if let grouping {
+        } else if isSearching && filteredItems.isEmpty {
+            ContentUnavailableView {
+                Label("Aucun résultat", systemImage: "magnifyingglass")
+            } description: {
+                Text("Aucun fichier ne correspond à « \(searchText.trimmingCharacters(in: .whitespacesAndNewlines)) ».")
+            }
+            .padding(.top, 60)
+        } else if let grouping, !isSearching {
             ForEach(viewModel.groups(by: grouping.component, title: grouping.title)) { group in
                 SectionHeader(title: group.title)
                 grid(for: group.files)
             }
             footer
         } else {
-            grid(for: viewModel.items)
+            grid(for: filteredItems)
             footer
         }
     }
@@ -184,5 +222,13 @@ struct FileGridView: View {
         case .favorites: return "Aucun favori"
         case .category: return "Aucun fichier avec ce tag"
         }
+    }
+}
+
+/// Préférence remontée par l'offset de scroll du contenu.
+private struct ScrollOffsetKey: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = nextValue()
     }
 }
