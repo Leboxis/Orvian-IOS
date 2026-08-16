@@ -99,7 +99,7 @@ struct FilterSheet: View {
                 )
                 .overlay {
                     RoundedRectangle(cornerRadius: 10, style: .continuous)
-                        .strokeBorder(isActive ? Color.accentColor.opacity(0.4) : .quaternary, lineWidth: 1)
+                        .strokeBorder(isActive ? Color.accentColor.opacity(0.4) : Color.gray.opacity(0.3), lineWidth: 1)
                 }
                 .contentShape(Rectangle())
         }
