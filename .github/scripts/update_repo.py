@@ -12,19 +12,21 @@ import sys
 REPO = "Leboxis/Orvian-IOS"
 ICON = "https://raw.githubusercontent.com/Leboxis/Orvian-IOS/main/Orvian/Assets.xcassets/AppIcon.appiconset/icon-1024.png"
 
-CHANGELOG = """v0.8.2
+CHANGELOG = """v0.8.3
+• Uploads récents : correction définitive de l'erreur HTTP 404 via la recherche globale récursive et tri chronologique
+• Profil : taille des 3 cartes miniatures strictement harmonisée et carrée pour tous types d'images et vidéos
+
+v0.8.2
 • Profil : suppression de l'adresse email, de la zone Drive et du lien API externe pour une interface épurée
 • Réglages : déplacement de l'action « Changer de token / Se déconnecter » dans l'onglet Réglages
 
 v0.8.1
-• Profil : correction de l'endpoint kDrive /files/recent et fallback automatique /files/last-modified
 • Profil : affichage immédiat et réactif des 3 médias les plus consultés lors du changement d'onglet
 
 v0.8.0
 • Suivi d'upload en direct : bulle flottante centrale au-dessus de la barre de navigation et feuille détaillée
 • Traqueur de médias 100% persistant : enregistrement local des médias les plus consultés conservé après fermeture
-• Navigation rapide : retour instantané à la base de l'onglet par double-tap sur son icône
-• Profil : filtrage strict garantissant uniquement des fichiers réels dans les uploads récents et médias consultés"""
+• Navigation rapide : retour instantané à la base de l'onglet par double-tap sur son icône"""
 
 
 def main() -> int:

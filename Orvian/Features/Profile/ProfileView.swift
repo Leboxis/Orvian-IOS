@@ -87,6 +87,7 @@ struct ProfileView: View {
                                 ProfileThumbnailCard(file: file, driveId: drive.id)
                             }
                             .buttonStyle(.plain)
+                            .frame(maxWidth: .infinity)
                         }
                     }
                     .padding(.vertical, 4)
@@ -134,6 +135,7 @@ struct ProfileView: View {
                                 ProfileThumbnailCard(file: file, driveId: drive.id)
                             }
                             .buttonStyle(.plain)
+                            .frame(maxWidth: .infinity)
                         }
                     }
                     .padding(.vertical, 4)
@@ -164,9 +166,15 @@ struct ProfileView: View {
     private var thumbnailsSkeleton: some View {
         HStack(spacing: 10) {
             ForEach(0..<3, id: \.self) { _ in
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .fill(.quaternary.opacity(0.4))
-                    .aspectRatio(1, contentMode: .fit)
+                VStack(alignment: .leading, spacing: 4) {
+                    Color.clear
+                        .aspectRatio(1, contentMode: .fit)
+                        .background(.quaternary.opacity(0.4), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                    RoundedRectangle(cornerRadius: 3, style: .continuous)
+                        .fill(.quaternary.opacity(0.3))
+                        .frame(height: 10)
+                }
+                .frame(maxWidth: .infinity)
             }
         }
         .padding(.vertical, 4)
@@ -220,7 +228,9 @@ struct ProfileView: View {
 
         let (recentsPage, favsPage) = await (recentsTask, favsTask)
         if let recentsPage {
-            recentUploads = (recentsPage.data ?? []).filter { !$0.isDirectory }
+            recentUploads = (recentsPage.data ?? [])
+                .filter { !$0.isDirectory }
+                .sorted { ($0.addedAt ?? $0.lastModifiedAt ?? 0) > ($1.addedAt ?? $1.lastModifiedAt ?? 0) }
         }
         isLoadingRecents = false
 
@@ -241,38 +251,42 @@ private struct ProfileThumbnailCard: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
-            ZStack {
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .fill(.quaternary.opacity(0.35))
+            Color.clear
+                .aspectRatio(1, contentMode: .fit)
+                .overlay {
+                    ZStack {
+                        RoundedRectangle(cornerRadius: 10, style: .continuous)
+                            .fill(.quaternary.opacity(0.35))
 
-                if let thumb = ThumbnailProvider.shared.cachedMemoryThumbnail(driveId: driveId, fileId: file.id) {
-                    Image(uiImage: thumb)
-                        .resizable()
-                        .scaledToFill()
-                } else {
-                    AsyncProfileThumbnail(file: file, driveId: driveId)
-                }
+                        if let thumb = ThumbnailProvider.shared.cachedMemoryThumbnail(driveId: driveId, fileId: file.id) {
+                            Image(uiImage: thumb)
+                                .resizable()
+                                .scaledToFill()
+                        } else {
+                            AsyncProfileThumbnail(file: file, driveId: driveId)
+                        }
 
-                if file.isVideo {
-                    Image(systemName: "play.fill")
-                        .font(.system(size: 11, weight: .bold))
-                        .foregroundStyle(.white)
-                        .padding(6)
-                        .background(.ultraThinMaterial, in: Circle())
+                        if file.isVideo {
+                            Image(systemName: "play.fill")
+                                .font(.system(size: 11, weight: .bold))
+                                .foregroundStyle(.white)
+                                .padding(6)
+                                .background(.ultraThinMaterial, in: Circle())
+                        }
+                    }
                 }
-            }
-            .aspectRatio(1, contentMode: .fit)
-            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-            .overlay {
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .strokeBorder(.black.opacity(0.06), lineWidth: 0.5)
-            }
+                .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                .overlay {
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .strokeBorder(.black.opacity(0.06), lineWidth: 0.5)
+                }
 
             Text(file.name)
                 .font(.caption2)
                 .lineLimit(1)
                 .truncationMode(.middle)
                 .foregroundStyle(.primary)
+                .frame(maxWidth: .infinity, alignment: .leading)
         }
         .frame(maxWidth: .infinity)
     }

@@ -72,7 +72,11 @@ final class FileGridViewModel {
 
     private func filterItemsIfNeeded(_ raw: [DriveFile]) -> [DriveFile] {
         switch source {
-        case .recents, .mostViewed:
+        case .recents:
+            return raw
+                .filter { !$0.isDirectory }
+                .sorted { ($0.addedAt ?? $0.lastModifiedAt ?? 0) > ($1.addedAt ?? $1.lastModifiedAt ?? 0) }
+        case .mostViewed:
             return raw.filter { !$0.isDirectory }
         default:
             return raw
