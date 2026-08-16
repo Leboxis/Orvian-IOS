@@ -36,8 +36,6 @@ struct VideoPlayerView: View {
             await load()
         }
         .onDisappear {
-            // Ne pas couper la lecture si le PiP est actif.
-            guard !AVPictureInPictureController.isPictureInPictureActive else { return }
             player?.pause()
         }
     }
