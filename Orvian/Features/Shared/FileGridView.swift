@@ -19,23 +19,37 @@ struct FileGridView: View {
     /// Filtre client des éléments affichés (barre de recherche de l'Accueil).
     var searchText: String = ""
 
-    /// Remonte true quand l'utilisateur n'est plus tout en haut de la liste
-    /// (tiré vers le bas ou descendu dans le contenu).
+    /// Options de tri et de filtrage (bouton filtre de l'Accueil).
+    var filters: FileFilters = .init()
+
+    /// Remonte true quand l'utilisateur a défilé vers le bas (dépassé le haut).
     var onScrolledPastTop: ((Bool) -> Void)?
 
     /// Pull-to-refresh (désactivé sur l'Accueil, remplacé par la barre de recherche).
     var allowsPullToRefresh = true
 
+    @ObservedObject private var mediaMetadata = MediaMetadataStore.shared
+
     var body: some View {
         scrollContent
-            .onScrollGeometryChange(for: Bool.self, of: { abs($0.contentOffset.y) > 1 }) { _, movedFromTop in
-                onScrolledPastTop?(movedFromTop)
+            .onScrollGeometryChange(for: Bool.self, of: { $0.contentOffset.y > 0 }) { _, scrolledDown in
+                onScrolledPastTop?(scrolledDown)
             }
             .background(Color(uiColor: .systemGroupedBackground))
             .task {
                 await viewModel.loadIfNeeded()
                 onInitialLoad?(viewModel.items)
             }
+            .task(id: filterTaskKey) {
+                await mediaMetadata.resolveAll(driveId: viewModel.driveId, items: viewModel.items)
+            }
+    }
+
+    /// Relance la résolution des métadonnées vidéo uniquement quand un tri ou
+    /// un filtre en a besoin.
+    private var filterTaskKey: String {
+        let needsMetadata = filters.sort == .duration || !filters.orientations.isEmpty
+        return needsMetadata ? "resolve-\(viewModel.items.count)" : "none"
     }
 
     @ViewBuilder
@@ -67,9 +81,56 @@ struct FileGridView: View {
         !searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
-    private var filteredItems: [DriveFile] {
-        guard isSearching else { return viewModel.items }
-        return viewModel.items.filter { $0.name.localizedCaseInsensitiveContains(searchText) }
+    /// Éléments après filtres (type, orientation, recherche) et tri.
+    private var visibleItems: [DriveFile] {
+        var result = viewModel.items
+
+        switch filters.media {
+        case .all: break
+        case .videos: result = result.filter(\.isVideo)
+        case .images: result = result.filter(\.isImage)
+        case .other: result = result.filter { !$0.isVideo && !$0.isImage }
+        }
+
+        if !filters.orientations.isEmpty {
+            result = result.filter { file in
+                guard file.isVideo, let info = mediaMetadata.info(for: file.id) else { return false }
+                return filters.orientations.contains(info.orientation)
+            }
+        }
+
+        if isSearching {
+            result = result.filter { $0.name.localizedCaseInsensitiveContains(searchText) }
+        }
+
+        switch filters.sort {
+        case .original:
+            break
+        case .date:
+            result = result.sorted {
+                ($0.lastModifiedAt ?? $0.addedAt ?? 0) > ($1.lastModifiedAt ?? $1.addedAt ?? 0)
+            }
+        case .type:
+            result = result.sorted {
+                $0.fileKind.label.localizedCaseInsensitiveCompare($1.fileKind.label) == .orderedAscending
+            }
+        case .size:
+            result = result.sorted { ($0.size ?? -1) > ($1.size ?? -1) }
+        case .duration:
+            result = result.sorted {
+                (mediaMetadata.info(for: $0.id)?.duration ?? -1) > (mediaMetadata.info(for: $1.id)?.duration ?? -1)
+            }
+        }
+
+        return result
+    }
+
+    /// Message quand aucun élément ne correspond aux filtres ou à la recherche.
+    private var noResultsMessage: String {
+        if isSearching {
+            return "Aucun fichier ne correspond à « \(searchText.trimmingCharacters(in: .whitespacesAndNewlines)) »."
+        }
+        return "Aucun fichier ne correspond aux filtres sélectionnés."
     }
 
     @ViewBuilder
@@ -80,21 +141,21 @@ struct FileGridView: View {
             errorState(message)
         } else if viewModel.items.isEmpty {
             emptyState
-        } else if isSearching && filteredItems.isEmpty {
+        } else if visibleItems.isEmpty {
             ContentUnavailableView {
-                Label("Aucun résultat", systemImage: "magnifyingglass")
+                Label("Aucun résultat", systemImage: "line.3.horizontal.decrease.circle")
             } description: {
-                Text("Aucun fichier ne correspond à « \(searchText.trimmingCharacters(in: .whitespacesAndNewlines)) ».")
+                Text(noResultsMessage)
             }
             .padding(.top, 60)
-        } else if let grouping, !isSearching {
+        } else if let grouping, !isSearching && !filters.isActive {
             ForEach(viewModel.groups(by: grouping.component, title: grouping.title)) { group in
                 SectionHeader(title: group.title)
                 grid(for: group.files)
             }
             footer
         } else {
-            grid(for: filteredItems)
+            grid(for: visibleItems)
             footer
         }
     }

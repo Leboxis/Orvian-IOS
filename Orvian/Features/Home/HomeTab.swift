@@ -92,6 +92,8 @@ struct DirectoryView: View {
     @State private var addError: String?
     @State private var searchText = ""
     @State private var scrolledPastTop = false
+    @State private var filters = FileFilters()
+    @State private var showFilterSheet = false
     @FocusState private var searchFocused: Bool
 
     private let router: ViewerRouter
@@ -128,6 +130,7 @@ struct DirectoryView: View {
                 onInitialLoad?(items)
             },
             searchText: searchText,
+            filters: filters,
             onScrolledPastTop: showsSearchBar ? { scrolledPastTop = $0 } : nil,
             allowsPullToRefresh: !showsSearchBar
         )
@@ -149,7 +152,15 @@ struct DirectoryView: View {
             }
         }
         .toolbar {
-            ToolbarItem(placement: .topBarTrailing) {
+            ToolbarItemGroup(placement: .topBarTrailing) {
+                Button {
+                    showFilterSheet = true
+                } label: {
+                    Image(systemName: filters.isActive ? "line.3.horizontal.decrease.circle.fill" : "line.3.horizontal.decrease.circle")
+                }
+                .accessibilityLabel("Filtres")
+                .accessibilityHint("Trier et filtrer la liste")
+
                 AddMenuButton(
                     directoryId: directory.id,
                     driveId: driveId,
@@ -159,6 +170,9 @@ struct DirectoryView: View {
                     onDone: { Task { await viewModel.reload() } }
                 )
             }
+        }
+        .sheet(isPresented: $showFilterSheet) {
+            FilterSheet(filters: $filters)
         }
         .overlay(alignment: .bottom) {
             if addBusy {
@@ -172,19 +186,18 @@ struct DirectoryView: View {
         }
     }
 
-    /// La barre apparaît dès que l'utilisateur quitte le haut de la liste :
-    /// tirer vers le bas (le refresh a été retiré sur l'Accueil) ou
-    /// descendre dans le contenu fait glisser la barre en place.
+    /// La barre apparaît uniquement en défilant dans le contenu du dossier.
     private var searchBarVisible: Bool {
         searchFocused || !searchText.isEmpty || scrolledPastTop
     }
 
+    /// Pastille flottante, détachée du haut, centrée et translucide.
     private var searchBar: some View {
-        HStack(spacing: 8) {
+        HStack(spacing: 6) {
             Image(systemName: "magnifyingglass")
-                .font(.system(size: 15, weight: .medium))
+                .font(.system(size: 13, weight: .medium))
                 .foregroundStyle(.secondary)
-            TextField("Rechercher dans ce dossier", text: $searchText)
+            TextField("Rechercher", text: $searchText)
                 .focused($searchFocused)
                 .autocorrectionDisabled()
                 .submitLabel(.search)
@@ -198,13 +211,16 @@ struct DirectoryView: View {
                 .accessibilityLabel("Effacer la recherche")
             }
         }
-        .padding(.horizontal, 10)
+        .padding(.horizontal, 14)
         .padding(.vertical, 8)
-        .background(Color(uiColor: .secondarySystemBackground), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-        .padding(.horizontal, DS.gridMargin)
-        .padding(.vertical, 6)
+        .background(.bar, in: Capsule())
+        .overlay {
+            Capsule().strokeBorder(.quaternary, lineWidth: 0.5)
+        }
+        .shadow(color: .black.opacity(0.08), radius: 6, x: 0, y: 2)
+        .frame(width: 200)
         .frame(maxWidth: .infinity)
-        .background(.bar)
+        .padding(.top, 10)
         .offset(y: searchBarVisible ? 0 : -64)
         .opacity(searchBarVisible ? 1 : 0)
         .allowsHitTesting(searchBarVisible)
