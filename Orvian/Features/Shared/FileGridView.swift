@@ -41,17 +41,18 @@ struct FileGridView: View {
     /// Appelé quand l'utilisateur tape une carte en mode sélection.
     var onToggleSelection: ((DriveFile) -> Void)?
 
-    @ObservedObject private var mediaMetadata = MediaMetadataStore.shared
+    private let mediaMetadata = MediaMetadataStore.shared
+    @State private var metadataRevision = 0
+
+    private var needsVideoMetadata: Bool {
+        filters.sort == .duration || !filters.orientations.isEmpty
+    }
 
     var body: some View {
         scrollContent
-            .onScrollGeometryChange(for: CGFloat.self, of: { $0.contentOffset.y }) { oldY, newY in
-                // Transition réelle (offset ≥ 0 → < 0) : la barre n'apparaît
-                // que lors d'un geste vers le haut, jamais au lancement.
-                if newY >= 0 {
-                    onScrolledPastTop?(false)
-                } else if oldY >= 0 && newY < 0 {
-                    onScrolledPastTop?(true)
+            .onScrollGeometryChange(for: Bool.self, of: { $0.contentOffset.y < 0 }) { oldValue, newValue in
+                if oldValue != newValue {
+                    onScrolledPastTop?(newValue)
                 }
             }
             .background(Color(uiColor: .systemGroupedBackground))
@@ -60,15 +61,20 @@ struct FileGridView: View {
                 onInitialLoad?(viewModel.items)
             }
             .task(id: filterTaskKey) {
+                guard needsVideoMetadata else { return }
                 await mediaMetadata.resolveAll(driveId: viewModel.driveId, items: viewModel.items)
+            }
+            .onReceive(mediaMetadata.$revision) { newRev in
+                if needsVideoMetadata {
+                    metadataRevision = newRev
+                }
             }
     }
 
     /// Relance la résolution des métadonnées vidéo uniquement quand un tri ou
     /// un filtre en a besoin.
     private var filterTaskKey: String {
-        let needsMetadata = filters.sort == .duration || !filters.orientations.isEmpty
-        return needsMetadata ? "resolve-\(viewModel.items.count)" : "none"
+        return needsVideoMetadata ? "resolve-\(viewModel.items.count)" : "none"
     }
 
     @ViewBuilder
@@ -269,13 +275,15 @@ struct FileGridView: View {
         }
     }
 
-    /// Apparition d'une carte : pagination + préchargement des suivantes.
+    /// Apparition d'une carte : pagination + préchargement régulé des suivantes.
     private func appeared(file: DriveFile, index: Int, in siblings: [DriveFile]) {
         if index >= siblings.count - 6 {
             Task { await viewModel.loadMoreIfNeeded() }
         }
-        let ahead = siblings.dropFirst(index).prefix(7)
-        let thumbnailIds = ahead.dropFirst().map(\.id)
+        // Préchargement par lot toutes les 3 cellules pour ne pas saturer la file async au scroll rapide
+        guard index % 3 == 0 else { return }
+        let ahead = siblings.dropFirst(index + 1).prefix(6)
+        let thumbnailIds = ahead.filter { $0.fileKind.supportsThumbnail }.map(\.id)
         if !thumbnailIds.isEmpty {
             Task { await ThumbnailProvider.shared.prefetch(driveId: viewModel.driveId, fileIds: Array(thumbnailIds), isTrashed: viewModel.source == .trash) }
         }

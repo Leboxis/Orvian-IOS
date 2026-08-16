@@ -29,6 +29,12 @@ actor ThumbnailProvider {
         memory.totalCostLimit = 80 * 1024 * 1024
     }
 
+    /// Accès synchrone ultra-rapide au cache mémoire (sans saut de thread).
+    nonisolated func cachedMemoryThumbnail(driveId: Int, fileId: Int, pixels: Int = DS.thumbnailPixels) -> UIImage? {
+        let key = "\(driveId)-\(fileId)-\(pixels)" as NSString
+        return memory.object(forKey: key)
+    }
+
     /// Miniature pour une carte ; nil si le fichier n'en a pas ou si annulé.
     /// `isTrashed` : les fichiers de la corbeille utilisent l'endpoint dédié.
     func thumbnail(driveId: Int, fileId: Int, pixels: Int = DS.thumbnailPixels, isTrashed: Bool = false) async -> UIImage? {
@@ -111,16 +117,10 @@ actor ThumbnailProvider {
 }
 
 private extension UIImage {
-    /// Décompression hors écran : évite les à-coups de LazyVGrid au scroll.
+    /// Décompression directe hors écran optimisée pour le GPU.
     static func decode(_ data: Data) -> UIImage? {
         guard let image = UIImage(data: data) else { return nil }
-        let format = UIGraphicsImageRendererFormat.default()
-        format.scale = 1
-        let size = image.size
-        let rendered = UIGraphicsImageRenderer(size: size, format: format).image { _ in
-            image.draw(in: CGRect(origin: .zero, size: size))
-        }
-        return rendered.preparingForDisplay()
+        return image.preparingForDisplay() ?? image
     }
 
     var estimatedByteSize: Int {

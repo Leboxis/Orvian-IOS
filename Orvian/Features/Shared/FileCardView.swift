@@ -169,7 +169,6 @@ struct FileCardView: View {
             Image(uiImage: thumbnail)
                 .resizable()
                 .scaledToFill()
-                .transition(.opacity)
         } else if thumbnailLoaded {
             // Fichier sans miniature : vignette typée, teinte très légère.
             ZStack {
@@ -266,12 +265,16 @@ struct FileCardView: View {
             thumbnailLoaded = true
             return
         }
+        // Accès mémoire synchrone immédiat (zéro délai, zéro animation superflue)
+        if let cached = ThumbnailProvider.shared.cachedMemoryThumbnail(driveId: driveId, fileId: file.id) {
+            thumbnail = cached
+            thumbnailLoaded = true
+            return
+        }
         if let image = await ThumbnailProvider.shared.thumbnail(driveId: driveId, fileId: file.id, isTrashed: isTrashed) {
             guard !Task.isCancelled else { return }
-            withAnimation(.easeOut(duration: 0.18)) {
-                thumbnail = image
-                thumbnailLoaded = true
-            }
+            thumbnail = image
+            thumbnailLoaded = true
         } else {
             thumbnailLoaded = true
         }

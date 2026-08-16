@@ -31,8 +31,8 @@ struct DiskImageCache {
     func loadImage(driveId: Int, fileId: Int, pixels: Int) -> UIImage? {
         let fileURL = url(driveId: driveId, fileId: fileId, pixels: pixels)
         guard let data = try? Data(contentsOf: fileURL, options: .mappedIfSafe) else { return nil }
-        touch(fileURL)
-        return UIImage(data: data)
+        guard let image = UIImage(data: data) else { return nil }
+        return image.preparingForDisplay() ?? image
     }
 
     func store(image: UIImage, driveId: Int, fileId: Int, pixels: Int) {
