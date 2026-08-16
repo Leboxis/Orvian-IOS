@@ -4,7 +4,7 @@ Client iOS natif non officiel pour **kDrive** (Infomaniak), en Swift + SwiftUI.
 Pensé pour une expérience « Apple Photos » : grilles de miniatures fluides,
 visionneuse photos avec zoom, lecteur vidéo AVPlayer quasi instantané.
 
-## Fonctionnalités (jalon 3 — v0.3.0)
+## Fonctionnalités (jalon 4 — v0.4.0)
 
 - **5 onglets** avec barre flottante translucide, de gauche à droite :
   **Réglages · Tag · Accueil · Favoris · Profil**
@@ -23,12 +23,16 @@ visionneuse photos avec zoom, lecteur vidéo AVPlayer quasi instantané.
   miniature instantanée puis haute résolution sous-échantillonnée (ImageIO)
 - **Lecteur vidéo** : lecteur système AVKit (VideoPlayer) via URL temporaire
   (pré-résolue en amont pour démarrer vite) — contrôles natifs, PiP, AirPlay, vitesse
+- **Ajout** : bouton « + » dans les dossiers — créer un dossier, importer un
+  fichier, importer photos/vidéos (upload kDrive v3, conflits renommés automatiquement)
+- **Couleurs de dossiers** : teinte d'origine définie dans kDrive (API), sinon
+  teinte par type ; l'onglet Accueil démarre sur le 2e dossier de la racine
 - **Performance** : cache mémoire + disque LRU (250 Mo) des miniatures, déduplication des requêtes,
   annulation hors écran, préchargement des cartes suivantes, décodage hors thread principal
 
 ### Non inclus dans ce jalon (route map)
 
-Recherche, corbeille, upload/téléchargement manuel, cache offline, liens de partage,
+Recherche, corbeille, téléchargement manuel, cache offline, liens de partage,
 commentaires, catégories, actions sur fichiers (déplacer/renommer), synchronisation.
 
 ## Démarrage

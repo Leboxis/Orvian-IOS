@@ -13,6 +13,9 @@ struct FileGridView: View {
     /// Ouverture d'une visionneuse (image/vidéo) avec ses voisins pour le pager.
     var onOpenFile: ((DriveFile, [DriveFile]) -> Void)?
 
+    /// Appelé une fois le premier chargement terminé (items à jour).
+    var onInitialLoad: (([DriveFile]) -> Void)?
+
     var body: some View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 18, pinnedViews: []) {
@@ -28,6 +31,7 @@ struct FileGridView: View {
         }
         .task {
             await viewModel.loadIfNeeded()
+            onInitialLoad?(viewModel.items)
         }
     }
 

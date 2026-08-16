@@ -83,4 +83,25 @@ struct KDriveService {
     func thumbnailData(driveId: Int, fileId: Int, pixels: Int) async throws -> Data {
         try await api.data(.thumbnail(driveId: driveId, fileId: fileId, pixels: pixels))
     }
+
+    // MARK: - Création & upload
+
+    private struct CreateFolderRequest: Encodable {
+        let name: String
+    }
+
+    /// Crée un dossier dans `directoryId`.
+    func createFolder(driveId: Int, directoryId: Int, name: String) async throws {
+        let body = try JSONEncoder().encode(CreateFolderRequest(name: name))
+        try await api.post(.createFolder(driveId: driveId, directoryId: directoryId), body: body, contentType: "application/json")
+    }
+
+    /// Upload d'un fichier complet (corps brut) dans `directoryId`.
+    func upload(driveId: Int, directoryId: Int, data: Data, fileName: String, mimeType: String) async throws {
+        try await api.post(
+            .upload(driveId: driveId, directoryId: directoryId, fileName: fileName, totalSize: data.count),
+            body: data,
+            contentType: mimeType.isEmpty ? "application/octet-stream" : mimeType
+        )
+    }
 }

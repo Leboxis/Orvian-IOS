@@ -13,6 +13,12 @@ struct FileCardView: View {
 
     private var kind: FileKind { file.fileKind }
 
+    /// Teinte de la carte : couleur du dossier fournie par l'API si présente,
+    /// sinon la teinte par type.
+    private var tint: Color {
+        file.color.flatMap { Color(hex: $0) } ?? kind.tint
+    }
+
     var body: some View {
         Button(action: action) {
             VStack(spacing: 5) {
@@ -74,10 +80,10 @@ struct FileCardView: View {
         } else if thumbnailLoaded {
             // Fichier sans miniature : vignette typée, teinte très légère.
             ZStack {
-                Rectangle().fill(kind.tint.opacity(0.10))
+                Rectangle().fill(tint.opacity(0.10))
                 Image(systemName: kind.symbolName)
                     .font(.system(size: 30, weight: .light))
-                    .foregroundStyle(kind.tint)
+                    .foregroundStyle(tint)
                     .padding(14)
             }
         } else {
@@ -86,7 +92,7 @@ struct FileCardView: View {
                 if kind == .folder {
                     Image(systemName: kind.symbolName)
                         .font(.system(size: 30, weight: .light))
-                        .foregroundStyle(kind.tint.opacity(0.8))
+                        .foregroundStyle(tint.opacity(0.8))
                         .padding(14)
                 }
             }

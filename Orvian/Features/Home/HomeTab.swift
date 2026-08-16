@@ -6,6 +6,8 @@ struct HomeTab: View {
     let router: ViewerRouter
 
     @State private var path: [DriveFile] = []
+    /// Ouvre automatiquement le 2e dossier de la racine au lancement.
+    @State private var didAutoOpen = false
 
     var body: some View {
         NavigationStack(path: $path) {
@@ -16,6 +18,13 @@ struct HomeTab: View {
                 router: router,
                 onOpenFolder: { folder in
                     path.append(folder)
+                },
+                onInitialLoad: { items in
+                    guard !didAutoOpen else { return }
+                    let folders = items.filter(\.isDirectory)
+                    guard folders.count >= 2 else { return }
+                    didAutoOpen = true
+                    path.append(folders[1])
                 }
             )
             .navigationDestination(for: DriveFile.self) { directory in
@@ -48,6 +57,7 @@ extension DriveFile {
             isFavorite: nil,
             parentId: nil,
             path: nil,
+            color: nil,
             addedAt: nil,
             lastModifiedAt: nil
         )
@@ -62,21 +72,28 @@ struct DirectoryView: View {
     let crumbs: [String]
 
     @State private var viewModel: FileGridViewModel
+    @State private var addBusy = false
+    @State private var busyMessage = ""
+    @State private var addError: String?
+
     private let router: ViewerRouter
     private let onOpenFolder: (DriveFile) -> Void
+    private let onInitialLoad: (([DriveFile]) -> Void)?
 
     init(
         directory: DriveFile,
         driveId: Int,
         crumbs: [String],
         router: ViewerRouter,
-        onOpenFolder: @escaping (DriveFile) -> Void
+        onOpenFolder: @escaping (DriveFile) -> Void,
+        onInitialLoad: (([DriveFile]) -> Void)? = nil
     ) {
         self.directory = directory
         self.driveId = driveId
         self.crumbs = crumbs
         self.router = router
         self.onOpenFolder = onOpenFolder
+        self.onInitialLoad = onInitialLoad
         _viewModel = State(initialValue: FileGridViewModel(source: .directory(directory.id), driveId: driveId))
     }
 
@@ -86,6 +103,9 @@ struct DirectoryView: View {
             onOpenDirectory: onOpenFolder,
             onOpenFile: { file, siblings in
                 router.open(file, siblings: siblings)
+            },
+            onInitialLoad: { items in
+                onInitialLoad?(items)
             }
         )
         .navigationTitle(crumbs.isEmpty ? directory.name : crumbs.last ?? directory.name)
@@ -100,6 +120,51 @@ struct DirectoryView: View {
                 .background(.bar)
             }
         }
+        .toolbar {
+            ToolbarItem(placement: .topBarLeading) {
+                AddMenuButton(
+                    directoryId: directory.id,
+                    driveId: driveId,
+                    isBusy: $addBusy,
+                    busyMessage: $busyMessage,
+                    errorMessage: $addError,
+                    onDone: { Task { await viewModel.reload() } }
+                )
+            }
+        }
+        .overlay(alignment: .bottom) {
+            if addBusy {
+                busyIndicator
+            }
+        }
+        .alert("Impossible", isPresented: addErrorBinding) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(addError ?? "")
+        }
+    }
+
+    private var addErrorBinding: Binding<Bool> {
+        Binding(
+            get: { addError != nil },
+            set: { if !$0 { addError = nil } }
+        )
+    }
+
+    /// Pastille de progression pendant un import / une création.
+    private var busyIndicator: some View {
+        HStack(spacing: 10) {
+            ProgressView()
+                .tint(.white)
+            Text(busyMessage)
+                .font(.footnote.weight(.medium))
+                .foregroundStyle(.white)
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 10)
+        .background(.black.opacity(0.75), in: Capsule())
+        .padding(.bottom, 130)
+        .transition(.opacity)
     }
 
     /// Fil d'Ariane compact sous la barre de navigation.

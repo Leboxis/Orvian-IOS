@@ -40,9 +40,21 @@ actor APIClient {
         try Self.check(response: response, data: data)
     }
 
+    /// POST avec corps brut (JSON, octet-stream…). Lève une erreur si le
+    /// statut HTTP n'est pas 2xx ; le contenu de la réponse est ignoré.
+    func post(_ endpoint: Endpoint, body: Data, contentType: String) async throws {
+        let (data, response) = try await send(endpoint, method: "POST", httpBody: body, contentType: contentType)
+        try Self.check(response: response, data: data)
+    }
+
     // MARK: - Internes
 
-    private func send(_ endpoint: Endpoint, method: String) async throws -> (Data, URLResponse) {
+    private func send(
+        _ endpoint: Endpoint,
+        method: String,
+        httpBody: Data? = nil,
+        contentType: String? = nil
+    ) async throws -> (Data, URLResponse) {
         guard var components = URLComponents(url: Self.baseURL, resolvingAgainstBaseURL: false) else {
             throw APIError.invalidURL
         }
@@ -56,6 +68,10 @@ actor APIClient {
         request.httpMethod = method
         request.timeoutInterval = 30
         request.setValue("application/json", forHTTPHeaderField: "Accept")
+        if let httpBody {
+            request.httpBody = httpBody
+            request.setValue(contentType, forHTTPHeaderField: "Content-Type")
+        }
         if let token = TokenStore.current() {
             request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         } else if requiresAuth(endpoint) {

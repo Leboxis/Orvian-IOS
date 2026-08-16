@@ -96,4 +96,23 @@ extension Endpoint {
     static func favorite(driveId: Int, fileId: Int) -> Endpoint {
         Endpoint(path: "/2/drive/\(driveId)/files/\(fileId)/favorite")
     }
+
+    /// Créer un dossier : POST JSON `{"name": …}` (v3).
+    static func createFolder(driveId: Int, directoryId: Int) -> Endpoint {
+        Endpoint(path: "/3/drive/\(driveId)/files/\(directoryId)/directory")
+    }
+
+    /// Upload d'un fichier : POST corps brut (`application/octet-stream`).
+    /// `conflict=rename` : le serveur renomme si le nom existe déjà.
+    static func upload(driveId: Int, directoryId: Int, fileName: String, totalSize: Int) -> Endpoint {
+        Endpoint(
+            path: "/3/drive/\(driveId)/upload",
+            query: [
+                URLQueryItem(name: "directory_id", value: String(directoryId)),
+                URLQueryItem(name: "file_name", value: fileName),
+                URLQueryItem(name: "total_size", value: String(totalSize)),
+                URLQueryItem(name: "conflict", value: "rename"),
+            ]
+        )
+    }
 }

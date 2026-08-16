@@ -18,6 +18,8 @@ struct DriveFile: Decodable, Identifiable, Hashable {
     var isFavorite: Bool?
     let parentId: Int?
     let path: String?
+    /// Couleur hexadécimale (#rrggbb) des dossiers, définie côté kDrive.
+    let color: String?
     /// Timestamps Unix (secondes)
     let addedAt: Double?
     let lastModifiedAt: Double?
@@ -36,6 +38,7 @@ struct DriveFile: Decodable, Identifiable, Hashable {
         case extensionType = "extension_type"
         case isFavorite = "is_favorite"
         case parentId = "parent_id"
+        case color
         case addedAt = "added_at"
         case lastModifiedAt = "last_modified_at"
     }
