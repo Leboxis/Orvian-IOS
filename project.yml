@@ -27,6 +27,11 @@ targets:
     platform: iOS
     sources:
       - path: Orvian
+    info:
+      path: Orvian/Info.plist
+      properties:
+        UIBackgroundModes:
+          - audio
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.orvian.app

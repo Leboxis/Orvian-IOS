@@ -21,8 +21,8 @@ visionneuse photos avec zoom, lecteur vidéo AVPlayer quasi instantané.
   ont exactement la même taille, quelle que soit l'orientation d'origine
 - **Visionneuse photos** : pager plein écran, pinch zoom, double-tap, fermeture au swipe vertical,
   miniature instantanée puis haute résolution sous-échantillonnée (ImageIO)
-- **Lecteur vidéo** : AVPlayer natif via URL temporaire (pré-résolue en amont pour démarrer vite),
-  contrôles sur mesure (play/pause, ±10 s, scrub, vitesse)
+- **Lecteur vidéo** : lecteur système AVKit (VideoPlayer) via URL temporaire
+  (pré-résolue en amont pour démarrer vite) — contrôles natifs, PiP, AirPlay, vitesse
 - **Performance** : cache mémoire + disque LRU (250 Mo) des miniatures, déduplication des requêtes,
   annulation hors écran, préchargement des cartes suivantes, décodage hors thread principal
 
