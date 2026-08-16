@@ -7,6 +7,11 @@ struct FileCardView: View {
     let file: DriveFile
     let driveId: Int
     var enabled = true
+    /// Mode sélection (corbeille) : le tap coche au lieu d'ouvrir.
+    var selectionMode = false
+    /// État de la coche en mode sélection.
+    var isSelected = false
+    var onToggleSelection: (() -> Void)?
     var onToggleFavorite: (() -> Void)?
     var onDelete: (() -> Void)?
     var onRename: ((String) -> Void)?
@@ -28,10 +33,22 @@ struct FileCardView: View {
     }
 
     var body: some View {
-        Button(action: action) {
+        Button {
+            if selectionMode {
+                onToggleSelection?()
+            } else {
+                action()
+            }
+        } label: {
             VStack(spacing: 5) {
                 thumbnailArea
-                    .overlay(alignment: .topTrailing) { favoriteBadge }
+                    .overlay(alignment: .topTrailing) {
+                        if selectionMode {
+                            selectionBadge
+                        } else {
+                            favoriteBadge
+                        }
+                    }
                     .overlay(alignment: .center) { playBadge }
                     .shadow(color: .black.opacity(0.06), radius: 4, x: 0, y: 2)
 
@@ -56,32 +73,34 @@ struct FileCardView: View {
         .buttonStyle(.plain)
         .disabled(!enabled)
         .contextMenu {
-            Button {
-                showDetail = true
-            } label: {
-                Label("Détails", systemImage: "info.circle")
-            }
-            Button {
-                onToggleFavorite?()
-            } label: {
-                Label(
-                    file.isFavorite == true ? "Retirer des favoris" : "Ajouter aux favoris",
-                    systemImage: file.isFavorite == true ? "star.slash" : "star"
-                )
-            }
-            if onRename != nil {
+            if !selectionMode {
                 Button {
-                    renameText = file.name
-                    showRenameAlert = true
+                    showDetail = true
                 } label: {
-                    Label("Renommer", systemImage: "pencil")
+                    Label("Détails", systemImage: "info.circle")
                 }
-            }
-            if onDelete != nil {
-                Button(role: .destructive) {
-                    showDeleteConfirm = true
+                Button {
+                    onToggleFavorite?()
                 } label: {
-                    Label("Supprimer", systemImage: "trash")
+                    Label(
+                        file.isFavorite == true ? "Retirer des favoris" : "Ajouter aux favoris",
+                        systemImage: file.isFavorite == true ? "star.slash" : "star"
+                    )
+                }
+                if onRename != nil {
+                    Button {
+                        renameText = file.name
+                        showRenameAlert = true
+                    } label: {
+                        Label("Renommer", systemImage: "pencil")
+                    }
+                }
+                if onDelete != nil {
+                    Button(role: .destructive) {
+                        showDeleteConfirm = true
+                    } label: {
+                        Label("Supprimer", systemImage: "trash")
+                    }
                 }
             }
         }
@@ -206,6 +225,16 @@ struct FileCardView: View {
             .accessibilityLabel("Retirer des favoris")
             .padding(5)
         }
+    }
+
+    /// Cocher de sélection (mode sélection de la corbeille).
+    @ViewBuilder
+    private var selectionBadge: some View {
+        Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
+            .font(.system(size: 20, weight: .medium))
+            .foregroundStyle(isSelected ? Color.accentColor : .white)
+            .shadow(color: .black.opacity(isSelected ? 0 : 0.35), radius: 3, y: 1)
+            .padding(5)
     }
 
     /// Indicateur de lecture sur les vidéos.

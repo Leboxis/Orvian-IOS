@@ -5,6 +5,7 @@ enum FileSource: Hashable {
     case directory(Int)
     case favorites
     case category(Int)
+    case trash
 }
 
 /// Couche Repository : unique point d'accès aux données kDrive.
@@ -54,6 +55,8 @@ struct KDriveService {
             endpoint = .favorites(driveId: driveId, cursor: cursor)
         case let .category(categoryId):
             endpoint = .categoryFiles(driveId: driveId, categoryId: categoryId, cursor: cursor)
+        case .trash:
+            endpoint = .trashContent(driveId: driveId, cursor: cursor)
         }
         return try await api.get(CursorPage<DriveFile>.self, endpoint)
     }
@@ -120,6 +123,11 @@ struct KDriveService {
     /// Déplace un fichier ou dossier dans la corbeille.
     func trash(driveId: Int, fileId: Int) async throws {
         try await api.sendEmpty(.trash(driveId: driveId, fileId: fileId), method: "DELETE")
+    }
+
+    /// Supprime définitivement un fichier ou dossier de la corbeille.
+    func permanentlyDelete(driveId: Int, fileId: Int) async throws {
+        try await api.sendEmpty(.permanentDelete(driveId: driveId, fileId: fileId), method: "DELETE")
     }
 
     /// Renomme un fichier ou dossier.

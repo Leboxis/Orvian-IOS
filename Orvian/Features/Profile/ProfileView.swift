@@ -14,6 +14,7 @@ struct ProfileView: View {
             List {
                 headerSection
                 driveSection
+                trashSection
                 aboutSection
             }
             .navigationTitle("Profil")
@@ -86,6 +87,22 @@ struct ProfileView: View {
             }
         } header: {
             Text("Drive")
+        }
+    }
+
+    private var trashSection: some View {
+        Section {
+            if let drive = session.selectedDrive {
+                NavigationLink {
+                    TrashView(driveId: drive.id)
+                } label: {
+                    Label("Corbeille", systemImage: "trash")
+                }
+            }
+        } header: {
+            Text("Stockage")
+        } footer: {
+            Text("Les fichiers supprimés restent dans la corbeille jusqu'à leur effacement définitif.")
         }
     }
 

@@ -29,6 +29,27 @@ struct FileFilters: Equatable {
         }
     }
 
+    /// Sens du tri (croissant / décroissant).
+    enum Direction: String, CaseIterable, Identifiable {
+        case ascending, descending
+
+        var id: String { rawValue }
+
+        var title: String {
+            switch self {
+            case .ascending: return "Croissant"
+            case .descending: return "Décroissant"
+            }
+        }
+
+        var symbol: String {
+            switch self {
+            case .ascending: return "arrow.up"
+            case .descending: return "arrow.down"
+            }
+        }
+    }
+
     /// Orientation des vidéos (filtres combinables entre eux).
     enum Orientation: String, CaseIterable, Identifiable {
         case portrait, landscape, square
@@ -38,7 +59,7 @@ struct FileFilters: Equatable {
         var symbol: String {
             switch self {
             case .portrait: return "rectangle.portrait"
-            case .landscape: return "rectangle.landscape"
+            case .landscape: return "rectangle.landscape.rotate"
             case .square: return "square"
             }
         }
@@ -69,6 +90,7 @@ struct FileFilters: Equatable {
     }
 
     var sort: SortMode = .original
+    var direction: Direction = .descending
     var orientations: Set<Orientation> = []
     var media: MediaFilter = .all
 

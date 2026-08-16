@@ -104,6 +104,35 @@ final class FileGridViewModel {
         }
     }
 
+    // MARK: - Corbeille
+
+    /// Supprime définitivement un fichier de la corbeille.
+    func permanentlyDelete(_ file: DriveFile) async {
+        do {
+            try await service.permanentlyDelete(driveId: driveId, fileId: file.id)
+            items.removeAll { $0.id == file.id }
+        } catch {
+            errorMessage = "Suppression définitive impossible : \((error as? APIError)?.errorDescription ?? error.localizedDescription)"
+        }
+    }
+
+    /// Supprime définitivement une sélection entière ; les échecs partiels
+    /// sont signalés dans `errorMessage` sans bloquer les autres suppressions.
+    func permanentlyDelete(ids: Set<Int>) async {
+        var firstError: Error?
+        for id in ids {
+            do {
+                try await service.permanentlyDelete(driveId: driveId, fileId: id)
+            } catch {
+                if firstError == nil { firstError = error }
+            }
+        }
+        items.removeAll { ids.contains($0.id) }
+        if let firstError {
+            errorMessage = "Suppression définitive impossible : \((firstError as? APIError)?.errorDescription ?? firstError.localizedDescription)"
+        }
+    }
+
     // MARK: - Groupes (Actualité par jour, Média par mois)
 
     struct Group: Identifiable {

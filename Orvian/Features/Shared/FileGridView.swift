@@ -22,18 +22,27 @@ struct FileGridView: View {
     /// Options de tri et de filtrage (bouton filtre de l'Accueil).
     var filters: FileFilters = .init()
 
-    /// Remonte true quand l'utilisateur a défilé vers le bas (dépassé le haut).
+    /// Remonte true quand l'utilisateur défile vers le haut (offset négatif).
     var onScrolledPastTop: ((Bool) -> Void)?
 
     /// Pull-to-refresh (désactivé sur l'Accueil, remplacé par la barre de recherche).
     var allowsPullToRefresh = true
 
+    /// Mode sélection (corbeille) : le tap coche au lieu d'ouvrir.
+    var selectionMode = false
+
+    /// Identifiants des éléments sélectionnés (mode sélection).
+    var selectedIDs: Set<Int> = []
+
+    /// Appelé quand l'utilisateur tape une carte en mode sélection.
+    var onToggleSelection: ((DriveFile) -> Void)?
+
     @ObservedObject private var mediaMetadata = MediaMetadataStore.shared
 
     var body: some View {
         scrollContent
-            .onScrollGeometryChange(for: Bool.self, of: { $0.contentOffset.y > 0 }) { _, scrolledDown in
-                onScrolledPastTop?(scrolledDown)
+            .onScrollGeometryChange(for: Bool.self, of: { $0.contentOffset.y < 0 }) { _, scrolledUp in
+                onScrolledPastTop?(scrolledUp)
             }
             .background(Color(uiColor: .systemGroupedBackground))
             .task {
@@ -108,17 +117,26 @@ struct FileGridView: View {
             break
         case .date:
             result = result.sorted {
-                ($0.lastModifiedAt ?? $0.addedAt ?? 0) > ($1.lastModifiedAt ?? $1.addedAt ?? 0)
+                let lhs = $0.lastModifiedAt ?? $0.addedAt ?? 0
+                let rhs = $1.lastModifiedAt ?? $1.addedAt ?? 0
+                return filters.direction == .descending ? lhs > rhs : lhs < rhs
             }
         case .type:
             result = result.sorted {
-                $0.fileKind.label.localizedCaseInsensitiveCompare($1.fileKind.label) == .orderedAscending
+                let comparison = $0.fileKind.label.localizedCaseInsensitiveCompare($1.fileKind.label)
+                return filters.direction == .ascending ? comparison == .orderedAscending : comparison == .orderedDescending
             }
         case .size:
-            result = result.sorted { ($0.size ?? -1) > ($1.size ?? -1) }
+            result = result.sorted {
+                let lhs = $0.size ?? -1
+                let rhs = $1.size ?? -1
+                return filters.direction == .descending ? lhs > rhs : lhs < rhs
+            }
         case .duration:
             result = result.sorted {
-                (mediaMetadata.info(for: $0.id)?.duration ?? -1) > (mediaMetadata.info(for: $1.id)?.duration ?? -1)
+                let lhs = mediaMetadata.info(for: $0.id)?.duration ?? -1
+                let rhs = mediaMetadata.info(for: $1.id)?.duration ?? -1
+                return filters.direction == .descending ? lhs > rhs : lhs < rhs
             }
         }
 
@@ -205,7 +223,10 @@ struct FileGridView: View {
         FileCardView(
             file: file,
             driveId: viewModel.driveId,
-            enabled: !file.isDirectory || onOpenDirectory != nil,
+            enabled: selectionMode || !file.isDirectory || onOpenDirectory != nil,
+            selectionMode: selectionMode,
+            isSelected: selectedIDs.contains(file.id),
+            onToggleSelection: onToggleSelection == nil ? nil : { onToggleSelection?(file) },
             onToggleFavorite: {
                 Task { await viewModel.toggleFavorite(file) }
             },
@@ -216,7 +237,9 @@ struct FileGridView: View {
                 Task { await viewModel.rename(file, name: newName) }
             },
             action: {
-                if file.isDirectory {
+                if selectionMode {
+                    onToggleSelection?(file)
+                } else if file.isDirectory {
                     onOpenDirectory?(file)
                 } else {
                     onOpenFile?(file, siblings)
@@ -284,6 +307,7 @@ struct FileGridView: View {
         case .directory: return "folder"
         case .favorites: return "star"
         case .category: return "tag"
+        case .trash: return "trash"
         }
     }
 
@@ -292,6 +316,7 @@ struct FileGridView: View {
         case .directory: return "Dossier vide"
         case .favorites: return "Aucun favori"
         case .category: return "Aucun fichier avec ce tag"
+        case .trash: return "Corbeille vide"
         }
     }
 }

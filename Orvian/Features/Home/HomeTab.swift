@@ -93,7 +93,6 @@ struct DirectoryView: View {
     @State private var searchText = ""
     @State private var scrolledPastTop = false
     @State private var filters = FileFilters()
-    @State private var showFilterSheet = false
     @FocusState private var searchFocused: Bool
 
     private let router: ViewerRouter
@@ -153,13 +152,7 @@ struct DirectoryView: View {
         }
         .toolbar {
             ToolbarItemGroup(placement: .topBarTrailing) {
-                Button {
-                    showFilterSheet = true
-                } label: {
-                    Image(systemName: filters.isActive ? "line.3.horizontal.decrease.circle.fill" : "line.3.horizontal.decrease.circle")
-                }
-                .accessibilityLabel("Filtres")
-                .accessibilityHint("Trier et filtrer la liste")
+                FilterMenu(filters: $filters)
 
                 AddMenuButton(
                     directoryId: directory.id,
@@ -170,9 +163,6 @@ struct DirectoryView: View {
                     onDone: { Task { await viewModel.reload() } }
                 )
             }
-        }
-        .sheet(isPresented: $showFilterSheet) {
-            FilterSheet(filters: $filters)
         }
         .overlay(alignment: .bottom) {
             if addBusy {

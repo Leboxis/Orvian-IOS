@@ -76,6 +76,17 @@ extension Endpoint {
         )
     }
 
+    /// Contenu de la corbeille (v3, pagination curseur).
+    static func trashContent(driveId: Int, cursor: String?, limit: Int = 60) -> Endpoint {
+        Endpoint(
+            path: "/3/drive/\(driveId)/trash",
+            query: [
+                URLQueryItem(name: "with", value: "is_favorite,categories"),
+                URLQueryItem(name: "limit", value: String(limit)),
+            ] + (cursor.map { [URLQueryItem(name: "cursor", value: $0)] } ?? [])
+        )
+    }
+
     /// Catégories du drive.
     static func categories(driveId: Int) -> Endpoint {
         Endpoint(path: "/2/drive/\(driveId)/categories")
@@ -132,6 +143,11 @@ extension Endpoint {
     /// Supprimer un fichier (le déplacer dans la corbeille).
     static func trash(driveId: Int, fileId: Int) -> Endpoint {
         Endpoint(path: "/2/drive/\(driveId)/files/\(fileId)")
+    }
+
+    /// Supprimer définitivement un fichier/dossier de la corbeille (v2).
+    static func permanentDelete(driveId: Int, fileId: Int) -> Endpoint {
+        Endpoint(path: "/2/drive/\(driveId)/trash/\(fileId)")
     }
 
     /// Renommer un fichier ou dossier.
