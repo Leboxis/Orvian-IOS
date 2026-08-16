@@ -128,7 +128,8 @@ struct DirectoryView: View {
                 onInitialLoad?(items)
             },
             searchText: searchText,
-            onScrolledPastTop: showsSearchBar ? { scrolledPastTop = $0 } : nil
+            onScrolledPastTop: showsSearchBar ? { scrolledPastTop = $0 } : nil,
+            allowsPullToRefresh: !showsSearchBar
         )
         .navigationTitle(crumbs.isEmpty ? directory.name : crumbs.last ?? directory.name)
         .navigationBarTitleDisplayMode(.inline)
@@ -171,8 +172,9 @@ struct DirectoryView: View {
         }
     }
 
-    /// La barre n'apparaît qu'en défilant dans le contenu du dossier
-    /// (pas lors du tirage en haut, le refresh est indépendant).
+    /// La barre apparaît dès que l'utilisateur quitte le haut de la liste :
+    /// tirer vers le bas (le refresh a été retiré sur l'Accueil) ou
+    /// descendre dans le contenu fait glisser la barre en place.
     private var searchBarVisible: Bool {
         searchFocused || !searchText.isEmpty || scrolledPastTop
     }

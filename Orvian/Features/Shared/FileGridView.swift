@@ -19,10 +19,38 @@ struct FileGridView: View {
     /// Filtre client des éléments affichés (barre de recherche de l'Accueil).
     var searchText: String = ""
 
-    /// Remonte true quand l'utilisateur a défilé vers le bas (dépassé le haut).
+    /// Remonte true quand l'utilisateur n'est plus tout en haut de la liste
+    /// (tiré vers le bas ou descendu dans le contenu).
     var onScrolledPastTop: ((Bool) -> Void)?
 
+    /// Pull-to-refresh (désactivé sur l'Accueil, remplacé par la barre de recherche).
+    var allowsPullToRefresh = true
+
     var body: some View {
+        scrollContent
+            .onScrollGeometryChange(for: Bool.self, of: { abs($0.contentOffset.y) > 1 }) { _, movedFromTop in
+                onScrolledPastTop?(movedFromTop)
+            }
+            .background(Color(uiColor: .systemGroupedBackground))
+            .task {
+                await viewModel.loadIfNeeded()
+                onInitialLoad?(viewModel.items)
+            }
+    }
+
+    @ViewBuilder
+    private var scrollContent: some View {
+        if allowsPullToRefresh {
+            baseScroll
+                .refreshable {
+                    await viewModel.reload()
+                }
+        } else {
+            baseScroll
+        }
+    }
+
+    private var baseScroll: some View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 18, pinnedViews: []) {
                 content
@@ -30,17 +58,6 @@ struct FileGridView: View {
             .padding(.horizontal, DS.gridMargin)
             .padding(.top, 6)
             .padding(.bottom, 110) // barre flottante
-        }
-        .onScrollGeometryChange(for: Bool.self, of: { $0.contentOffset.y > 0 }) { _, scrolledDown in
-            onScrolledPastTop?(scrolledDown)
-        }
-        .background(Color(uiColor: .systemGroupedBackground))
-        .refreshable {
-            await viewModel.reload()
-        }
-        .task {
-            await viewModel.loadIfNeeded()
-            onInitialLoad?(viewModel.items)
         }
     }
 
