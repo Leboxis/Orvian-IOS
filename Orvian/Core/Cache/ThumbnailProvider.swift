@@ -18,6 +18,8 @@ actor ThumbnailProvider {
         let driveId: Int
         let fileId: Int
         let pixels: Int
+
+        var nsString: NSString { "\(driveId)-\(fileId)-\(pixels)" as NSString }
     }
 
     init(service: KDriveService = KDriveService(), disk: DiskImageCache = .init()) {
@@ -105,10 +107,6 @@ actor ThumbnailProvider {
     func diskCacheSize() -> Int {
         disk.totalSize()
     }
-}
-
-private extension ThumbnailProvider.Key {
-    var nsString: NSString { "\(driveId)-\(fileId)-\(pixels)" as NSString }
 }
 
 private extension UIImage {

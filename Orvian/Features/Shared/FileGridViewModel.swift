@@ -106,7 +106,7 @@ final class FileGridViewModel {
     }
 
     /// « Aujourd'hui », « Hier », sinon la date complète localisée.
-    static func dayTitle(for date: Date, calendar: Calendar = .current) -> String {
+    nonisolated static func dayTitle(for date: Date, calendar: Calendar = .current) -> String {
         if calendar.isDateInToday(date) { return "Aujourd'hui" }
         if calendar.isDateInYesterday(date) { return "Hier" }
         let formatter = DateFormatter()

@@ -12,8 +12,6 @@ enum DS {
     static let gridMargin: CGFloat = 14
     /// Taille de miniature demandée à l'API (bucket arrondi, max 400).
     static let thumbnailPixels: Int = 360
-
-    static let cardShadow = ShadowStyle.drop(color: .black.opacity(0.08), radius: 8, x: 0, y: 3)
 }
 
 /// Titre de section discrêt au-dessus des groupes de fichiers.

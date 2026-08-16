@@ -18,6 +18,8 @@ struct VideoPlayerView: View {
     @State private var scrubValue: Double = 0
     @State private var autoHideTask: Task<Void, Never>?
 
+    private static let playbackSpeeds: [Float] = [0.5, 0.75, 1.0, 1.25, 1.5, 2.0]
+
     var body: some View {
         ZStack {
             Color.black.ignoresSafeArea()
@@ -148,7 +150,7 @@ struct VideoPlayerView: View {
                     .monospacedDigit()
 
                 Menu {
-                    ForEach([0.5, 0.75, 1.0, 1.25, 1.5, 2.0], id: \.self) { value in
+                    ForEach(Self.playbackSpeeds, id: \.self) { value in
                         Button {
                             setRate(value)
                         } label: {
@@ -255,8 +257,8 @@ struct VideoPlayerView: View {
         let clamped = min(max(0, time), max(0, tracker.duration))
         player.seek(
             to: CMTime(seconds: clamped, preferredTimescale: 600),
-            toleranceBefore: .positive,
-            toleranceAfter: .positive
+            toleranceBefore: .zero,
+            toleranceAfter: .zero
         )
         tracker.currentTime = clamped
         scheduleAutoHide()

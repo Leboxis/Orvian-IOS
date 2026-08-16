@@ -50,8 +50,7 @@ struct MoreView: View {
                                 .font(.footnote)
                         }
                     }
-                    Gauge(value: Double(drive.usedSize ?? 0), in: 0...Double(max(drive.size ?? 1, 1)))
-                        .gaugeStyle(.accessoryLinearCapacity)
+                    ProgressView(value: Double(drive.usedSize ?? 0), total: Double(max(drive.size ?? 1, 1)))
                         .tint(.blue)
                         .accessibilityLabel("Stockage du drive")
                     Text(ByteFormatter.usage(used: drive.usedSize, total: drive.size))

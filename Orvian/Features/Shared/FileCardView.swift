@@ -21,7 +21,7 @@ struct FileCardView: View {
                     .aspectRatio(1, contentMode: .fit)
                     .overlay(alignment: .topTrailing) { favoriteBadge }
                     .overlay(alignment: .center) { playBadge }
-                    .shadow(DS.cardShadow)
+                    .shadow(color: .black.opacity(0.06), radius: 4, x: 0, y: 2)
 
                 Text(file.name)
                     .font(.footnote)
@@ -72,7 +72,7 @@ struct FileCardView: View {
         } else {
             ZStack {
                 shape.fill(.quaternary.opacity(0.5))
-                if kind.isDirectory {
+                if kind == .folder {
                     Image(systemName: kind.symbolName)
                         .font(.system(size: 30, weight: .light))
                         .foregroundStyle(kind.tint.opacity(0.8))
