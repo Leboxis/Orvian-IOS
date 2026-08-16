@@ -114,6 +114,11 @@ extension Endpoint {
         Endpoint(path: "/2/drive/\(driveId)/categories")
     }
 
+    /// Catégorie individuelle : PUT pour modifier/renommer, DELETE pour supprimer (v2).
+    static func category(driveId: Int, categoryId: Int) -> Endpoint {
+        Endpoint(path: "/2/drive/\(driveId)/categories/\(categoryId)")
+    }
+
     /// Miniature carrée (10…400 px).
     static func thumbnail(driveId: Int, fileId: Int, pixels: Int) -> Endpoint {
         Endpoint(

@@ -47,6 +47,12 @@ actor APIClient {
         try Self.check(response: response, data: data)
     }
 
+    /// PUT avec corps brut (JSON…). Lève une erreur si le statut HTTP n'est pas 2xx.
+    func put(_ endpoint: Endpoint, body: Data, contentType: String = "application/json") async throws {
+        let (data, response) = try await send(endpoint, method: "PUT", httpBody: body, contentType: contentType)
+        try Self.check(response: response, data: data)
+    }
+
     // MARK: - Internes
 
     private func send(

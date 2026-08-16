@@ -4,14 +4,15 @@ import Foundation
 struct FileFilters: Equatable {
     /// Ordre de tri.
     enum SortMode: String, CaseIterable, Identifiable {
-        case original, date, type, size, duration
+        case original, modifiedDate, addedDate, type, size, duration
 
         var id: String { rawValue }
 
         var title: String {
             switch self {
             case .original: return "Original"
-            case .date: return "Date"
+            case .modifiedDate: return "Date de modification"
+            case .addedDate: return "Date d'importation"
             case .type: return "Type"
             case .size: return "Poids"
             case .duration: return "Durée"
@@ -21,7 +22,8 @@ struct FileFilters: Equatable {
         var symbol: String {
             switch self {
             case .original: return "arrow.up.arrow.down"
-            case .date: return "calendar"
+            case .modifiedDate: return "calendar.badge.clock"
+            case .addedDate: return "calendar.badge.plus"
             case .type: return "doc.text"
             case .size: return "externaldrive"
             case .duration: return "clock"
@@ -50,7 +52,7 @@ struct FileFilters: Equatable {
         }
     }
 
-    /// Orientation des vidéos (filtres combinables entre eux).
+    /// Orientation des vidéos (sélection unique et exclusive).
     enum Orientation: String, CaseIterable, Identifiable {
         case portrait, landscape, square
 
@@ -91,11 +93,11 @@ struct FileFilters: Equatable {
 
     var sort: SortMode = .original
     var direction: Direction = .descending
-    var orientations: Set<Orientation> = []
+    var orientation: Orientation? = nil
     var media: MediaFilter = .all
 
     /// Vrai dès qu'un tri ou un filtre diffère du comportement par défaut.
     var isActive: Bool {
-        sort != .original || !orientations.isEmpty || media != .all
+        sort != .original || orientation != nil || media != .all
     }
 }

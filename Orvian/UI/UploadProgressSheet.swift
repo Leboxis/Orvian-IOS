@@ -105,7 +105,7 @@ struct UploadProgressSheet: View {
                 Text("En attente")
                     .font(.caption2)
                     .foregroundStyle(.tertiary)
-            case let .inProgress(progress):
+            case .inProgress:
                 ProgressView()
                     .controlSize(.small)
             case .completed:

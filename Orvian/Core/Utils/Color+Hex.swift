@@ -22,4 +22,20 @@ extension Color {
             self.init(red: r, green: g, blue: b)
         }
     }
+
+    /// Convertit la couleur SwiftUI en chaîne hexadécimale « #rrggbb ».
+    func toHex() -> String? {
+        let uiColor = UIColor(self)
+        var red: CGFloat = 0
+        var green: CGFloat = 0
+        var blue: CGFloat = 0
+        var alpha: CGFloat = 0
+        guard uiColor.getRed(&red, green: &green, blue: &blue, alpha: &alpha) else {
+            return nil
+        }
+        let r = Int(round(red * 255))
+        let g = Int(round(green * 255))
+        let b = Int(round(blue * 255))
+        return String(format: "#%02x%02x%02x", r, g, b)
+    }
 }

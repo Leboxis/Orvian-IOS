@@ -45,7 +45,7 @@ struct FileGridView: View {
     @State private var metadataRevision = 0
 
     private var needsVideoMetadata: Bool {
-        filters.sort == .duration || !filters.orientations.isEmpty
+        filters.sort == .duration || filters.orientation != nil
     }
 
     var body: some View {
@@ -124,10 +124,10 @@ struct FileGridView: View {
         case .other: result = result.filter { !$0.isVideo && !$0.isImage }
         }
 
-        if !filters.orientations.isEmpty {
+        if let orientation = filters.orientation {
             result = result.filter { file in
                 guard file.isVideo, let info = mediaMetadata.info(for: file.id) else { return false }
-                return filters.orientations.contains(info.orientation)
+                return info.orientation == orientation
             }
         }
 
@@ -138,10 +138,16 @@ struct FileGridView: View {
         switch filters.sort {
         case .original:
             break
-        case .date:
+        case .modifiedDate:
             result = result.sorted {
-                let lhs = $0.lastModifiedAt ?? $0.addedAt ?? 0
-                let rhs = $1.lastModifiedAt ?? $1.addedAt ?? 0
+                let lhs = $0.lastModifiedAt ?? 0
+                let rhs = $1.lastModifiedAt ?? 0
+                return filters.direction == .descending ? lhs > rhs : lhs < rhs
+            }
+        case .addedDate:
+            result = result.sorted {
+                let lhs = $0.addedAt ?? 0
+                let rhs = $1.addedAt ?? 0
                 return filters.direction == .descending ? lhs > rhs : lhs < rhs
             }
         case .type:

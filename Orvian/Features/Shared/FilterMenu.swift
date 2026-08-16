@@ -54,7 +54,7 @@ struct FilterMenu: View {
                     rowLabel(
                         title: orientation.title,
                         symbol: orientation.symbol,
-                        selected: filters.orientations.contains(orientation)
+                        selected: filters.orientation == orientation
                     )
                 }
             }
@@ -84,10 +84,10 @@ struct FilterMenu: View {
     }
 
     private func toggle(_ orientation: FileFilters.Orientation) {
-        if filters.orientations.contains(orientation) {
-            filters.orientations.remove(orientation)
+        if filters.orientation == orientation {
+            filters.orientation = nil
         } else {
-            filters.orientations.insert(orientation)
+            filters.orientation = orientation
         }
     }
 

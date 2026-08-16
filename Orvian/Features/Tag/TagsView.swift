@@ -18,6 +18,13 @@ struct TagsView: View {
     @AppStorage("tagsLayout") private var layout = CategoryLayout.grid
     @State private var showCreateSheet = false
 
+    @State private var tagToRename: Category?
+    @State private var renameText = ""
+    @State private var showRenameAlert = false
+
+    @State private var tagToDelete: Category?
+    @State private var showDeleteConfirm = false
+
     private let service = KDriveService()
 
     var body: some View {
@@ -77,6 +84,35 @@ struct TagsView: View {
                 Task { await load(force: true) }
             }
         }
+        .alert("Renommer le tag", isPresented: $showRenameAlert) {
+            TextField("Nom du tag", text: $renameText)
+            Button("Enregistrer") {
+                let trimmed = renameText.trimmingCharacters(in: .whitespacesAndNewlines)
+                if let tag = tagToRename, !trimmed.isEmpty {
+                    Task {
+                        try? await service.updateCategory(driveId: driveId, categoryId: tag.id, name: trimmed, color: tag.color)
+                        await load(force: true)
+                    }
+                }
+            }
+            Button("Annuler", role: .cancel) { }
+        }
+        .confirmationDialog(
+            "Supprimer le tag « \(tagToDelete?.name ?? "") » ?",
+            isPresented: $showDeleteConfirm,
+            titleVisibility: .visible
+        ) {
+            Button("Supprimer", role: .destructive) {
+                if let tag = tagToDelete {
+                    Task {
+                        try? await service.deleteCategory(driveId: driveId, categoryId: tag.id)
+                        await load(force: true)
+                    }
+                }
+            }
+        } message: {
+            Text("Le tag sera retiré de tous les fichiers associés.")
+        }
     }
 
     private var root: some View {
@@ -130,6 +166,9 @@ struct TagsView: View {
                         CategoryGridCell(category: category)
                     }
                     .buttonStyle(.plain)
+                    .contextMenu {
+                        tagContextMenu(for: category)
+                    }
                 }
             }
             .padding(.horizontal, DS.gridMargin)
@@ -156,6 +195,26 @@ struct TagsView: View {
                         CategoryRow(category: category)
                     }
                     .buttonStyle(.plain)
+                    .contextMenu {
+                        tagContextMenu(for: category)
+                    }
+                    .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                        Button(role: .destructive) {
+                            tagToDelete = category
+                            showDeleteConfirm = true
+                        } label: {
+                            Label("Supprimer", systemImage: "trash")
+                        }
+
+                        Button {
+                            tagToRename = category
+                            renameText = category.name
+                            showRenameAlert = true
+                        } label: {
+                            Label("Renommer", systemImage: "pencil")
+                        }
+                        .tint(.orange)
+                    }
                 }
             }
             .padding(.horizontal, DS.gridMargin)
@@ -165,6 +224,24 @@ struct TagsView: View {
         .background(Color(uiColor: .systemGroupedBackground))
         .refreshable {
             await load(force: true)
+        }
+    }
+
+    @ViewBuilder
+    private func tagContextMenu(for category: Category) -> some View {
+        Button {
+            tagToRename = category
+            renameText = category.name
+            showRenameAlert = true
+        } label: {
+            Label("Renommer", systemImage: "pencil")
+        }
+
+        Button(role: .destructive) {
+            tagToDelete = category
+            showDeleteConfirm = true
+        } label: {
+            Label("Supprimer", systemImage: "trash")
         }
     }
 
@@ -352,7 +429,7 @@ enum TagPalette {
     static let initial = colors[0]
 }
 
-/// Feuille « Nouveau tag » : nom + choix de couleur dans une palette.
+/// Feuille « Nouveau tag » : nom + choix de couleur dans une palette + couleur personnalisée.
 private struct CreateTagSheet: View {
     let driveId: Int
     let onCreated: () -> Void
@@ -360,6 +437,7 @@ private struct CreateTagSheet: View {
     @Environment(\.dismiss) private var dismiss
     @State private var name = ""
     @State private var color = TagPalette.initial
+    @State private var customColor: Color = Color(hex: TagPalette.initial) ?? .red
     @State private var creating = false
     @State private var errorMessage: String?
 
@@ -377,6 +455,13 @@ private struct CreateTagSheet: View {
                 }
                 Section("Couleur") {
                     colorGrid
+
+                    ColorPicker("Couleur personnalisée", selection: $customColor, supportsOpacity: false)
+                        .onChange(of: customColor) { _, newColor in
+                            if let hex = newColor.toHex() {
+                                color = hex
+                            }
+                        }
                 }
                 if let errorMessage {
                     Section {
@@ -409,13 +494,16 @@ private struct CreateTagSheet: View {
                 Button {
                     withAnimation(.snappy(duration: 0.2)) {
                         color = hex
+                        if let c = Color(hex: hex) {
+                            customColor = c
+                        }
                     }
                 } label: {
                     Circle()
                         .fill(Color(hex: hex) ?? .gray)
                         .frame(width: 38, height: 38)
                         .overlay {
-                            if color == hex {
+                            if color.lowercased() == hex.lowercased() {
                                 Image(systemName: "checkmark")
                                     .font(.system(size: 14, weight: .bold))
                                     .foregroundStyle(.white)
