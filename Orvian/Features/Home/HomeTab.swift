@@ -132,7 +132,7 @@ struct DirectoryView: View {
         )
         .navigationTitle(crumbs.isEmpty ? directory.name : crumbs.last ?? directory.name)
         .navigationBarTitleDisplayMode(.inline)
-        .safeAreaInset(edge: .top, spacing: 0) {
+        .overlay(alignment: .top) {
             if showsSearchBar {
                 searchBar
             }
@@ -203,9 +203,9 @@ struct DirectoryView: View {
         .padding(.vertical, 6)
         .frame(maxWidth: .infinity)
         .background(.bar)
-        .frame(height: searchBarVisible ? nil : 0)
+        .offset(y: searchBarVisible ? 0 : -64)
         .opacity(searchBarVisible ? 1 : 0)
-        .clipped()
+        .allowsHitTesting(searchBarVisible)
         .animation(.snappy(duration: 0.25), value: searchBarVisible)
     }
 
