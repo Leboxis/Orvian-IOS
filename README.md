@@ -21,19 +21,24 @@ visionneuse photos avec zoom, lecteur vidéo AVPlayer quasi instantané.
   ont exactement la même taille, quelle que soit l'orientation d'origine
 - **Visionneuse photos** : pager plein écran, pinch zoom, double-tap, fermeture au swipe vertical,
   miniature instantanée puis haute résolution sous-échantillonnée (ImageIO)
-- **Lecteur vidéo** : lecteur système AVKit (VideoPlayer) via URL temporaire
-  (pré-résolue en amont pour démarrer vite) — contrôles natifs, PiP, AirPlay, vitesse
+- **Lecteur vidéo** : interface personnalisée, barres hors de la zone de lecture —
+  titre et fermer en haut, play/pause, barre de progression, muet, AirPlay,
+  favori et choix d'un tag en bas — lecture via URL temporaire (pré-résolue en amont)
+- **Favoris & tags sur les cartes** : étoile dorée en haut à droite des favoris,
+  pastilles colorées des tags à côté du poids (`with=is_favorite,categories`)
 - **Ajout** : bouton « + » dans les dossiers — créer un dossier, importer un
   fichier, importer photos/vidéos (upload kDrive v3, conflits renommés automatiquement)
 - **Couleurs de dossiers** : teinte d'origine définie dans kDrive (API), sinon
-  teinte par type ; l'onglet Accueil démarre sur le 2e dossier de la racine
+  teinte par type ; l'onglet Accueil démarre directement dans le premier dossier
+  de la racine
 - **Performance** : cache mémoire + disque LRU (250 Mo) des miniatures, déduplication des requêtes,
   annulation hors écran, préchargement des cartes suivantes, décodage hors thread principal
 
 ### Non inclus dans ce jalon (route map)
 
 Recherche, corbeille, téléchargement manuel, cache offline, liens de partage,
-commentaires, catégories, actions sur fichiers (déplacer/renommer), synchronisation.
+commentaires, actions sur fichiers (déplacer/renommer), gestion des catégories,
+synchronisation.
 
 ## Démarrage
 

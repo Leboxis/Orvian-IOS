@@ -12,7 +12,13 @@ import sys
 REPO = "Leboxis/Orvian-IOS"
 ICON = "https://raw.githubusercontent.com/Leboxis/Orvian-IOS/main/Orvian/Assets.xcassets/AppIcon.appiconset/icon-1024.png"
 
-CHANGELOG = """v0.4.0
+CHANGELOG = """v0.5.0
+• Lecteur vidéo personnalisé : barres hors de la zone de lecture, play/pause, barre de progression, muet, AirPlay, favori, choix d'un tag
+• Étoile dorée sur les cartes des favoris, pastilles colorées des tags à côté du poids
+• Bouton « + » déplacé à droite, import de fichiers hors du thread principal
+• Accueil ouvert automatiquement dans le premier dossier de la racine
+
+v0.4.0
 • Bouton « + » : créer un dossier, importer un fichier, importer photos/vidéos (upload kDrive)
 • Couleurs de dossiers d'origine (API kDrive)
 • Accueil ouvert sur le 2e dossier de la racine

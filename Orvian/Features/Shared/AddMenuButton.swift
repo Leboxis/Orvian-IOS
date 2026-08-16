@@ -94,7 +94,8 @@ struct AddMenuButton: View {
             if scoped { url.stopAccessingSecurityScopedResource() }
         }
         do {
-            let data = try Data(contentsOf: url)
+            // Lecture hors du MainActor : un gros fichier ne fige pas l'UI.
+            let data = try await Task.detached { try Data(contentsOf: url) }.value
             try await upload(data: data, fileName: url.lastPathComponent)
         } catch {
             errorMessage = "Import impossible : \(message(for: error))"

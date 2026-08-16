@@ -25,10 +25,13 @@ extension Endpoint {
     }
 
     /// Contenu d'un dossier (dossiers en premier, puis fichiers, par nom).
+    /// `with=is_favorite,categories` : ces champs ne sont renvoyés que sur
+    /// demande explicite (cf. app kDrive officielle).
     static func directoryContent(driveId: Int, directoryId: Int, cursor: String?, limit: Int = 60) -> Endpoint {
         Endpoint(
             path: "/3/drive/\(driveId)/files/\(directoryId)/files",
             query: [
+                URLQueryItem(name: "with", value: "is_favorite,categories"),
                 URLQueryItem(name: "limit", value: String(limit)),
                 URLQueryItem(name: "order_by[]", value: "type"),
                 URLQueryItem(name: "order_by[]", value: "name"),
@@ -41,8 +44,10 @@ extension Endpoint {
     static func recents(driveId: Int, cursor: String?, limit: Int = 60) -> Endpoint {
         Endpoint(
             path: "/3/drive/\(driveId)/files/recents",
-            query: [URLQueryItem(name: "limit", value: String(limit))]
-                + (cursor.map { [URLQueryItem(name: "cursor", value: $0)] } ?? [])
+            query: [
+                URLQueryItem(name: "with", value: "is_favorite,categories"),
+                URLQueryItem(name: "limit", value: String(limit)),
+            ] + (cursor.map { [URLQueryItem(name: "cursor", value: $0)] } ?? [])
         )
     }
 
@@ -50,8 +55,10 @@ extension Endpoint {
     static func favorites(driveId: Int, cursor: String?, limit: Int = 60) -> Endpoint {
         Endpoint(
             path: "/3/drive/\(driveId)/files/favorites",
-            query: [URLQueryItem(name: "limit", value: String(limit))]
-                + (cursor.map { [URLQueryItem(name: "cursor", value: $0)] } ?? [])
+            query: [
+                URLQueryItem(name: "with", value: "is_favorite,categories"),
+                URLQueryItem(name: "limit", value: String(limit)),
+            ] + (cursor.map { [URLQueryItem(name: "cursor", value: $0)] } ?? [])
         )
     }
 
@@ -61,6 +68,7 @@ extension Endpoint {
         Endpoint(
             path: "/3/drive/\(driveId)/files/search",
             query: [
+                URLQueryItem(name: "with", value: "is_favorite,categories"),
                 URLQueryItem(name: "limit", value: String(limit)),
                 URLQueryItem(name: "category", value: String(categoryId)),
                 URLQueryItem(name: "depth", value: "unlimited"),
@@ -95,6 +103,11 @@ extension Endpoint {
     /// Favori : POST pour ajouter, DELETE pour retirer (même chemin).
     static func favorite(driveId: Int, fileId: Int) -> Endpoint {
         Endpoint(path: "/2/drive/\(driveId)/files/\(fileId)/favorite")
+    }
+
+    /// Catégorie (tag) d'un fichier : POST pour appliquer, DELETE pour retirer (v2).
+    static func fileCategory(driveId: Int, fileId: Int, categoryId: Int) -> Endpoint {
+        Endpoint(path: "/2/drive/\(driveId)/files/\(fileId)/categories/\(categoryId)")
     }
 
     /// Créer un dossier : POST JSON `{"name": …}` (v3).

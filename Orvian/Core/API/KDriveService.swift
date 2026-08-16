@@ -64,6 +64,16 @@ struct KDriveService {
         try await api.get(DataResponse<[Category]>.self, .categories(driveId: driveId)).data ?? []
     }
 
+    /// Applique une catégorie (tag) sur un fichier.
+    func addCategory(driveId: Int, fileId: Int, categoryId: Int) async throws {
+        try await api.sendEmpty(.fileCategory(driveId: driveId, fileId: fileId, categoryId: categoryId), method: "POST")
+    }
+
+    /// Retire une catégorie (tag) d'un fichier.
+    func removeCategory(driveId: Int, fileId: Int, categoryId: Int) async throws {
+        try await api.sendEmpty(.fileCategory(driveId: driveId, fileId: fileId, categoryId: categoryId), method: "DELETE")
+    }
+
     // MARK: - Favoris
 
     func setFavorite(driveId: Int, fileId: Int, favorite: Bool) async throws {

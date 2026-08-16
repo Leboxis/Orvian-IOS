@@ -6,7 +6,7 @@ struct HomeTab: View {
     let router: ViewerRouter
 
     @State private var path: [DriveFile] = []
-    /// Ouvre automatiquement le 2e dossier de la racine au lancement.
+    /// Ouvre automatiquement le premier dossier de la racine au lancement.
     @State private var didAutoOpen = false
 
     var body: some View {
@@ -21,10 +21,9 @@ struct HomeTab: View {
                 },
                 onInitialLoad: { items in
                     guard !didAutoOpen else { return }
-                    let folders = items.filter(\.isDirectory)
-                    guard folders.count >= 2 else { return }
+                    guard let firstFolder = items.first(where: \.isDirectory) else { return }
                     didAutoOpen = true
-                    path.append(folders[1])
+                    path.append(firstFolder)
                 }
             )
             .navigationDestination(for: DriveFile.self) { directory in
@@ -121,7 +120,7 @@ struct DirectoryView: View {
             }
         }
         .toolbar {
-            ToolbarItem(placement: .topBarLeading) {
+            ToolbarItem(placement: .topBarTrailing) {
                 AddMenuButton(
                     directoryId: directory.id,
                     driveId: driveId,

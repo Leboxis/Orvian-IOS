@@ -15,3 +15,9 @@ struct Category: Decodable, Identifiable, Hashable {
         case userUses = "user_uses"
     }
 }
+
+/// Catégorie attachée à un fichier (`FileCategory` de l'API v3) :
+/// arrive dans les listes de fichiers avec `with=categories`.
+struct FileCategory: Decodable, Hashable {
+    let category: Category?
+}

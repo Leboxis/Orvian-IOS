@@ -34,10 +34,13 @@ struct FileCardView: View {
                     .foregroundStyle(.primary)
                     .frame(maxWidth: .infinity)
 
-                Text(subtitle)
-                    .font(.caption2)
-                    .foregroundStyle(.tertiary)
-                    .frame(maxWidth: .infinity)
+                HStack(spacing: 4) {
+                    Text(subtitle)
+                    categoryDots
+                }
+                .font(.caption2)
+                .foregroundStyle(.tertiary)
+                .frame(maxWidth: .infinity)
             }
             .opacity(enabled ? 1 : 0.55)
             .contentShape(Rectangle())
@@ -102,6 +105,20 @@ struct FileCardView: View {
     private var subtitle: String {
         if file.isDirectory { return "Dossier" }
         return ByteFormatter.string(fromBytes: file.size)
+    }
+
+    /// Petits cercles de la couleur de chaque catégorie (tag) du fichier,
+    /// discrètement à droite du poids. Maximum 4 pour rester léger.
+    @ViewBuilder
+    private var categoryDots: some View {
+        let hexes = (file.categories ?? []).compactMap { $0.category?.color }
+        ForEach(hexes.prefix(4), id: \.self) { hex in
+            if let color = Color(hex: hex) {
+                Circle()
+                    .fill(color)
+                    .frame(width: 6, height: 6)
+            }
+        }
     }
 
     /// Pastille translucide + étoile, lisible sur toute miniature.

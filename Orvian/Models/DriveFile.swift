@@ -20,6 +20,8 @@ struct DriveFile: Decodable, Identifiable, Hashable {
     let path: String?
     /// Couleur hexadécimale (#rrggbb) des dossiers, définie côté kDrive.
     let color: String?
+    /// Catégories (tags) du fichier — renvoyées uniquement avec `with=categories`.
+    let categories: [FileCategory]?
     /// Timestamps Unix (secondes)
     let addedAt: Double?
     let lastModifiedAt: Double?
@@ -39,6 +41,7 @@ struct DriveFile: Decodable, Identifiable, Hashable {
         case isFavorite = "is_favorite"
         case parentId = "parent_id"
         case color
+        case categories
         case addedAt = "added_at"
         case lastModifiedAt = "last_modified_at"
     }
