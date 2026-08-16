@@ -334,6 +334,7 @@ struct FileGridView: View {
         switch viewModel.source {
         case .directory: return "folder"
         case .favorites: return "star"
+        case .recents: return "clock"
         case .category: return "tag"
         case .trash: return "trash"
         case .search: return "magnifyingglass"
@@ -344,6 +345,7 @@ struct FileGridView: View {
         switch viewModel.source {
         case .directory: return "Dossier vide"
         case .favorites: return "Aucun favori"
+        case .recents: return "Aucun upload récent"
         case .category: return "Aucun fichier avec ce tag"
         case .trash: return "Corbeille vide"
         case .search: return "Aucun résultat"

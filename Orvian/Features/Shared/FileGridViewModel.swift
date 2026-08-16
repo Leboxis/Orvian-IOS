@@ -96,10 +96,13 @@ final class FileGridViewModel {
     }
 
     func rename(_ file: DriveFile, name: String) async {
+        guard let index = items.firstIndex(where: { $0.id == file.id }) else { return }
+        let oldName = items[index].name
+        items[index].name = name
         do {
             try await service.rename(driveId: driveId, fileId: file.id, name: name)
-            await reload()
         } catch {
+            items[index].name = oldName
             errorMessage = "Renommage impossible : \((error as? APIError)?.errorDescription ?? error.localizedDescription)"
         }
     }
@@ -120,14 +123,16 @@ final class FileGridViewModel {
     /// sont signalés dans `errorMessage` sans bloquer les autres suppressions.
     func permanentlyDelete(ids: Set<Int>) async {
         var firstError: Error?
+        var deletedIds: Set<Int> = []
         for id in ids {
             do {
                 try await service.permanentlyDelete(driveId: driveId, fileId: id)
+                deletedIds.insert(id)
             } catch {
                 if firstError == nil { firstError = error }
             }
         }
-        items.removeAll { ids.contains($0.id) }
+        items.removeAll { deletedIds.contains($0.id) }
         if let firstError {
             errorMessage = "Suppression définitive impossible : \((firstError as? APIError)?.errorDescription ?? firstError.localizedDescription)"
         }

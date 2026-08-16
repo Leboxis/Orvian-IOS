@@ -87,12 +87,18 @@ struct AddMenuButton: View {
     }
 
     /// Import d'un ou plusieurs fichiers choisis dans le document picker
-    /// (copiés dans la sandbox : pas de resource scoped à libérer).
+    /// (gestion des URLs security-scoped pour iCloud Drive, clés USB et partages SMB).
     private func importFiles(_ urls: [URL]) async {
         isBusy = true
         var failures = 0
         for (index, url) in urls.enumerated() {
             busyMessage = "Import \(index + 1)/\(urls.count)…"
+            let accessing = url.startAccessingSecurityScopedResource()
+            defer {
+                if accessing {
+                    url.stopAccessingSecurityScopedResource()
+                }
+            }
             do {
                 // Lecture hors du MainActor : un gros fichier ne fige pas l'UI.
                 let data = try await Task.detached { try Data(contentsOf: url) }.value

@@ -1,12 +1,16 @@
 import SwiftUI
 
-/// Onglet « Profil » : compte Infomaniak, drive utilisé, déconnexion.
+/// Onglet « Profil » : compte Infomaniak, drive utilisé, uploads récents, favoris, corbeille, déconnexion.
 struct ProfileView: View {
     let session: SessionStore
     let router: ViewerRouter
 
     @State private var accountName: String?
     @State private var showSignOutConfirm = false
+    @State private var recentUploads: [DriveFile] = []
+    @State private var frequentFavorites: [DriveFile] = []
+    @State private var isLoadingRecents = true
+    @State private var isLoadingFavorites = true
 
     private let service = KDriveService()
 
@@ -15,6 +19,8 @@ struct ProfileView: View {
             List {
                 headerSection
                 driveSection
+                recentUploadsSection
+                frequentFavoritesSection
                 trashSection
                 aboutSection
             }
@@ -30,6 +36,7 @@ struct ProfileView: View {
         }
         .task {
             await loadAccountName()
+            await loadPreviews()
         }
     }
 
@@ -91,6 +98,111 @@ struct ProfileView: View {
         }
     }
 
+    // MARK: - Uploads récents (3 miniatures + bouton voir plus)
+
+    private var recentUploadsSection: some View {
+        Section {
+            if let drive = session.selectedDrive {
+                if isLoadingRecents {
+                    thumbnailsSkeleton
+                } else if recentUploads.isEmpty {
+                    Text("Aucun upload récent")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                } else {
+                    HStack(spacing: 10) {
+                        ForEach(recentUploads.prefix(3)) { file in
+                            Button {
+                                router.open(file, siblings: recentUploads)
+                            } label: {
+                                ProfileThumbnailCard(file: file, driveId: drive.id)
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                    .padding(.vertical, 4)
+                }
+            }
+        } header: {
+            HStack {
+                Text("Uploads récents")
+                Spacer()
+                if let drive = session.selectedDrive {
+                    NavigationLink {
+                        RecentFilesView(
+                            driveId: drive.id,
+                            title: "Uploads récents",
+                            source: .recents(limit: 12),
+                            router: router
+                        )
+                    } label: {
+                        Image(systemName: "chevron.right")
+                            .font(.caption.weight(.bold))
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            }
+        }
+    }
+
+    // MARK: - Favoris les plus consultés (3 miniatures + bouton voir plus)
+
+    private var frequentFavoritesSection: some View {
+        Section {
+            if let drive = session.selectedDrive {
+                if isLoadingFavorites {
+                    thumbnailsSkeleton
+                } else if frequentFavorites.isEmpty {
+                    Text("Aucun favori")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                } else {
+                    HStack(spacing: 10) {
+                        ForEach(frequentFavorites.prefix(3)) { file in
+                            Button {
+                                router.open(file, siblings: frequentFavorites)
+                            } label: {
+                                ProfileThumbnailCard(file: file, driveId: drive.id)
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                    .padding(.vertical, 4)
+                }
+            }
+        } header: {
+            HStack {
+                Text("Favoris les plus consultés")
+                Spacer()
+                if let drive = session.selectedDrive {
+                    NavigationLink {
+                        RecentFilesView(
+                            driveId: drive.id,
+                            title: "Favoris les plus consultés",
+                            source: .favorites(limit: 12),
+                            router: router
+                        )
+                    } label: {
+                        Image(systemName: "chevron.right")
+                            .font(.caption.weight(.bold))
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            }
+        }
+    }
+
+    private var thumbnailsSkeleton: some View {
+        HStack(spacing: 10) {
+            ForEach(0..<3, id: \.self) { _ in
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .fill(.quaternary.opacity(0.4))
+                    .aspectRatio(1, contentMode: .fit)
+            }
+        }
+        .padding(.vertical, 4)
+    }
+
     private var trashSection: some View {
         Section {
             if let drive = session.selectedDrive {
@@ -131,5 +243,91 @@ struct ProfileView: View {
         guard let accounts = try? await service.accounts(),
               let id = session.accountId else { return }
         accountName = accounts.first(where: { $0.id == id })?.name
+    }
+
+    private func loadPreviews() async {
+        guard let drive = session.selectedDrive else { return }
+        async let recentsTask = try? service.page(.recents(limit: 12), driveId: drive.id, cursor: nil)
+        async let favsTask = try? service.page(.favorites(limit: 12), driveId: drive.id, cursor: nil)
+
+        let (recentsPage, favsPage) = await (recentsTask, favsTask)
+        if let recentsPage {
+            recentUploads = recentsPage.data ?? []
+        }
+        isLoadingRecents = false
+
+        if let favsPage {
+            frequentFavorites = favsPage.data ?? []
+        }
+        isLoadingFavorites = false
+    }
+}
+
+// MARK: - Vignette de prévisualisation dans le profil
+
+private struct ProfileThumbnailCard: View {
+    let file: DriveFile
+    let driveId: Int
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            ZStack {
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .fill(.quaternary.opacity(0.35))
+
+                if let thumb = ThumbnailProvider.shared.cachedMemoryThumbnail(driveId: driveId, fileId: file.id) {
+                    Image(uiImage: thumb)
+                        .resizable()
+                        .scaledToFill()
+                } else {
+                    AsyncProfileThumbnail(file: file, driveId: driveId)
+                }
+
+                if file.isVideo {
+                    Image(systemName: "play.fill")
+                        .font(.system(size: 11, weight: .bold))
+                        .foregroundStyle(.white)
+                        .padding(6)
+                        .background(.ultraThinMaterial, in: Circle())
+                }
+            }
+            .aspectRatio(1, contentMode: .fit)
+            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .strokeBorder(.black.opacity(0.06), lineWidth: 0.5)
+            }
+
+            Text(file.name)
+                .font(.caption2)
+                .lineLimit(1)
+                .truncationMode(.middle)
+                .foregroundStyle(.primary)
+        }
+        .frame(maxWidth: .infinity)
+    }
+}
+
+private struct AsyncProfileThumbnail: View {
+    let file: DriveFile
+    let driveId: Int
+    @State private var image: UIImage?
+
+    var body: some View {
+        ZStack {
+            if let image {
+                Image(uiImage: image)
+                    .resizable()
+                    .scaledToFill()
+            } else {
+                Image(systemName: file.fileKind.symbolName)
+                    .font(.system(size: 20, weight: .light))
+                    .foregroundStyle(file.fileKind.tint)
+            }
+        }
+        .task(id: file.id) {
+            guard file.fileKind.supportsThumbnail else { return }
+            image = await ThumbnailProvider.shared.thumbnail(driveId: driveId, fileId: file.id, pixels: 200)
+        }
     }
 }

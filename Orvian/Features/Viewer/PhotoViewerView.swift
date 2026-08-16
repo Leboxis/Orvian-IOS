@@ -96,18 +96,20 @@ private struct ZoomablePhotoPage: View {
                     .scaleEffect(scale)
                     .offset(panOffset)
                     .opacity(1 - dismissProgress)
-                    .gesture(magnifyGesture)
+                    .gesture(magnifyGesture(in: proxy.size))
                     .onTapGesture(count: 2) {
                         withAnimation(.snappy(duration: 0.3)) {
                             if isZoomed {
                                 scale = 1
                                 offset = .zero
+                                lastScale = 1
                             } else {
                                 scale = 2.5
+                                lastScale = 2.5
                             }
                         }
                     }
-                    .simultaneousGesture(dragGesture)
+                    .simultaneousGesture(dragGesture(in: proxy.size))
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .contentShape(Rectangle())
@@ -125,7 +127,6 @@ private struct ZoomablePhotoPage: View {
             Image(uiImage: display)
                 .resizable()
                 .scaledToFit()
-                .transition(.opacity)
         } else {
             ProgressView()
                 .tint(.white)
@@ -147,9 +148,19 @@ private struct ZoomablePhotoPage: View {
         return min(0.55, abs(dragOffset.height) / 700)
     }
 
+    private func clampOffset(_ raw: CGSize, screenSize: CGSize, currentScale: CGFloat) -> CGSize {
+        guard currentScale > 1 else { return .zero }
+        let maxOffsetX = max(0, screenSize.width * (currentScale - 1) / 2)
+        let maxOffsetY = max(0, screenSize.height * (currentScale - 1) / 2)
+        return CGSize(
+            width: min(maxOffsetX, max(-maxOffsetX, raw.width)),
+            height: min(maxOffsetY, max(-maxOffsetY, raw.height))
+        )
+    }
+
     // MARK: - Gestures
 
-    private var magnifyGesture: some Gesture {
+    private func magnifyGesture(in screenSize: CGSize) -> some Gesture {
         MagnifyGesture()
             .onChanged { value in
                 scale = min(6, max(1, lastScale * value.magnification))
@@ -160,12 +171,17 @@ private struct ZoomablePhotoPage: View {
                         scale = 1
                         offset = .zero
                     }
+                } else {
+                    let clamped = clampOffset(offset, screenSize: screenSize, currentScale: scale)
+                    withAnimation(.snappy(duration: 0.2)) {
+                        offset = clamped
+                    }
                 }
                 lastScale = scale
             }
     }
 
-    private var dragGesture: some Gesture {
+    private func dragGesture(in screenSize: CGSize) -> some Gesture {
         DragGesture(minimumDistance: 12)
             .onChanged { value in
                 if isZoomed {
@@ -177,9 +193,15 @@ private struct ZoomablePhotoPage: View {
             }
             .onEnded { value in
                 if isZoomed {
-                    offset = CGSize(width: offset.width + value.translation.width,
-                                    height: offset.height + value.translation.height)
-                    dragOffset = .zero
+                    let newRaw = CGSize(
+                        width: offset.width + value.translation.width,
+                        height: offset.height + value.translation.height
+                    )
+                    let clamped = clampOffset(newRaw, screenSize: screenSize, currentScale: scale)
+                    withAnimation(.snappy(duration: 0.2)) {
+                        offset = clamped
+                        dragOffset = .zero
+                    }
                 } else if abs(value.translation.height) > 130 {
                     onClose()
                 } else {

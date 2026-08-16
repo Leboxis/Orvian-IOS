@@ -3,7 +3,8 @@ import Foundation
 /// Source de fichiers pour les grilles paginées.
 enum FileSource: Hashable {
     case directory(Int)
-    case favorites
+    case favorites(limit: Int = 60)
+    case recents(limit: Int = 12)
     case category(Int)
     case trash
     case search(query: String, directoryId: Int?)
@@ -52,8 +53,10 @@ struct KDriveService {
         switch source {
         case let .directory(directoryId):
             endpoint = .directoryContent(driveId: driveId, directoryId: directoryId, cursor: cursor)
-        case .favorites:
-            endpoint = .favorites(driveId: driveId, cursor: cursor)
+        case let .favorites(limit):
+            endpoint = .favorites(driveId: driveId, cursor: cursor, limit: limit)
+        case let .recents(limit):
+            endpoint = .recents(driveId: driveId, cursor: cursor, limit: limit)
         case let .category(categoryId):
             endpoint = .categoryFiles(driveId: driveId, categoryId: categoryId, cursor: cursor)
         case .trash:

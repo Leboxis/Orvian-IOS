@@ -12,7 +12,14 @@ import sys
 REPO = "Leboxis/Orvian-IOS"
 ICON = "https://raw.githubusercontent.com/Leboxis/Orvian-IOS/main/Orvian/Assets.xcassets/AppIcon.appiconset/icon-1024.png"
 
-CHANGELOG = """v0.7.8
+CHANGELOG = """v0.7.9
+• Accueil : bouton filtre déplacé à gauche et nouveau bouton « Dé » pour ouvrir un fichier aléatoire
+• Profil : sections « Uploads récents » et « Favoris » avec 3 miniatures et vue dédiée paginée par 12 à l'infini
+• Lecteur vidéo : vitesse de lecture modifiable en continu et correction de la fuite audio à la fermeture
+• Import de fichiers : support des clés USB et iCloud Drive (Security-Scoped Resources)
+• Visionneuse photo : déplacement borné lors du zoom et renommage sans saut d'écran
+
+v0.7.8
 • Défilement ultra-fluide (60/120 FPS) : accès mémoire synchrone des miniatures et suppression des micro-gels
 • Décompression directe GPU hors du thread principal pour les photos et vidéos
 • Suppression des écritures disque superflues lors de la lecture du cache
@@ -22,13 +29,7 @@ v0.7.7
 • Recherche ciblée sur le dossier actuel et ses sous-dossiers
 • Recherche multi-mots combinant l'ensemble des termes dans le nom du fichier
 • Bulle de chemin (breadcrumbs) avec compteur d'éléments toujours visible et rehaussée sous le titre
-• Bouton Trier accessible lors de l'exploration des fichiers d'un tag
-
-v0.7.6
-• Corbeille : miniatures, restauration et ouverture des fichiers, barre de sélection compacte
-• Barre de recherche : apparition fluide au défilement
-• Import de fichiers via document picker UIKit
-• Tri des tags par récence d'utilisation et création avec palette de couleurs"""
+• Bouton Trier accessible lors de l'exploration des fichiers d'un tag"""
 
 
 def main() -> int:

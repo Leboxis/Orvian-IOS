@@ -35,6 +35,7 @@ struct VideoPlayerView: View {
     @State private var errorMessage: String?
     @State private var timeObserver: Any?
     @State private var endObserver: NSObjectProtocol?
+    @State private var isDisappeared = false
 
     private let service = KDriveService()
 
@@ -56,11 +57,15 @@ struct VideoPlayerView: View {
                 bottomBar
             }
         }
-        .onAppear(perform: setupAudioSession)
+        .onAppear {
+            isDisappeared = false
+            setupAudioSession()
+        }
         .task {
             await load()
         }
         .onDisappear {
+            isDisappeared = true
             teardown()
         }
         .alert("Erreur", isPresented: errorBinding) {
@@ -219,7 +224,15 @@ struct VideoPlayerView: View {
         .accessibilityLabel("Fermer")
     }
 
-    /// Vitesse de lecture : petite pastille en bas à droite.
+    /// Titre formaté de la vitesse actuelle (ex: 1x, 1,5x, 2x).
+    private var currentSpeedTitle: String {
+        if let match = SpeedOption.allCases.first(where: { abs($0.rate - playbackRate) < 0.01 }) {
+            return match.title
+        }
+        return "1x"
+    }
+
+    /// Vitesse de lecture : petite pastille en bas à droite avec menu interactif.
     private var speedMenu: some View {
         Menu {
             ForEach(SpeedOption.allCases) { option in
@@ -229,18 +242,19 @@ struct VideoPlayerView: View {
                     HStack {
                         Text(option.title)
                         Spacer()
-                        if option.rate == playbackRate {
+                        if abs(option.rate - playbackRate) < 0.01 {
                             Image(systemName: "checkmark")
                         }
                     }
                 }
             }
         } label: {
-            Text(SpeedOption(rawValue: playbackRate)?.title ?? "1x")
+            Text(currentSpeedTitle)
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(.white)
                 .frame(width: 36, height: 36)
                 .background(.white.opacity(0.12), in: Circle())
+                .contentShape(Circle())
         }
         .accessibilityLabel("Vitesse de lecture")
     }
@@ -287,14 +301,15 @@ struct VideoPlayerView: View {
         guard let player else { return }
         if isPlaying {
             player.pause()
+            isPlaying = false
         } else {
             // Reprise après la fin : retour au début.
             if duration > 0, abs(currentTime - duration) < 0.5 {
                 player.seek(to: .zero)
             }
-            player.play()
+            player.playImmediately(atRate: playbackRate)
+            isPlaying = true
         }
-        isPlaying.toggle()
     }
 
     private func seek(to seconds: Double, precise: Bool = false) {
@@ -307,7 +322,7 @@ struct VideoPlayerView: View {
     private func setPlaybackRate(_ rate: Float) {
         playbackRate = rate
         player?.defaultRate = rate
-        if player?.timeControlStatus == .playing {
+        if isPlaying || player?.timeControlStatus == .playing {
             player?.rate = rate
         }
     }
@@ -356,26 +371,29 @@ struct VideoPlayerView: View {
         async let categoriesTask: [Category]? = try? service.categories(driveId: driveId)
 
         let (loadedPoster, url, loadedCategories) = await (posterTask, urlTask, categoriesTask)
+        guard !isDisappeared, !Task.isCancelled else { return }
+
         if let loadedPoster {
             withAnimation { poster = loadedPoster }
         }
         if let loadedCategories, !loadedCategories.isEmpty {
             categories = loadedCategories
         }
-        guard let url, !Task.isCancelled else { return }
+        guard let url, !isDisappeared, !Task.isCancelled else { return }
 
         let newPlayer = AVPlayer(url: url)
         newPlayer.automaticallyWaitsToMinimizeStalling = true
         newPlayer.isMuted = isMuted
         newPlayer.defaultRate = playbackRate
 
-        guard !Task.isCancelled else {
+        guard !isDisappeared, !Task.isCancelled else {
             newPlayer.pause()
             return
         }
         player = newPlayer
         addObservers(to: newPlayer)
-        newPlayer.play()
+        newPlayer.playImmediately(atRate: playbackRate)
+        isPlaying = true
     }
 
     private func addObservers(to player: AVPlayer) {
@@ -409,6 +427,7 @@ struct VideoPlayerView: View {
             NotificationCenter.default.removeObserver(endObserver)
         }
         player?.pause()
+        player = nil
     }
 
     private func setupAudioSession() {

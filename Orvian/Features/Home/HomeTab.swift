@@ -163,8 +163,12 @@ struct DirectoryView: View {
             .animation(.snappy(duration: 0.25), value: searchBarVisible)
         }
         .toolbar {
-            ToolbarItemGroup(placement: .topBarTrailing) {
+            ToolbarItem(placement: .topBarLeading) {
                 FilterMenu(filters: $filters)
+            }
+
+            ToolbarItemGroup(placement: .topBarTrailing) {
+                randomFileButton
 
                 AddMenuButton(
                     directoryId: directory.id,
@@ -240,6 +244,30 @@ struct DirectoryView: View {
         }
         .shadow(color: .black.opacity(0.08), radius: 6, x: 0, y: 2)
         .frame(maxWidth: 260)
+    }
+
+    /// Bouton dé : ouvre au hasard un fichier parmi les éléments du dossier actuel.
+    private var randomFileButton: some View {
+        Button {
+            openRandomFile()
+        } label: {
+            Image(systemName: "dice")
+                .font(.system(size: 17, weight: .medium))
+                .foregroundStyle(Color.accentColor)
+                .frame(width: 32, height: 32)
+                .contentShape(Rectangle())
+        }
+        .disabled(playableFiles.isEmpty)
+        .accessibilityLabel("Ouvrir un fichier au hasard")
+    }
+
+    private var playableFiles: [DriveFile] {
+        activeViewModel.items.filter { !$0.isDirectory }
+    }
+
+    private func openRandomFile() {
+        guard let random = playableFiles.randomElement() else { return }
+        router.open(random, siblings: playableFiles)
     }
 
     private var addErrorBinding: Binding<Bool> {
