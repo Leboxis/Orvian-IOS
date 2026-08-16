@@ -3,12 +3,13 @@ import SwiftUI
 /// Onglet « Réglages » : drive et stockage local.
 struct SettingsView: View {
     let session: SessionStore
+    @Binding var path: NavigationPath
 
     @State private var cacheSize: Int = 0
     @State private var showDrivePicker = false
 
     var body: some View {
-        NavigationStack {
+        NavigationStack(path: $path) {
             List {
                 driveSection
                 cacheSection

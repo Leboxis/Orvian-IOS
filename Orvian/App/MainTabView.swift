@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// Conteneur des 5 onglets + barre flottante + visionneuses plein écran.
+/// Conteneur des 5 onglets + barre flottante + visionneuses plein écran + suivi d'upload.
 ///
 /// Barre, de gauche à droite : Réglages · Tag · Accueil · Favoris · Profil.
 /// Les onglets restent montés (ZStack + opacité) pour conserver la
@@ -11,6 +11,10 @@ struct MainTabView: View {
 
     @State private var tab: AppTab = .home
     @State private var router: ViewerRouter
+    @State private var navState = TabNavigationState()
+    @State private var showUploadSheet = false
+
+    private let uploadManager = UploadManager.shared
 
     init(drive: Drive, session: SessionStore) {
         self.drive = drive
@@ -21,10 +25,30 @@ struct MainTabView: View {
     var body: some View {
         ZStack(alignment: .bottom) {
             tabs
-            FloatingTabBar(selection: $tab)
+
+            VStack(spacing: 8) {
+                if uploadManager.isPillVisible {
+                    UploadProgressPill(manager: uploadManager) {
+                        showUploadSheet = true
+                    }
+                    .transition(.asymmetric(
+                        insertion: .move(edge: .bottom).combined(with: .opacity),
+                        removal: .opacity.combined(with: .scale(scale: 0.9))
+                    ))
+                }
+
+                FloatingTabBar(selection: $tab, onReselect: { targetTab in
+                    navState.reset(tab: targetTab)
+                })
+            }
+            .padding(.bottom, 4)
+            .animation(.snappy(duration: 0.28), value: uploadManager.isPillVisible)
         }
         .ignoresSafeArea(.keyboard, edges: .bottom)
         .tint(.accentColor)
+        .sheet(isPresented: $showUploadSheet) {
+            UploadProgressSheet(manager: uploadManager)
+        }
         .fullScreenCover(item: $router.photoContext) { context in
             PhotoViewerView(context: context)
         }
@@ -37,19 +61,19 @@ struct MainTabView: View {
     private var tabs: some View {
         ZStack {
             tabPane(.settings) {
-                SettingsView(session: session)
+                SettingsView(session: session, path: $navState.settingsPath)
             }
             tabPane(.tag) {
-                TagsView(driveId: drive.id, router: router)
+                TagsView(driveId: drive.id, router: router, path: $navState.tagsPath)
             }
             tabPane(.home) {
-                HomeTab(driveId: drive.id, router: router)
+                HomeTab(driveId: drive.id, router: router, path: $navState.homePath)
             }
             tabPane(.favorites) {
-                FavoritesView(driveId: drive.id, router: router)
+                FavoritesView(driveId: drive.id, router: router, path: $navState.favoritesPath)
             }
             tabPane(.profile) {
-                ProfileView(session: session, router: router)
+                ProfileView(session: session, router: router, path: $navState.profilePath)
             }
         }
     }

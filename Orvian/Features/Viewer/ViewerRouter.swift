@@ -24,6 +24,7 @@ final class ViewerRouter {
     }
 
     func open(_ file: DriveFile, siblings: [DriveFile]) {
+        MediaUsageStore.recordView(file: file)
         if file.isVideo {
             videoFile = file
         } else if file.isImage {

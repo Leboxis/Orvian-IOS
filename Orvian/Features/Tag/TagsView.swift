@@ -8,11 +8,11 @@ import SwiftUI
 struct TagsView: View {
     let driveId: Int
     let router: ViewerRouter
+    @Binding var path: NavigationPath
 
     @State private var categories: [Category] = []
     @State private var isLoading = false
     @State private var errorMessage: String?
-    @State private var path = NavigationPath()
     @State private var trail: [String] = []
     /// Affichage des catégories : grille (défaut) ou liste.
     @AppStorage("tagsLayout") private var layout = CategoryLayout.grid

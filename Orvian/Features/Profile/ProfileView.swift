@@ -1,9 +1,10 @@
 import SwiftUI
 
-/// Onglet « Profil » : compte Infomaniak, drive utilisé, uploads récents, favoris, corbeille, déconnexion.
+/// Onglet « Profil » : compte Infomaniak, drive utilisé, uploads récents, médias consultés, corbeille, déconnexion.
 struct ProfileView: View {
     let session: SessionStore
     let router: ViewerRouter
+    @Binding var path: NavigationPath
 
     @State private var accountName: String?
     @State private var showSignOutConfirm = false
@@ -15,7 +16,7 @@ struct ProfileView: View {
     private let service = KDriveService()
 
     var body: some View {
-        NavigationStack {
+        NavigationStack(path: $path) {
             List {
                 headerSection
                 driveSection
@@ -145,7 +146,7 @@ struct ProfileView: View {
         }
     }
 
-    // MARK: - Favoris les plus consultés (3 miniatures + bouton voir plus)
+    // MARK: - Médias les plus consultés (3 miniatures + bouton voir plus)
 
     private var frequentFavoritesSection: some View {
         Section {
@@ -153,7 +154,7 @@ struct ProfileView: View {
                 if isLoadingFavorites {
                     thumbnailsSkeleton
                 } else if frequentFavorites.isEmpty {
-                    Text("Aucun favori")
+                    Text("Aucun média consulté")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                 } else {
@@ -172,14 +173,14 @@ struct ProfileView: View {
             }
         } header: {
             HStack {
-                Text("Favoris les plus consultés")
+                Text("Médias les plus consultés")
                 Spacer()
                 if let drive = session.selectedDrive {
                     NavigationLink {
                         RecentFilesView(
                             driveId: drive.id,
-                            title: "Favoris les plus consultés",
-                            source: .favorites(limit: 12),
+                            title: "Médias les plus consultés",
+                            source: .mostViewed(limit: 12),
                             router: router
                         )
                     } label: {
@@ -252,12 +253,15 @@ struct ProfileView: View {
 
         let (recentsPage, favsPage) = await (recentsTask, favsTask)
         if let recentsPage {
-            recentUploads = recentsPage.data ?? []
+            recentUploads = (recentsPage.data ?? []).filter { !$0.isDirectory }
         }
         isLoadingRecents = false
 
-        if let favsPage {
-            frequentFavorites = favsPage.data ?? []
+        let tracked = MediaUsageStore.mostViewedFiles(driveId: drive.id, limit: 12)
+        if !tracked.isEmpty {
+            frequentFavorites = tracked
+        } else if let favsPage {
+            frequentFavorites = (favsPage.data ?? []).filter { !$0.isDirectory }
         }
         isLoadingFavorites = false
     }

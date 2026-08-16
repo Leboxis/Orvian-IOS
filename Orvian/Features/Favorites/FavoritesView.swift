@@ -6,11 +6,11 @@ struct FavoritesView: View {
     @State private var viewModel: FileGridViewModel
     @State private var filters = FileFilters()
     private let router: ViewerRouter
+    @Binding var path: [DriveFile]
 
-    @State private var path: [DriveFile] = []
-
-    init(driveId: Int, router: ViewerRouter) {
+    init(driveId: Int, router: ViewerRouter, path: Binding<[DriveFile]>) {
         self.router = router
+        self._path = path
         _viewModel = State(initialValue: FileGridViewModel(source: .favorites, driveId: driveId))
     }
 

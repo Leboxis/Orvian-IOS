@@ -3,13 +3,18 @@ import SwiftUI
 /// Barre d'onglets flottante translucide à coins arrondis.
 struct FloatingTabBar: View {
     @Binding var selection: AppTab
+    var onReselect: ((AppTab) -> Void)? = nil
 
     var body: some View {
         HStack(spacing: 4) {
             ForEach(AppTab.allCases) { tab in
                 TabButton(tab: tab, isSelected: selection == tab) {
-                    withAnimation(.snappy(duration: 0.25)) {
-                        selection = tab
+                    if selection == tab {
+                        onReselect?(tab)
+                    } else {
+                        withAnimation(.snappy(duration: 0.25)) {
+                            selection = tab
+                        }
                     }
                 }
             }

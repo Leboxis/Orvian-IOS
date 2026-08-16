@@ -90,51 +90,45 @@ struct AddMenuButton: View {
     /// (gestion des URLs security-scoped pour iCloud Drive, clés USB et partages SMB).
     private func importFiles(_ urls: [URL]) async {
         isBusy = true
-        var failures = 0
-        for (index, url) in urls.enumerated() {
-            busyMessage = "Import \(index + 1)/\(urls.count)…"
+        busyMessage = "Lecture des fichiers…"
+        var filesToUpload: [(data: Data, name: String)] = []
+
+        for url in urls {
             let accessing = url.startAccessingSecurityScopedResource()
             defer {
                 if accessing {
                     url.stopAccessingSecurityScopedResource()
                 }
             }
-            do {
-                // Lecture hors du MainActor : un gros fichier ne fige pas l'UI.
-                let data = try await Task.detached { try Data(contentsOf: url) }.value
-                try await upload(data: data, fileName: url.lastPathComponent)
-            } catch {
-                failures += 1
+            if let data = try? await Task.detached(operation: { try Data(contentsOf: url) }).value {
+                filesToUpload.append((data: data, name: url.lastPathComponent))
             }
         }
+
         isBusy = false
-        if failures > 0 {
-            errorMessage = "\(failures) élément(s) n'ont pas pu être importés."
+        guard !filesToUpload.isEmpty else { return }
+        UploadManager.shared.enqueue(driveId: driveId, directoryId: directoryId, files: filesToUpload) {
+            onDone()
         }
-        onDone()
     }
 
     private func importPhotos(_ items: [PhotosPickerItem]) async {
         photoItems = []
         isBusy = true
-        var failures = 0
-        for (index, item) in items.enumerated() {
-            busyMessage = "Import \(index + 1)/\(items.count)…"
-            do {
-                guard let data = try await item.loadTransferable(type: Data.self) else {
-                    failures += 1
-                    continue
-                }
-                try await upload(data: data, fileName: fileName(for: item))
-            } catch {
-                failures += 1
+        busyMessage = "Préparation des photos…"
+        var filesToUpload: [(data: Data, name: String)] = []
+
+        for item in items {
+            if let data = try? await item.loadTransferable(type: Data.self) {
+                filesToUpload.append((data: data, name: fileName(for: item)))
             }
         }
+
         isBusy = false
-        if failures > 0 {
-            errorMessage = "\(failures) élément(s) n'ont pas pu être importés."
+        guard !filesToUpload.isEmpty else { return }
+        UploadManager.shared.enqueue(driveId: driveId, directoryId: directoryId, files: filesToUpload) {
+            onDone()
         }
-        onDone()
     }
 
     // MARK: - Helpers

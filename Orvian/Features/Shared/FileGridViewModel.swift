@@ -40,7 +40,7 @@ final class FileGridViewModel {
         do {
             let page = try await service.page(source, driveId: driveId, cursor: nil)
             guard !Task.isCancelled else { return }
-            items = page.data ?? []
+            items = filterItemsIfNeeded(page.data ?? [])
             cursor = page.cursor
             hasMore = page.hasMore ?? false
             loadedOnce = true
@@ -60,12 +60,22 @@ final class FileGridViewModel {
             let page = try await service.page(source, driveId: driveId, cursor: cursor)
             guard !Task.isCancelled else { return }
             let existing = Set(items.map(\.id))
-            items.append(contentsOf: (page.data ?? []).filter { !existing.contains($0.id) })
+            let filtered = filterItemsIfNeeded(page.data ?? [])
+            items.append(contentsOf: filtered.filter { !existing.contains($0.id) })
             cursor = page.cursor
             hasMore = page.hasMore ?? false
         } catch {
             guard !Task.isCancelled else { return }
             errorMessage = (error as? APIError)?.errorDescription ?? error.localizedDescription
+        }
+    }
+
+    private func filterItemsIfNeeded(_ raw: [DriveFile]) -> [DriveFile] {
+        switch source {
+        case .recents, .mostViewed:
+            return raw.filter { !$0.isDirectory }
+        default:
+            return raw
         }
     }
 

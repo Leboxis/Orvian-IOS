@@ -4,8 +4,8 @@ import SwiftUI
 struct HomeTab: View {
     let driveId: Int
     let router: ViewerRouter
+    @Binding var path: [DriveFile]
 
-    @State private var path: [DriveFile] = []
     /// Premier dossier de la racine, ouvert automatiquement au lancement.
     /// Une fois défini, il remplace la racine « Accueil » : aucun moyen de
     /// revenir dessus (pas de flèche retour ni de geste de balayage).
