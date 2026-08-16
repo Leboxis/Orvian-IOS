@@ -36,6 +36,7 @@ struct VideoPlayerView: View {
     @State private var timeObserver: Any?
     @State private var endObserver: NSObjectProtocol?
     @State private var isDisappeared = false
+    @State private var isExternalPlaybackActive = false
 
     // Masquage automatique des contrôles après 2.5 secondes
     @State private var showControls = true
@@ -121,7 +122,7 @@ struct VideoPlayerView: View {
 
     private var topBar: some View {
         ZStack {
-            HStack(spacing: 4) {
+            HStack(spacing: 8) {
                 AirPlayButton()
                     .frame(width: 32, height: 32)
                 tagMenu
@@ -129,23 +130,23 @@ struct VideoPlayerView: View {
                 Spacer()
             }
             Text(file.name)
-                .font(.caption.weight(.semibold))
+                .font(.footnote.weight(.medium))
                 .foregroundStyle(.white)
                 .lineLimit(1)
                 .minimumScaleFactor(0.6)
-                .padding(.horizontal, 10)
-                .padding(.vertical, 4)
-                .background(.black.opacity(0.3), in: Capsule())
-                .padding(.horizontal, 70)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 6)
+                .background(.black.opacity(0.25), in: Capsule())
+                .padding(.horizontal, 120)
                 .frame(maxWidth: .infinity)
-            HStack(spacing: 4) {
+            HStack(spacing: 8) {
                 Spacer()
                 muteButton
                 closeButton
             }
         }
-        .padding(.horizontal, 4)
-        .padding(.top, 0)
+        .padding(.horizontal, 0)
+        .padding(.top, -4)
         .padding(.bottom, 2)
     }
 
@@ -161,7 +162,18 @@ struct VideoPlayerView: View {
                     .resizable()
                     .scaledToFit()
             }
-            if player == nil {
+            if isExternalPlaybackActive {
+                VStack(spacing: 12) {
+                    Image(systemName: "airplayvideo")
+                        .font(.system(size: 48))
+                        .foregroundStyle(.white)
+                    Text("Lecture en cours via AirPlay")
+                        .font(.footnote.weight(.medium))
+                        .foregroundStyle(.white.opacity(0.9))
+                }
+                .padding(24)
+                .background(.black.opacity(0.6), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+            } else if player == nil {
                 preparing
             }
         }
@@ -185,7 +197,7 @@ struct VideoPlayerView: View {
     // MARK: - Barre du bas (transport, hors zone vidéo)
 
     private var bottomBar: some View {
-        HStack(spacing: 4) {
+        HStack(spacing: 6) {
             playButton
 
             Text(timeText(currentTime))
@@ -213,9 +225,9 @@ struct VideoPlayerView: View {
 
             speedMenu
         }
-        .padding(.horizontal, 4)
+        .padding(.horizontal, 0)
         .padding(.top, 2)
-        .padding(.bottom, 0)
+        .padding(.bottom, -4)
     }
 
     // MARK: - Boutons
@@ -435,6 +447,8 @@ struct VideoPlayerView: View {
         newPlayer.automaticallyWaitsToMinimizeStalling = true
         newPlayer.isMuted = isMuted
         newPlayer.defaultRate = playbackRate
+        newPlayer.allowsExternalPlayback = true
+        newPlayer.usesExternalPlaybackWhileExternalScreenIsActive = true
 
         guard !isDisappeared, !Task.isCancelled else {
             newPlayer.pause()
@@ -459,6 +473,7 @@ struct VideoPlayerView: View {
                 currentTime = time.seconds
             }
             isPlaying = player.timeControlStatus == .playing
+            isExternalPlaybackActive = player.isExternalPlaybackActive
         }
         endObserver = NotificationCenter.default.addObserver(
             forName: .AVPlayerItemDidPlayToEndTime,
@@ -481,7 +496,14 @@ struct VideoPlayerView: View {
     }
 
     private func setupAudioSession() {
-        try? AVAudioSession.sharedInstance().setCategory(.playback, mode: .moviePlayback)
+        let session = AVAudioSession.sharedInstance()
+        do {
+            try session.setCategory(.playback, mode: .moviePlayback, policy: .longFormVideo)
+            try session.setActive(true)
+        } catch {
+            try? session.setCategory(.playback, mode: .moviePlayback)
+            try? session.setActive(true)
+        }
     }
 
     // MARK: - Format
@@ -546,6 +568,7 @@ private struct AirPlayButton: UIViewRepresentable {
         let view = AVRoutePickerView()
         view.tintColor = .white
         view.activeTintColor = .white
+        view.prioritizesVideoDevices = true
         return view
     }
 

@@ -12,9 +12,13 @@ import sys
 REPO = "Leboxis/Orvian-IOS"
 ICON = "https://raw.githubusercontent.com/Leboxis/Orvian-IOS/main/Orvian/Assets.xcassets/AppIcon.appiconset/icon-1024.png"
 
-CHANGELOG = """v0.8.7
+CHANGELOG = """v0.8.8
+• AirPlay vidéo : correction de la diffusion vers les écrans externes (Apple TV, AirPlay 2)
+• Lecteur vidéo : décalage supplémentaire de 4 points vers les extrémités et titre centré d'origine
+
+v0.8.7
 • Téléchargement : ajout de l'option « Télécharger » (appui long et feuille de détails) avec partage natif iOS
-• Lecteur vidéo : boutons haut/bas et barre de lecture décalés au maximum vers les extrémités
+• Lecteur vidéo : boutons haut/bas et barre de lecture décalés vers les extrémités
 
 v0.8.6
 • Profil & Réglages : ajout d'une marge basse pour faire défiler la section À propos au-dessus de la barre de navigation
@@ -22,12 +26,7 @@ v0.8.6
 
 v0.8.5
 • Uploads récents : utilisation de l'endpoint kDrive exact /files/last_modified avec cascade de fallbacks
-• Lecteur vidéo : masquage automatique des commandes au bout de 2.5s et réaffichage au clic
-
-v0.8.4
-• Filtre : orientation vidéo à sélection unique et exclusive
-• Tris : ajout des tris natifs par date de modification et par date d'importation
-• Tags : renommage et suppression des tags (menu contextuel et swipe)"""
+• Lecteur vidéo : masquage automatique des commandes au bout de 2.5s et réaffichage au clic"""
 
 
 def main() -> int:
