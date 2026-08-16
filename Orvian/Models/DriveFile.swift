@@ -7,7 +7,7 @@ import Foundation
 /// optionnel sauf l'essentiel.
 struct DriveFile: Decodable, Identifiable, Hashable {
     let id: Int
-    let name: String
+    var name: String
     /// "dir" ou "file"
     let type: String
     let size: Int?

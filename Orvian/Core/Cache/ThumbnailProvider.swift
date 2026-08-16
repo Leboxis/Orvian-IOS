@@ -9,7 +9,13 @@ import UIKit
 actor ThumbnailProvider {
     static let shared = ThumbnailProvider()
 
-    private let memory = NSCache<NSString, UIImage>()
+    private static let memory: NSCache<NSString, UIImage> = {
+        let cache = NSCache<NSString, UIImage>()
+        cache.countLimit = 600
+        cache.totalCostLimit = 80 * 1024 * 1024
+        return cache
+    }()
+
     private let disk: DiskImageCache
     private let service: KDriveService
     private var inFlight: [Key: Task<UIImage?, Never>] = [:]
@@ -25,14 +31,12 @@ actor ThumbnailProvider {
     init(service: KDriveService = KDriveService(), disk: DiskImageCache = .init()) {
         self.service = service
         self.disk = disk
-        memory.countLimit = 600
-        memory.totalCostLimit = 80 * 1024 * 1024
     }
 
     /// Accès synchrone ultra-rapide au cache mémoire (sans saut de thread).
     nonisolated func cachedMemoryThumbnail(driveId: Int, fileId: Int, pixels: Int = DS.thumbnailPixels) -> UIImage? {
         let key = "\(driveId)-\(fileId)-\(pixels)" as NSString
-        return memory.object(forKey: key)
+        return Self.memory.object(forKey: key)
     }
 
     /// Miniature pour une carte ; nil si le fichier n'en a pas ou si annulé.
@@ -40,12 +44,12 @@ actor ThumbnailProvider {
     func thumbnail(driveId: Int, fileId: Int, pixels: Int = DS.thumbnailPixels, isTrashed: Bool = false) async -> UIImage? {
         let key = Key(driveId: driveId, fileId: fileId, pixels: pixels)
 
-        if let cached = memory.object(forKey: key.nsString) {
+        if let cached = Self.memory.object(forKey: key.nsString) {
             return cached
         }
         if disk.hasEntry(driveId: driveId, fileId: fileId, pixels: pixels) {
             if let image = disk.loadImage(driveId: driveId, fileId: fileId, pixels: pixels) {
-                memory.setObject(image, forKey: key.nsString, cost: image.estimatedByteSize)
+                Self.memory.setObject(image, forKey: key.nsString, cost: image.estimatedByteSize)
                 return image
             }
             return nil // marqueur « pas de miniature » déjà sur disque
@@ -62,7 +66,7 @@ actor ThumbnailProvider {
         inFlight[key] = task
         let image = await task.value
         if !Task.isCancelled, let image {
-            memory.setObject(image, forKey: key.nsString, cost: image.estimatedByteSize)
+            Self.memory.setObject(image, forKey: key.nsString, cost: image.estimatedByteSize)
         }
         return image
     }
@@ -72,7 +76,7 @@ actor ThumbnailProvider {
         for fileId in fileIds {
             let key = Key(driveId: driveId, fileId: fileId, pixels: pixels)
             guard inFlight[key] == nil,
-                  memory.object(forKey: key.nsString) == nil,
+                  Self.memory.object(forKey: key.nsString) == nil,
                   !disk.hasEntry(driveId: driveId, fileId: fileId, pixels: pixels)
             else { continue }
             let task = Task<UIImage?, Never> { [self] in
@@ -107,7 +111,7 @@ actor ThumbnailProvider {
     // MARK: - Maintenance
 
     func purgeDiskCache() {
-        memory.removeAllObjects()
+        Self.memory.removeAllObjects()
         disk.purge()
     }
 

@@ -8,6 +8,9 @@ enum FileSource: Hashable {
     case category(Int)
     case trash
     case search(query: String, directoryId: Int?)
+
+    static var favorites: FileSource { .favorites() }
+    static var recents: FileSource { .recents() }
 }
 
 /// Couche Repository : unique point d'accès aux données kDrive.

@@ -461,7 +461,7 @@ struct FileDetailSheet: View {
                     )
                 }
             }
-            if !isTrashed, let onRename {
+            if !isTrashed, onRename != nil {
                 Button {
                     renameText = file.name
                     showRenameAlert = true
@@ -469,7 +469,7 @@ struct FileDetailSheet: View {
                     Label("Renommer", systemImage: "pencil")
                 }
             }
-            if !isTrashed, let onDelete {
+            if !isTrashed, onDelete != nil {
                 Button(role: .destructive) {
                     showDeleteConfirm = true
                 } label: {
