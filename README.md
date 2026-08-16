@@ -70,7 +70,19 @@ xcodegen generate
 open Orvian.xcodeproj   # puis Cmd+R avec son certificat de développement
 ```
 
-### 3. CI
+### 3. Installation directe via la source LiveContainer
+
+LiveContainer sait lire les sources de type AltStore (`repo.json`) : à chaque
+version, la CI met automatiquement le JSON à jour.
+
+1. Dans LiveContainer : onglet **Sources → Add Source**
+2. Collez : `https://raw.githubusercontent.com/Leboxis/Orvian-IOS/main/repo.json`
+3. Appuyez sur **Install** sur l'app Orvian — pas de téléchargement IPA manuel
+
+Lien direct (si votre version de LiveContainer le supporte) :
+`livecontainer://source?url=https%3A%2F%2Fraw.githubusercontent.com%2FLeboxis%2FOrvian-IOS%2Fmain%2Frepo.json`
+
+### 4. CI
 
 `.github/workflows/build.yml` (runner `macos-26`) :
 
