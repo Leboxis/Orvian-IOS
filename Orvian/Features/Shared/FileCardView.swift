@@ -380,7 +380,7 @@ struct FileDetailSheet: View {
                 Spacer()
                 if appliedCategoryIds.contains(category.id) {
                     Image(systemName: "checkmark")
-                        .foregroundStyle(.accent)
+                        .foregroundStyle(.accentColor)
                 }
             }
         }
