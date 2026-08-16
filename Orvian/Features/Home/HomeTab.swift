@@ -57,6 +57,7 @@ extension DriveFile {
             parentId: nil,
             path: nil,
             color: nil,
+            categories: nil,
             addedAt: nil,
             lastModifiedAt: nil
         )
