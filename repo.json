@@ -12,15 +12,15 @@
       "bundleIdentifier": "com.orvian.app",
       "developerName": "Leboxis",
       "subtitle": "Client kDrive non officiel",
-      "version": "0.6.0",
+      "version": "0.7.0",
       "versionDate": "2026-08-16",
       "versionDescription": "v0.5.0\n• Lecteur vidéo personnalisé : barres hors de la zone de lecture, play/pause, barre de progression, muet, AirPlay, favori, choix d'un tag\n• Étoile dorée sur les cartes des favoris, pastilles colorées des tags à côté du poids\n• Bouton « + » déplacé à droite, import de fichiers hors du thread principal\n• Accueil ouvert automatiquement dans le premier dossier de la racine\n\nv0.4.0\n• Bouton « + » : créer un dossier, importer un fichier, importer photos/vidéos (upload kDrive)\n• Couleurs de dossiers d'origine (API kDrive)\n• Accueil ouvert sur le 2e dossier de la racine\n\nv0.3.0\n• Lecteur vidéo 100 % natif (AVKit) : contrôles système, PiP, AirPlay",
-      "downloadURL": "https://github.com/Leboxis/Orvian-IOS/releases/download/v0.6.0/Orvian-0.6.0-unsigned.ipa",
+      "downloadURL": "https://github.com/Leboxis/Orvian-IOS/releases/download/v0.7.0/Orvian-0.7.0-unsigned.ipa",
       "localizedDescription": "Client iOS natif non officiel pour kDrive (Infomaniak) : navigation dans l'arborescence, favoris, tags, visionneuse photo et vidéo, import de fichiers, photos et vidéos.",
       "iconURL": "https://raw.githubusercontent.com/Leboxis/Orvian-IOS/main/Orvian/Assets.xcassets/AppIcon.appiconset/icon-1024.png",
       "tintColor": "#4285F5",
       "category": "utilities",
-      "size": 680552
+      "size": 740666
     }
   ]
 }
