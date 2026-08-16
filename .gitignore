@@ -1,0 +1,19 @@
+# Secrets — jamais commités
+.env
+.env.*
+*.env
+
+# Xcode (généré par XcodeGen, reconstruit à la volée)
+*.xcodeproj
+build/
+DerivedData/
+xcuserdata/
+*.xcuserstate
+.swiftpm/
+
+# macOS / divers
+.DS_Store
+*.log
+
+# ZCode local
+.zcode/

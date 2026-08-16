@@ -1,0 +1,43 @@
+name: Orvian
+options:
+  bundleIdPrefix: com.orvian
+  createIntermediateGroups: true
+  deploymentTarget:
+    iOS: "26.0"
+
+settings:
+  base:
+    SWIFT_VERSION: "5.0"
+    MARKETING_VERSION: "0.1.0"
+    CURRENT_PROJECT_VERSION: "1"
+    GENERATE_INFOPLIST_FILE: true
+    INFOPLIST_KEY_CFBundleDisplayName: Orvian
+    INFOPLIST_KEY_UILaunchScreen_Generation: true
+    INFOPLIST_KEY_UIApplicationSceneManifest_Generation: true
+    INFOPLIST_KEY_UISupportedInterfaceOrientations: >-
+      UIInterfaceOrientationPortrait
+      UIInterfaceOrientationLandscapeLeft
+      UIInterfaceOrientationLandscapeRight
+    CODE_SIGNING_ALLOWED: "NO"
+    CODE_SIGNING_REQUIRED: "NO"
+
+targets:
+  Orvian:
+    type: application
+    platform: iOS
+    sources:
+      - path: Orvian
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.orvian.app
+        TARGETED_DEVICE_FAMILY: "1,2"
+
+schemes:
+  Orvian:
+    build:
+      targets:
+        Orvian: all
+    run:
+      config: Debug
+    archive:
+      config: Release

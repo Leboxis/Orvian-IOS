@@ -1,0 +1,45 @@
+import SwiftUI
+
+/// Constantes de design partagées.
+enum DS {
+    /// Coins arrondis des cartes.
+    static let cardRadius: CGFloat = 18
+    /// Coins arrondis de la barre d'onglets flottante.
+    static let tabBarRadius: CGFloat = 28
+    /// Espacement horizontal entre cartes de la grille.
+    static let gridSpacing: CGFloat = 10
+    /// Marges latérales de la grille.
+    static let gridMargin: CGFloat = 14
+    /// Taille de miniature demandée à l'API (bucket arrondi, max 400).
+    static let thumbnailPixels: Int = 360
+
+    static let cardShadow = ShadowStyle.drop(color: .black.opacity(0.08), radius: 8, x: 0, y: 3)
+}
+
+/// Titre de section discrêt au-dessus des groupes de fichiers.
+struct SectionHeader: View {
+    let title: String
+
+    var body: some View {
+        Text(title)
+            .font(.subheadline.weight(.semibold))
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .accessibilityAddTraits(.isHeader)
+    }
+}
+
+/// Vue d'état vide réutilisable.
+struct EmptyStateView: View {
+    let symbol: String
+    let title: String
+    let message: String
+
+    var body: some View {
+        ContentUnavailableView {
+            Label(title, systemImage: symbol)
+        } description: {
+            Text(message)
+        }
+        .padding(.top, 60)
+    }
+}
