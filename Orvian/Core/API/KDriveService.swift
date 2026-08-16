@@ -105,7 +105,7 @@ struct KDriveService {
     }
 
     func thumbnailData(driveId: Int, fileId: Int, pixels: Int, isTrashed: Bool = false) async throws -> Data {
-        let endpoint = isTrashed
+        let endpoint: Endpoint = isTrashed
             ? .trashedThumbnail(driveId: driveId, fileId: fileId, pixels: pixels)
             : .thumbnail(driveId: driveId, fileId: fileId, pixels: pixels)
         return try await api.data(endpoint)
