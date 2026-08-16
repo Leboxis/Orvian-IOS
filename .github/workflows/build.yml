@@ -73,7 +73,8 @@ jobs:
             git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
             git add repo.json
             git commit -m "repo.json : Orvian $VERSION (source LiveContainer)"
-            if ! git push; then
+            # Le checkout d'un tag est en detached HEAD : pousser explicitement vers main
+            if ! git push origin HEAD:main; then
               echo "::warning::repo.json non poussé (conflit de branche ?) — mise à jour manuelle requise"
             fi
           else

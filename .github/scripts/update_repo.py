@@ -29,6 +29,8 @@ v0.3.0
 
 def main() -> int:
     version, tag, size, version_date = sys.argv[1:5]
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8")  # Windows : évite cp1252
     source = {
         "name": "Orvian",
         "identifier": "com.orvian.repo",
