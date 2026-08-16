@@ -25,6 +25,10 @@ struct FileGridView: View {
     /// Remonte true quand l'utilisateur défile vers le haut (offset négatif).
     var onScrolledPastTop: ((Bool) -> Void)?
 
+    /// Décalage ajouté en haut du contenu (barre de recherche flottante) pour
+    /// que la première rangée ne soit jamais masquée.
+    var contentTopInset: CGFloat = 0
+
     /// Pull-to-refresh (désactivé sur l'Accueil, remplacé par la barre de recherche).
     var allowsPullToRefresh = true
 
@@ -41,8 +45,14 @@ struct FileGridView: View {
 
     var body: some View {
         scrollContent
-            .onScrollGeometryChange(for: Bool.self, of: { $0.contentOffset.y < 0 }) { _, scrolledUp in
-                onScrolledPastTop?(scrolledUp)
+            .onScrollGeometryChange(for: CGFloat.self, of: { $0.contentOffset.y }) { oldY, newY in
+                // Transition réelle (offset ≥ 0 → < 0) : la barre n'apparaît
+                // que lors d'un geste vers le haut, jamais au lancement.
+                if newY >= 0 {
+                    onScrolledPastTop?(false)
+                } else if oldY >= 0 && newY < 0 {
+                    onScrolledPastTop?(true)
+                }
             }
             .background(Color(uiColor: .systemGroupedBackground))
             .task {
@@ -79,7 +89,7 @@ struct FileGridView: View {
                 content
             }
             .padding(.horizontal, DS.gridMargin)
-            .padding(.top, 6)
+            .padding(.top, 6 + contentTopInset)
             .padding(.bottom, 110) // barre flottante
         }
     }
@@ -225,6 +235,7 @@ struct FileGridView: View {
             driveId: viewModel.driveId,
             enabled: selectionMode || !file.isDirectory || onOpenDirectory != nil,
             selectionMode: selectionMode,
+            isTrashed: viewModel.source == .trash,
             isSelected: selectedIDs.contains(file.id),
             onToggleSelection: onToggleSelection == nil ? nil : { onToggleSelection?(file) },
             onToggleFavorite: {
@@ -259,9 +270,11 @@ struct FileGridView: View {
         let ahead = siblings.dropFirst(index).prefix(7)
         let thumbnailIds = ahead.dropFirst().map(\.id)
         if !thumbnailIds.isEmpty {
-            Task { await ThumbnailProvider.shared.prefetch(driveId: viewModel.driveId, fileIds: Array(thumbnailIds)) }
+            Task { await ThumbnailProvider.shared.prefetch(driveId: viewModel.driveId, fileIds: Array(thumbnailIds), isTrashed: viewModel.source == .trash) }
         }
         // URLs temporaires des vidéos à venir : lecture quasi immédiate au tap.
+        // Inutile pour la corbeille (les fichiers y sont inaccessibles).
+        guard viewModel.source != .trash else { return }
         let videoIds = ahead.filter { $0.isVideo }.map(\.id)
         if !videoIds.isEmpty {
             Task { await MediaURLCache.shared.prefetch(driveId: viewModel.driveId, fileIds: videoIds) }

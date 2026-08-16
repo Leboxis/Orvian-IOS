@@ -12,6 +12,9 @@ enum DS {
     static let gridMargin: CGFloat = 14
     /// Taille de miniature demandée à l'API (bucket arrondi, max 400).
     static let thumbnailPixels: Int = 360
+    /// Hauteur réservée sous la barre de recherche flottante : le contenu de
+    /// la grille est décalé de cette valeur quand la barre est visible.
+    static let searchBarInset: CGFloat = 52
 }
 
 /// Titre de section discrêt au-dessus des groupes de fichiers.

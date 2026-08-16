@@ -3,6 +3,7 @@ import SwiftUI
 /// Onglet « Profil » : compte Infomaniak, drive utilisé, déconnexion.
 struct ProfileView: View {
     let session: SessionStore
+    let router: ViewerRouter
 
     @State private var accountName: String?
     @State private var showSignOutConfirm = false
@@ -94,7 +95,7 @@ struct ProfileView: View {
         Section {
             if let drive = session.selectedDrive {
                 NavigationLink {
-                    TrashView(driveId: drive.id)
+                    TrashView(driveId: drive.id, router: router)
                 } label: {
                     Label("Corbeille", systemImage: "trash")
                 }

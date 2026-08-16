@@ -133,6 +133,30 @@ final class FileGridViewModel {
         }
     }
 
+    /// Restaure un fichier de la corbeille vers son dossier d'origine ; si ce
+    /// dossier n'existe plus, retente vers la racine du drive (id 1).
+    func restore(_ file: DriveFile) async -> Bool {
+        let destination = file.parentId ?? 1
+        do {
+            try await service.restore(driveId: driveId, fileId: file.id, destinationDirectoryId: destination)
+            items.removeAll { $0.id == file.id }
+            return true
+        } catch {
+            guard destination != 1 else {
+                errorMessage = "Restauration impossible : \((error as? APIError)?.errorDescription ?? error.localizedDescription)"
+                return false
+            }
+            do {
+                try await service.restore(driveId: driveId, fileId: file.id, destinationDirectoryId: 1)
+                items.removeAll { $0.id == file.id }
+                return true
+            } catch {
+                errorMessage = "Restauration impossible : \((error as? APIError)?.errorDescription ?? error.localizedDescription)"
+                return false
+            }
+        }
+    }
+
     // MARK: - Groupes (Actualité par jour, Média par mois)
 
     struct Group: Identifiable {

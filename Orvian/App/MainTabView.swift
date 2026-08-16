@@ -49,7 +49,7 @@ struct MainTabView: View {
                 FavoritesView(driveId: drive.id, router: router)
             }
             tabPane(.profile) {
-                ProfileView(session: session)
+                ProfileView(session: session, router: router)
             }
         }
     }

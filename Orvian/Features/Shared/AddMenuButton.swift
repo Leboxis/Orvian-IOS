@@ -2,7 +2,7 @@ import SwiftUI
 import PhotosUI
 import UniformTypeIdentifiers
 
-/// Bouton « + » d'un dossier : créer un dossier, importer un fichier
+/// Bouton « + » d'un dossier : créer un dossier, importer des fichiers
 /// ou importer des photos/vidéos (upload kDrive).
 struct AddMenuButton: View {
     let directoryId: Int
@@ -14,7 +14,7 @@ struct AddMenuButton: View {
 
     @State private var showFolderAlert = false
     @State private var folderName = ""
-    @State private var showFileImporter = false
+    @State private var showDocumentPicker = false
     @State private var showPhotosPicker = false
     @State private var photoItems: [PhotosPickerItem] = []
 
@@ -28,9 +28,9 @@ struct AddMenuButton: View {
                 Label("Créer un dossier", systemImage: "folder.badge.plus")
             }
             Button {
-                showFileImporter = true
+                showDocumentPicker = true
             } label: {
-                Label("Importer un fichier", systemImage: "doc.badge.plus")
+                Label("Importer des fichiers", systemImage: "doc.badge.plus")
             }
             Button {
                 showPhotosPicker = true
@@ -51,10 +51,11 @@ struct AddMenuButton: View {
             Button("Créer") { Task { await createFolder() } }
             Button("Annuler", role: .cancel) {}
         }
-        .fileImporter(isPresented: $showFileImporter, allowedContentTypes: [.item]) { result in
-            if case let .success(url) = result {
-                Task { await importFile(url: url) }
+        .sheet(isPresented: $showDocumentPicker) {
+            DocumentPicker { urls in
+                Task { await importFiles(urls) }
             }
+            .ignoresSafeArea()
         }
         .photosPicker(
             isPresented: $showPhotosPicker,
@@ -85,21 +86,25 @@ struct AddMenuButton: View {
         onDone()
     }
 
-    private func importFile(url: URL) async {
+    /// Import d'un ou plusieurs fichiers choisis dans le document picker
+    /// (copiés dans la sandbox : pas de resource scoped à libérer).
+    private func importFiles(_ urls: [URL]) async {
         isBusy = true
-        busyMessage = "Import en cours…"
-        let scoped = url.startAccessingSecurityScopedResource()
-        defer {
-            if scoped { url.stopAccessingSecurityScopedResource() }
-        }
-        do {
-            // Lecture hors du MainActor : un gros fichier ne fige pas l'UI.
-            let data = try await Task.detached { try Data(contentsOf: url) }.value
-            try await upload(data: data, fileName: url.lastPathComponent)
-        } catch {
-            errorMessage = "Import impossible : \(message(for: error))"
+        var failures = 0
+        for (index, url) in urls.enumerated() {
+            busyMessage = "Import \(index + 1)/\(urls.count)…"
+            do {
+                // Lecture hors du MainActor : un gros fichier ne fige pas l'UI.
+                let data = try await Task.detached { try Data(contentsOf: url) }.value
+                try await upload(data: data, fileName: url.lastPathComponent)
+            } catch {
+                failures += 1
+            }
         }
         isBusy = false
+        if failures > 0 {
+            errorMessage = "\(failures) élément(s) n'ont pas pu être importés."
+        }
         onDone()
     }
 

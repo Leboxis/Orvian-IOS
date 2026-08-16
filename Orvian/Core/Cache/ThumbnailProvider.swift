@@ -30,7 +30,8 @@ actor ThumbnailProvider {
     }
 
     /// Miniature pour une carte ; nil si le fichier n'en a pas ou si annulé.
-    func thumbnail(driveId: Int, fileId: Int, pixels: Int = DS.thumbnailPixels) async -> UIImage? {
+    /// `isTrashed` : les fichiers de la corbeille utilisent l'endpoint dédié.
+    func thumbnail(driveId: Int, fileId: Int, pixels: Int = DS.thumbnailPixels, isTrashed: Bool = false) async -> UIImage? {
         let key = Key(driveId: driveId, fileId: fileId, pixels: pixels)
 
         if let cached = memory.object(forKey: key.nsString) {
@@ -50,7 +51,7 @@ actor ThumbnailProvider {
 
         let task = Task<UIImage?, Never> { [self] in
             defer { inFlight[key] = nil }
-            return await fetch(key: key)
+            return await fetch(key: key, isTrashed: isTrashed)
         }
         inFlight[key] = task
         let image = await task.value
@@ -61,7 +62,7 @@ actor ThumbnailProvider {
     }
 
     /// Préchargement discret (cartes suivantes, vidéos à venir).
-    func prefetch(driveId: Int, fileIds: [Int], pixels: Int = DS.thumbnailPixels) {
+    func prefetch(driveId: Int, fileIds: [Int], pixels: Int = DS.thumbnailPixels, isTrashed: Bool = false) {
         for fileId in fileIds {
             let key = Key(driveId: driveId, fileId: fileId, pixels: pixels)
             guard inFlight[key] == nil,
@@ -70,16 +71,16 @@ actor ThumbnailProvider {
             else { continue }
             let task = Task<UIImage?, Never> { [self] in
                 defer { inFlight[key] = nil }
-                return await fetch(key: key)
+                return await fetch(key: key, isTrashed: isTrashed)
             }
             inFlight[key] = task
         }
     }
 
-    private func fetch(key: Key) async -> UIImage? {
+    private func fetch(key: Key, isTrashed: Bool) async -> UIImage? {
         guard !Task.isCancelled else { return nil }
         do {
-            let data = try await service.thumbnailData(driveId: key.driveId, fileId: key.fileId, pixels: key.pixels)
+            let data = try await service.thumbnailData(driveId: key.driveId, fileId: key.fileId, pixels: key.pixels, isTrashed: isTrashed)
             guard !data.isEmpty, let image = UIImage.decode(data) else {
                 disk.storeMarker(driveId: key.driveId, fileId: key.fileId, pixels: key.pixels)
                 return nil

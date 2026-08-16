@@ -1,17 +1,22 @@
 import SwiftUI
 
-/// Corbeille du drive : consultation, sélection (un par un ou tout d'un
-/// coup) et suppression définitive.
+/// Corbeille du drive : consultation (miniatures et restauration),
+/// sélection (un par un ou tout d'un coup) et suppression définitive.
 struct TrashView: View {
     let driveId: Int
+    let router: ViewerRouter
 
     @State private var viewModel: FileGridViewModel
     @State private var selectionMode = false
     @State private var selectedIDs: Set<Int> = []
     @State private var showDeleteConfirm = false
+    /// Fichier tapé hors mode sélection : restauration ou suppression définitive.
+    @State private var tappedFile: DriveFile?
+    @State private var showFileActions = false
 
-    init(driveId: Int) {
+    init(driveId: Int, router: ViewerRouter) {
         self.driveId = driveId
+        self.router = router
         _viewModel = State(initialValue: FileGridViewModel(source: .trash, driveId: driveId))
     }
 
@@ -19,8 +24,8 @@ struct TrashView: View {
         FileGridView(
             viewModel: viewModel,
             grouping: nil,
-            onOpenDirectory: nil,
-            onOpenFile: nil,
+            onOpenDirectory: { tap($0) },
+            onOpenFile: { file, _ in tap(file) },
             onInitialLoad: nil,
             searchText: "",
             filters: .init(),
@@ -40,11 +45,6 @@ struct TrashView: View {
                         selectedIDs = []
                     }
                 }
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button(allSelected ? "Tout désélectionner" : "Tout sélectionner") {
-                        toggleAll()
-                    }
-                }
             } else {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button {
@@ -56,8 +56,8 @@ struct TrashView: View {
             }
         }
         .safeAreaInset(edge: .bottom) {
-            if selectionMode && !selectedIDs.isEmpty {
-                deleteBar
+            if selectionMode && !viewModel.items.isEmpty {
+                selectionBar
             }
         }
         .confirmationDialog("Supprimer définitivement ?", isPresented: $showDeleteConfirm, titleVisibility: .visible) {
@@ -67,6 +67,23 @@ struct TrashView: View {
             Button("Annuler", role: .cancel) {}
         } message: {
             Text("Cette action est irréversible : les fichiers sélectionnés seront définitivement effacés du drive.")
+        }
+        .confirmationDialog(
+            "« \(tappedFile?.name ?? "") » est dans la corbeille",
+            isPresented: $showFileActions,
+            titleVisibility: .visible
+        ) {
+            if let file = tappedFile {
+                Button(file.isImage || file.isVideo ? "Restaurer et ouvrir" : "Restaurer") {
+                    Task { await restoreAndOpen(file) }
+                }
+                Button("Supprimer définitivement", role: .destructive) {
+                    Task { await viewModel.permanentlyDelete(file) }
+                }
+            }
+            Button("Annuler", role: .cancel) {}
+        } message: {
+            Text("La restauration remet le fichier à son emplacement d'origine (ou à la racine du drive).")
         }
     }
 
@@ -91,25 +108,58 @@ struct TrashView: View {
         }
     }
 
-    /// Barre d'action collée en bas quand une sélection existe.
-    private var deleteBar: some View {
-        Button(role: .destructive) {
-            showDeleteConfirm = true
-        } label: {
-            Label("Supprimer définitivement", systemImage: "trash.slash")
-                .font(.footnote.weight(.semibold))
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 12)
-                .background(.ultraThinMaterial, in: Capsule())
+    private func tap(_ file: DriveFile) {
+        tappedFile = file
+        showFileActions = true
+    }
+
+    /// Restaure le fichier puis l'ouvre dans la visionneuse si c'est une
+    /// image ou une vidéo (seul moyen de les consulter depuis la corbeille).
+    private func restoreAndOpen(_ file: DriveFile) async {
+        let restored = await viewModel.restore(file)
+        if restored, file.isImage || file.isVideo {
+            router.open(file, siblings: [file])
         }
-        .buttonStyle(.plain)
-        .padding(.horizontal, 16)
-        .padding(.bottom, 8)
     }
 
     private func deleteSelected() async {
         await viewModel.permanentlyDelete(ids: selectedIDs)
         selectedIDs = []
         selectionMode = false
+    }
+
+    /// Barre d'action collée en bas pendant la sélection : sélectionner tout
+    /// d'un coup + suppression définitive. La barre de navigation ne garde
+    /// qu'« Annuler » pour que le titre reste lisible.
+    private var selectionBar: some View {
+        HStack(spacing: 10) {
+            Button {
+                toggleAll()
+            } label: {
+                Label(
+                    allSelected ? "Tout désélectionner" : "Tout sélectionner",
+                    systemImage: allSelected ? "checkmark.circle.fill" : "checkmark.circle"
+                )
+                .font(.footnote.weight(.semibold))
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 12)
+                .background(.ultraThinMaterial, in: Capsule())
+            }
+            .buttonStyle(.plain)
+            if !selectedIDs.isEmpty {
+                Button(role: .destructive) {
+                    showDeleteConfirm = true
+                } label: {
+                    Label("Supprimer (\(selectedIDs.count))", systemImage: "trash")
+                        .font(.footnote.weight(.semibold))
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 12)
+                        .background(.ultraThinMaterial, in: Capsule())
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(.horizontal, 16)
+        .padding(.bottom, 8)
     }
 }

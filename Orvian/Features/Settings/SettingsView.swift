@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// Onglet « Réglages » : drive, stockage local, fonctions à venir.
+/// Onglet « Réglages » : drive et stockage local.
 struct SettingsView: View {
     let session: SessionStore
 
@@ -12,7 +12,6 @@ struct SettingsView: View {
             List {
                 driveSection
                 cacheSection
-                upcomingSection
             }
             .navigationTitle("Réglages")
             .navigationBarTitleDisplayMode(.large)
@@ -75,29 +74,6 @@ struct SettingsView: View {
             Text("Stockage local")
         } footer: {
             Text("Les miniatures sont re-téléchargées à la demande après la purge.")
-        }
-    }
-
-    private var upcomingSection: some View {
-        Section {
-            upcomingRow("Recherche", symbol: "magnifyingglass")
-            upcomingRow("Corbeille", symbol: "trash")
-            upcomingRow("Upload", symbol: "square.and.arrow.up")
-            upcomingRow("Liens de partage", symbol: "link")
-            upcomingRow("Actions sur fichiers", symbol: "ellipsis.circle")
-        } header: {
-            Text("Bientôt disponible")
-        }
-    }
-
-    private func upcomingRow(_ title: String, symbol: String) -> some View {
-        HStack {
-            Label(title, systemImage: symbol)
-                .foregroundStyle(.primary)
-            Spacer()
-            Text("à venir")
-                .font(.caption)
-                .foregroundStyle(.tertiary)
         }
     }
 }

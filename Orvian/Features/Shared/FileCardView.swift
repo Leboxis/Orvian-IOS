@@ -9,6 +9,9 @@ struct FileCardView: View {
     var enabled = true
     /// Mode sélection (corbeille) : le tap coche au lieu d'ouvrir.
     var selectionMode = false
+    /// Fichier corbeillé : les miniatures passent par l'endpoint trash et
+    /// les actions favori/renommer/supprimer sont masquées.
+    var isTrashed = false
     /// État de la coche en mode sélection.
     var isSelected = false
     var onToggleSelection: (() -> Void)?
@@ -79,27 +82,29 @@ struct FileCardView: View {
                 } label: {
                     Label("Détails", systemImage: "info.circle")
                 }
-                Button {
-                    onToggleFavorite?()
-                } label: {
-                    Label(
-                        file.isFavorite == true ? "Retirer des favoris" : "Ajouter aux favoris",
-                        systemImage: file.isFavorite == true ? "star.slash" : "star"
-                    )
-                }
-                if onRename != nil {
+                if !isTrashed {
                     Button {
-                        renameText = file.name
-                        showRenameAlert = true
+                        onToggleFavorite?()
                     } label: {
-                        Label("Renommer", systemImage: "pencil")
+                        Label(
+                            file.isFavorite == true ? "Retirer des favoris" : "Ajouter aux favoris",
+                            systemImage: file.isFavorite == true ? "star.slash" : "star"
+                        )
                     }
-                }
-                if onDelete != nil {
-                    Button(role: .destructive) {
-                        showDeleteConfirm = true
-                    } label: {
-                        Label("Supprimer", systemImage: "trash")
+                    if onRename != nil {
+                        Button {
+                            renameText = file.name
+                            showRenameAlert = true
+                        } label: {
+                            Label("Renommer", systemImage: "pencil")
+                        }
+                    }
+                    if onDelete != nil {
+                        Button(role: .destructive) {
+                            showDeleteConfirm = true
+                        } label: {
+                            Label("Supprimer", systemImage: "trash")
+                        }
                     }
                 }
             }
@@ -108,6 +113,7 @@ struct FileCardView: View {
             FileDetailSheet(
                 file: file,
                 driveId: driveId,
+                isTrashed: isTrashed,
                 onOpen: action,
                 onToggleFavorite: onToggleFavorite,
                 onDelete: onDelete,
@@ -260,7 +266,7 @@ struct FileCardView: View {
             thumbnailLoaded = true
             return
         }
-        if let image = await ThumbnailProvider.shared.thumbnail(driveId: driveId, fileId: file.id) {
+        if let image = await ThumbnailProvider.shared.thumbnail(driveId: driveId, fileId: file.id, isTrashed: isTrashed) {
             guard !Task.isCancelled else { return }
             withAnimation(.easeOut(duration: 0.18)) {
                 thumbnail = image
@@ -279,6 +285,9 @@ struct FileCardView: View {
 struct FileDetailSheet: View {
     let file: DriveFile
     let driveId: Int
+    /// Fichier corbeillé : la fiche reste consultable mais sans les actions
+    /// favori/tags et la miniature passe par l'endpoint trash.
+    var isTrashed = false
     let onOpen: () -> Void
     let onToggleFavorite: (() -> Void)?
     let onDelete: (() -> Void)?
@@ -296,6 +305,7 @@ struct FileDetailSheet: View {
     init(
         file: DriveFile,
         driveId: Int,
+        isTrashed: Bool = false,
         onOpen: @escaping () -> Void,
         onToggleFavorite: (() -> Void)?,
         onDelete: (() -> Void)?,
@@ -303,6 +313,7 @@ struct FileDetailSheet: View {
     ) {
         self.file = file
         self.driveId = driveId
+        self.isTrashed = isTrashed
         self.onOpen = onOpen
         self.onToggleFavorite = onToggleFavorite
         self.onDelete = onDelete
@@ -369,7 +380,7 @@ struct FileDetailSheet: View {
             }
             labeledRow("Ajouté", dateText(file.addedAt))
             labeledRow("Modifié", dateText(file.lastModifiedAt))
-            if !file.isDirectory {
+            if !file.isDirectory, !isTrashed {
                 favoriteRow
             }
         }
@@ -391,7 +402,10 @@ struct FileDetailSheet: View {
 
     private var tagsSection: some View {
         Section("Tags") {
-            if categories.isEmpty {
+            if isTrashed {
+                Text("Restaurer le fichier pour modifier ses tags.")
+                    .foregroundStyle(.secondary)
+            } else if categories.isEmpty {
                 Text("Aucun tag disponible")
                     .foregroundStyle(.secondary)
             } else {
@@ -434,7 +448,7 @@ struct FileDetailSheet: View {
 
     private var ellipsisMenu: some View {
         Menu {
-            if let onToggleFavorite {
+            if !isTrashed, let onToggleFavorite {
                 Button {
                     onToggleFavorite()
                 } label: {
@@ -444,7 +458,7 @@ struct FileDetailSheet: View {
                     )
                 }
             }
-            if let onRename {
+            if !isTrashed, let onRename {
                 Button {
                     renameText = file.name
                     showRenameAlert = true
@@ -452,7 +466,7 @@ struct FileDetailSheet: View {
                     Label("Renommer", systemImage: "pencil")
                 }
             }
-            if let onDelete {
+            if !isTrashed, let onDelete {
                 Button(role: .destructive) {
                     showDeleteConfirm = true
                 } label: {
@@ -477,7 +491,7 @@ struct FileDetailSheet: View {
             .clipShape(shape)
             .overlay { shape.strokeBorder(.black.opacity(0.05), lineWidth: 0.5) }
         } else {
-            AsyncThumbnail(driveId: driveId, fileId: file.id, shape: shape)
+            AsyncThumbnail(driveId: driveId, fileId: file.id, isTrashed: isTrashed, shape: shape)
         }
     }
 
@@ -513,6 +527,7 @@ struct FileDetailSheet: View {
         do {
             if isApplying {
                 try await service.addCategory(driveId: driveId, fileId: file.id, categoryId: category.id)
+                TagUsageStore.markUsed(driveId: driveId, categoryId: category.id)
             } else {
                 try await service.removeCategory(driveId: driveId, fileId: file.id, categoryId: category.id)
             }
@@ -530,6 +545,7 @@ struct FileDetailSheet: View {
 private struct AsyncThumbnail<S: InsettableShape>: View {
     let driveId: Int
     let fileId: Int
+    var isTrashed = false
     let shape: S
 
     @State private var image: UIImage?
@@ -547,7 +563,7 @@ private struct AsyncThumbnail<S: InsettableShape>: View {
         .clipShape(shape)
         .overlay { shape.strokeBorder(.black.opacity(0.05), lineWidth: 0.5) }
         .task {
-            image = await ThumbnailProvider.shared.thumbnail(driveId: driveId, fileId: fileId, pixels: 200)
+            image = await ThumbnailProvider.shared.thumbnail(driveId: driveId, fileId: fileId, pixels: 200, isTrashed: isTrashed)
         }
     }
 }

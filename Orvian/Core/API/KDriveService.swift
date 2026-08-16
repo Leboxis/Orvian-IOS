@@ -67,6 +67,17 @@ struct KDriveService {
         try await api.get(DataResponse<[Category]>.self, .categories(driveId: driveId)).data ?? []
     }
 
+    private struct CreateCategoryRequest: Encodable {
+        let name: String
+        let color: String
+    }
+
+    /// Crée une catégorie (tag) avec sa couleur `#rrggbb`.
+    func createCategory(driveId: Int, name: String, color: String) async throws {
+        let body = try JSONEncoder().encode(CreateCategoryRequest(name: name, color: color))
+        try await api.post(.categories(driveId: driveId), body: body, contentType: "application/json")
+    }
+
     /// Applique une catégorie (tag) sur un fichier.
     func addCategory(driveId: Int, fileId: Int, categoryId: Int) async throws {
         try await api.sendEmpty(.fileCategory(driveId: driveId, fileId: fileId, categoryId: categoryId), method: "POST")
@@ -93,8 +104,11 @@ struct KDriveService {
         return url
     }
 
-    func thumbnailData(driveId: Int, fileId: Int, pixels: Int) async throws -> Data {
-        try await api.data(.thumbnail(driveId: driveId, fileId: fileId, pixels: pixels))
+    func thumbnailData(driveId: Int, fileId: Int, pixels: Int, isTrashed: Bool = false) async throws -> Data {
+        let endpoint = isTrashed
+            ? .trashedThumbnail(driveId: driveId, fileId: fileId, pixels: pixels)
+            : .thumbnail(driveId: driveId, fileId: fileId, pixels: pixels)
+        return try await api.data(endpoint)
     }
 
     // MARK: - Création & upload
@@ -128,6 +142,14 @@ struct KDriveService {
     /// Supprime définitivement un fichier ou dossier de la corbeille.
     func permanentlyDelete(driveId: Int, fileId: Int) async throws {
         try await api.sendEmpty(.permanentDelete(driveId: driveId, fileId: fileId), method: "DELETE")
+    }
+
+    /// Restaure un fichier ou dossier depuis la corbeille.
+    /// `destinationDirectoryId` : dossier de destination (dossier d'origine
+    /// ou racine du drive).
+    func restore(driveId: Int, fileId: Int, destinationDirectoryId: Int) async throws {
+        let body = try JSONEncoder().encode(["destination_directory_id": destinationDirectoryId])
+        try await api.post(.restore(driveId: driveId, fileId: fileId), body: body, contentType: "application/json")
     }
 
     /// Renomme un fichier ou dossier.

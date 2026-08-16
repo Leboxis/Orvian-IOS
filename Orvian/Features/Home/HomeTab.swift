@@ -131,8 +131,10 @@ struct DirectoryView: View {
             searchText: searchText,
             filters: filters,
             onScrolledPastTop: showsSearchBar ? { scrolledPastTop = $0 } : nil,
+            contentTopInset: searchBarVisible ? DS.searchBarInset : 0,
             allowsPullToRefresh: !showsSearchBar
         )
+        .animation(.snappy(duration: 0.25), value: searchBarVisible)
         .navigationTitle(crumbs.isEmpty ? directory.name : crumbs.last ?? directory.name)
         .navigationBarTitleDisplayMode(.inline)
         .overlay(alignment: .top) {

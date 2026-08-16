@@ -87,7 +87,7 @@ extension Endpoint {
         )
     }
 
-    /// Catégories du drive.
+    /// Catégories du drive : GET pour lister, POST pour en créer une.
     static func categories(driveId: Int) -> Endpoint {
         Endpoint(path: "/2/drive/\(driveId)/categories")
     }
@@ -101,6 +101,23 @@ extension Endpoint {
                 URLQueryItem(name: "height", value: String(pixels)),
             ]
         )
+    }
+
+    /// Miniature d'un fichier corbeillé (même format que `.thumbnail`).
+    static func trashedThumbnail(driveId: Int, fileId: Int, pixels: Int) -> Endpoint {
+        Endpoint(
+            path: "/2/drive/\(driveId)/trash/\(fileId)/thumbnail",
+            query: [
+                URLQueryItem(name: "width", value: String(pixels)),
+                URLQueryItem(name: "height", value: String(pixels)),
+            ]
+        )
+    }
+
+    /// Restaurer un fichier depuis la corbeille : POST JSON
+    /// `{"destination_directory_id": …}` (v2).
+    static func restore(driveId: Int, fileId: Int) -> Endpoint {
+        Endpoint(path: "/2/drive/\(driveId)/trash/\(fileId)/restore")
     }
 
     /// URL temporaire publique (streaming AVPlayer / image haute résolution).
