@@ -278,72 +278,10 @@ struct FileDetailSheet: View {
     var body: some View {
         NavigationStack {
             List {
-                Section {
-                    HStack {
-                        Spacer()
-                        thumbnailPreview
-                            .frame(width: 80, height: 80)
-                        Spacer()
-                    }
-                    .listRowBackground(Color.clear)
-                }
-
-                Section("Informations") {
-                    labeledRow("Type", file.isDirectory ? "Dossier" : file.fileKind.label)
-                    if let size = file.size, !file.isDirectory {
-                        labeledRow("Taille", ByteFormatter.string(fromBytes: size))
-                    }
-                    labeledRow("Ajouté", dateText(file.addedAt))
-                    labeledRow("Modifié", dateText(file.lastModifiedAt))
-                    if !file.isDirectory {
-                        Button {
-                            onToggleFavorite?()
-                        } label: {
-                            HStack {
-                                Text("Favori")
-                                    .foregroundStyle(.primary)
-                                Spacer()
-                                Image(systemName: file.isFavorite == true ? "star.fill" : "star")
-                                    .foregroundStyle(file.isFavorite == true ? .yellow : .secondary)
-                            }
-                        }
-                    }
-                }
-
-                Section("Tags") {
-                    if categories.isEmpty {
-                        Text("Aucun tag disponible")
-                            .foregroundStyle(.secondary)
-                    } else {
-                        ForEach(categories) { category in
-                            Button {
-                                Task { await toggleCategory(category) }
-                            } label: {
-                                HStack {
-                                    Circle()
-                                        .fill(Color(hex: category.color) ?? .gray)
-                                        .frame(width: 10, height: 10)
-                                    Text(category.name)
-                                        .foregroundStyle(.primary)
-                                    Spacer()
-                                    if appliedCategoryIds.contains(category.id) {
-                                        Image(systemName: "checkmark")
-                                            .foregroundStyle(.accent)
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-
-                Section {
-                    Button {
-                        dismiss()
-                        onOpen()
-                    } label: {
-                        Label(file.isDirectory ? "Ouvrir le dossier" : "Ouvrir", systemImage: file.isDirectory ? "folder" : "play.fill")
-                    }
-                }
+                previewSection
+                infoSection
+                tagsSection
+                openSection
             }
             .navigationTitle(file.name)
             .navigationBarTitleDisplayMode(.inline)
@@ -352,35 +290,7 @@ struct FileDetailSheet: View {
                     Button("Fermer") { dismiss() }
                 }
                 ToolbarItem(placement: .topBarTrailing) {
-                    Menu {
-                        if let onToggleFavorite {
-                            Button {
-                                onToggleFavorite()
-                            } label: {
-                                Label(
-                                    file.isFavorite == true ? "Retirer des favoris" : "Ajouter aux favoris",
-                                    systemImage: file.isFavorite == true ? "star.slash" : "star"
-                                )
-                            }
-                        }
-                        if let onRename {
-                            Button {
-                                renameText = file.name
-                                showRenameAlert = true
-                            } label: {
-                                Label("Renommer", systemImage: "pencil")
-                            }
-                        }
-                        if let onDelete {
-                            Button(role: .destructive) {
-                                showDeleteConfirm = true
-                            } label: {
-                                Label("Supprimer", systemImage: "trash")
-                            }
-                        }
-                    } label: {
-                        Image(systemName: "ellipsis.circle")
-                    }
+                    ellipsisMenu
                 }
             }
             .alert("Supprimer", isPresented: $showDeleteConfirm) {
@@ -401,6 +311,121 @@ struct FileDetailSheet: View {
                 Text("Ancien nom : \(file.name)")
             }
             .task { await loadCategories() }
+        }
+    }
+
+    private var previewSection: some View {
+        Section {
+            HStack {
+                Spacer()
+                thumbnailPreview
+                    .frame(width: 80, height: 80)
+                Spacer()
+            }
+            .listRowBackground(Color.clear)
+        }
+    }
+
+    private var infoSection: some View {
+        Section("Informations") {
+            labeledRow("Type", file.isDirectory ? "Dossier" : file.fileKind.label)
+            if let size = file.size, !file.isDirectory {
+                labeledRow("Taille", ByteFormatter.string(fromBytes: size))
+            }
+            labeledRow("Ajouté", dateText(file.addedAt))
+            labeledRow("Modifié", dateText(file.lastModifiedAt))
+            if !file.isDirectory {
+                favoriteRow
+            }
+        }
+    }
+
+    private var favoriteRow: some View {
+        Button {
+            onToggleFavorite?()
+        } label: {
+            HStack {
+                Text("Favori")
+                    .foregroundStyle(.primary)
+                Spacer()
+                Image(systemName: file.isFavorite == true ? "star.fill" : "star")
+                    .foregroundStyle(file.isFavorite == true ? .yellow : .secondary)
+            }
+        }
+    }
+
+    private var tagsSection: some View {
+        Section("Tags") {
+            if categories.isEmpty {
+                Text("Aucun tag disponible")
+                    .foregroundStyle(.secondary)
+            } else {
+                ForEach(categories) { category in
+                    categoryRow(category)
+                }
+            }
+        }
+    }
+
+    private func categoryRow(_ category: Category) -> some View {
+        Button {
+            Task { await toggleCategory(category) }
+        } label: {
+            HStack {
+                Circle()
+                    .fill(Color(hex: category.color) ?? .gray)
+                    .frame(width: 10, height: 10)
+                Text(category.name)
+                    .foregroundStyle(.primary)
+                Spacer()
+                if appliedCategoryIds.contains(category.id) {
+                    Image(systemName: "checkmark")
+                        .foregroundStyle(.accent)
+                }
+            }
+        }
+    }
+
+    private var openSection: some View {
+        Section {
+            Button {
+                dismiss()
+                onOpen()
+            } label: {
+                Label(file.isDirectory ? "Ouvrir le dossier" : "Ouvrir", systemImage: file.isDirectory ? "folder" : "play.fill")
+            }
+        }
+    }
+
+    private var ellipsisMenu: some View {
+        Menu {
+            if let onToggleFavorite {
+                Button {
+                    onToggleFavorite()
+                } label: {
+                    Label(
+                        file.isFavorite == true ? "Retirer des favoris" : "Ajouter aux favoris",
+                        systemImage: file.isFavorite == true ? "star.slash" : "star"
+                    )
+                }
+            }
+            if let onRename {
+                Button {
+                    renameText = file.name
+                    showRenameAlert = true
+                } label: {
+                    Label("Renommer", systemImage: "pencil")
+                }
+            }
+            if let onDelete {
+                Button(role: .destructive) {
+                    showDeleteConfirm = true
+                } label: {
+                    Label("Supprimer", systemImage: "trash")
+                }
+            }
+        } label: {
+            Image(systemName: "ellipsis.circle")
         }
     }
 
