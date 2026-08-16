@@ -76,6 +76,27 @@ extension Endpoint {
         )
     }
 
+    /// Recherche récursive de fichiers dans un dossier (ou tout le drive) et ses sous-dossiers.
+    static func search(driveId: Int, query: String, directoryId: Int?, cursor: String?, limit: Int = 60) -> Endpoint {
+        var queryItems: [URLQueryItem] = [
+            URLQueryItem(name: "with", value: "is_favorite,categories"),
+            URLQueryItem(name: "limit", value: String(limit)),
+            URLQueryItem(name: "depth", value: "unlimited"),
+        ]
+        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !trimmed.isEmpty {
+            queryItems.append(URLQueryItem(name: "query", value: trimmed))
+        }
+        if let directoryId {
+            queryItems.append(URLQueryItem(name: "directory_id", value: String(directoryId)))
+        }
+        if let cursor {
+            queryItems.append(URLQueryItem(name: "cursor", value: cursor))
+        }
+        return Endpoint(path: "/3/drive/\(driveId)/files/search", query: queryItems)
+    }
+
+
     /// Contenu de la corbeille (v3, pagination curseur).
     static func trashContent(driveId: Int, cursor: String?, limit: Int = 60) -> Endpoint {
         Endpoint(

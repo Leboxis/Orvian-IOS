@@ -22,7 +22,8 @@ struct HomeTab: View {
             }
             .navigationDestination(for: DriveFile.self) { directory in
                 let index = path.firstIndex(where: { $0.id == directory.id })
-                let crumbs = index.map { Array(path[...$0].map(\.name)) } ?? []
+                let rootName = startDirectory?.name ?? "Accueil"
+                let crumbs = [rootName] + (index.map { Array(path[...$0].map(\.name)) } ?? [directory.name])
                 DirectoryView(
                     directory: directory,
                     driveId: driveId,
@@ -41,7 +42,7 @@ struct HomeTab: View {
         DirectoryView(
             directory: directory,
             driveId: driveId,
-            crumbs: [],
+            crumbs: [startDirectory?.name ?? directory.name],
             router: router,
             showsSearchBar: true,
             onOpenFolder: { folder in
@@ -87,6 +88,7 @@ struct DirectoryView: View {
     let showsSearchBar: Bool
 
     @State private var viewModel: FileGridViewModel
+    @State private var searchViewModel: FileGridViewModel?
     @State private var addBusy = false
     @State private var busyMessage = ""
     @State private var addError: String?
@@ -118,9 +120,20 @@ struct DirectoryView: View {
         _viewModel = State(initialValue: FileGridViewModel(source: .directory(directory.id), driveId: driveId))
     }
 
+    private var isSearching: Bool {
+        !searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    private var activeViewModel: FileGridViewModel {
+        if isSearching, let searchViewModel {
+            return searchViewModel
+        }
+        return viewModel
+    }
+
     var body: some View {
         FileGridView(
-            viewModel: viewModel,
+            viewModel: activeViewModel,
             onOpenDirectory: onOpenFolder,
             onOpenFile: { file, siblings in
                 router.open(file, siblings: siblings)
@@ -131,26 +144,23 @@ struct DirectoryView: View {
             searchText: searchText,
             filters: filters,
             onScrolledPastTop: showsSearchBar ? { scrolledPastTop = $0 } : nil,
-            contentTopInset: searchBarVisible ? DS.searchBarInset : 0,
             allowsPullToRefresh: !showsSearchBar
         )
-        .animation(.snappy(duration: 0.25), value: searchBarVisible)
-        .navigationTitle(crumbs.isEmpty ? directory.name : crumbs.last ?? directory.name)
+        .navigationTitle(crumbs.last ?? directory.name)
         .navigationBarTitleDisplayMode(.inline)
-        .overlay(alignment: .top) {
-            if showsSearchBar {
-                searchBar
-            }
-        }
         .safeAreaInset(edge: .top, spacing: 0) {
-            if !crumbs.isEmpty {
-                VStack(spacing: 0) {
-                    breadcrumb
-                        .frame(maxWidth: .infinity)
-                    Divider().opacity(0.4)
+            VStack(spacing: 6) {
+                breadcrumb
+                    .frame(maxWidth: .infinity)
+
+                if showsSearchBar && searchBarVisible {
+                    searchBar
+                        .transition(.move(edge: .top).combined(with: .opacity))
                 }
-                .background(.bar)
             }
+            .padding(.top, 2)
+            .padding(.bottom, 4)
+            .animation(.snappy(duration: 0.25), value: searchBarVisible)
         }
         .toolbar {
             ToolbarItemGroup(placement: .topBarTrailing) {
@@ -162,7 +172,7 @@ struct DirectoryView: View {
                     isBusy: $addBusy,
                     busyMessage: $busyMessage,
                     errorMessage: $addError,
-                    onDone: { Task { await viewModel.reload() } }
+                    onDone: { Task { await activeViewModel.reload() } }
                 )
             }
         }
@@ -176,20 +186,39 @@ struct DirectoryView: View {
         } message: {
             Text(addError ?? "")
         }
+        .task(id: searchText) {
+            let trimmed = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty else {
+                searchViewModel = nil
+                return
+            }
+            // Debounce de 300 ms pour éviter les requêtes superflues pendant la saisie
+            do {
+                try await Task.sleep(for: .milliseconds(300))
+            } catch {
+                return
+            }
+            let searchVM = FileGridViewModel(
+                source: .search(query: trimmed, directoryId: directory.id),
+                driveId: driveId
+            )
+            searchViewModel = searchVM
+            await searchVM.reload()
+        }
     }
 
-    /// La barre apparaît uniquement en défilant dans le contenu du dossier.
+    /// La barre apparaît lors d'un défilé vers le haut ou lorsque la recherche est active.
     private var searchBarVisible: Bool {
         searchFocused || !searchText.isEmpty || scrolledPastTop
     }
 
-    /// Pastille flottante, détachée du haut, centrée et translucide.
+    /// Pastille de recherche centrée et compacte.
     private var searchBar: some View {
         HStack(spacing: 6) {
             Image(systemName: "magnifyingglass")
                 .font(.system(size: 13, weight: .medium))
                 .foregroundStyle(.secondary)
-            TextField("Rechercher", text: $searchText)
+            TextField("Rechercher dans ce dossier…", text: $searchText)
                 .focused($searchFocused)
                 .autocorrectionDisabled()
                 .submitLabel(.search)
@@ -204,19 +233,13 @@ struct DirectoryView: View {
             }
         }
         .padding(.horizontal, 14)
-        .padding(.vertical, 8)
+        .padding(.vertical, 7)
         .background(.bar, in: Capsule())
         .overlay {
             Capsule().strokeBorder(.quaternary, lineWidth: 0.5)
         }
         .shadow(color: .black.opacity(0.08), radius: 6, x: 0, y: 2)
-        .frame(width: 200)
-        .frame(maxWidth: .infinity)
-        .padding(.top, 10)
-        .offset(y: searchBarVisible ? 0 : -64)
-        .opacity(searchBarVisible ? 1 : 0)
-        .allowsHitTesting(searchBarVisible)
-        .animation(.snappy(duration: 0.25), value: searchBarVisible)
+        .frame(maxWidth: 260)
     }
 
     private var addErrorBinding: Binding<Bool> {
@@ -242,21 +265,33 @@ struct DirectoryView: View {
         .transition(.opacity)
     }
 
-    /// Fil d'Ariane compact sous la barre de navigation.
+    /// Bulle compacte indiquant le chemin et le nombre d'éléments, rapprochée du titre.
     private var breadcrumb: some View {
-        HStack(spacing: 4) {
-            Image(systemName: "folder")
-                .font(.caption2)
+        HStack(spacing: 5) {
+            Image(systemName: "folder.fill")
+                .font(.system(size: 10, weight: .medium))
             Text(crumbs.joined(separator: "  ›  "))
                 .lineLimit(1)
                 .truncationMode(.head)
+
+            Text("•")
+                .font(.system(size: 8))
+                .foregroundStyle(.tertiary)
+
+            let count = activeViewModel.items.count
+            Text("\(count) élément\(count > 1 ? "s" : "")")
+                .lineLimit(1)
         }
-        .font(.caption2)
+        .font(.system(size: 11, weight: .medium))
         .foregroundStyle(.secondary)
-        .padding(.horizontal, 12)
-        .padding(.vertical, 6)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 3.5)
         .background(.ultraThinMaterial, in: Capsule())
-        .padding(.vertical, 4)
-        .accessibilityLabel("Chemin : " + crumbs.joined(separator: ", "))
+        .overlay {
+            Capsule().strokeBorder(.quaternary.opacity(0.5), lineWidth: 0.5)
+        }
+        .shadow(color: .black.opacity(0.04), radius: 2, x: 0, y: 1)
+        .accessibilityLabel("Chemin : " + crumbs.joined(separator: ", ") + ", \(activeViewModel.items.count) éléments")
     }
 }
+

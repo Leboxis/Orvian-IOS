@@ -4,6 +4,7 @@ import SwiftUI
 /// dossiers favoris (les dossiers sont poussés dans la pile comme dans Accueil).
 struct FavoritesView: View {
     @State private var viewModel: FileGridViewModel
+    @State private var filters = FileFilters()
     private let router: ViewerRouter
 
     @State private var path: [DriveFile] = []
@@ -22,10 +23,16 @@ struct FavoritesView: View {
                 },
                 onOpenFile: { file, siblings in
                     router.open(file, siblings: siblings)
-                }
+                },
+                filters: filters
             )
             .navigationTitle("Favoris")
             .navigationBarTitleDisplayMode(.large)
+            .toolbar {
+                ToolbarItemGroup(placement: .topBarTrailing) {
+                    FilterMenu(filters: $filters)
+                }
+            }
             .navigationDestination(for: DriveFile.self) { directory in
                 let index = path.firstIndex(where: { $0.id == directory.id })
                 let crumbs = ["Favoris"] + (index.map { Array(path[...$0].map(\.name)) } ?? [])

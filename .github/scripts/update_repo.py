@@ -12,19 +12,23 @@ import sys
 REPO = "Leboxis/Orvian-IOS"
 ICON = "https://raw.githubusercontent.com/Leboxis/Orvian-IOS/main/Orvian/Assets.xcassets/AppIcon.appiconset/icon-1024.png"
 
-CHANGELOG = """v0.5.0
+CHANGELOG = """v0.7.7
+• Recherche ciblée sur le dossier actuel et ses sous-dossiers
+• Recherche multi-mots combinant l'ensemble des termes dans le nom du fichier
+• Bulle de chemin (breadcrumbs) avec compteur d'éléments toujours visible et rehaussée sous le titre
+• Bouton Trier accessible lors de l'exploration des fichiers d'un tag
+
+v0.7.6
+• Corbeille : miniatures, restauration et ouverture des fichiers, barre de sélection compacte
+• Barre de recherche : apparition fluide au défilement
+• Import de fichiers via document picker UIKit
+• Tri des tags par récence d'utilisation et création avec palette de couleurs
+
+v0.5.0
 • Lecteur vidéo personnalisé : barres hors de la zone de lecture, play/pause, barre de progression, muet, AirPlay, favori, choix d'un tag
 • Étoile dorée sur les cartes des favoris, pastilles colorées des tags à côté du poids
 • Bouton « + » déplacé à droite, import de fichiers hors du thread principal
-• Accueil ouvert automatiquement dans le premier dossier de la racine
-
-v0.4.0
-• Bouton « + » : créer un dossier, importer un fichier, importer photos/vidéos (upload kDrive)
-• Couleurs de dossiers d'origine (API kDrive)
-• Accueil ouvert sur le 2e dossier de la racine
-
-v0.3.0
-• Lecteur vidéo 100 % natif (AVKit) : contrôles système, PiP, AirPlay"""
+• Accueil ouvert automatiquement dans le premier dossier de la racine"""
 
 
 def main() -> int:

@@ -303,6 +303,7 @@ struct CategoryFilesView: View {
     let onOpenFolder: (DriveFile) -> Void
 
     @State private var viewModel: FileGridViewModel
+    @State private var filters = FileFilters()
 
     init(
         category: Category,
@@ -323,10 +324,16 @@ struct CategoryFilesView: View {
             onOpenDirectory: onOpenFolder,
             onOpenFile: { file, siblings in
                 router.open(file, siblings: siblings)
-            }
+            },
+            filters: filters
         )
         .navigationTitle(category.name)
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItemGroup(placement: .topBarTrailing) {
+                FilterMenu(filters: $filters)
+            }
+        }
     }
 }
 

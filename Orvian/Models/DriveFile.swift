@@ -34,6 +34,14 @@ struct DriveFile: Decodable, Identifiable, Hashable {
         FileKind(extensionType: extensionType, mimeType: mimeType, fileName: name, isDirectory: isDirectory)
     }
 
+    /// Vérifie si le nom du fichier contient l'ensemble des mots-clés recherchés.
+    func matchesSearchKeywords(_ keywords: [String]) -> Bool {
+        guard !keywords.isEmpty else { return true }
+        return keywords.allSatisfy { word in
+            name.localizedStandardContains(word)
+        }
+    }
+
     enum CodingKeys: String, CodingKey {
         case id, name, type, size, path
         case mimeType = "mime_type"

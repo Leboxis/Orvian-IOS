@@ -6,6 +6,7 @@ enum FileSource: Hashable {
     case favorites
     case category(Int)
     case trash
+    case search(query: String, directoryId: Int?)
 }
 
 /// Couche Repository : unique point d'accès aux données kDrive.
@@ -57,6 +58,8 @@ struct KDriveService {
             endpoint = .categoryFiles(driveId: driveId, categoryId: categoryId, cursor: cursor)
         case .trash:
             endpoint = .trashContent(driveId: driveId, cursor: cursor)
+        case let .search(query, directoryId):
+            endpoint = .search(driveId: driveId, query: query, directoryId: directoryId, cursor: cursor)
         }
         return try await api.get(CursorPage<DriveFile>.self, endpoint)
     }

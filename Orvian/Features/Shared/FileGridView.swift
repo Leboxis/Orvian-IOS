@@ -2,7 +2,7 @@ import SwiftUI
 
 /// Grille 3 colonnes réutilisable, avec pagination infinie et préchargement.
 struct FileGridView: View {
-    @State var viewModel: FileGridViewModel
+    var viewModel: FileGridViewModel
 
     /// Groupement des sections : composant de calendrier + titre (Actualité → jour, Média → mois). nil → grille plate.
     var grouping: (component: Calendar.Component, title: (Date) -> String)?
@@ -55,7 +55,7 @@ struct FileGridView: View {
                 }
             }
             .background(Color(uiColor: .systemGroupedBackground))
-            .task {
+            .task(id: viewModel.source) {
                 await viewModel.loadIfNeeded()
                 onInitialLoad?(viewModel.items)
             }
@@ -96,8 +96,15 @@ struct FileGridView: View {
 
     // MARK: - Contenu
 
+    private var searchKeywords: [String] {
+        searchText
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .split(whereSeparator: \.isWhitespace)
+            .map(String.init)
+    }
+
     private var isSearching: Bool {
-        !searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        !searchKeywords.isEmpty
     }
 
     /// Éléments après filtres (type, orientation, recherche) et tri.
@@ -119,7 +126,7 @@ struct FileGridView: View {
         }
 
         if isSearching {
-            result = result.filter { $0.name.localizedCaseInsensitiveContains(searchText) }
+            result = result.filter { $0.matchesSearchKeywords(searchKeywords) }
         }
 
         switch filters.sort {
@@ -321,6 +328,7 @@ struct FileGridView: View {
         case .favorites: return "star"
         case .category: return "tag"
         case .trash: return "trash"
+        case .search: return "magnifyingglass"
         }
     }
 
@@ -330,6 +338,7 @@ struct FileGridView: View {
         case .favorites: return "Aucun favori"
         case .category: return "Aucun fichier avec ce tag"
         case .trash: return "Corbeille vide"
+        case .search: return "Aucun résultat"
         }
     }
 }
