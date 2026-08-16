@@ -16,6 +16,9 @@ struct SettingsView: View {
                 cacheSection
                 sessionSection
             }
+            .safeAreaInset(edge: .bottom) {
+                Color.clear.frame(height: 90)
+            }
             .navigationTitle("Réglages")
             .navigationBarTitleDisplayMode(.large)
         }

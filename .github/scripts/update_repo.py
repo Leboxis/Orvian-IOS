@@ -12,7 +12,11 @@ import sys
 REPO = "Leboxis/Orvian-IOS"
 ICON = "https://raw.githubusercontent.com/Leboxis/Orvian-IOS/main/Orvian/Assets.xcassets/AppIcon.appiconset/icon-1024.png"
 
-CHANGELOG = """v0.8.5
+CHANGELOG = """v0.8.6
+• Lecteur vidéo : boutons haut/bas et barre de progression élargis et décalés vers les extrémités
+• Profil & Réglages : ajout d'une marge basse pour faire défiler la section À propos au-dessus de la barre de navigation
+
+v0.8.5
 • Uploads récents : utilisation de l'endpoint kDrive exact /files/last_modified avec cascade de fallbacks
 • Lecteur vidéo : masquage automatique des commandes au bout de 2.5s et réaffichage au clic
 
@@ -24,11 +28,7 @@ v0.8.4
 
 v0.8.3
 • Uploads récents : correction définitive de l'erreur HTTP 404 via la recherche globale récursive et tri chronologique
-• Profil : taille des 3 cartes miniatures strictement harmonisée et carrée pour tous types d'images et vidéos
-
-v0.8.2
-• Profil : suppression de l'adresse email, de la zone Drive et du lien API externe pour une interface épurée
-• Réglages : déplacement de l'action « Changer de token / Se déconnecter » dans l'onglet Réglages"""
+• Profil : taille des 3 cartes miniatures strictement harmonisée et carrée pour tous types d'images et vidéos"""
 
 
 def main() -> int:
