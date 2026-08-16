@@ -58,7 +58,7 @@ struct TagsView: View {
                 ProgressView("Chargement des tags…")
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else if let errorMessage, categories.isEmpty {
-                errorState(message)
+                errorState(errorMessage)
             } else if categories.isEmpty {
                 EmptyStateView(
                     symbol: "tag",
