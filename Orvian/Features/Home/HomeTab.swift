@@ -1,9 +1,8 @@
 import SwiftUI
 
-/// Onglet « Fichiers » : navigation dans l'arborescence.
-struct FilesTab: View {
+/// Onglet « Accueil » : navigation dans l'arborescence du drive.
+struct HomeTab: View {
     let driveId: Int
-    let driveName: String
     let router: ViewerRouter
 
     @State private var path: [DriveFile] = []
@@ -11,7 +10,7 @@ struct FilesTab: View {
     var body: some View {
         NavigationStack(path: $path) {
             DirectoryView(
-                directory: DriveFile.root(name: driveName),
+                directory: DriveFile.root(name: "Accueil"),
                 driveId: driveId,
                 crumbs: [],
                 router: router,
@@ -37,7 +36,7 @@ struct FilesTab: View {
 }
 
 extension DriveFile {
-    /// Racine du drive (id 1), habillée du nom du drive pour l'affichage.
+    /// Racine du drive (id 1).
     static func root(name: String) -> DriveFile {
         DriveFile(
             id: 1,
@@ -56,6 +55,7 @@ extension DriveFile {
 }
 
 /// Contenu d'un dossier, avec breadcrumb compact.
+/// Réutilisé par Accueil, Favoris et Tag (chaque onglet possède sa pile).
 struct DirectoryView: View {
     let directory: DriveFile
     let driveId: Int
@@ -88,7 +88,7 @@ struct DirectoryView: View {
                 router.open(file, siblings: siblings)
             }
         )
-        .navigationTitle(directory.name)
+        .navigationTitle(crumbs.isEmpty ? directory.name : crumbs.last ?? directory.name)
         .navigationBarTitleDisplayMode(.inline)
         .safeAreaInset(edge: .top, spacing: 0) {
             if !crumbs.isEmpty {

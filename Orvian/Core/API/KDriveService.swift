@@ -3,9 +3,8 @@ import Foundation
 /// Source de fichiers pour les grilles paginées.
 enum FileSource: Hashable {
     case directory(Int)
-    case recents
     case favorites
-    case media
+    case category(Int)
 }
 
 /// Couche Repository : unique point d'accès aux données kDrive.
@@ -51,14 +50,18 @@ struct KDriveService {
         switch source {
         case let .directory(directoryId):
             endpoint = .directoryContent(driveId: driveId, directoryId: directoryId, cursor: cursor)
-        case .recents:
-            endpoint = .recents(driveId: driveId, cursor: cursor)
         case .favorites:
             endpoint = .favorites(driveId: driveId, cursor: cursor)
-        case .media:
-            endpoint = .media(driveId: driveId, cursor: cursor)
+        case let .category(categoryId):
+            endpoint = .categoryFiles(driveId: driveId, categoryId: categoryId, cursor: cursor)
         }
         return try await api.get(CursorPage<DriveFile>.self, endpoint)
+    }
+
+    // MARK: - Catégories
+
+    func categories(driveId: Int) async throws -> [Category] {
+        try await api.get(DataResponse<[Category]>.self, .categories(driveId: driveId)).data ?? []
     }
 
     // MARK: - Favoris

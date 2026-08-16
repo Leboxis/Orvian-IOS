@@ -4,15 +4,21 @@ Client iOS natif non officiel pour **kDrive** (Infomaniak), en Swift + SwiftUI.
 Pensé pour une expérience « Apple Photos » : grilles de miniatures fluides,
 visionneuse photos avec zoom, lecteur vidéo AVPlayer quasi instantané.
 
-## Fonctionnalités (jalon 1)
+## Fonctionnalités (jalon 2 — v0.2.0)
 
-- **5 onglets** avec barre flottante translucide : Actualité · Fichiers · Favoris · Média · Plus
-- **Actualité** : fichiers récents groupés par jour (« Aujourd'hui », « Hier »…)
-- **Fichiers** : navigation dans l'arborescence, dossiers en premier, breadcrumb compact,
-  pagination infinie, pull-to-refresh — l'ancien contenu reste affiché pendant le rechargement
-- **Favoris** : grille des favoris, bascule de l'étoile optimiste directement depuis les cartes
-- **Média** : toutes les photos et vidéos du drive groupées par mois
-- **Plus** : stockage du drive, purge du cache de miniatures, changement de drive, déconnexion
+- **5 onglets** avec barre flottante translucide, de gauche à droite :
+  **Réglages · Tag · Accueil · Favoris · Profil**
+- **Accueil** : navigation dans l'arborescence du drive, dossiers en premier,
+  breadcrumb compact, pagination infinie, pull-to-refresh — l'ancien contenu
+  reste affiché pendant le rechargement
+- **Tag** : catégories kDrive (couleur, nom) et grille des fichiers de chaque
+  catégorie, avec navigation dans les dossiers
+- **Favoris** : grille des favoris, bascule de l'étoile optimiste depuis les
+  cartes, navigation dans les dossiers favoris
+- **Réglages** : stockage du drive, purge du cache de miniatures, changement de drive
+- **Profil** : compte Infomaniak, drive utilisé, version, déconnexion
+- **Cartes uniformes** : zone de miniature carrée stricte — toutes les cartes
+  ont exactement la même taille, quelle que soit l'orientation d'origine
 - **Visionneuse photos** : pager plein écran, pinch zoom, double-tap, fermeture au swipe vertical,
   miniature instantanée puis haute résolution sous-échantillonnée (ImageIO)
 - **Lecteur vidéo** : AVPlayer natif via URL temporaire (pré-résolue en amont pour démarrer vite),

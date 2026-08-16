@@ -11,9 +11,9 @@ struct Endpoint {
     }
 }
 
-// MARK: - Endpoints kDrive utilisés par le MVP
-// En extension pour que `.recents(...)`, `.media(...)` etc. résolvent
-// directement via la syntaxe à point partout dans le code.
+// MARK: - Endpoints kDrive utilisés par l'app
+// En extension pour que `.favorites(...)`, `.categoryFiles(...)` etc.
+// résolvent directement via la syntaxe à point partout dans le code.
 
 extension Endpoint {
     /// Comptes accessibles avec le token courant.
@@ -55,16 +55,22 @@ extension Endpoint {
         )
     }
 
-    /// Photos et vidéos du drive (recherche typée récursive) — onglet Média.
-    static func media(driveId: Int, cursor: String?, limit: Int = 60) -> Endpoint {
+    /// Fichiers d'une catégorie (recherche par catégorie, récursive).
+    /// NB : le endpoint search n'accepte pas `order_by[]=name` — tri par pertinence.
+    static func categoryFiles(driveId: Int, categoryId: Int, cursor: String?, limit: Int = 60) -> Endpoint {
         Endpoint(
             path: "/3/drive/\(driveId)/files/search",
             query: [
                 URLQueryItem(name: "limit", value: String(limit)),
+                URLQueryItem(name: "category", value: String(categoryId)),
                 URLQueryItem(name: "depth", value: "unlimited"),
-            ] + array("types", ["image", "video"])
-                + (cursor.map { [URLQueryItem(name: "cursor", value: $0)] } ?? [])
+            ] + (cursor.map { [URLQueryItem(name: "cursor", value: $0)] } ?? [])
         )
+    }
+
+    /// Catégories du drive.
+    static func categories(driveId: Int) -> Endpoint {
+        Endpoint(path: "/2/drive/\(driveId)/categories")
     }
 
     /// Miniature carrée (10…400 px).

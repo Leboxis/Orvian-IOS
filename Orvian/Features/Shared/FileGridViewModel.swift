@@ -104,14 +104,4 @@ final class FileGridViewModel {
         }
         return buckets.map { Group(title: title($0.0), files: $0.1) }
     }
-
-    /// « Aujourd'hui », « Hier », sinon la date complète localisée.
-    nonisolated static func dayTitle(for date: Date, calendar: Calendar = .current) -> String {
-        if calendar.isDateInToday(date) { return "Aujourd'hui" }
-        if calendar.isDateInYesterday(date) { return "Hier" }
-        let formatter = DateFormatter()
-        formatter.dateStyle = .full
-        formatter.timeStyle = .none
-        return formatter.string(from: date)
-    }
 }

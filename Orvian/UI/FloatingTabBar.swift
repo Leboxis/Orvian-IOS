@@ -59,43 +59,43 @@ private struct TabButton: View {
     }
 }
 
-/// Onglets de l'application.
+/// Onglets de l'application, de gauche à droite dans la barre.
 enum AppTab: String, CaseIterable, Identifiable {
-    case recents
-    case files
+    case settings
+    case tag
+    case home
     case favorites
-    case media
-    case more
+    case profile
 
     var id: String { rawValue }
 
     var title: String {
         switch self {
-        case .recents: return "Actualité"
-        case .files: return "Fichiers"
+        case .settings: return "Réglages"
+        case .tag: return "Tag"
+        case .home: return "Accueil"
         case .favorites: return "Favoris"
-        case .media: return "Média"
-        case .more: return "Plus"
+        case .profile: return "Profil"
         }
     }
 
     var symbol: String {
         switch self {
-        case .recents: return "clock"
-        case .files: return "folder"
+        case .settings: return "gearshape"
+        case .tag: return "tag"
+        case .home: return "house"
         case .favorites: return "star"
-        case .media: return "photo.on.rectangle.angled"
-        case .more: return "ellipsis"
+        case .profile: return "person"
         }
     }
 
     var symbolFilled: String {
         switch self {
-        case .recents: return "clock.fill"
-        case .files: return "folder.fill"
+        case .settings: return "gearshape.fill"
+        case .tag: return "tag.fill"
+        case .home: return "house.fill"
         case .favorites: return "star.fill"
-        case .media: return "photo.fill.on.rectangle.fill.angled"
-        case .more: return "ellipsis.circle.fill"
+        case .profile: return "person.fill"
         }
     }
 }

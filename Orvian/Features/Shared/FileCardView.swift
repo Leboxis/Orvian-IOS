@@ -17,8 +17,6 @@ struct FileCardView: View {
         Button(action: action) {
             VStack(spacing: 5) {
                 thumbnailArea
-                    .frame(maxWidth: .infinity)
-                    .aspectRatio(1, contentMode: .fit)
                     .overlay(alignment: .topTrailing) { favoriteBadge }
                     .overlay(alignment: .center) { playBadge }
                     .shadow(color: .black.opacity(0.06), radius: 4, x: 0, y: 2)
@@ -47,23 +45,36 @@ struct FileCardView: View {
 
     // MARK: - Zones
 
-    @ViewBuilder
+    /// Conteneur carré strict : `Color.clear` fixe les limites, le contenu
+    /// est plaqué dessus en remplissage puis recadré — toutes les cartes
+    /// ont exactement la même taille, quelle que soit l'orientation
+    /// d'origine de la miniature (le serveur renvoie toujours du 4:3).
     private var thumbnailArea: some View {
         let shape = RoundedRectangle(cornerRadius: DS.cardRadius, style: .continuous)
+        return Color.clear
+            .aspectRatio(1, contentMode: .fit)
+            .frame(maxWidth: .infinity)
+            .overlay {
+                content
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+            .clipShape(shape)
+            .overlay {
+                shape.strokeBorder(.black.opacity(0.05), lineWidth: 0.5)
+            }
+    }
+
+    @ViewBuilder
+    private var content: some View {
         if let thumbnail {
             Image(uiImage: thumbnail)
                 .resizable()
                 .scaledToFill()
-                .clipShape(shape)
-                .overlay {
-                    shape.strokeBorder(.black.opacity(0.05), lineWidth: 0.5)
-                }
                 .transition(.opacity)
         } else if thumbnailLoaded {
             // Fichier sans miniature : vignette typée, teinte très légère.
             ZStack {
-                shape.fill(kind.tint.opacity(0.10))
-                shape.strokeBorder(kind.tint.opacity(0.16), lineWidth: 0.8)
+                Rectangle().fill(kind.tint.opacity(0.10))
                 Image(systemName: kind.symbolName)
                     .font(.system(size: 30, weight: .light))
                     .foregroundStyle(kind.tint)
@@ -71,7 +82,7 @@ struct FileCardView: View {
             }
         } else {
             ZStack {
-                shape.fill(.quaternary.opacity(0.5))
+                Rectangle().fill(.quaternary.opacity(0.5))
                 if kind == .folder {
                     Image(systemName: kind.symbolName)
                         .font(.system(size: 30, weight: .light))

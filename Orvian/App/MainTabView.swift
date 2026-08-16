@@ -2,13 +2,14 @@ import SwiftUI
 
 /// Conteneur des 5 onglets + barre flottante + visionneuses plein écran.
 ///
+/// Barre, de gauche à droite : Réglages · Tag · Accueil · Favoris · Profil.
 /// Les onglets restent montés (ZStack + opacité) pour conserver la
 /// navigation et la position de scroll quand on change d'onglet.
 struct MainTabView: View {
     let drive: Drive
     let session: SessionStore
 
-    @State private var tab: AppTab = .recents
+    @State private var tab: AppTab = .home
     @State private var router: ViewerRouter
 
     init(drive: Drive, session: SessionStore) {
@@ -35,20 +36,20 @@ struct MainTabView: View {
     @ViewBuilder
     private var tabs: some View {
         ZStack {
-            tabPane(.recents) {
-                RecentsView(driveId: drive.id, router: router)
+            tabPane(.settings) {
+                SettingsView(session: session)
             }
-            tabPane(.files) {
-                FilesTab(driveId: drive.id, driveName: drive.name, router: router)
+            tabPane(.tag) {
+                TagsView(driveId: drive.id, router: router)
+            }
+            tabPane(.home) {
+                HomeTab(driveId: drive.id, router: router)
             }
             tabPane(.favorites) {
                 FavoritesView(driveId: drive.id, router: router)
             }
-            tabPane(.media) {
-                MediaLibraryView(driveId: drive.id, router: router)
-            }
-            tabPane(.more) {
-                MoreView(session: session)
+            tabPane(.profile) {
+                ProfileView(session: session)
             }
         }
     }

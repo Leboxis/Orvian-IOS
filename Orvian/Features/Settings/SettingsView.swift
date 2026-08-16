@@ -1,12 +1,11 @@
 import SwiftUI
 
-/// Onglet « Plus » : réglages, stockage, cache, fonctions à venir.
-struct MoreView: View {
+/// Onglet « Réglages » : drive, stockage local, fonctions à venir.
+struct SettingsView: View {
     let session: SessionStore
 
     @State private var cacheSize: Int = 0
     @State private var showDrivePicker = false
-    @State private var showSignOutConfirm = false
 
     var body: some View {
         NavigationStack {
@@ -14,20 +13,12 @@ struct MoreView: View {
                 driveSection
                 cacheSection
                 upcomingSection
-                aboutSection
             }
-            .navigationTitle("Plus")
+            .navigationTitle("Réglages")
             .navigationBarTitleDisplayMode(.large)
         }
         .sheet(isPresented: $showDrivePicker) {
             DrivePickerSheet(session: session)
-        }
-        .confirmationDialog("Se déconnecter ?", isPresented: $showSignOutConfirm, titleVisibility: .visible) {
-            Button("Se déconnecter", role: .destructive) {
-                session.signOut()
-            }
-        } message: {
-            Text("Le token et le drive sélectionné seront effacés de cet appareil.")
         }
         .task {
             cacheSize = await ThumbnailProvider.shared.diskCacheSize()
@@ -107,29 +98,6 @@ struct MoreView: View {
             Text("à venir")
                 .font(.caption)
                 .foregroundStyle(.tertiary)
-        }
-    }
-
-    private var aboutSection: some View {
-        Section {
-            HStack {
-                Label("Version", systemImage: "info.circle")
-                Spacer()
-                Text(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0.1.0")
-                    .foregroundStyle(.secondary)
-            }
-            Link(destination: URL(string: "https://developer.infomaniak.com")!) {
-                Label("API kDrive Infomaniak", systemImage: "network")
-            }
-            Button(role: .destructive) {
-                showSignOutConfirm = true
-            } label: {
-                Label("Changer de token / se déconnecter", systemImage: "rectangle.portrait.and.arrow.right")
-            }
-        } header: {
-            Text("À propos")
-        } footer: {
-            Text("Orvian est un client non officiel pour kDrive (Infomaniak).")
         }
     }
 }

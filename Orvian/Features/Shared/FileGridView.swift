@@ -169,18 +169,16 @@ struct FileGridView: View {
     private var emptySymbol: String {
         switch viewModel.source {
         case .directory: return "folder"
-        case .recents: return "clock"
         case .favorites: return "star"
-        case .media: return "photo.on.rectangle.angled"
+        case .category: return "tag"
         }
     }
 
     private var emptyTitle: String {
         switch viewModel.source {
         case .directory: return "Dossier vide"
-        case .recents: return "Aucune activité"
         case .favorites: return "Aucun favori"
-        case .media: return "Aucune photo ni vidéo"
+        case .category: return "Aucun fichier avec ce tag"
         }
     }
 }
