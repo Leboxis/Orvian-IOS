@@ -58,8 +58,18 @@ struct VideoPlayerView: View {
     }
 
     private var topBar: some View {
-        VStack {
-            HStack(spacing: 10) {
+        ZStack(alignment: .top) {
+            Text(file.name)
+                .font(.footnote.weight(.medium))
+                .foregroundStyle(.white)
+                .lineLimit(1)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 6)
+                .background(.black.opacity(0.25), in: Capsule())
+                .padding(.horizontal, 72)
+
+            HStack {
+                Spacer()
                 Button {
                     dismiss()
                 } label: {
@@ -70,23 +80,11 @@ struct VideoPlayerView: View {
                         .background(.ultraThinMaterial, in: Circle())
                 }
                 .accessibilityLabel("Fermer")
-
-                Text(file.name)
-                    .font(.footnote.weight(.medium))
-                    .foregroundStyle(.white)
-                    .lineLimit(1)
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 6)
-                    .background(.black.opacity(0.25), in: Capsule())
-
-                Spacer()
             }
             .padding(.horizontal, 14)
-            .padding(.top, 6)
-
-            Spacer()
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .padding(.top, 6)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
     }
 
     // MARK: - Chargement
