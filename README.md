@@ -4,7 +4,7 @@ Client iOS natif non officiel pour **kDrive** (Infomaniak), en Swift + SwiftUI.
 Pensé pour une expérience « Apple Photos » : grilles de miniatures fluides,
 visionneuse photos avec zoom, lecteur vidéo AVPlayer quasi instantané.
 
-## Fonctionnalités (jalon 2 — v0.2.0)
+## Fonctionnalités (jalon 3 — v0.3.0)
 
 - **5 onglets** avec barre flottante translucide, de gauche à droite :
   **Réglages · Tag · Accueil · Favoris · Profil**
