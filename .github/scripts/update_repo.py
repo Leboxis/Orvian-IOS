@@ -12,7 +12,11 @@ import sys
 REPO = "Leboxis/Orvian-IOS"
 ICON = "https://raw.githubusercontent.com/Leboxis/Orvian-IOS/main/Orvian/Assets.xcassets/AppIcon.appiconset/icon-1024.png"
 
-CHANGELOG = """v0.8.4
+CHANGELOG = """v0.8.5
+• Uploads récents : utilisation de l'endpoint kDrive exact /files/last_modified avec cascade de fallbacks
+• Lecteur vidéo : masquage automatique des commandes au bout de 2.5s et réaffichage au clic
+
+v0.8.4
 • Filtre : orientation vidéo à sélection unique et exclusive
 • Tris : ajout des tris natifs par date de modification et par date d'importation
 • Tags : renommage et suppression des tags (menu contextuel et swipe)
@@ -24,10 +28,7 @@ v0.8.3
 
 v0.8.2
 • Profil : suppression de l'adresse email, de la zone Drive et du lien API externe pour une interface épurée
-• Réglages : déplacement de l'action « Changer de token / Se déconnecter » dans l'onglet Réglages
-
-v0.8.1
-• Profil : affichage immédiat et réactif des 3 médias les plus consultés lors du changement d'onglet"""
+• Réglages : déplacement de l'action « Changer de token / Se déconnecter » dans l'onglet Réglages"""
 
 
 def main() -> int:

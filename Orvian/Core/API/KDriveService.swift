@@ -61,7 +61,32 @@ struct KDriveService {
         case let .favorites(limit):
             endpoint = .favorites(driveId: driveId, cursor: cursor, limit: limit)
         case let .recents(limit):
-            endpoint = .recents(driveId: driveId, cursor: cursor, limit: limit)
+            // 1) Priorité /files/last_modified (fichiers modifiés/uploadés récemment sur le drive)
+            do {
+                let res = try await api.get(CursorPage<DriveFile>.self, .lastModified(driveId: driveId, cursor: cursor, limit: limit))
+                if let data = res.data, !data.isEmpty {
+                    return res
+                }
+            } catch { }
+
+            // 2) Fallback /files/recents
+            do {
+                let res = try await api.get(CursorPage<DriveFile>.self, .recents(driveId: driveId, cursor: cursor, limit: limit))
+                if let data = res.data, !data.isEmpty {
+                    return res
+                }
+            } catch { }
+
+            // 3) Fallback /files/activities
+            do {
+                let res = try await api.get(CursorPage<DriveFile>.self, .activities(driveId: driveId, cursor: cursor, limit: limit))
+                if let data = res.data, !data.isEmpty {
+                    return res
+                }
+            } catch { }
+
+            // 4) Dernier recours : recherche globale
+            endpoint = .search(driveId: driveId, query: "", directoryId: nil, cursor: cursor, limit: limit)
         case let .mostViewed(limit):
             let files = MediaUsageStore.mostViewedFiles(driveId: driveId, limit: limit)
             return CursorPage<DriveFile>(data: files, cursor: nil, hasMore: false)

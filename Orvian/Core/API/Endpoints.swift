@@ -40,14 +40,35 @@ extension Endpoint {
         )
     }
 
-    /// Fichiers récents du drive (recherche globale illimitée triée chronologiquement).
-    static func recents(driveId: Int, cursor: String?, limit: Int = 60) -> Endpoint {
+    /// Fichiers récemment modifiés / uploadés (/3/drive/{id}/files/last_modified).
+    static func lastModified(driveId: Int, cursor: String?, limit: Int = 60) -> Endpoint {
         Endpoint(
-            path: "/3/drive/\(driveId)/files/search",
+            path: "/3/drive/\(driveId)/files/last_modified",
             query: [
                 URLQueryItem(name: "with", value: "is_favorite,categories"),
                 URLQueryItem(name: "limit", value: String(limit)),
-                URLQueryItem(name: "depth", value: "unlimited"),
+            ] + (cursor.map { [URLQueryItem(name: "cursor", value: $0)] } ?? [])
+        )
+    }
+
+    /// Fichiers récents du drive (/3/drive/{id}/files/recents).
+    static func recents(driveId: Int, cursor: String?, limit: Int = 60) -> Endpoint {
+        Endpoint(
+            path: "/3/drive/\(driveId)/files/recents",
+            query: [
+                URLQueryItem(name: "with", value: "is_favorite,categories"),
+                URLQueryItem(name: "limit", value: String(limit)),
+            ] + (cursor.map { [URLQueryItem(name: "cursor", value: $0)] } ?? [])
+        )
+    }
+
+    /// Flux d'activités récentes (/3/drive/{id}/files/activities).
+    static func activities(driveId: Int, cursor: String?, limit: Int = 60) -> Endpoint {
+        Endpoint(
+            path: "/3/drive/\(driveId)/files/activities",
+            query: [
+                URLQueryItem(name: "with", value: "is_favorite,categories"),
+                URLQueryItem(name: "limit", value: String(limit)),
             ] + (cursor.map { [URLQueryItem(name: "cursor", value: $0)] } ?? [])
         )
     }

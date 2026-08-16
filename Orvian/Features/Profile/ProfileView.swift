@@ -228,9 +228,7 @@ struct ProfileView: View {
 
         let (recentsPage, favsPage) = await (recentsTask, favsTask)
         if let recentsPage {
-            recentUploads = (recentsPage.data ?? [])
-                .filter { !$0.isDirectory }
-                .sorted { ($0.addedAt ?? $0.lastModifiedAt ?? 0) > ($1.addedAt ?? $1.lastModifiedAt ?? 0) }
+            recentUploads = (recentsPage.data ?? []).filter { !$0.isDirectory }
         }
         isLoadingRecents = false
 

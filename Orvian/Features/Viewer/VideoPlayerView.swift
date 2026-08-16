@@ -37,6 +37,10 @@ struct VideoPlayerView: View {
     @State private var endObserver: NSObjectProtocol?
     @State private var isDisappeared = false
 
+    // Masquage automatique des contrôles après 2.5 secondes
+    @State private var showControls = true
+    @State private var hideControlsTask: Task<Void, Never>?
+
     private let service = KDriveService()
 
     init(file: DriveFile, driveId: Int) {
@@ -50,15 +54,26 @@ struct VideoPlayerView: View {
         ZStack {
             Color.black.ignoresSafeArea()
 
+            videoArea
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .contentShape(Rectangle())
+                .onTapGesture {
+                    toggleControls()
+                }
+
             VStack(spacing: 0) {
                 topBar
-                videoArea
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                Spacer()
                 bottomBar
             }
+            .opacity(showControls ? 1 : 0)
+            .allowsHitTesting(showControls)
+            .animation(.easeInOut(duration: 0.25), value: showControls)
         }
         .onAppear {
             isDisappeared = false
+            showControls = true
+            scheduleControlsAutoHide(delay: 2.5)
             setupAudioSession()
         }
         .task {
@@ -66,12 +81,39 @@ struct VideoPlayerView: View {
         }
         .onDisappear {
             isDisappeared = true
+            hideControlsTask?.cancel()
             teardown()
         }
         .alert("Erreur", isPresented: errorBinding) {
             Button("OK") { errorMessage = nil }
         } message: {
             Text(errorMessage ?? "")
+        }
+    }
+
+    // MARK: - Gestion de l'affichage des contrôles
+
+    private func scheduleControlsAutoHide(delay: Double = 2.5) {
+        hideControlsTask?.cancel()
+        hideControlsTask = Task {
+            try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
+            guard !Task.isCancelled else { return }
+            if !isScrubbing {
+                withAnimation(.easeInOut(duration: 0.25)) {
+                    showControls = false
+                }
+            }
+        }
+    }
+
+    private func toggleControls() {
+        withAnimation(.easeInOut(duration: 0.25)) {
+            showControls.toggle()
+        }
+        if showControls {
+            scheduleControlsAutoHide(delay: 2.5)
+        } else {
+            hideControlsTask?.cancel()
         }
     }
 
@@ -151,8 +193,11 @@ struct VideoPlayerView: View {
 
             Slider(value: scrubBinding, in: 0...max(duration, 1)) { editing in
                 isScrubbing = editing
-                if !editing {
+                if editing {
+                    hideControlsTask?.cancel()
+                } else {
                     seek(to: scrubValue, precise: true)
+                    scheduleControlsAutoHide(delay: 2.5)
                 }
             }
             .tint(.white)
@@ -203,6 +248,7 @@ struct VideoPlayerView: View {
         Button {
             isMuted.toggle()
             player?.isMuted = isMuted
+            scheduleControlsAutoHide(delay: 2.5)
         } label: {
             Image(systemName: isMuted ? "speaker.slash.fill" : "speaker.wave.2.fill")
                 .font(.system(size: 16, weight: .medium))
@@ -299,6 +345,7 @@ struct VideoPlayerView: View {
 
     private func togglePlay() {
         guard let player else { return }
+        scheduleControlsAutoHide(delay: 2.5)
         if isPlaying {
             player.pause()
             isPlaying = false
@@ -325,6 +372,7 @@ struct VideoPlayerView: View {
         if isPlaying || player?.timeControlStatus == .playing {
             player?.rate = rate
         }
+        scheduleControlsAutoHide(delay: 2.5)
     }
 
     // MARK: - Favori & tags
