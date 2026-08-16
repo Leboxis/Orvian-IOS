@@ -1,14 +1,12 @@
 import SwiftUI
 
-/// Onglet « Profil » : compte Infomaniak, drive utilisé, uploads récents, médias consultés, corbeille, déconnexion.
+/// Onglet « Profil » : uploads récents, médias consultés, corbeille, à propos.
 struct ProfileView: View {
     let session: SessionStore
     let router: ViewerRouter
     @Binding var path: NavigationPath
     var isSelected: Bool = false
 
-    @State private var accountName: String?
-    @State private var showSignOutConfirm = false
     @State private var recentUploads: [DriveFile] = []
     @State private var frequentFavorites: [DriveFile] = []
     @State private var isLoadingRecents = true
@@ -20,7 +18,6 @@ struct ProfileView: View {
         NavigationStack(path: $path) {
             List {
                 headerSection
-                driveSection
                 recentUploadsSection
                 frequentFavoritesSection
                 trashSection
@@ -29,15 +26,7 @@ struct ProfileView: View {
             .navigationTitle("Profil")
             .navigationBarTitleDisplayMode(.large)
         }
-        .confirmationDialog("Se déconnecter ?", isPresented: $showSignOutConfirm, titleVisibility: .visible) {
-            Button("Se déconnecter", role: .destructive) {
-                session.signOut()
-            }
-        } message: {
-            Text("Le token et le drive sélectionné seront effacés de cet appareil.")
-        }
         .task {
-            await loadAccountName()
             await loadPreviews()
         }
         .onChange(of: isSelected) { _, selected in
@@ -63,47 +52,18 @@ struct ProfileView: View {
                                 endPoint: .bottomTrailing
                             )
                         )
-                    Text(String((accountName ?? "O").prefix(1)).uppercased())
-                        .font(.system(size: 34, weight: .bold))
+                    Image(systemName: "person.crop.circle.fill")
+                        .font(.system(size: 42))
                         .foregroundStyle(.white)
                 }
                 .frame(width: 76, height: 76)
 
-                VStack(spacing: 3) {
-                    Text(accountName ?? "Compte Infomaniak")
-                        .font(.headline)
-                    if accountName == nil {
-                        Text("Chargement…")
-                            .font(.caption)
-                            .foregroundStyle(.tertiary)
-                    }
-                }
+                Text("Profil")
+                    .font(.headline)
             }
             .frame(maxWidth: .infinity)
             .padding(.vertical, 8)
             .listRowBackground(Color.clear)
-        }
-    }
-
-    private var driveSection: some View {
-        Section {
-            if let drive = session.selectedDrive {
-                HStack {
-                    Label(drive.name, systemImage: "externaldrive.fill")
-                        .foregroundStyle(.primary)
-                    Spacer()
-                    Text(ByteFormatter.usage(used: drive.usedSize, total: drive.size))
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-            }
-            Button(role: .destructive) {
-                showSignOutConfirm = true
-            } label: {
-                Label("Changer de token / se déconnecter", systemImage: "rectangle.portrait.and.arrow.right")
-            }
-        } header: {
-            Text("Drive")
         }
     }
 
@@ -236,9 +196,6 @@ struct ProfileView: View {
                 Text(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "—")
                     .foregroundStyle(.secondary)
             }
-            Link(destination: URL(string: "https://developer.infomaniak.com")!) {
-                Label("API kDrive Infomaniak", systemImage: "network")
-            }
         } header: {
             Text("À propos")
         } footer: {
@@ -247,12 +204,6 @@ struct ProfileView: View {
     }
 
     // MARK: - Chargement
-
-    private func loadAccountName() async {
-        guard let accounts = try? await service.accounts(),
-              let id = session.accountId else { return }
-        accountName = accounts.first(where: { $0.id == id })?.name
-    }
 
     private func loadPreviews() async {
         guard let drive = session.selectedDrive else { return }

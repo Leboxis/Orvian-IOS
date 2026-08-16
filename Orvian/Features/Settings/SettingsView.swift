@@ -7,18 +7,27 @@ struct SettingsView: View {
 
     @State private var cacheSize: Int = 0
     @State private var showDrivePicker = false
+    @State private var showSignOutConfirm = false
 
     var body: some View {
         NavigationStack(path: $path) {
             List {
                 driveSection
                 cacheSection
+                sessionSection
             }
             .navigationTitle("Réglages")
             .navigationBarTitleDisplayMode(.large)
         }
         .sheet(isPresented: $showDrivePicker) {
             DrivePickerSheet(session: session)
+        }
+        .confirmationDialog("Se déconnecter ?", isPresented: $showSignOutConfirm, titleVisibility: .visible) {
+            Button("Se déconnecter", role: .destructive) {
+                session.signOut()
+            }
+        } message: {
+            Text("Le token et le drive sélectionné seront effacés de cet appareil.")
         }
         .task {
             cacheSize = await ThumbnailProvider.shared.diskCacheSize()
@@ -75,6 +84,18 @@ struct SettingsView: View {
             Text("Stockage local")
         } footer: {
             Text("Les miniatures sont re-téléchargées à la demande après la purge.")
+        }
+    }
+
+    private var sessionSection: some View {
+        Section {
+            Button(role: .destructive) {
+                showSignOutConfirm = true
+            } label: {
+                Label("Changer de token / se déconnecter", systemImage: "rectangle.portrait.and.arrow.right")
+            }
+        } header: {
+            Text("Compte")
         }
     }
 }
