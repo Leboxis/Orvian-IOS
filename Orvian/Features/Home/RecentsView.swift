@@ -14,7 +14,7 @@ struct RecentsView: View {
         NavigationStack {
             FileGridView(
                 viewModel: viewModel,
-                grouping: (component: .day, title: FileGridViewModel.dayTitle(for:)),
+                grouping: (component: .day, title: { FileGridViewModel.dayTitle(for: $0) }),
                 onOpenFile: { file, siblings in
                     router.open(file, siblings: siblings)
                 }
