@@ -5,6 +5,7 @@ struct ProfileView: View {
     let session: SessionStore
     let router: ViewerRouter
     @Binding var path: NavigationPath
+    var isSelected: Bool = false
 
     @State private var accountName: String?
     @State private var showSignOutConfirm = false
@@ -38,6 +39,13 @@ struct ProfileView: View {
         .task {
             await loadAccountName()
             await loadPreviews()
+        }
+        .onChange(of: isSelected) { _, selected in
+            if selected {
+                Task {
+                    await loadPreviews()
+                }
+            }
         }
     }
 
@@ -248,6 +256,14 @@ struct ProfileView: View {
 
     private func loadPreviews() async {
         guard let drive = session.selectedDrive else { return }
+
+        // Chargement immédiat des médias les plus consultés (synchrone local)
+        let tracked = MediaUsageStore.mostViewedFiles(driveId: drive.id, limit: 12)
+        if !tracked.isEmpty {
+            frequentFavorites = tracked
+            isLoadingFavorites = false
+        }
+
         async let recentsTask = try? service.page(.recents(limit: 12), driveId: drive.id, cursor: nil)
         async let favsTask = try? service.page(.favorites(limit: 12), driveId: drive.id, cursor: nil)
 
@@ -257,11 +273,10 @@ struct ProfileView: View {
         }
         isLoadingRecents = false
 
-        let tracked = MediaUsageStore.mostViewedFiles(driveId: drive.id, limit: 12)
-        if !tracked.isEmpty {
-            frequentFavorites = tracked
-        } else if let favsPage {
-            frequentFavorites = (favsPage.data ?? []).filter { !$0.isDirectory }
+        if frequentFavorites.isEmpty {
+            if let favsPage {
+                frequentFavorites = (favsPage.data ?? []).filter { !$0.isDirectory }
+            }
         }
         isLoadingFavorites = false
     }

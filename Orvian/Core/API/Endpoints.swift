@@ -40,10 +40,21 @@ extension Endpoint {
         )
     }
 
-    /// Fichiers récents du drive.
+    /// Fichiers récents du drive (/files/recent).
     static func recents(driveId: Int, cursor: String?, limit: Int = 60) -> Endpoint {
         Endpoint(
-            path: "/3/drive/\(driveId)/files/recents",
+            path: "/3/drive/\(driveId)/files/recent",
+            query: [
+                URLQueryItem(name: "with", value: "is_favorite,categories"),
+                URLQueryItem(name: "limit", value: String(limit)),
+            ] + (cursor.map { [URLQueryItem(name: "cursor", value: $0)] } ?? [])
+        )
+    }
+
+    /// Fichiers récemment modifiés / ajoutés (/files/last-modified).
+    static func lastModified(driveId: Int, cursor: String?, limit: Int = 60) -> Endpoint {
+        Endpoint(
+            path: "/3/drive/\(driveId)/files/last-modified",
             query: [
                 URLQueryItem(name: "with", value: "is_favorite,categories"),
                 URLQueryItem(name: "limit", value: String(limit)),

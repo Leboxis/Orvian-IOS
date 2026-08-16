@@ -73,7 +73,7 @@ struct MainTabView: View {
                 FavoritesView(driveId: drive.id, router: router, path: $navState.favoritesPath)
             }
             tabPane(.profile) {
-                ProfileView(session: session, router: router, path: $navState.profilePath)
+                ProfileView(session: session, router: router, path: $navState.profilePath, isSelected: tab == .profile)
             }
         }
     }

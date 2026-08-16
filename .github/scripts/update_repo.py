@@ -12,7 +12,11 @@ import sys
 REPO = "Leboxis/Orvian-IOS"
 ICON = "https://raw.githubusercontent.com/Leboxis/Orvian-IOS/main/Orvian/Assets.xcassets/AppIcon.appiconset/icon-1024.png"
 
-CHANGELOG = """v0.8.0
+CHANGELOG = """v0.8.1
+• Profil : correction de l'endpoint kDrive /files/recent et fallback automatique /files/last-modified
+• Profil : affichage immédiat et réactif des 3 médias les plus consultés lors du changement d'onglet
+
+v0.8.0
 • Suivi d'upload en direct : bulle flottante centrale au-dessus de la barre de navigation et feuille détaillée
 • Traqueur de médias 100% persistant : enregistrement local des médias les plus consultés conservé après fermeture
 • Navigation rapide : retour instantané à la base de l'onglet par double-tap sur son icône
@@ -23,13 +27,7 @@ v0.7.9
 • Profil : sections « Uploads récents » et « Favoris » avec 3 miniatures et vue dédiée paginée par 12 à l'infini
 • Lecteur vidéo : vitesse de lecture modifiable en continu et correction de la fuite audio à la fermeture
 • Import de fichiers : support des clés USB et iCloud Drive (Security-Scoped Resources)
-• Visionneuse photo : déplacement borné lors du zoom et renommage sans saut d'écran
-
-v0.7.8
-• Défilement ultra-fluide (60/120 FPS) : accès mémoire synchrone des miniatures et suppression des micro-gels
-• Décompression directe GPU hors du thread principal pour les photos et vidéos
-• Suppression des écritures disque superflues lors de la lecture du cache
-• Isolation des résolutions de métadonnées vidéo pour éviter les rafraîchissements intempestifs"""
+• Visionneuse photo : déplacement borné lors du zoom et renommage sans saut d'écran"""
 
 
 def main() -> int:
