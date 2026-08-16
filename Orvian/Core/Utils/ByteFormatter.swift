@@ -14,6 +14,10 @@ enum ByteFormatter {
         return formatter.string(fromByteCount: Int64(bytes))
     }
 
+    static func format(_ bytes: Int?) -> String {
+        string(fromBytes: bytes)
+    }
+
     /// « 1,84 Go utilisés sur 6 To » pour l'onglet Plus.
     static func usage(used: Int?, total: Int?) -> String {
         "\(string(fromBytes: used)) utilisés sur \(string(fromBytes: total))"

@@ -5,7 +5,7 @@ import Foundation
 /// Unifie les schémas `FileV3` / `DirectoryV3` de l'API v3 : les dossiers
 /// reviennent avec des champs plus pauvres que les fichiers, tout est donc
 /// optionnel sauf l'essentiel.
-struct DriveFile: Decodable, Identifiable, Hashable {
+struct DriveFile: Codable, Identifiable, Hashable {
     let id: Int
     var name: String
     /// "dir" ou "file"
@@ -61,6 +61,13 @@ struct CursorPage<T: Decodable>: Decodable {
     let data: [T]?
     let cursor: String?
     let hasMore: Bool?
+
+    init(result: String? = "success", data: [T]?, cursor: String? = nil, hasMore: Bool? = nil) {
+        self.result = result
+        self.data = data
+        self.cursor = cursor
+        self.hasMore = hasMore
+    }
 
     enum CodingKeys: String, CodingKey {
         case result, data, cursor
