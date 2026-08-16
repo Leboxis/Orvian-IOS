@@ -120,15 +120,15 @@ struct DirectoryView: View {
     var body: some View {
         FileGridView(
             viewModel: viewModel,
-            searchText: searchText,
-            onScrollOffset: showsSearchBar ? { scrollOffset = $0 } : nil,
             onOpenDirectory: onOpenFolder,
             onOpenFile: { file, siblings in
                 router.open(file, siblings: siblings)
             },
             onInitialLoad: { items in
                 onInitialLoad?(items)
-            }
+            },
+            searchText: searchText,
+            onScrollOffset: showsSearchBar ? { scrollOffset = $0 } : nil
         )
         .navigationTitle(crumbs.isEmpty ? directory.name : crumbs.last ?? directory.name)
         .navigationBarTitleDisplayMode(.inline)
