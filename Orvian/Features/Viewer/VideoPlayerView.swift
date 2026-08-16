@@ -121,7 +121,7 @@ struct VideoPlayerView: View {
 
     private var topBar: some View {
         ZStack {
-            HStack(spacing: 8) {
+            HStack(spacing: 4) {
                 AirPlayButton()
                     .frame(width: 32, height: 32)
                 tagMenu
@@ -129,24 +129,24 @@ struct VideoPlayerView: View {
                 Spacer()
             }
             Text(file.name)
-                .font(.footnote.weight(.medium))
+                .font(.caption.weight(.semibold))
                 .foregroundStyle(.white)
                 .lineLimit(1)
                 .minimumScaleFactor(0.6)
-                .padding(.horizontal, 12)
-                .padding(.vertical, 5)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 4)
                 .background(.black.opacity(0.3), in: Capsule())
-                .padding(.horizontal, 95)
+                .padding(.horizontal, 70)
                 .frame(maxWidth: .infinity)
-            HStack(spacing: 8) {
+            HStack(spacing: 4) {
                 Spacer()
                 muteButton
                 closeButton
             }
         }
-        .padding(.horizontal, 8)
-        .padding(.top, 2)
-        .padding(.bottom, 4)
+        .padding(.horizontal, 4)
+        .padding(.top, 0)
+        .padding(.bottom, 2)
     }
 
     // MARK: - Zone vidéo
@@ -185,7 +185,7 @@ struct VideoPlayerView: View {
     // MARK: - Barre du bas (transport, hors zone vidéo)
 
     private var bottomBar: some View {
-        HStack(spacing: 6) {
+        HStack(spacing: 4) {
             playButton
 
             Text(timeText(currentTime))
@@ -213,9 +213,9 @@ struct VideoPlayerView: View {
 
             speedMenu
         }
-        .padding(.horizontal, 8)
-        .padding(.top, 4)
-        .padding(.bottom, 2)
+        .padding(.horizontal, 4)
+        .padding(.top, 2)
+        .padding(.bottom, 0)
     }
 
     // MARK: - Boutons

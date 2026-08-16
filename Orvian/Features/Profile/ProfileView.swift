@@ -290,6 +290,17 @@ private struct ProfileThumbnailCard: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
         }
         .frame(maxWidth: .infinity)
+        .contextMenu {
+            if !file.isDirectory {
+                Button {
+                    Task {
+                        await FileDownloadService.shared.downloadAndShare(driveId: driveId, file: file)
+                    }
+                } label: {
+                    Label("Télécharger", systemImage: "arrow.down.circle")
+                }
+            }
+        }
     }
 }
 

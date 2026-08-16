@@ -12,9 +12,13 @@ import sys
 REPO = "Leboxis/Orvian-IOS"
 ICON = "https://raw.githubusercontent.com/Leboxis/Orvian-IOS/main/Orvian/Assets.xcassets/AppIcon.appiconset/icon-1024.png"
 
-CHANGELOG = """v0.8.6
-• Lecteur vidéo : boutons haut/bas et barre de progression élargis et décalés vers les extrémités
+CHANGELOG = """v0.8.7
+• Téléchargement : ajout de l'option « Télécharger » (appui long et feuille de détails) avec partage natif iOS
+• Lecteur vidéo : boutons haut/bas et barre de lecture décalés au maximum vers les extrémités
+
+v0.8.6
 • Profil & Réglages : ajout d'une marge basse pour faire défiler la section À propos au-dessus de la barre de navigation
+• Lecteur vidéo : commandes décalées vers les bords
 
 v0.8.5
 • Uploads récents : utilisation de l'endpoint kDrive exact /files/last_modified avec cascade de fallbacks
@@ -23,12 +27,7 @@ v0.8.5
 v0.8.4
 • Filtre : orientation vidéo à sélection unique et exclusive
 • Tris : ajout des tris natifs par date de modification et par date d'importation
-• Tags : renommage et suppression des tags (menu contextuel et swipe)
-• Tags : sélecteur de couleur personnalisée avec palette système lors de la création
-
-v0.8.3
-• Uploads récents : correction définitive de l'erreur HTTP 404 via la recherche globale récursive et tri chronologique
-• Profil : taille des 3 cartes miniatures strictement harmonisée et carrée pour tous types d'images et vidéos"""
+• Tags : renommage et suppression des tags (menu contextuel et swipe)"""
 
 
 def main() -> int:

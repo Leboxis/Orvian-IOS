@@ -83,6 +83,15 @@ struct FileCardView: View {
                     Label("Détails", systemImage: "info.circle")
                 }
                 if !isTrashed {
+                    if !file.isDirectory {
+                        Button {
+                            Task {
+                                await FileDownloadService.shared.downloadAndShare(driveId: driveId, file: file)
+                            }
+                        } label: {
+                            Label("Télécharger", systemImage: "arrow.down.circle")
+                        }
+                    }
                     Button {
                         onToggleFavorite?()
                     } label: {
@@ -446,11 +455,30 @@ struct FileDetailSheet: View {
             } label: {
                 Label(file.isDirectory ? "Ouvrir le dossier" : "Ouvrir", systemImage: file.isDirectory ? "folder" : "play.fill")
             }
+
+            if !file.isDirectory, !isTrashed {
+                Button {
+                    Task {
+                        await FileDownloadService.shared.downloadAndShare(driveId: driveId, file: file)
+                    }
+                } label: {
+                    Label("Télécharger", systemImage: "arrow.down.circle")
+                }
+            }
         }
     }
 
     private var ellipsisMenu: some View {
         Menu {
+            if !file.isDirectory, !isTrashed {
+                Button {
+                    Task {
+                        await FileDownloadService.shared.downloadAndShare(driveId: driveId, file: file)
+                    }
+                } label: {
+                    Label("Télécharger", systemImage: "arrow.down.circle")
+                }
+            }
             if !isTrashed, let onToggleFavorite {
                 Button {
                     onToggleFavorite()
