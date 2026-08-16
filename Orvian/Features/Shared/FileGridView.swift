@@ -25,18 +25,14 @@ struct FileGridView: View {
     var body: some View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 18, pinnedViews: []) {
-                if onScrolledPastTop != nil {
-                    Color.clear
-                        .frame(height: 1)
-                        .onScrollVisibilityChange(threshold: 0.01) { visible in
-                            onScrolledPastTop?(!visible)
-                        }
-                }
                 content
             }
             .padding(.horizontal, DS.gridMargin)
             .padding(.top, 6)
             .padding(.bottom, 110) // barre flottante
+        }
+        .onScrollGeometryChange(for: Bool.self, of: { $0.contentOffset.y > 0 }) { _, scrolledDown in
+            onScrolledPastTop?(scrolledDown)
         }
         .background(Color(uiColor: .systemGroupedBackground))
         .refreshable {

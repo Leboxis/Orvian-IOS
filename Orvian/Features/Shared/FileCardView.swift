@@ -1,7 +1,8 @@
 import SwiftUI
 
 /// Carte de fichier : miniature, étoile favori, nom, taille.
-/// Tap → fiche détails. Appui long → menu contextuel (favori, renommer, supprimer).
+/// Tap → ouverture du fichier/dossier. Appui long → menu contextuel
+/// (détails, favori, renommer, supprimer).
 struct FileCardView: View {
     let file: DriveFile
     let driveId: Int
@@ -27,7 +28,7 @@ struct FileCardView: View {
     }
 
     var body: some View {
-        Button { showDetail = true } label: {
+        Button(action: action) {
             VStack(spacing: 5) {
                 thumbnailArea
                     .overlay(alignment: .topTrailing) { favoriteBadge }
@@ -55,6 +56,11 @@ struct FileCardView: View {
         .buttonStyle(.plain)
         .disabled(!enabled)
         .contextMenu {
+            Button {
+                showDetail = true
+            } label: {
+                Label("Détails", systemImage: "info.circle")
+            }
             Button {
                 onToggleFavorite?()
             } label: {
