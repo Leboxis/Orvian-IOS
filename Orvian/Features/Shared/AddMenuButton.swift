@@ -73,7 +73,7 @@ struct AddMenuButton: View {
             Button("Annuler", role: .cancel) {}
         }
         .sheet(isPresented: $showDocumentPicker) {
-            DocumentPicker(types: [.item], allowsMultiple: true) { urls in
+            DocumentPicker { urls in
                 Task { await importFiles(urls) }
             }
         }
