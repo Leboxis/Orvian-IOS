@@ -112,9 +112,19 @@ struct UploadProgressSheet: View {
                 Image(systemName: "checkmark.circle.fill")
                     .foregroundStyle(.green)
             case let .failed(msg):
-                Image(systemName: "exclamationmark.circle.fill")
-                    .foregroundStyle(.orange)
-                    .help(msg)
+                HStack(spacing: 8) {
+                    Button {
+                        manager.retry(taskId: task.id)
+                    } label: {
+                        Image(systemName: "arrow.clockwise")
+                    }
+                    .buttonStyle(.borderless)
+                    .accessibilityLabel("Réessayer \(task.fileName)")
+
+                    Image(systemName: "exclamationmark.circle.fill")
+                        .foregroundStyle(.orange)
+                        .help(msg)
+                }
             }
         }
         .padding(.vertical, 2)
