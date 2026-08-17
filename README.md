@@ -81,11 +81,11 @@ LiveContainer sait lire les sources de type AltStore (`repo.json`) : à chaque
 version, la CI met automatiquement le JSON à jour.
 
 1. Dans LiveContainer : onglet **Sources → Add Source**
-2. Collez : `https://raw.githubusercontent.com/Leboxis/Orvian-IOS/main/repo.json`
+2. Collez : `https://raw.githubusercontent.com/Leboxis/Orvian-IOS/refs/heads/main/repo.json`
 3. Appuyez sur **Install** sur l'app Orvian — pas de téléchargement IPA manuel
 
 Lien direct (si votre version de LiveContainer le supporte) :
-`livecontainer://source?url=https%3A%2F%2Fraw.githubusercontent.com%2FLeboxis%2FOrvian-IOS%2Fmain%2Frepo.json`
+`livecontainer://source?url=https%3A%2F%2Fraw.githubusercontent.com%2FLeboxis%2FOrvian-IOS%2Frefs%2Fheads%2Fmain%2Frepo.json`
 
 ### 4. CI
 

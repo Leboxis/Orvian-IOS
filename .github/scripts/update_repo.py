@@ -10,9 +10,12 @@ import json
 import sys
 
 REPO = "Leboxis/Orvian-IOS"
-ICON = "https://raw.githubusercontent.com/Leboxis/Orvian-IOS/main/Orvian/Assets.xcassets/AppIcon.appiconset/icon-1024.png"
+ICON = "https://raw.githubusercontent.com/Leboxis/Orvian-IOS/refs/heads/main/Orvian/Assets.xcassets/AppIcon.appiconset/icon-1024.png"
 
-CHANGELOG = """v0.8.11
+CHANGELOG = """v0.8.12
+• Source LiveContainer : chemin Git explicite pour éviter une ancienne réponse mise en cache
+
+v0.8.11
 • Accueil : la racine démarre un niveau plus bas, sans retour vers l'ancien niveau
 • Uploads : correction du suivi, du nettoyage temporaire et des blocages du thread principal
 • Vidéo : démarrage de la lecture sans attendre le poster ni les tags
