@@ -1,6 +1,25 @@
 import SwiftUI
 import PhotosUI
 import UniformTypeIdentifiers
+import CoreTransferable
+
+/// Représentation fichier sur disque pour l'import Transferable PhotosUI
+private struct PickedPhotoFile: Transferable {
+    let url: URL
+
+    static var transferRepresentation: some TransferRepresentation {
+        FileRepresentation(contentType: .item) { picked in
+            SentTransferredFile(picked.url)
+        } importing: { received in
+            let tempDir = FileManager.default.temporaryDirectory.appendingPathComponent("Uploads", isDirectory: true)
+            try? FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+            let tempURL = tempDir.appendingPathComponent(UUID().uuidString + "_" + received.file.lastPathComponent)
+            try? FileManager.default.removeItem(at: tempURL)
+            try FileManager.default.copyItem(at: received.file, to: tempURL)
+            return PickedPhotoFile(url: tempURL)
+        }
+    }
+}
 
 /// Bouton « + » d'un dossier : créer un dossier, importer des fichiers
 /// ou importer des photos/vidéos (upload kDrive).
@@ -23,39 +42,40 @@ struct AddMenuButton: View {
     var body: some View {
         Menu {
             Button {
+                folderName = ""
                 showFolderAlert = true
             } label: {
-                Label("Créer un dossier", systemImage: "folder.badge.plus")
+                Label("Nouveau dossier", systemImage: "folder.badge.plus")
+            }
+            Button {
+                showPhotosPicker = true
+            } label: {
+                Label("Importer photos / vidéos", systemImage: "photo.on.rectangle.angled")
             }
             Button {
                 showDocumentPicker = true
             } label: {
                 Label("Importer des fichiers", systemImage: "doc.badge.plus")
             }
-            Button {
-                showPhotosPicker = true
-            } label: {
-                Label("Photos et vidéos", systemImage: "photo.badge.plus")
-            }
         } label: {
             Image(systemName: "plus")
-                .font(.system(size: 18, weight: .semibold))
+                .font(.headline.weight(.semibold))
                 .foregroundStyle(Color.accentColor)
-                .frame(width: 32, height: 32)
-                .contentShape(Rectangle())
         }
         .disabled(isBusy)
-        .accessibilityLabel("Ajouter")
-        .alert("Créer un dossier", isPresented: $showFolderAlert) {
+        .alert("Nouveau dossier", isPresented: $showFolderAlert) {
             TextField("Nom du dossier", text: $folderName)
-            Button("Créer") { Task { await createFolder() } }
+            Button("Créer") {
+                let name = folderName.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !name.isEmpty else { return }
+                Task { await createFolder(named: name) }
+            }
             Button("Annuler", role: .cancel) {}
         }
         .sheet(isPresented: $showDocumentPicker) {
-            DocumentPicker { urls in
+            DocumentPicker(types: [.item], allowsMultiple: true) { urls in
                 Task { await importFiles(urls) }
             }
-            .ignoresSafeArea()
         }
         .photosPicker(
             isPresented: $showPhotosPicker,
@@ -71,10 +91,7 @@ struct AddMenuButton: View {
 
     // MARK: - Actions
 
-    private func createFolder() async {
-        let name = folderName.trimmingCharacters(in: .whitespacesAndNewlines)
-        folderName = ""
-        guard !name.isEmpty else { return }
+    private func createFolder(named name: String) async {
         isBusy = true
         busyMessage = "Création du dossier…"
         do {
@@ -135,27 +152,17 @@ struct AddMenuButton: View {
             let contentType = item.supportedContentTypes.first ?? .data
             let ext = contentType.preferredFilenameExtension ?? "jpg"
             let name = "Import-\(Int(Date().timeIntervalSince1970))-\(index + 1).\(ext)"
-            let tempURL = tempDir.appendingPathComponent(name)
-            try? FileManager.default.removeItem(at: tempURL)
 
-            let success: Bool = await withCheckedContinuation { continuation in
-                _ = item.loadFileRepresentation(for: contentType) { sourceURL, error in
-                    guard let sourceURL, error == nil else {
-                        continuation.resume(returning: false)
-                        return
-                    }
-                    do {
-                        try FileManager.default.copyItem(at: sourceURL, to: tempURL)
-                        continuation.resume(returning: true)
-                    } catch {
-                        continuation.resume(returning: false)
-                    }
-                }
-            }
-
-            if success {
-                let size = (try? tempURL.resourceValues(forKeys: [.fileSizeKey]))?.fileSize ?? 0
-                payloads.append(UploadPayload(fileURL: tempURL, fileName: name, totalBytes: size, isTemporary: true))
+            if let picked = try? await item.loadTransferable(type: PickedPhotoFile.self) {
+                let size = (try? picked.url.resourceValues(forKeys: [.fileSizeKey]))?.fileSize ?? 0
+                payloads.append(UploadPayload(fileURL: picked.url, fileName: name, totalBytes: size, isTemporary: true))
+            } else if let data = try? await item.loadTransferable(type: Data.self) {
+                let tempURL = tempDir.appendingPathComponent(name)
+                try? FileManager.default.removeItem(at: tempURL)
+                do {
+                    try data.write(to: tempURL, options: .atomic)
+                    payloads.append(UploadPayload(fileURL: tempURL, fileName: name, totalBytes: data.count, isTemporary: true))
+                } catch {}
             }
         }
 
