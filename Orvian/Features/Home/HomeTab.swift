@@ -6,46 +6,54 @@ struct HomeTab: View {
     let router: ViewerRouter
     @Binding var path: [DriveFile]
 
-    /// Premier dossier de la racine (ex: « Mon lecteur »), mémorisé localement pour un accès immédiat.
+    /// Premier sous-dossier du dossier qui servait auparavant de racine.
+    /// Il devient la nouvelle racine de navigation : son parent n'est jamais
+    /// ajouté au NavigationStack et n'est donc pas accessible par retour.
     @State private var startDirectory: DriveFile?
+    private let service = KDriveService()
+
+    private var cacheKey: String { "home_start_dir_n_plus_1_\(driveId)" }
+    private var previousCacheKey: String { "home_start_dir_\(driveId)" }
 
     init(driveId: Int, router: ViewerRouter, path: Binding<[DriveFile]>) {
         self.driveId = driveId
         self.router = router
         self._path = path
 
-        if let data = UserDefaults.standard.data(forKey: "home_start_dir_\(driveId)"),
+        if let data = UserDefaults.standard.data(forKey: "home_start_dir_n_plus_1_\(driveId)"),
            let cached = try? JSONDecoder().decode(DriveFile.self, from: data) {
             _startDirectory = State(initialValue: cached)
         }
     }
 
-    private var activeRoot: DriveFile {
-        startDirectory ?? DriveFile.root(name: "Accueil")
+    @ViewBuilder
+    var body: some View {
+        if let startDirectory {
+            navigationRoot(startDirectory)
+        } else {
+            ProgressView("Ouverture de l’Accueil…")
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .task(id: driveId) {
+                    await resolveStartDirectory()
+                }
+        }
     }
 
-    var body: some View {
+    private func navigationRoot(_ root: DriveFile) -> some View {
         NavigationStack(path: $path) {
             DirectoryView(
-                directory: activeRoot,
+                directory: root,
                 driveId: driveId,
-                crumbs: [activeRoot.name],
+                crumbs: [root.name],
                 router: router,
                 showsSearchBar: true,
                 onOpenFolder: { folder in
                     path.append(folder)
-                },
-                onFirstFolderDiscovered: { firstFolder in
-                    guard startDirectory == nil else { return }
-                    startDirectory = firstFolder
-                    if let data = try? JSONEncoder().encode(firstFolder) {
-                        UserDefaults.standard.set(data, forKey: "home_start_dir_\(driveId)")
-                    }
                 }
             )
             .navigationDestination(for: DriveFile.self) { directory in
                 let index = path.firstIndex(where: { $0.id == directory.id })
-                let crumbs = [activeRoot.name] + (index.map { Array(path[...$0].map(\.name)) } ?? [directory.name])
+                let crumbs = [root.name] + (index.map { Array(path[...$0].map(\.name)) } ?? [directory.name])
                 DirectoryView(
                     directory: directory,
                     driveId: driveId,
@@ -57,6 +65,44 @@ struct HomeTab: View {
                     }
                 )
             }
+        }
+    }
+
+    /// Résout une seule fois le niveau n+1. L'ancien cache fournit le niveau
+    /// qui servait jusque-là de racine, ce qui évite une requête supplémentaire
+    /// lors de la migration. Sans ancien cache, la racine du drive est d'abord
+    /// parcourue pour retrouver ce même niveau.
+    private func resolveStartDirectory() async {
+        let defaults = UserDefaults.standard
+        var currentRoot: DriveFile?
+
+        if let data = defaults.data(forKey: previousCacheKey),
+           let cached = try? JSONDecoder().decode(DriveFile.self, from: data) {
+            currentRoot = cached
+        }
+
+        if currentRoot == nil,
+           let page = try? await service.page(.directory(1), driveId: driveId, cursor: nil) {
+            currentRoot = page.data?.first(where: \.isDirectory)
+        }
+
+        guard !Task.isCancelled else { return }
+        guard let currentRoot else {
+            startDirectory = DriveFile.root(name: "Accueil")
+            return
+        }
+
+        let page = try? await service.page(.directory(currentRoot.id), driveId: driveId, cursor: nil)
+        guard !Task.isCancelled else { return }
+
+        // Si aucun sous-dossier n'existe ou si le réseau échoue, conserver le
+        // dossier actuel évite de rendre l'Accueil inutilisable.
+        let resolved = page?.data?.first(where: \.isDirectory) ?? currentRoot
+        path.removeAll()
+        startDirectory = resolved
+
+        if let data = try? JSONEncoder().encode(resolved) {
+            defaults.set(data, forKey: cacheKey)
         }
     }
 }
@@ -103,7 +149,6 @@ struct DirectoryView: View {
 
     private let router: ViewerRouter
     private let onOpenFolder: (DriveFile) -> Void
-    private let onFirstFolderDiscovered: ((DriveFile) -> Void)?
 
     init(
         directory: DriveFile,
@@ -111,8 +156,7 @@ struct DirectoryView: View {
         crumbs: [String],
         router: ViewerRouter,
         showsSearchBar: Bool = false,
-        onOpenFolder: @escaping (DriveFile) -> Void,
-        onFirstFolderDiscovered: ((DriveFile) -> Void)? = nil
+        onOpenFolder: @escaping (DriveFile) -> Void
     ) {
         self.directory = directory
         self.driveId = driveId
@@ -120,7 +164,6 @@ struct DirectoryView: View {
         self.router = router
         self.showsSearchBar = showsSearchBar
         self.onOpenFolder = onOpenFolder
-        self.onFirstFolderDiscovered = onFirstFolderDiscovered
         _viewModel = State(initialValue: FileGridViewModel(source: .directory(directory.id), driveId: driveId))
     }
 
@@ -147,11 +190,6 @@ struct DirectoryView: View {
             onScrolledPastTop: showsSearchBar ? { scrolledPastTop = $0 } : nil,
             allowsPullToRefresh: !showsSearchBar
         )
-        .onChange(of: activeViewModel.items) { _, items in
-            if directory.id == 1, let firstFolder = items.first(where: \.isDirectory) {
-                onFirstFolderDiscovered?(firstFolder)
-            }
-        }
         .navigationTitle(crumbs.last ?? directory.name)
         .navigationBarTitleDisplayMode(.inline)
         .safeAreaInset(edge: .top, spacing: 0) {
@@ -328,4 +366,3 @@ struct DirectoryView: View {
         .accessibilityLabel("Chemin : " + crumbs.joined(separator: ", ") + ", \(activeViewModel.items.count) éléments")
     }
 }
-

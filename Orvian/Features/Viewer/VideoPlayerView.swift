@@ -429,18 +429,11 @@ struct VideoPlayerView: View {
 
     private func load() async {
         async let posterTask: UIImage? = ThumbnailProvider.shared.thumbnail(driveId: driveId, fileId: file.id, pixels: 400)
-        async let urlTask: URL? = MediaURLCache.shared.url(driveId: driveId, fileId: file.id)
         async let categoriesTask: [Category]? = try? service.categories(driveId: driveId)
 
-        let (loadedPoster, url, loadedCategories) = await (posterTask, urlTask, categoriesTask)
-        guard !isDisappeared, !Task.isCancelled else { return }
-
-        if let loadedPoster {
-            withAnimation { poster = loadedPoster }
-        }
-        if let loadedCategories, !loadedCategories.isEmpty {
-            categories = loadedCategories
-        }
+        // Seule l'URL est nécessaire au démarrage. Le poster et les tags ne
+        // doivent jamais retarder la création du player.
+        let url = await MediaURLCache.shared.url(driveId: driveId, fileId: file.id)
         guard let url, !isDisappeared, !Task.isCancelled else { return }
 
         let newPlayer = AVPlayer(url: url)
@@ -458,6 +451,15 @@ struct VideoPlayerView: View {
         addObservers(to: newPlayer)
         newPlayer.playImmediately(atRate: playbackRate)
         isPlaying = true
+
+        let (loadedPoster, loadedCategories) = await (posterTask, categoriesTask)
+        guard !isDisappeared, !Task.isCancelled else { return }
+        if let loadedPoster {
+            poster = loadedPoster
+        }
+        if let loadedCategories, !loadedCategories.isEmpty {
+            categories = loadedCategories
+        }
     }
 
     private func addObservers(to player: AVPlayer) {
