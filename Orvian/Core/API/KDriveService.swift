@@ -221,4 +221,15 @@ struct KDriveService {
         let body = try JSONEncoder().encode(["name": name])
         try await api.post(.rename(driveId: driveId, fileId: fileId), body: body, contentType: "application/json")
     }
+
+    /// Déplace un fichier ou dossier. En cas de doublon, l'API crée un nom
+    /// disponible plutôt que de bloquer l'action choisie par l'utilisateur.
+    func move(driveId: Int, fileId: Int, destinationDirectoryId: Int) async throws {
+        let body = try JSONEncoder().encode(["conflict": "rename"])
+        try await api.post(
+            .move(driveId: driveId, fileId: fileId, destinationDirectoryId: destinationDirectoryId),
+            body: body,
+            contentType: "application/json"
+        )
+    }
 }
