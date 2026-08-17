@@ -24,6 +24,7 @@ struct TagsView: View {
 
     @State private var tagToDelete: Category?
     @State private var showDeleteConfirm = false
+    @State private var actionErrorMessage: String?
 
     private let service = KDriveService()
 
@@ -90,8 +91,12 @@ struct TagsView: View {
                 let trimmed = renameText.trimmingCharacters(in: .whitespacesAndNewlines)
                 if let tag = tagToRename, !trimmed.isEmpty {
                     Task {
-                        try? await service.updateCategory(driveId: driveId, categoryId: tag.id, name: trimmed, color: tag.color)
-                        await load(force: true)
+                        do {
+                            try await service.updateCategory(driveId: driveId, categoryId: tag.id, name: trimmed, color: tag.color)
+                            await load(force: true)
+                        } catch {
+                            actionErrorMessage = "Renommage impossible : \((error as? APIError)?.errorDescription ?? error.localizedDescription)"
+                        }
                     }
                 }
             }
@@ -105,13 +110,22 @@ struct TagsView: View {
             Button("Supprimer", role: .destructive) {
                 if let tag = tagToDelete {
                     Task {
-                        try? await service.deleteCategory(driveId: driveId, categoryId: tag.id)
-                        await load(force: true)
+                        do {
+                            try await service.deleteCategory(driveId: driveId, categoryId: tag.id)
+                            await load(force: true)
+                        } catch {
+                            actionErrorMessage = "Suppression impossible : \((error as? APIError)?.errorDescription ?? error.localizedDescription)"
+                        }
                     }
                 }
             }
         } message: {
             Text("Le tag sera retiré de tous les fichiers associés.")
+        }
+        .alert("Action impossible", isPresented: actionErrorBinding) {
+            Button("OK", role: .cancel) { actionErrorMessage = nil }
+        } message: {
+            Text(actionErrorMessage ?? "Une erreur inattendue est survenue.")
         }
     }
 
@@ -272,6 +286,13 @@ struct TagsView: View {
     private func loadIfNeeded() async {
         guard categories.isEmpty, !isLoading else { return }
         await load(force: false)
+    }
+
+    private var actionErrorBinding: Binding<Bool> {
+        Binding(
+            get: { actionErrorMessage != nil },
+            set: { if !$0 { actionErrorMessage = nil } }
+        )
     }
 
     private func load(force: Bool) async {
