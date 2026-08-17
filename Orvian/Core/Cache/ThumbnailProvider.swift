@@ -74,8 +74,9 @@ actor ThumbnailProvider {
     private var inFlight: [Key: Task<UIImage?, Never>] = [:]
 
     private var pendingPrefetchKeys: [Key] = []
+    private var pendingPrefetchIsTrashed = false
     private var prefetchTask: Task<Void, Never>?
-    private let maxPendingPrefetch = 24
+    private let maxPendingPrefetch = 6
 
     private struct Key: Hashable {
         let driveId: Int
@@ -130,21 +131,23 @@ actor ThumbnailProvider {
 
     /// Préchargement discret avec régulation de concurrence et abandon des requêtes lointaines.
     func prefetch(driveId: Int, fileIds: [Int], pixels: Int = DS.thumbnailPixels, isTrashed: Bool = false) {
+        var newestKeys: [Key] = []
         for fileId in fileIds {
             let key = Key(driveId: driveId, fileId: fileId, pixels: pixels)
             guard inFlight[key] == nil,
                   Self.memory.object(forKey: key.nsString) == nil,
                   !disk.hasEntry(driveId: driveId, fileId: fileId, pixels: pixels)
             else { continue }
-            if !pendingPrefetchKeys.contains(key) {
-                pendingPrefetchKeys.append(key)
+            if !newestKeys.contains(key) {
+                newestKeys.append(key)
             }
         }
 
-        // Lors d'un scroll rapide, limiter la file aux 24 requêtes les plus récentes
-        if pendingPrefetchKeys.count > maxPendingPrefetch {
-            pendingPrefetchKeys = Array(pendingPrefetchKeys.suffix(maxPendingPrefetch))
-        }
+        // La dernière position visible remplace les anciennes demandes encore
+        // en attente. Le téléchargement déjà commencé peut finir, mais aucune
+        // longue file de miniatures hors écran ne subsiste.
+        pendingPrefetchKeys = Array(newestKeys.prefix(maxPendingPrefetch))
+        pendingPrefetchIsTrashed = isTrashed
 
         schedulePrefetchWorker(isTrashed: isTrashed)
     }
@@ -168,7 +171,7 @@ actor ThumbnailProvider {
     private func clearPrefetchTask() {
         prefetchTask = nil
         if !pendingPrefetchKeys.isEmpty {
-            schedulePrefetchWorker(isTrashed: false)
+            schedulePrefetchWorker(isTrashed: pendingPrefetchIsTrashed)
         }
     }
 

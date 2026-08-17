@@ -14,6 +14,9 @@ struct FileCardView: View {
     var isTrashed = false
     /// État de la coche en mode sélection.
     var isSelected = false
+    /// L'étoile est redondante dans l'onglet Favoris, où chaque carte est déjà
+    /// un favori. Les autres grilles la conservent comme action rapide.
+    var showsFavoriteBadge = true
     var onToggleSelection: (() -> Void)?
     var onToggleFavorite: (() -> Void)?
     var onDelete: (() -> Void)?
@@ -48,12 +51,11 @@ struct FileCardView: View {
                     .overlay(alignment: .topTrailing) {
                         if selectionMode {
                             selectionBadge
-                        } else {
+                        } else if showsFavoriteBadge {
                             favoriteBadge
                         }
                     }
                     .overlay(alignment: .center) { playBadge }
-                    .shadow(color: .black.opacity(0.06), radius: 4, x: 0, y: 2)
 
                 Text(file.name)
                     .font(.footnote)
@@ -230,10 +232,7 @@ struct FileCardView: View {
                     .font(.system(size: 11, weight: .semibold))
                     .foregroundStyle(.yellow)
                     .padding(5)
-                    .background(.ultraThinMaterial, in: Circle())
-                    .overlay {
-                        Circle().strokeBorder(.black.opacity(0.06), lineWidth: 0.5)
-                    }
+                    .background(.black.opacity(0.48), in: Circle())
             }
             .buttonStyle(.plain)
             .accessibilityLabel("Retirer des favoris")
@@ -259,11 +258,10 @@ struct FileCardView: View {
                 .font(.system(size: 15, weight: .bold))
                 .foregroundStyle(.white)
                 .padding(10)
-                .background(.ultraThinMaterial, in: Circle())
+                .background(.black.opacity(0.48), in: Circle())
                 .overlay {
                     Circle().strokeBorder(.white.opacity(0.35), lineWidth: 0.8)
                 }
-                .shadow(color: .black.opacity(0.25), radius: 4, y: 1)
         }
     }
 

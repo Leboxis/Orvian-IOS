@@ -40,6 +40,7 @@ struct FileGridView: View {
 
     private let mediaMetadata = MediaMetadataStore.shared
     @State private var metadataRevision = 0
+    @State private var prefetchTask: Task<Void, Never>?
 
     private var needsVideoMetadata: Bool {
         filters.sort == .duration || filters.orientation != nil
@@ -64,6 +65,10 @@ struct FileGridView: View {
                 if needsVideoMetadata {
                     metadataRevision = newRev
                 }
+            }
+            .onDisappear {
+                prefetchTask?.cancel()
+                prefetchTask = nil
             }
     }
 
@@ -252,6 +257,7 @@ struct FileGridView: View {
             selectionMode: selectionMode,
             isTrashed: viewModel.source == .trash,
             isSelected: selectedIDs.contains(file.id),
+            showsFavoriteBadge: viewModel.source != .favorites,
             onToggleSelection: onToggleSelection == nil ? nil : { onToggleSelection?(file) },
             onToggleFavorite: {
                 Task { await viewModel.toggleFavorite(file) }
@@ -277,24 +283,41 @@ struct FileGridView: View {
         }
     }
 
-    /// Apparition d'une carte : pagination + préchargement régulé des suivantes.
+    /// Apparition d'une carte : pagination immédiate, puis préchargement d'une
+    /// seule rangée après une courte accalmie. Un scroll rapide annule ainsi le
+    /// travail prévu pour les cartes déjà dépassées.
     private func appeared(file: DriveFile, index: Int, in siblings: [DriveFile]) {
         if index >= siblings.count - 6 {
             Task { await viewModel.loadMoreIfNeeded() }
         }
-        // Préchargement par lot toutes les 3 cellules pour ne pas saturer la file async au scroll rapide
-        guard index % 3 == 0 else { return }
-        let ahead = siblings.dropFirst(index + 1).prefix(6)
+
+        let ahead = siblings.dropFirst(index + 1).prefix(3)
         let thumbnailIds = ahead.filter { $0.fileKind.supportsThumbnail }.map(\.id)
-        if !thumbnailIds.isEmpty {
-            Task { await ThumbnailProvider.shared.prefetch(driveId: viewModel.driveId, fileIds: Array(thumbnailIds), isTrashed: viewModel.source == .trash) }
-        }
-        // URLs temporaires des vidéos à venir : lecture quasi immédiate au tap.
-        // Inutile pour la corbeille (les fichiers y sont inaccessibles).
-        guard viewModel.source != .trash else { return }
-        let videoIds = ahead.filter { $0.isVideo }.map(\.id)
-        if !videoIds.isEmpty {
-            Task { await MediaURLCache.shared.prefetch(driveId: viewModel.driveId, fileIds: videoIds) }
+        let videoIds = viewModel.source == .trash
+            ? []
+            : Array(ahead.lazy.filter(\.isVideo).prefix(2).map(\.id))
+        let driveId = viewModel.driveId
+        let isTrashed = viewModel.source == .trash
+
+        prefetchTask?.cancel()
+        prefetchTask = Task {
+            do {
+                try await Task.sleep(for: .milliseconds(180))
+            } catch {
+                return
+            }
+            guard !Task.isCancelled else { return }
+
+            if !thumbnailIds.isEmpty {
+                await ThumbnailProvider.shared.prefetch(
+                    driveId: driveId,
+                    fileIds: Array(thumbnailIds),
+                    isTrashed: isTrashed
+                )
+            }
+            if !videoIds.isEmpty {
+                await MediaURLCache.shared.prefetch(driveId: driveId, fileIds: videoIds)
+            }
         }
     }
 

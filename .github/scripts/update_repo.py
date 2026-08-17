@@ -12,7 +12,11 @@ import sys
 REPO = "Leboxis/Orvian-IOS"
 ICON = "https://raw.githubusercontent.com/Leboxis/Orvian-IOS/refs/heads/main/Orvian/Assets.xcassets/AppIcon.appiconset/icon-1024.png"
 
-CHANGELOG = """v0.8.13
+CHANGELOG = """v0.8.14
+• Favoris : cartes sans étoile redondante et effets graphiques allégés
+• Défilement : préchargement des miniatures et URL vidéo régulé selon la position visible
+
+v0.8.13
 • Accueil : racine remontée d'un niveau tout en bloquant le retour au niveau supérieur
 
 v0.8.12
