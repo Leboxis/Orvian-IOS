@@ -74,7 +74,10 @@ struct AddMenuButton: View {
         }
         .sheet(isPresented: $showDocumentPicker) {
             DocumentPicker { urls in
-                Task { await importFiles(urls) }
+                guard !urls.isEmpty else { return }
+                UploadManager.shared.enqueueDocuments(driveId: driveId, directoryId: directoryId, urls: urls) {
+                    onDone()
+                }
             }
         }
         .photosPicker(
@@ -85,7 +88,11 @@ struct AddMenuButton: View {
         )
         .onChange(of: photoItems) { _, items in
             guard !items.isEmpty else { return }
-            Task { await importPhotos(items) }
+            let picked = items
+            photoItems = []
+            UploadManager.shared.enqueuePhotos(driveId: driveId, directoryId: directoryId, items: picked) {
+                onDone()
+            }
         }
     }
 
@@ -103,88 +110,7 @@ struct AddMenuButton: View {
         onDone()
     }
 
-    /// Import d'un ou plusieurs fichiers choisis dans le document picker
-    /// (gestion des URLs security-scoped avec copie locale vers dossier temporaire sans chargement RAM).
-    private func importFiles(_ urls: [URL]) async {
-        isBusy = true
-        busyMessage = "Préparation des fichiers…"
-        var payloads: [UploadPayload] = []
-
-        let tempDir = FileManager.default.temporaryDirectory.appendingPathComponent("Uploads", isDirectory: true)
-        try? FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
-
-        for url in urls {
-            let accessing = url.startAccessingSecurityScopedResource()
-            defer {
-                if accessing {
-                    url.stopAccessingSecurityScopedResource()
-                }
-            }
-
-            let tempURL = tempDir.appendingPathComponent(UUID().uuidString + "_" + url.lastPathComponent)
-            try? FileManager.default.removeItem(at: tempURL)
-            do {
-                try FileManager.default.copyItem(at: url, to: tempURL)
-                let size = (try? tempURL.resourceValues(forKeys: [.fileSizeKey]))?.fileSize ?? 0
-                payloads.append(UploadPayload(fileURL: tempURL, fileName: url.lastPathComponent, totalBytes: size, isTemporary: true))
-            } catch {
-                // Erreur de copie ignorée pour ce fichier individuel
-            }
-        }
-
-        isBusy = false
-        guard !payloads.isEmpty else { return }
-        UploadManager.shared.enqueue(driveId: driveId, directoryId: directoryId, files: payloads) {
-            onDone()
-        }
-    }
-
-    private func importPhotos(_ items: [PhotosPickerItem]) async {
-        photoItems = []
-        isBusy = true
-        busyMessage = "Préparation des médias…"
-        var payloads: [UploadPayload] = []
-
-        let tempDir = FileManager.default.temporaryDirectory.appendingPathComponent("Uploads", isDirectory: true)
-        try? FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
-
-        for (index, item) in items.enumerated() {
-            let contentType = item.supportedContentTypes.first ?? .data
-            let ext = contentType.preferredFilenameExtension ?? "jpg"
-            let name = "Import-\(Int(Date().timeIntervalSince1970))-\(index + 1).\(ext)"
-
-            if let picked = try? await item.loadTransferable(type: PickedPhotoFile.self) {
-                let size = (try? picked.url.resourceValues(forKeys: [.fileSizeKey]))?.fileSize ?? 0
-                payloads.append(UploadPayload(fileURL: picked.url, fileName: name, totalBytes: size, isTemporary: true))
-            } else if let data = try? await item.loadTransferable(type: Data.self) {
-                let tempURL = tempDir.appendingPathComponent(name)
-                try? FileManager.default.removeItem(at: tempURL)
-                do {
-                    try data.write(to: tempURL, options: .atomic)
-                    payloads.append(UploadPayload(fileURL: tempURL, fileName: name, totalBytes: data.count, isTemporary: true))
-                } catch {}
-            }
-        }
-
-        isBusy = false
-        guard !payloads.isEmpty else { return }
-        UploadManager.shared.enqueue(driveId: driveId, directoryId: directoryId, files: payloads) {
-            onDone()
-        }
-    }
-
     // MARK: - Helpers
-
-    private func upload(data: Data, fileName: String) async throws {
-        let mimeType = UTType(filenameExtension: (fileName as NSString).pathExtension)?.preferredMIMEType
-            ?? "application/octet-stream"
-        try await service.upload(driveId: driveId, directoryId: directoryId, data: data, fileName: fileName, mimeType: mimeType)
-    }
-
-    private func fileName(for item: PhotosPickerItem) -> String {
-        let ext = item.supportedContentTypes.first?.preferredFilenameExtension ?? "jpg"
-        return "Import-\(Int(Date().timeIntervalSince1970)).\(ext)"
-    }
 
     private func message(for error: Error) -> String {
         (error as? APIError)?.errorDescription ?? error.localizedDescription

@@ -6,21 +6,46 @@ struct HomeTab: View {
     let router: ViewerRouter
     @Binding var path: [DriveFile]
 
+    /// Premier dossier de la racine (ex: « Mon lecteur »), mémorisé localement pour un accès immédiat.
+    @State private var startDirectory: DriveFile?
+
+    init(driveId: Int, router: ViewerRouter, path: Binding<[DriveFile]>) {
+        self.driveId = driveId
+        self.router = router
+        self._path = path
+
+        if let data = UserDefaults.standard.data(forKey: "home_start_dir_\(driveId)"),
+           let cached = try? JSONDecoder().decode(DriveFile.self, from: data) {
+            _startDirectory = State(initialValue: cached)
+        }
+    }
+
+    private var activeRoot: DriveFile {
+        startDirectory ?? DriveFile.root(name: "Accueil")
+    }
+
     var body: some View {
         NavigationStack(path: $path) {
             DirectoryView(
-                directory: DriveFile.root(name: "Accueil"),
+                directory: activeRoot,
                 driveId: driveId,
-                crumbs: ["Accueil"],
+                crumbs: [activeRoot.name],
                 router: router,
                 showsSearchBar: true,
                 onOpenFolder: { folder in
                     path.append(folder)
+                },
+                onFirstFolderDiscovered: { firstFolder in
+                    guard startDirectory == nil else { return }
+                    startDirectory = firstFolder
+                    if let data = try? JSONEncoder().encode(firstFolder) {
+                        UserDefaults.standard.set(data, forKey: "home_start_dir_\(driveId)")
+                    }
                 }
             )
             .navigationDestination(for: DriveFile.self) { directory in
                 let index = path.firstIndex(where: { $0.id == directory.id })
-                let crumbs = ["Accueil"] + (index.map { Array(path[...$0].map(\.name)) } ?? [directory.name])
+                let crumbs = [activeRoot.name] + (index.map { Array(path[...$0].map(\.name)) } ?? [directory.name])
                 DirectoryView(
                     directory: directory,
                     driveId: driveId,
@@ -78,6 +103,7 @@ struct DirectoryView: View {
 
     private let router: ViewerRouter
     private let onOpenFolder: (DriveFile) -> Void
+    private let onFirstFolderDiscovered: ((DriveFile) -> Void)?
 
     init(
         directory: DriveFile,
@@ -85,7 +111,8 @@ struct DirectoryView: View {
         crumbs: [String],
         router: ViewerRouter,
         showsSearchBar: Bool = false,
-        onOpenFolder: @escaping (DriveFile) -> Void
+        onOpenFolder: @escaping (DriveFile) -> Void,
+        onFirstFolderDiscovered: ((DriveFile) -> Void)? = nil
     ) {
         self.directory = directory
         self.driveId = driveId
@@ -93,6 +120,7 @@ struct DirectoryView: View {
         self.router = router
         self.showsSearchBar = showsSearchBar
         self.onOpenFolder = onOpenFolder
+        self.onFirstFolderDiscovered = onFirstFolderDiscovered
         _viewModel = State(initialValue: FileGridViewModel(source: .directory(directory.id), driveId: driveId))
     }
 
@@ -119,6 +147,11 @@ struct DirectoryView: View {
             onScrolledPastTop: showsSearchBar ? { scrolledPastTop = $0 } : nil,
             allowsPullToRefresh: !showsSearchBar
         )
+        .onChange(of: activeViewModel.items) { _, items in
+            if directory.id == 1, let firstFolder = items.first(where: \.isDirectory) {
+                onFirstFolderDiscovered?(firstFolder)
+            }
+        }
         .navigationTitle(crumbs.last ?? directory.name)
         .navigationBarTitleDisplayMode(.inline)
         .safeAreaInset(edge: .top, spacing: 0) {
