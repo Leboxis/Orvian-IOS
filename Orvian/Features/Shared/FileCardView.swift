@@ -21,6 +21,7 @@ struct FileCardView: View {
     var onToggleFavorite: (() -> Void)?
     var onDelete: (() -> Void)?
     var onRename: ((String) -> Void)?
+    var onMove: ((Int) -> Void)?
     var action: () -> Void
 
     @State private var thumbnail: UIImage?
@@ -28,6 +29,7 @@ struct FileCardView: View {
     @State private var showDetail = false
     @State private var showDeleteConfirm = false
     @State private var showRenameAlert = false
+    @State private var showMovePicker = false
     @State private var renameText = ""
 
     private var kind: FileKind { file.fileKind }
@@ -110,6 +112,13 @@ struct FileCardView: View {
                             Label("Renommer", systemImage: "pencil")
                         }
                     }
+                    if onMove != nil {
+                        Button {
+                            showMovePicker = true
+                        } label: {
+                            Label("Déplacer", systemImage: "folder")
+                        }
+                    }
                     if onDelete != nil {
                         Button(role: .destructive) {
                             showDeleteConfirm = true
@@ -130,6 +139,11 @@ struct FileCardView: View {
                 onDelete: onDelete,
                 onRename: onRename
             )
+        }
+        .sheet(isPresented: $showMovePicker) {
+            MoveDestinationPicker(file: file, driveId: driveId) { destinationDirectoryId in
+                onMove?(destinationDirectoryId)
+            }
         }
         .alert("Supprimer", isPresented: $showDeleteConfirm) {
             Button("Supprimer", role: .destructive) { onDelete?() }
@@ -309,6 +323,7 @@ struct FileDetailSheet: View {
     @State private var showDeleteConfirm = false
     @State private var showRenameAlert = false
     @State private var renameText = ""
+    @State private var categoryErrorMessage: String?
 
     private let service = KDriveService()
 
@@ -365,6 +380,11 @@ struct FileDetailSheet: View {
                 Button("Annuler", role: .cancel) { renameText = "" }
             } message: {
                 Text("Ancien nom : \(file.name)")
+            }
+            .alert("Modification du tag impossible", isPresented: categoryErrorBinding) {
+                Button("OK", role: .cancel) { categoryErrorMessage = nil }
+            } message: {
+                Text(categoryErrorMessage ?? "Une erreur inattendue est survenue.")
             }
             .task { await loadCategories() }
         }
@@ -566,7 +586,15 @@ struct FileDetailSheet: View {
             } else {
                 appliedCategoryIds.insert(category.id)
             }
+            categoryErrorMessage = (error as? APIError)?.errorDescription ?? error.localizedDescription
         }
+    }
+
+    private var categoryErrorBinding: Binding<Bool> {
+        Binding(
+            get: { categoryErrorMessage != nil },
+            set: { if !$0 { categoryErrorMessage = nil } }
+        )
     }
 }
 
