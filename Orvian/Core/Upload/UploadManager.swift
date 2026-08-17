@@ -119,11 +119,19 @@ struct UploadPayload: Sendable {
 final class UploadManager {
     static let shared = UploadManager()
 
+    private struct RetryContext {
+        let driveId: Int
+        let directoryId: Int
+        let payload: UploadPayload
+    }
+
     var tasks: [UploadTaskItem] = []
     var isPillVisible: Bool = false
 
     private let service = KDriveService()
     private var hidePillTask: Task<Void, Never>?
+    private var retryContexts: [UUID: RetryContext] = [:]
+    private let maximumUploadAttempts = 3
 
     private init() {}
 
@@ -311,28 +319,86 @@ final class UploadManager {
         let mimeType = UTType(filenameExtension: (payload.fileName as NSString).pathExtension)?.preferredMIMEType
             ?? "application/octet-stream"
 
-        do {
-            tasks[index].status = .inProgress(progress: 0.5)
-            try await service.uploadFile(
-                driveId: driveId,
-                directoryId: directoryId,
-                fileURL: payload.fileURL,
-                fileName: payload.fileName,
-                totalSize: payload.totalBytes,
-                mimeType: mimeType
-            )
-            tasks[index].status = .completed
-        } catch {
-            let desc = (error as? APIError)?.errorDescription ?? error.localizedDescription
-            tasks[index].status = .failed(message: desc)
-        }
+        for attempt in 1...maximumUploadAttempts {
+            guard !Task.isCancelled else {
+                retryContexts[taskId] = RetryContext(driveId: driveId, directoryId: directoryId, payload: payload)
+                tasks[index].status = .failed(message: "Téléversement interrompu")
+                return
+            }
 
-        if payload.isTemporary {
-            await UploadFileIO.removeTemporaryFile(payload.fileURL)
+            do {
+                tasks[index].status = .inProgress(progress: attempt == 1 ? 0.5 : 0.35)
+                try await service.uploadFile(
+                    driveId: driveId,
+                    directoryId: directoryId,
+                    fileURL: payload.fileURL,
+                    fileName: payload.fileName,
+                    totalSize: payload.totalBytes,
+                    mimeType: mimeType
+                )
+                tasks[index].status = .completed
+                retryContexts[taskId] = nil
+                if payload.isTemporary {
+                    await UploadFileIO.removeTemporaryFile(payload.fileURL)
+                }
+                return
+            } catch {
+                let apiError = error as? APIError
+                let mayRetry = apiError?.isRetryable == true && attempt < maximumUploadAttempts
+                guard mayRetry else {
+                    let desc = apiError?.errorDescription ?? error.localizedDescription
+                    retryContexts[taskId] = RetryContext(driveId: driveId, directoryId: directoryId, payload: payload)
+                    tasks[index].status = .failed(message: desc)
+                    return
+                }
+
+                // Reprise progressive : 1 s puis 2 s, sans bloquer l'UI.
+                tasks[index].status = .inProgress(progress: 0.25)
+                do {
+                    try await Task.sleep(for: .seconds(attempt))
+                } catch {
+                    retryContexts[taskId] = RetryContext(driveId: driveId, directoryId: directoryId, payload: payload)
+                    tasks[index].status = .failed(message: "Téléversement interrompu")
+                    return
+                }
+            }
+        }
+    }
+
+    /// Rejoue un transfert en échec depuis son fichier temporaire. Les médias
+    /// ne sont donc pas redemandés à Photos ou au sélecteur de documents.
+    func retry(taskId: UUID) {
+        guard let context = retryContexts[taskId],
+              let index = tasks.firstIndex(where: { $0.id == taskId }) else { return }
+        hidePillTask?.cancel()
+        isPillVisible = true
+        tasks[index].status = .queued
+        Task {
+            await uploadSingleFile(
+                taskId: taskId,
+                driveId: context.driveId,
+                directoryId: context.directoryId,
+                payload: context.payload
+            )
+            schedulePillAutoDismiss()
         }
     }
 
     func clearCompleted() {
+        let completedIds = tasks.compactMap { task -> UUID? in
+            switch task.status {
+            case .completed, .failed: return task.id
+            case .queued, .inProgress: return nil
+            }
+        }
+        let temporaryURLs = completedIds.compactMap { id -> URL? in
+            guard let context = retryContexts[id], context.payload.isTemporary else { return nil }
+            return context.payload.fileURL
+        }
+        for url in temporaryURLs {
+            Task { await UploadFileIO.removeTemporaryFile(url) }
+        }
+        completedIds.forEach { retryContexts[$0] = nil }
         tasks.removeAll {
             switch $0.status {
             case .completed, .failed: return true
