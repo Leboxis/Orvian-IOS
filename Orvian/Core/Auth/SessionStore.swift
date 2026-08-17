@@ -16,6 +16,9 @@ final class SessionStore {
     private(set) var drives: [Drive] = []
     private(set) var accountId: Int?
     private(set) var selectedDrive: Drive?
+    /// Le token est utilisable mais n'a pas pu être écrit dans le Keychain.
+    /// Dans ce cas il est volontairement perdu à la fermeture de l'app.
+    private(set) var tokenIsSessionOnly = false
 
     var onUnauthorized: (() -> Void)?
 
@@ -57,7 +60,7 @@ final class SessionStore {
 
     /// Connexion avec un token collé par l'utilisateur.
     func signIn(token: String) async throws {
-        TokenStore.save(token)
+        tokenIsSessionOnly = !TokenStore.save(token)
         phase = .bootstrapping
         do {
             try await loadDrives(preferredDriveId: nil)
@@ -67,6 +70,7 @@ final class SessionStore {
             phase = .signedIn
         } catch {
             TokenStore.clear()
+            tokenIsSessionOnly = false
             phase = .signedOut
             throw error
         }
@@ -79,6 +83,7 @@ final class SessionStore {
         drives = []
         selectedDrive = nil
         accountId = nil
+        tokenIsSessionOnly = false
         phase = .signedOut
     }
 
