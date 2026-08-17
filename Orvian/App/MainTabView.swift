@@ -14,6 +14,7 @@ struct MainTabView: View {
     @State private var router: ViewerRouter
     @State private var navState = TabNavigationState()
     @State private var showUploadSheet = false
+    @State private var showTokenStorageWarning = false
 
     private let uploadManager = UploadManager.shared
 
@@ -52,6 +53,9 @@ struct MainTabView: View {
                 loadedTabs.insert(newTab)
             }
         }
+        .onAppear {
+            showTokenStorageWarning = session.tokenIsSessionOnly
+        }
         .sheet(isPresented: $showUploadSheet) {
             UploadProgressSheet(manager: uploadManager)
         }
@@ -60,6 +64,11 @@ struct MainTabView: View {
         }
         .fullScreenCover(item: $router.videoFile) { file in
             VideoPlayerView(file: file, driveId: drive.id)
+        }
+        .alert("Token conservé pour cette session", isPresented: $showTokenStorageWarning) {
+            Button("Compris", role: .cancel) {}
+        } message: {
+            Text("Le Keychain n'est pas disponible dans cet environnement. Pour protéger votre compte, le token ne sera pas conservé après la fermeture d'Orvian.")
         }
     }
 
