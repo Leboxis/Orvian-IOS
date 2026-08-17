@@ -35,4 +35,24 @@ enum APIError: LocalizedError {
         if case let .http(status, _, _) = self { return status == 401 }
         return false
     }
+
+    /// Erreurs pour lesquelles une nouvelle tentative est raisonnable sans
+    /// demander une action utilisateur (réseau temporaire, limite ou serveur).
+    var isRetryable: Bool {
+        switch self {
+        case let .http(status, _, _):
+            return status == 408 || status == 429 || (500..<600).contains(status)
+        case let .network(error):
+            guard let urlError = error as? URLError else { return false }
+            switch urlError.code {
+            case .notConnectedToInternet, .networkConnectionLost, .timedOut,
+                    .cannotConnectToHost, .cannotFindHost, .dnsLookupFailed:
+                return true
+            default:
+                return false
+            }
+        default:
+            return false
+        }
+    }
 }
