@@ -12,15 +12,15 @@
       "bundleIdentifier": "com.orvian.app",
       "developerName": "Leboxis",
       "subtitle": "Client kDrive non officiel",
-      "version": "0.8.9",
+      "version": "0.8.10",
       "versionDate": "2026-08-17",
       "versionDescription": "v0.8.8\n• AirPlay vidéo : correction de la diffusion vers les écrans externes (Apple TV, AirPlay 2)\n• Lecteur vidéo : décalage supplémentaire de 4 points vers les extrémités et titre centré d'origine\n\nv0.8.7\n• Téléchargement : ajout de l'option « Télécharger » (appui long et feuille de détails) avec partage natif iOS\n• Lecteur vidéo : boutons haut/bas et barre de lecture décalés vers les extrémités\n\nv0.8.6\n• Profil & Réglages : ajout d'une marge basse pour faire défiler la section À propos au-dessus de la barre de navigation\n• Lecteur vidéo : commandes décalées vers les bords\n\nv0.8.5\n• Uploads récents : utilisation de l'endpoint kDrive exact /files/last_modified avec cascade de fallbacks\n• Lecteur vidéo : masquage automatique des commandes au bout de 2.5s et réaffichage au clic",
-      "downloadURL": "https://github.com/Leboxis/Orvian-IOS/releases/download/v0.8.9/Orvian-0.8.9-unsigned.ipa",
+      "downloadURL": "https://github.com/Leboxis/Orvian-IOS/releases/download/v0.8.10/Orvian-0.8.10-unsigned.ipa",
       "localizedDescription": "Client iOS natif non officiel pour kDrive (Infomaniak) : navigation dans l'arborescence, favoris, tags, visionneuse photo et vidéo, import de fichiers, photos et vidéos.",
       "iconURL": "https://raw.githubusercontent.com/Leboxis/Orvian-IOS/main/Orvian/Assets.xcassets/AppIcon.appiconset/icon-1024.png",
       "tintColor": "#4285F5",
       "category": "utilities",
-      "size": 1025525
+      "size": 1037851
     }
   ]
 }
