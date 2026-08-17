@@ -12,7 +12,12 @@ import sys
 REPO = "Leboxis/Orvian-IOS"
 ICON = "https://raw.githubusercontent.com/Leboxis/Orvian-IOS/main/Orvian/Assets.xcassets/AppIcon.appiconset/icon-1024.png"
 
-CHANGELOG = """v0.8.8
+CHANGELOG = """v0.8.11
+• Accueil : la racine démarre un niveau plus bas, sans retour vers l'ancien niveau
+• Uploads : correction du suivi, du nettoyage temporaire et des blocages du thread principal
+• Vidéo : démarrage de la lecture sans attendre le poster ni les tags
+
+v0.8.8
 • AirPlay vidéo : correction de la diffusion vers les écrans externes (Apple TV, AirPlay 2)
 • Lecteur vidéo : décalage supplémentaire de 4 points vers les extrémités et titre centré d'origine
 
