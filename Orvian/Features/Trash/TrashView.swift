@@ -26,7 +26,6 @@ struct TrashView: View {
             grouping: nil,
             onOpenDirectory: { tap($0) },
             onOpenFile: { file, _ in tap(file) },
-            onInitialLoad: nil,
             searchText: "",
             filters: .init(),
             onScrolledPastTop: nil,

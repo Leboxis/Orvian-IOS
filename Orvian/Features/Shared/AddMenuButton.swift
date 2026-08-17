@@ -87,11 +87,14 @@ struct AddMenuButton: View {
     }
 
     /// Import d'un ou plusieurs fichiers choisis dans le document picker
-    /// (gestion des URLs security-scoped pour iCloud Drive, clés USB et partages SMB).
+    /// (gestion des URLs security-scoped avec copie locale vers dossier temporaire sans chargement RAM).
     private func importFiles(_ urls: [URL]) async {
         isBusy = true
-        busyMessage = "Lecture des fichiers…"
-        var filesToUpload: [(data: Data, name: String)] = []
+        busyMessage = "Préparation des fichiers…"
+        var payloads: [UploadPayload] = []
+
+        let tempDir = FileManager.default.temporaryDirectory.appendingPathComponent("Uploads", isDirectory: true)
+        try? FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
 
         for url in urls {
             let accessing = url.startAccessingSecurityScopedResource()
@@ -100,14 +103,21 @@ struct AddMenuButton: View {
                     url.stopAccessingSecurityScopedResource()
                 }
             }
-            if let data = try? await Task.detached(operation: { try Data(contentsOf: url) }).value {
-                filesToUpload.append((data: data, name: url.lastPathComponent))
+
+            let tempURL = tempDir.appendingPathComponent(UUID().uuidString + "_" + url.lastPathComponent)
+            try? FileManager.default.removeItem(at: tempURL)
+            do {
+                try FileManager.default.copyItem(at: url, to: tempURL)
+                let size = (try? tempURL.resourceValues(forKeys: [.fileSizeKey]))?.fileSize ?? 0
+                payloads.append(UploadPayload(fileURL: tempURL, fileName: url.lastPathComponent, totalBytes: size, isTemporary: true))
+            } catch {
+                // Erreur de copie ignorée pour ce fichier individuel
             }
         }
 
         isBusy = false
-        guard !filesToUpload.isEmpty else { return }
-        UploadManager.shared.enqueue(driveId: driveId, directoryId: directoryId, files: filesToUpload) {
+        guard !payloads.isEmpty else { return }
+        UploadManager.shared.enqueue(driveId: driveId, directoryId: directoryId, files: payloads) {
             onDone()
         }
     }
@@ -115,18 +125,43 @@ struct AddMenuButton: View {
     private func importPhotos(_ items: [PhotosPickerItem]) async {
         photoItems = []
         isBusy = true
-        busyMessage = "Préparation des photos…"
-        var filesToUpload: [(data: Data, name: String)] = []
+        busyMessage = "Préparation des médias…"
+        var payloads: [UploadPayload] = []
 
-        for item in items {
-            if let data = try? await item.loadTransferable(type: Data.self) {
-                filesToUpload.append((data: data, name: fileName(for: item)))
+        let tempDir = FileManager.default.temporaryDirectory.appendingPathComponent("Uploads", isDirectory: true)
+        try? FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+
+        for (index, item) in items.enumerated() {
+            let contentType = item.supportedContentTypes.first ?? .data
+            let ext = contentType.preferredFilenameExtension ?? "jpg"
+            let name = "Import-\(Int(Date().timeIntervalSince1970))-\(index + 1).\(ext)"
+            let tempURL = tempDir.appendingPathComponent(name)
+            try? FileManager.default.removeItem(at: tempURL)
+
+            let success: Bool = await withCheckedContinuation { continuation in
+                _ = item.loadFileRepresentation(for: contentType) { sourceURL, error in
+                    guard let sourceURL, error == nil else {
+                        continuation.resume(returning: false)
+                        return
+                    }
+                    do {
+                        try FileManager.default.copyItem(at: sourceURL, to: tempURL)
+                        continuation.resume(returning: true)
+                    } catch {
+                        continuation.resume(returning: false)
+                    }
+                }
+            }
+
+            if success {
+                let size = (try? tempURL.resourceValues(forKeys: [.fileSizeKey]))?.fileSize ?? 0
+                payloads.append(UploadPayload(fileURL: tempURL, fileName: name, totalBytes: size, isTemporary: true))
             }
         }
 
         isBusy = false
-        guard !filesToUpload.isEmpty else { return }
-        UploadManager.shared.enqueue(driveId: driveId, directoryId: directoryId, files: filesToUpload) {
+        guard !payloads.isEmpty else { return }
+        UploadManager.shared.enqueue(driveId: driveId, directoryId: directoryId, files: payloads) {
             onDone()
         }
     }

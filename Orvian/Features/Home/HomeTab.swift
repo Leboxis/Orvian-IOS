@@ -6,24 +6,21 @@ struct HomeTab: View {
     let router: ViewerRouter
     @Binding var path: [DriveFile]
 
-    /// Premier dossier de la racine, ouvert automatiquement au lancement.
-    /// Une fois défini, il remplace la racine « Accueil » : aucun moyen de
-    /// revenir dessus (pas de flèche retour ni de geste de balayage).
-    @State private var startDirectory: DriveFile?
-
     var body: some View {
         NavigationStack(path: $path) {
-            Group {
-                if let startDirectory {
-                    rootDirectory(startDirectory)
-                } else {
-                    rootDirectory(DriveFile.root(name: "Accueil"))
+            DirectoryView(
+                directory: DriveFile.root(name: "Accueil"),
+                driveId: driveId,
+                crumbs: ["Accueil"],
+                router: router,
+                showsSearchBar: true,
+                onOpenFolder: { folder in
+                    path.append(folder)
                 }
-            }
+            )
             .navigationDestination(for: DriveFile.self) { directory in
                 let index = path.firstIndex(where: { $0.id == directory.id })
-                let rootName = startDirectory?.name ?? "Accueil"
-                let crumbs = [rootName] + (index.map { Array(path[...$0].map(\.name)) } ?? [directory.name])
+                let crumbs = ["Accueil"] + (index.map { Array(path[...$0].map(\.name)) } ?? [directory.name])
                 DirectoryView(
                     directory: directory,
                     driveId: driveId,
@@ -36,24 +33,6 @@ struct HomeTab: View {
                 )
             }
         }
-    }
-
-    private func rootDirectory(_ directory: DriveFile) -> some View {
-        DirectoryView(
-            directory: directory,
-            driveId: driveId,
-            crumbs: [startDirectory?.name ?? directory.name],
-            router: router,
-            showsSearchBar: true,
-            onOpenFolder: { folder in
-                path.append(folder)
-            },
-            onInitialLoad: { items in
-                guard startDirectory == nil else { return }
-                guard let firstFolder = items.first(where: \.isDirectory) else { return }
-                startDirectory = firstFolder
-            }
-        )
     }
 }
 
@@ -99,7 +78,6 @@ struct DirectoryView: View {
 
     private let router: ViewerRouter
     private let onOpenFolder: (DriveFile) -> Void
-    private let onInitialLoad: (([DriveFile]) -> Void)?
 
     init(
         directory: DriveFile,
@@ -107,8 +85,7 @@ struct DirectoryView: View {
         crumbs: [String],
         router: ViewerRouter,
         showsSearchBar: Bool = false,
-        onOpenFolder: @escaping (DriveFile) -> Void,
-        onInitialLoad: (([DriveFile]) -> Void)? = nil
+        onOpenFolder: @escaping (DriveFile) -> Void
     ) {
         self.directory = directory
         self.driveId = driveId
@@ -116,7 +93,6 @@ struct DirectoryView: View {
         self.router = router
         self.showsSearchBar = showsSearchBar
         self.onOpenFolder = onOpenFolder
-        self.onInitialLoad = onInitialLoad
         _viewModel = State(initialValue: FileGridViewModel(source: .directory(directory.id), driveId: driveId))
     }
 
@@ -137,9 +113,6 @@ struct DirectoryView: View {
             onOpenDirectory: onOpenFolder,
             onOpenFile: { file, siblings in
                 router.open(file, siblings: siblings)
-            },
-            onInitialLoad: { items in
-                onInitialLoad?(items)
             },
             searchText: searchText,
             filters: filters,

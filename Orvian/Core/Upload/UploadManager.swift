@@ -28,6 +28,21 @@ struct UploadTaskItem: Identifiable, Equatable {
     }
 }
 
+/// Élément d'upload préparé sur disque (aucun buffer binaire volumineux en mémoire).
+struct UploadPayload: Sendable {
+    let fileURL: URL
+    let fileName: String
+    let totalBytes: Int
+    let isTemporary: Bool
+
+    init(fileURL: URL, fileName: String, totalBytes: Int, isTemporary: Bool = true) {
+        self.fileURL = fileURL
+        self.fileName = fileName
+        self.totalBytes = totalBytes
+        self.isTemporary = isTemporary
+    }
+}
+
 /// Gestionnaire centralisé des uploads avec suivi en temps réel.
 @MainActor
 @Observable
@@ -78,13 +93,13 @@ final class UploadManager {
         return total / Double(tasks.count)
     }
 
-    /// Enfile et exécute une liste de fichiers à uploader.
-    func enqueue(driveId: Int, directoryId: Int, files: [(data: Data, name: String)], onDone: (() -> Void)? = nil) {
+    /// Enfile et exécute une liste de fichiers à uploader par streaming direct depuis le disque.
+    func enqueue(driveId: Int, directoryId: Int, files: [UploadPayload], onDone: (() -> Void)? = nil) {
         hidePillTask?.cancel()
         hidePillTask = nil
         isPillVisible = true
 
-        let newTasks = files.map { UploadTaskItem(fileName: $0.name, totalBytes: $0.data.count) }
+        let newTasks = files.map { UploadTaskItem(fileName: $0.fileName, totalBytes: $0.totalBytes) }
         tasks.append(contentsOf: newTasks)
 
         Task {
@@ -94,8 +109,7 @@ final class UploadManager {
                     taskId: taskId,
                     driveId: driveId,
                     directoryId: directoryId,
-                    data: file.data,
-                    name: file.name
+                    payload: file
                 )
             }
 
@@ -104,20 +118,43 @@ final class UploadManager {
         }
     }
 
-    private func uploadSingleFile(taskId: UUID, driveId: Int, directoryId: Int, data: Data, name: String) async {
+    /// Rétrocompatibilité : convertit les données en fichiers temporaires avant enfilage.
+    func enqueue(driveId: Int, directoryId: Int, files: [(data: Data, name: String)], onDone: (() -> Void)? = nil) {
+        let payloads: [UploadPayload] = files.compactMap { item in
+            let tempDir = FileManager.default.temporaryDirectory.appendingPathComponent("Uploads", isDirectory: true)
+            try? FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+            let tempURL = tempDir.appendingPathComponent(UUID().uuidString + "_" + item.name)
+            do {
+                try item.data.write(to: tempURL, options: .atomic)
+                return UploadPayload(fileURL: tempURL, fileName: item.name, totalBytes: item.data.count, isTemporary: true)
+            } catch {
+                return nil
+            }
+        }
+        enqueue(driveId: driveId, directoryId: directoryId, files: payloads, onDone: onDone)
+    }
+
+    private func uploadSingleFile(taskId: UUID, driveId: Int, directoryId: Int, payload: UploadPayload) async {
         guard let index = tasks.firstIndex(where: { $0.id == taskId }) else { return }
         tasks[index].status = .inProgress(progress: 0.15)
 
-        let mimeType = UTType(filenameExtension: (name as NSString).pathExtension)?.preferredMIMEType
+        let mimeType = UTType(filenameExtension: (payload.fileName as NSString).pathExtension)?.preferredMIMEType
             ?? "application/octet-stream"
 
+        defer {
+            if payload.isTemporary {
+                try? FileManager.default.removeItem(at: payload.fileURL)
+            }
+        }
+
         do {
-            tasks[index].status = .inProgress(progress: 0.6)
-            try await service.upload(
+            tasks[index].status = .inProgress(progress: 0.5)
+            try await service.uploadFile(
                 driveId: driveId,
                 directoryId: directoryId,
-                data: data,
-                fileName: name,
+                fileURL: payload.fileURL,
+                fileName: payload.fileName,
+                totalSize: payload.totalBytes,
                 mimeType: mimeType
             )
             tasks[index].status = .completed

@@ -10,6 +10,7 @@ struct MainTabView: View {
     let session: SessionStore
 
     @State private var tab: AppTab = .home
+    @State private var loadedTabs: Set<AppTab> = [.home]
     @State private var router: ViewerRouter
     @State private var navState = TabNavigationState()
     @State private var showUploadSheet = false
@@ -46,6 +47,11 @@ struct MainTabView: View {
         }
         .ignoresSafeArea(.keyboard, edges: .bottom)
         .tint(.accentColor)
+        .onChange(of: tab, initial: true) { _, newTab in
+            if !loadedTabs.contains(newTab) {
+                loadedTabs.insert(newTab)
+            }
+        }
         .sheet(isPresented: $showUploadSheet) {
             UploadProgressSheet(manager: uploadManager)
         }
@@ -78,10 +84,17 @@ struct MainTabView: View {
         }
     }
 
+    @ViewBuilder
     private func tabPane(_ target: AppTab, @ViewBuilder content: () -> some View) -> some View {
-        content()
-            .opacity(tab == target ? 1 : 0)
-            .allowsHitTesting(tab == target)
-            .accessibilityHidden(tab != target)
+        if loadedTabs.contains(target) {
+            content()
+                .opacity(tab == target ? 1 : 0)
+                .allowsHitTesting(tab == target)
+                .accessibilityHidden(tab != target)
+        } else {
+            Color.clear
+                .allowsHitTesting(false)
+                .accessibilityHidden(true)
+        }
     }
 }

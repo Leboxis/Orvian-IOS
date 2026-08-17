@@ -13,12 +13,9 @@ struct FileGridView: View {
     /// Ouverture d'une visionneuse (image/vidéo) avec ses voisins pour le pager.
     var onOpenFile: ((DriveFile, [DriveFile]) -> Void)?
 
-    /// Appelé une fois le premier chargement terminé (items à jour).
-    var onInitialLoad: (([DriveFile]) -> Void)?
-
     /// Filtre client des éléments affichés (barre de recherche de l'Accueil).
     var searchText: String = ""
-
+    
     /// Options de tri et de filtrage (bouton filtre de l'Accueil).
     var filters: FileFilters = .init()
 
@@ -58,7 +55,6 @@ struct FileGridView: View {
             .background(Color(uiColor: .systemGroupedBackground))
             .task(id: viewModel.source) {
                 await viewModel.loadIfNeeded()
-                onInitialLoad?(viewModel.items)
             }
             .task(id: filterTaskKey) {
                 guard needsVideoMetadata else { return }

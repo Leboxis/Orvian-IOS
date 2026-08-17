@@ -53,6 +53,40 @@ actor APIClient {
         try Self.check(response: response, data: data)
     }
 
+    /// Upload d'un fichier local par streaming (évite le chargement du fichier en RAM).
+    func uploadFile(_ endpoint: Endpoint, fileURL: URL, contentType: String) async throws {
+        guard var components = URLComponents(url: Self.baseURL, resolvingAgainstBaseURL: false) else {
+            throw APIError.invalidURL
+        }
+        components.path = endpoint.path
+        if !endpoint.query.isEmpty {
+            components.queryItems = endpoint.query
+        }
+        guard let url = components.url else { throw APIError.invalidURL }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.timeoutInterval = 300
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        request.setValue(contentType, forHTTPHeaderField: "Content-Type")
+
+        if let token = TokenStore.current() {
+            request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        } else if requiresAuth(endpoint) {
+            throw APIError.notSignedIn
+        }
+
+        do {
+            let (data, response) = try await session.upload(for: request, fromFile: fileURL)
+            try Self.check(response: response, data: data)
+        } catch {
+            if error is APIError {
+                throw error
+            }
+            throw APIError.network(error)
+        }
+    }
+
     // MARK: - Internes
 
     private func send(

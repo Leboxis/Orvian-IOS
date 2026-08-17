@@ -187,6 +187,15 @@ struct KDriveService {
         )
     }
 
+    /// Upload d'un fichier local par streaming (sans buffer Data en mémoire) dans `directoryId`.
+    func uploadFile(driveId: Int, directoryId: Int, fileURL: URL, fileName: String, totalSize: Int, mimeType: String) async throws {
+        try await api.uploadFile(
+            .upload(driveId: driveId, directoryId: directoryId, fileName: fileName, totalSize: totalSize),
+            fileURL: fileURL,
+            contentType: mimeType.isEmpty ? "application/octet-stream" : mimeType
+        )
+    }
+
     // MARK: - Suppression & renommage
 
     /// Déplace un fichier ou dossier dans la corbeille.
