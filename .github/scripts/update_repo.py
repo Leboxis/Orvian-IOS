@@ -12,7 +12,10 @@ import sys
 REPO = "Leboxis/Orvian-IOS"
 ICON = "https://raw.githubusercontent.com/Leboxis/Orvian-IOS/refs/heads/main/Orvian/Assets.xcassets/AppIcon.appiconset/icon-1024.png"
 
-CHANGELOG = """v0.8.12
+CHANGELOG = """v0.8.13
+• Accueil : racine remontée d'un niveau tout en bloquant le retour au niveau supérieur
+
+v0.8.12
 • Source LiveContainer : chemin Git explicite pour éviter une ancienne réponse mise en cache
 
 v0.8.11

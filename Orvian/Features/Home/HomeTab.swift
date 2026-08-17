@@ -6,13 +6,13 @@ struct HomeTab: View {
     let router: ViewerRouter
     @Binding var path: [DriveFile]
 
-    /// Premier sous-dossier du dossier qui servait auparavant de racine.
-    /// Il devient la nouvelle racine de navigation : son parent n'est jamais
-    /// ajouté au NavigationStack et n'est donc pas accessible par retour.
+    /// Premier dossier du drive. Il devient la racine de navigation : la
+    /// racine technique du drive n'est jamais ajoutée au NavigationStack et
+    /// n'est donc pas accessible par retour.
     @State private var startDirectory: DriveFile?
     private let service = KDriveService()
 
-    private var cacheKey: String { "home_start_dir_n_plus_1_\(driveId)" }
+    private var cacheKey: String { "home_start_dir_locked_\(driveId)" }
     private var previousCacheKey: String { "home_start_dir_\(driveId)" }
 
     init(driveId: Int, router: ViewerRouter, path: Binding<[DriveFile]>) {
@@ -20,7 +20,7 @@ struct HomeTab: View {
         self.router = router
         self._path = path
 
-        if let data = UserDefaults.standard.data(forKey: "home_start_dir_n_plus_1_\(driveId)"),
+        if let data = UserDefaults.standard.data(forKey: "home_start_dir_locked_\(driveId)"),
            let cached = try? JSONDecoder().decode(DriveFile.self, from: data) {
             _startDirectory = State(initialValue: cached)
         }
@@ -68,42 +68,41 @@ struct HomeTab: View {
         }
     }
 
-    /// Résout une seule fois le niveau n+1. L'ancien cache fournit le niveau
-    /// qui servait jusque-là de racine, ce qui évite une requête supplémentaire
-    /// lors de la migration. Sans ancien cache, la racine du drive est d'abord
-    /// parcourue pour retrouver ce même niveau.
+    /// Résout le premier dossier du drive. L'ancien cache contient déjà ce
+    /// dossier ; sans cache, une seule lecture de la racine technique suffit.
     private func resolveStartDirectory() async {
         let defaults = UserDefaults.standard
-        var currentRoot: DriveFile?
+        var resolved: DriveFile?
 
         if let data = defaults.data(forKey: previousCacheKey),
            let cached = try? JSONDecoder().decode(DriveFile.self, from: data) {
-            currentRoot = cached
+            resolved = cached
         }
 
-        if currentRoot == nil,
+        if resolved == nil,
            let page = try? await service.page(.directory(1), driveId: driveId, cursor: nil) {
-            currentRoot = page.data?.first(where: \.isDirectory)
+            resolved = page.data?.first(where: \.isDirectory)
         }
 
         guard !Task.isCancelled else { return }
-        guard let currentRoot else {
+        guard let resolved else {
+            // Sans cache ni réseau, conserver un Accueil utilisable pour cette
+            // session seulement. La résolution sera retentée au prochain départ.
+            path.removeAll()
             startDirectory = DriveFile.root(name: "Accueil")
             return
         }
 
-        let page = try? await service.page(.directory(currentRoot.id), driveId: driveId, cursor: nil)
-        guard !Task.isCancelled else { return }
-
-        // Si aucun sous-dossier n'existe ou si le réseau échoue, conserver le
-        // dossier actuel évite de rendre l'Accueil inutilisable.
-        let resolved = page?.data?.first(where: \.isDirectory) ?? currentRoot
         path.removeAll()
         startDirectory = resolved
 
         if let data = try? JSONEncoder().encode(resolved) {
             defaults.set(data, forKey: cacheKey)
         }
+
+        // L'ancien cache n+1 pointait un niveau trop bas et ne doit plus être
+        // repris par une future version.
+        defaults.removeObject(forKey: "home_start_dir_n_plus_1_\(driveId)")
     }
 }
 
