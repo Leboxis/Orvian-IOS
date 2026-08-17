@@ -219,4 +219,9 @@ extension Endpoint {
     static func rename(driveId: Int, fileId: Int) -> Endpoint {
         Endpoint(path: "/2/drive/\(driveId)/files/\(fileId)/rename")
     }
+
+    /// Déplace un fichier ou dossier vers un dossier de destination (v3).
+    static func move(driveId: Int, fileId: Int, destinationDirectoryId: Int) -> Endpoint {
+        Endpoint(path: "/3/drive/\(driveId)/files/\(fileId)/move/\(destinationDirectoryId)")
+    }
 }
