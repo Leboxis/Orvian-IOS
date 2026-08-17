@@ -3,34 +3,39 @@ import Security
 
 /// Stockage du token API.
 ///
-/// Keychain en priorité ; repli sur UserDefaults si le Keychain est
-/// indisponible (cas rencontré dans certains conteneurs tiers comme
-/// LiveContainer, où l'entitlement keychain manque).
+/// Le token n'est jamais écrit dans `UserDefaults`. Quand le Keychain n'est
+/// pas disponible (certains conteneurs tiers), il reste uniquement en mémoire
+/// pour la session en cours.
 enum TokenStore {
     private static let keychainService = "com.orvian.app.api-token"
-    private static let defaultsKey = "orvian.api-token.fallback"
+    /// Ancienne clé utilisée avant que le repli persistant soit supprimé.
+    /// Elle est purgée pour éviter de conserver un token déjà exposé.
+    private static let legacyDefaultsKey = "orvian.api-token.fallback"
     private static let lock = NSLock()
     private static var cached: String?
+    private static var didPurgeLegacyFallback = false
 
     static func current() -> String? {
         lock.lock()
         defer { lock.unlock() }
+        purgeLegacyFallback()
         if let cached { return cached }
-        guard let token = readKeychain() ?? readDefaults() else { return nil }
+        guard let token = readKeychain() else { return nil }
         cached = token
         return token
     }
 
-    static func save(_ token: String) {
+    /// Renvoie `true` si le token survit à un redémarrage de l'app. Un échec
+    /// Keychain garde le token seulement en mémoire : utile pour la session,
+    /// sans l'exposer dans le conteneur de l'application.
+    @discardableResult
+    static func save(_ token: String) -> Bool {
         lock.lock()
         defer { lock.unlock() }
         let trimmed = token.trimmingCharacters(in: .whitespacesAndNewlines)
         cached = trimmed
-        if writeKeychain(trimmed) {
-            UserDefaults.standard.removeObject(forKey: defaultsKey)
-        } else {
-            UserDefaults.standard.set(trimmed, forKey: defaultsKey)
-        }
+        purgeLegacyFallback()
+        return writeKeychain(trimmed)
     }
 
     static func clear() {
@@ -38,7 +43,7 @@ enum TokenStore {
         defer { lock.unlock() }
         cached = nil
         deleteKeychain()
-        UserDefaults.standard.removeObject(forKey: defaultsKey)
+        purgeLegacyFallback()
     }
 
     // MARK: - Keychain
@@ -64,11 +69,14 @@ enum TokenStore {
     private static func writeKeychain(_ token: String) -> Bool {
         let data = Data(token.utf8)
         var query = keychainQuery()
-        let attributes: [String: Any] = [kSecValueData as String: data]
+        let attributes: [String: Any] = [
+            kSecValueData as String: data,
+            kSecAttrAccessible as String: kSecAttrAccessibleWhenUnlockedThisDeviceOnly,
+        ]
         var status = SecItemUpdate(query as CFDictionary, attributes as CFDictionary)
         if status == errSecItemNotFound {
             query[kSecValueData as String] = data
-            query[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlock
+            query[kSecAttrAccessible as String] = kSecAttrAccessibleWhenUnlockedThisDeviceOnly
             status = SecItemAdd(query as CFDictionary, nil)
         }
         return status == errSecSuccess
@@ -78,9 +86,9 @@ enum TokenStore {
         SecItemDelete(keychainQuery() as CFDictionary)
     }
 
-    // MARK: - Repli UserDefaults
-
-    private static func readDefaults() -> String? {
-        UserDefaults.standard.string(forKey: defaultsKey)
+    private static func purgeLegacyFallback() {
+        guard !didPurgeLegacyFallback else { return }
+        UserDefaults.standard.removeObject(forKey: legacyDefaultsKey)
+        didPurgeLegacyFallback = true
     }
 }
