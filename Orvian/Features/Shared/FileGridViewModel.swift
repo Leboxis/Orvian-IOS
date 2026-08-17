@@ -11,6 +11,7 @@ final class FileGridViewModel {
     private(set) var isLoadingMore = false
     private(set) var hasMore = false
     private(set) var errorMessage: String?
+    private(set) var actionErrorMessage: String?
 
     private var cursor: String?
     private var loadedOnce = false
@@ -90,7 +91,7 @@ final class FileGridViewModel {
             try await service.setFavorite(driveId: driveId, fileId: file.id, favorite: newValue)
         } catch {
             items[index].isFavorite = file.isFavorite
-            errorMessage = "Impossible de modifier le favori : \((error as? APIError)?.errorDescription ?? error.localizedDescription)"
+            actionErrorMessage = "Impossible de modifier le favori : \((error as? APIError)?.errorDescription ?? error.localizedDescription)"
         }
     }
 
@@ -101,7 +102,7 @@ final class FileGridViewModel {
             try await service.trash(driveId: driveId, fileId: file.id)
             items.removeAll { $0.id == file.id }
         } catch {
-            errorMessage = "Suppression impossible : \((error as? APIError)?.errorDescription ?? error.localizedDescription)"
+            actionErrorMessage = "Suppression impossible : \((error as? APIError)?.errorDescription ?? error.localizedDescription)"
         }
     }
 
@@ -113,7 +114,23 @@ final class FileGridViewModel {
             try await service.rename(driveId: driveId, fileId: file.id, name: name)
         } catch {
             items[index].name = oldName
-            errorMessage = "Renommage impossible : \((error as? APIError)?.errorDescription ?? error.localizedDescription)"
+            actionErrorMessage = "Renommage impossible : \((error as? APIError)?.errorDescription ?? error.localizedDescription)"
+        }
+    }
+
+    func move(_ file: DriveFile, toDirectoryId destinationDirectoryId: Int) async {
+        guard file.parentId != destinationDirectoryId else { return }
+        do {
+            try await service.move(
+                driveId: driveId,
+                fileId: file.id,
+                destinationDirectoryId: destinationDirectoryId
+            )
+            // La même grille peut représenter un dossier, une recherche ou un
+            // tag ; la recharger évite tout état local ambigu après le move.
+            await reload()
+        } catch {
+            actionErrorMessage = "Déplacement impossible : \((error as? APIError)?.errorDescription ?? error.localizedDescription)"
         }
     }
 
@@ -125,7 +142,7 @@ final class FileGridViewModel {
             try await service.permanentlyDelete(driveId: driveId, fileId: file.id)
             items.removeAll { $0.id == file.id }
         } catch {
-            errorMessage = "Suppression définitive impossible : \((error as? APIError)?.errorDescription ?? error.localizedDescription)"
+            actionErrorMessage = "Suppression définitive impossible : \((error as? APIError)?.errorDescription ?? error.localizedDescription)"
         }
     }
 
@@ -144,7 +161,7 @@ final class FileGridViewModel {
         }
         items.removeAll { deletedIds.contains($0.id) }
         if let firstError {
-            errorMessage = "Suppression définitive impossible : \((firstError as? APIError)?.errorDescription ?? firstError.localizedDescription)"
+            actionErrorMessage = "Suppression définitive impossible : \((firstError as? APIError)?.errorDescription ?? firstError.localizedDescription)"
         }
     }
 
@@ -158,7 +175,7 @@ final class FileGridViewModel {
             return true
         } catch {
             guard destination != 1 else {
-                errorMessage = "Restauration impossible : \((error as? APIError)?.errorDescription ?? error.localizedDescription)"
+                actionErrorMessage = "Restauration impossible : \((error as? APIError)?.errorDescription ?? error.localizedDescription)"
                 return false
             }
             do {
@@ -166,10 +183,14 @@ final class FileGridViewModel {
                 items.removeAll { $0.id == file.id }
                 return true
             } catch {
-                errorMessage = "Restauration impossible : \((error as? APIError)?.errorDescription ?? error.localizedDescription)"
+                actionErrorMessage = "Restauration impossible : \((error as? APIError)?.errorDescription ?? error.localizedDescription)"
                 return false
             }
         }
+    }
+
+    func dismissActionError() {
+        actionErrorMessage = nil
     }
 
     // MARK: - Groupes (Actualité par jour, Média par mois)
