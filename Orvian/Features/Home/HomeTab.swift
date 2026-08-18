@@ -198,31 +198,51 @@ struct DirectoryView: View {
             onToggleSelection: { toggleSelection($0) },
             onMove: { prepareMove(files: [$0]) }
         )
-        .navigationTitle(crumbs.last ?? directory.name)
+        .navigationTitle(selectionMode ? "" : (crumbs.last ?? directory.name))
         .navigationBarTitleDisplayMode(.inline)
         .safeAreaInset(edge: .top, spacing: 0) {
-            VStack(spacing: 6) {
-                breadcrumb
-                    .frame(maxWidth: .infinity)
+            if !selectionMode {
+                VStack(spacing: 6) {
+                    breadcrumb
+                        .frame(maxWidth: .infinity)
 
-                if showsSearchBar && searchBarVisible {
-                    searchBar
-                        .transition(.move(edge: .top).combined(with: .opacity))
+                    if showsSearchBar && searchBarVisible {
+                        searchBar
+                            .transition(.move(edge: .top).combined(with: .opacity))
+                    }
                 }
-            }
-            .padding(.top, 2)
-            .padding(.bottom, 4)
-            .animation(.snappy(duration: 0.25), value: searchBarVisible)
-        }
-        .safeAreaInset(edge: .bottom) {
-            if selectionMode && !activeViewModel.items.isEmpty {
-                selectionBar
+                .padding(.top, 2)
+                .padding(.bottom, 4)
+                .animation(.snappy(duration: 0.25), value: searchBarVisible)
             }
         }
         .toolbar {
             if selectionMode {
                 ToolbarItem(placement: .topBarLeading) {
                     Button("Annuler") { endSelection() }
+                }
+
+                ToolbarItem(placement: .principal) {
+                    Text(selectionTitle)
+                        .font(.headline)
+                        .lineLimit(1)
+                }
+
+                ToolbarItemGroup(placement: .topBarTrailing) {
+                    Button {
+                        toggleAll()
+                    } label: {
+                        Image(systemName: allSelected ? "checkmark.circle.fill" : "checkmark.circle")
+                    }
+                    .accessibilityLabel(allSelected ? "Tout désélectionner" : "Tout sélectionner")
+
+                    Button {
+                        prepareSelectedMove()
+                    } label: {
+                        Text("Déplacer")
+                            .fontWeight(.semibold)
+                    }
+                    .disabled(selectedIDs.isEmpty || moveBusy)
                 }
             } else {
                 ToolbarItem(placement: .topBarLeading) {
@@ -231,7 +251,7 @@ struct DirectoryView: View {
 
                 ToolbarItemGroup(placement: .topBarTrailing) {
                     Button {
-                        selectionMode = true
+                        startSelection()
                     } label: {
                         Label("Sélectionner", systemImage: "checkmark.circle")
                     }
@@ -377,6 +397,16 @@ struct DirectoryView: View {
         }
     }
 
+    private var selectionTitle: String {
+        guard !selectedIDs.isEmpty else { return "Sélection" }
+        return "\(selectedIDs.count) sélectionné\(selectedIDs.count > 1 ? "s" : "")"
+    }
+
+    private func startSelection() {
+        searchFocused = false
+        selectionMode = true
+    }
+
     private func endSelection() {
         selectionMode = false
         selectedIDs.removeAll()
@@ -427,40 +457,6 @@ struct DirectoryView: View {
         if selectedIDs.isEmpty {
             selectionMode = false
         }
-    }
-
-    private var selectionBar: some View {
-        HStack(spacing: 10) {
-            Button {
-                toggleAll()
-            } label: {
-                Label(
-                    allSelected ? "Tout désélectionner" : "Tout sélectionner",
-                    systemImage: allSelected ? "checkmark.circle.fill" : "checkmark.circle"
-                )
-                .font(.footnote.weight(.semibold))
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 12)
-                .background(.ultraThinMaterial, in: Capsule())
-            }
-            .buttonStyle(.plain)
-
-            if !selectedIDs.isEmpty {
-                Button {
-                    prepareSelectedMove()
-                } label: {
-                    Label("Déplacer (\(selectedIDs.count))", systemImage: "folder")
-                        .font(.footnote.weight(.semibold))
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 12)
-                        .background(.ultraThinMaterial, in: Capsule())
-                }
-                .buttonStyle(.plain)
-                .disabled(moveBusy)
-            }
-        }
-        .padding(.horizontal, 16)
-        .padding(.bottom, 8)
     }
 
     private var addErrorBinding: Binding<Bool> {

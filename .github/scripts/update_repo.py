@@ -12,7 +12,12 @@ import sys
 REPO = "Leboxis/Orvian-IOS"
 ICON = "https://raw.githubusercontent.com/Leboxis/Orvian-IOS/refs/heads/main/Orvian/Assets.xcassets/AppIcon.appiconset/icon-1024.png"
 
-CHANGELOG = """v0.8.15
+CHANGELOG = """v0.8.16
+• Sélection multiple : interface supérieure simplifiée avec compteur centré
+• Déplacement : bouton toujours visible dans la barre de navigation
+• Affichage : suppression de la barre d’action masquée par la navigation flottante
+
+v0.8.15
 • Déplacement : action disponible après un appui long sur une carte
 • Sélection multiple : déplacement groupé vers un dossier choisi dans l’arborescence
 • Sécurité : destinations invalides masquées et gestion des échecs partiels
