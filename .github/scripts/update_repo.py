@@ -12,7 +12,12 @@ import sys
 REPO = "Leboxis/Orvian-IOS"
 ICON = "https://raw.githubusercontent.com/Leboxis/Orvian-IOS/refs/heads/main/Orvian/Assets.xcassets/AppIcon.appiconset/icon-1024.png"
 
-CHANGELOG = """v0.8.14
+CHANGELOG = """v0.8.15
+• Déplacement : action disponible après un appui long sur une carte
+• Sélection multiple : déplacement groupé vers un dossier choisi dans l’arborescence
+• Sécurité : destinations invalides masquées et gestion des échecs partiels
+
+v0.8.14
 • Favoris : cartes sans étoile redondante et effets graphiques allégés
 • Défilement : préchargement des miniatures et URL vidéo régulé selon la position visible
 

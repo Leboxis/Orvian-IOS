@@ -29,7 +29,7 @@ struct FileGridView: View {
     /// Pull-to-refresh (désactivé sur l'Accueil, remplacé par la barre de recherche).
     var allowsPullToRefresh = true
 
-    /// Mode sélection (corbeille) : le tap coche au lieu d'ouvrir.
+    /// Mode sélection : le tap coche au lieu d'ouvrir.
     var selectionMode = false
 
     /// Identifiants des éléments sélectionnés (mode sélection).
@@ -37,6 +37,9 @@ struct FileGridView: View {
 
     /// Appelé quand l'utilisateur tape une carte en mode sélection.
     var onToggleSelection: ((DriveFile) -> Void)?
+
+    /// Demande de déplacement individuel depuis une carte.
+    var onMove: ((DriveFile) -> Void)?
 
     private let mediaMetadata = MediaMetadataStore.shared
     @State private var metadataRevision = 0
@@ -267,6 +270,9 @@ struct FileGridView: View {
             },
             onRename: { newName in
                 Task { await viewModel.rename(file, name: newName) }
+            },
+            onMove: onMove == nil ? nil : {
+                onMove?(file)
             },
             action: {
                 if selectionMode {

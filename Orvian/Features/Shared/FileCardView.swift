@@ -7,7 +7,7 @@ struct FileCardView: View {
     let file: DriveFile
     let driveId: Int
     var enabled = true
-    /// Mode sélection (corbeille) : le tap coche au lieu d'ouvrir.
+    /// Mode sélection : le tap coche au lieu d'ouvrir.
     var selectionMode = false
     /// Fichier corbeillé : les miniatures passent par l'endpoint trash et
     /// les actions favori/renommer/supprimer sont masquées.
@@ -21,6 +21,7 @@ struct FileCardView: View {
     var onToggleFavorite: (() -> Void)?
     var onDelete: (() -> Void)?
     var onRename: ((String) -> Void)?
+    var onMove: (() -> Void)?
     var action: () -> Void
 
     @State private var thumbnail: UIImage?
@@ -110,6 +111,13 @@ struct FileCardView: View {
                             Label("Renommer", systemImage: "pencil")
                         }
                     }
+                    if onMove != nil {
+                        Button {
+                            onMove?()
+                        } label: {
+                            Label("Déplacer", systemImage: "folder")
+                        }
+                    }
                     if onDelete != nil {
                         Button(role: .destructive) {
                             showDeleteConfirm = true
@@ -128,7 +136,8 @@ struct FileCardView: View {
                 onOpen: action,
                 onToggleFavorite: onToggleFavorite,
                 onDelete: onDelete,
-                onRename: onRename
+                onRename: onRename,
+                onMove: onMove
             )
         }
         .alert("Supprimer", isPresented: $showDeleteConfirm) {
@@ -302,6 +311,7 @@ struct FileDetailSheet: View {
     let onToggleFavorite: (() -> Void)?
     let onDelete: (() -> Void)?
     let onRename: ((String) -> Void)?
+    let onMove: (() -> Void)?
 
     @Environment(\.dismiss) private var dismiss
     @State private var categories: [Category] = []
@@ -319,7 +329,8 @@ struct FileDetailSheet: View {
         onOpen: @escaping () -> Void,
         onToggleFavorite: (() -> Void)?,
         onDelete: (() -> Void)?,
-        onRename: ((String) -> Void)?
+        onRename: ((String) -> Void)?,
+        onMove: (() -> Void)?
     ) {
         self.file = file
         self.driveId = driveId
@@ -328,6 +339,7 @@ struct FileDetailSheet: View {
         self.onToggleFavorite = onToggleFavorite
         self.onDelete = onDelete
         self.onRename = onRename
+        self.onMove = onMove
         _appliedCategoryIds = State(initialValue: Set((file.categories ?? []).compactMap { $0.category?.id }))
     }
 
@@ -493,6 +505,14 @@ struct FileDetailSheet: View {
                     showRenameAlert = true
                 } label: {
                     Label("Renommer", systemImage: "pencil")
+                }
+            }
+            if !isTrashed, let onMove {
+                Button {
+                    dismiss()
+                    onMove()
+                } label: {
+                    Label("Déplacer", systemImage: "folder")
                 }
             }
             if !isTrashed, onDelete != nil {

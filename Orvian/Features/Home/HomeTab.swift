@@ -144,6 +144,11 @@ struct DirectoryView: View {
     @State private var searchText = ""
     @State private var scrolledPastTop = false
     @State private var filters = FileFilters()
+    @State private var selectionMode = false
+    @State private var selectedIDs: Set<Int> = []
+    @State private var pendingMoveFiles: [DriveFile] = []
+    @State private var showMovePicker = false
+    @State private var moveBusy = false
     @FocusState private var searchFocused: Bool
 
     private let router: ViewerRouter
@@ -187,7 +192,11 @@ struct DirectoryView: View {
             searchText: searchText,
             filters: filters,
             onScrolledPastTop: showsSearchBar ? { scrolledPastTop = $0 } : nil,
-            allowsPullToRefresh: !showsSearchBar
+            allowsPullToRefresh: !showsSearchBar,
+            selectionMode: selectionMode,
+            selectedIDs: selectedIDs,
+            onToggleSelection: { toggleSelection($0) },
+            onMove: { prepareMove(files: [$0]) }
         )
         .navigationTitle(crumbs.last ?? directory.name)
         .navigationBarTitleDisplayMode(.inline)
@@ -205,26 +214,44 @@ struct DirectoryView: View {
             .padding(.bottom, 4)
             .animation(.snappy(duration: 0.25), value: searchBarVisible)
         }
-        .toolbar {
-            ToolbarItem(placement: .topBarLeading) {
-                FilterMenu(filters: $filters)
+        .safeAreaInset(edge: .bottom) {
+            if selectionMode && !activeViewModel.items.isEmpty {
+                selectionBar
             }
+        }
+        .toolbar {
+            if selectionMode {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button("Annuler") { endSelection() }
+                }
+            } else {
+                ToolbarItem(placement: .topBarLeading) {
+                    FilterMenu(filters: $filters)
+                }
 
-            ToolbarItemGroup(placement: .topBarTrailing) {
-                randomFileButton
+                ToolbarItemGroup(placement: .topBarTrailing) {
+                    Button {
+                        selectionMode = true
+                    } label: {
+                        Label("Sélectionner", systemImage: "checkmark.circle")
+                    }
+                    .disabled(activeViewModel.items.isEmpty || moveBusy || addBusy)
 
-                AddMenuButton(
-                    directoryId: directory.id,
-                    driveId: driveId,
-                    isBusy: $addBusy,
-                    busyMessage: $busyMessage,
-                    errorMessage: $addError,
-                    onDone: { Task { await activeViewModel.reload() } }
-                )
+                    randomFileButton
+
+                    AddMenuButton(
+                        directoryId: directory.id,
+                        driveId: driveId,
+                        isBusy: $addBusy,
+                        busyMessage: $busyMessage,
+                        errorMessage: $addError,
+                        onDone: { Task { await activeViewModel.reload() } }
+                    )
+                }
             }
         }
         .overlay(alignment: .bottom) {
-            if addBusy {
+            if addBusy || moveBusy {
                 busyIndicator
             }
         }
@@ -232,6 +259,21 @@ struct DirectoryView: View {
             Button("OK", role: .cancel) {}
         } message: {
             Text(addError ?? "")
+        }
+        .sheet(isPresented: $showMovePicker) {
+            MoveDestinationPicker(
+                driveId: driveId,
+                itemCount: pendingMoveFiles.count,
+                excludedDirectoryIDs: Set(pendingMoveFiles.filter(\.isDirectory).map(\.id)),
+                unavailableDestinationIDs: unavailableDestinationIDs,
+                onSelect: { destination in
+                    showMovePicker = false
+                    Task { await movePendingFiles(to: destination) }
+                }
+            )
+        }
+        .onChange(of: searchText) { _, _ in
+            if selectionMode { endSelection() }
         }
         .task(id: searchText) {
             let trimmed = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -311,6 +353,114 @@ struct DirectoryView: View {
     private func openRandomFile() {
         guard let random = playableFiles.randomElement() else { return }
         router.open(random, siblings: playableFiles)
+    }
+
+    private var allSelected: Bool {
+        let loadedIDs = Set(activeViewModel.items.map(\.id))
+        return !loadedIDs.isEmpty && selectedIDs.isSuperset(of: loadedIDs)
+    }
+
+    private func toggleSelection(_ file: DriveFile) {
+        if selectedIDs.contains(file.id) {
+            selectedIDs.remove(file.id)
+        } else {
+            selectedIDs.insert(file.id)
+        }
+    }
+
+    private func toggleAll() {
+        let loadedIDs = Set(activeViewModel.items.map(\.id))
+        if allSelected {
+            selectedIDs.subtract(loadedIDs)
+        } else {
+            selectedIDs.formUnion(loadedIDs)
+        }
+    }
+
+    private func endSelection() {
+        selectionMode = false
+        selectedIDs.removeAll()
+    }
+
+    private func prepareMove(files: [DriveFile]) {
+        guard !files.isEmpty else { return }
+        pendingMoveFiles = files
+        showMovePicker = true
+    }
+
+    private func prepareSelectedMove() {
+        let files = activeViewModel.items.filter { selectedIDs.contains($0.id) }
+        prepareMove(files: files)
+    }
+
+    /// Le dossier parent commun est désactivé : y déplacer tous les éléments
+    /// ne produirait aucun changement.
+    private var unavailableDestinationIDs: Set<Int> {
+        guard pendingMoveFiles.allSatisfy({ $0.parentId != nil }) else { return [] }
+        let parentIDs = Set(pendingMoveFiles.compactMap(\.parentId))
+        return parentIDs.count == 1 ? parentIDs : []
+    }
+
+    private func movePendingFiles(to destination: DriveFile) async {
+        let files = pendingMoveFiles
+        let ids = Set(files.map(\.id))
+        guard !ids.isEmpty else { return }
+
+        moveBusy = true
+        busyMessage = "Déplacement de \(ids.count) élément\(ids.count > 1 ? "s" : "")…"
+        let movingViewModel = activeViewModel
+        let movedIDs = await movingViewModel.move(ids: ids, to: destination.id)
+
+        // La recherche possède sa propre vue-modèle ; rafraîchir également le
+        // dossier courant évite d'y conserver une carte devenue obsolète.
+        if isSearching {
+            await viewModel.reload()
+        }
+
+        selectedIDs.subtract(movedIDs)
+        pendingMoveFiles.removeAll()
+        moveBusy = false
+
+        if movedIDs.count < ids.count {
+            addError = movingViewModel.errorMessage ?? "Certains éléments n’ont pas pu être déplacés."
+        }
+        if selectedIDs.isEmpty {
+            selectionMode = false
+        }
+    }
+
+    private var selectionBar: some View {
+        HStack(spacing: 10) {
+            Button {
+                toggleAll()
+            } label: {
+                Label(
+                    allSelected ? "Tout désélectionner" : "Tout sélectionner",
+                    systemImage: allSelected ? "checkmark.circle.fill" : "checkmark.circle"
+                )
+                .font(.footnote.weight(.semibold))
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 12)
+                .background(.ultraThinMaterial, in: Capsule())
+            }
+            .buttonStyle(.plain)
+
+            if !selectedIDs.isEmpty {
+                Button {
+                    prepareSelectedMove()
+                } label: {
+                    Label("Déplacer (\(selectedIDs.count))", systemImage: "folder")
+                        .font(.footnote.weight(.semibold))
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 12)
+                        .background(.ultraThinMaterial, in: Capsule())
+                }
+                .buttonStyle(.plain)
+                .disabled(moveBusy)
+            }
+        }
+        .padding(.horizontal, 16)
+        .padding(.bottom, 8)
     }
 
     private var addErrorBinding: Binding<Bool> {

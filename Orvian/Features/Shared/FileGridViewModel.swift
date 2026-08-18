@@ -94,7 +94,7 @@ final class FileGridViewModel {
         }
     }
 
-    // MARK: - Suppression & renommage
+    // MARK: - Suppression, renommage & déplacement
 
     func trash(_ file: DriveFile) async {
         do {
@@ -115,6 +115,40 @@ final class FileGridViewModel {
             items[index].name = oldName
             errorMessage = "Renommage impossible : \((error as? APIError)?.errorDescription ?? error.localizedDescription)"
         }
+    }
+
+    /// Déplace tous les éléments demandés. Les réussites disparaissent
+    /// immédiatement de la grille ; les éventuels échecs restent affichés.
+    @discardableResult
+    func move(ids: Set<Int>, to destinationDirectoryId: Int) async -> Set<Int> {
+        errorMessage = nil
+        var movedIDs: Set<Int> = []
+        var firstError: Error?
+
+        for id in ids {
+            do {
+                try await service.move(
+                    driveId: driveId,
+                    fileId: id,
+                    destinationDirectoryId: destinationDirectoryId
+                )
+                movedIDs.insert(id)
+            } catch {
+                if firstError == nil { firstError = error }
+            }
+        }
+
+        items.removeAll { movedIDs.contains($0.id) }
+
+        if let firstError {
+            let failedCount = ids.count - movedIDs.count
+            let detail = (firstError as? APIError)?.errorDescription ?? firstError.localizedDescription
+            errorMessage = failedCount == 1
+                ? "Un élément n’a pas pu être déplacé : \(detail)"
+                : "\(failedCount) éléments n’ont pas pu être déplacés : \(detail)"
+        }
+
+        return movedIDs
     }
 
     // MARK: - Corbeille

@@ -221,4 +221,12 @@ struct KDriveService {
         let body = try JSONEncoder().encode(["name": name])
         try await api.post(.rename(driveId: driveId, fileId: fileId), body: body, contentType: "application/json")
     }
+
+    /// Déplace un fichier ou dossier vers `destinationDirectoryId`.
+    func move(driveId: Int, fileId: Int, destinationDirectoryId: Int) async throws {
+        try await api.sendEmpty(
+            .move(driveId: driveId, fileId: fileId, destinationDirectoryId: destinationDirectoryId),
+            method: "POST"
+        )
+    }
 }

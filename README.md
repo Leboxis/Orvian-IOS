@@ -28,6 +28,8 @@ visionneuse photos avec zoom, lecteur vidéo AVPlayer quasi instantané.
   pastilles colorées des tags à côté du poids (`with=is_favorite,categories`)
 - **Ajout** : bouton « + » dans les dossiers — créer un dossier, importer un
   fichier, importer photos/vidéos (upload kDrive v3, conflits renommés automatiquement)
+- **Déplacement** : action rapide après un appui long, sélection multiple et
+  choix du dossier cible dans l’arborescence kDrive
 - **Couleurs de dossiers** : teinte d'origine définie dans kDrive (API), sinon
   teinte par type ; l'onglet Accueil démarre directement dans le premier dossier
   de la racine
@@ -36,9 +38,7 @@ visionneuse photos avec zoom, lecteur vidéo AVPlayer quasi instantané.
 
 ### Non inclus dans ce jalon (route map)
 
-Recherche, corbeille, téléchargement manuel, cache offline, liens de partage,
-commentaires, actions sur fichiers (déplacer/renommer), gestion des catégories,
-synchronisation.
+Cache offline, liens de partage, commentaires et synchronisation.
 
 ## Démarrage
 
