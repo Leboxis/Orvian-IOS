@@ -84,26 +84,9 @@ actor APIClient {
         contentType: String,
         progress: @escaping @Sendable (Double) -> Void
     ) async throws -> DriveFile {
-        guard var components = URLComponents(url: Self.baseURL, resolvingAgainstBaseURL: false) else {
-            throw APIError.invalidURL
-        }
-        components.path = endpoint.path
-        if !endpoint.query.isEmpty {
-            components.queryItems = endpoint.query
-        }
-        guard let url = components.url else { throw APIError.invalidURL }
-
-        var request = URLRequest(url: url)
-        request.httpMethod = "POST"
+        var request = try request(for: endpoint, method: "POST")
         request.timeoutInterval = 300
-        request.setValue("application/json", forHTTPHeaderField: "Accept")
         request.setValue(contentType, forHTTPHeaderField: "Content-Type")
-
-        if let token = TokenStore.current() {
-            request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-        } else if requiresAuth(endpoint) {
-            throw APIError.notSignedIn
-        }
 
         do {
             let delegate = UploadProgressDelegate(progress: progress)
@@ -127,7 +110,10 @@ actor APIClient {
             try Self.check(response: response, data: data)
             do {
                 let envelope = try JSONDecoder.api.decode(DataResponse<DriveFile>.self, from: data)
-                guard envelope.result == nil || envelope.result == "success" else {
+                guard envelope.result == nil
+                        || envelope.result == "success"
+                        || envelope.result == "asynchronous"
+                else {
                     throw APIError.invalidResponse
                 }
                 guard let uploadedFile = envelope.data else {
@@ -155,6 +141,28 @@ actor APIClient {
         progress: @escaping @Sendable (Double) -> Void
     ) async throws {
         var request = try request(for: endpoint, method: "POST")
+        try await uploadData(request: &request, data: data, contentType: contentType, progress: progress)
+    }
+
+    /// Envoie un morceau vers l'URL dédiée renvoyée par `upload/session/start`.
+    /// Cette URL reste contrôlée : seuls les hôtes Infomaniak autorisés peuvent
+    /// recevoir l'en-tête Bearer de l'utilisateur.
+    func uploadData(
+        to url: URL,
+        data: Data,
+        contentType: String,
+        progress: @escaping @Sendable (Double) -> Void
+    ) async throws {
+        var request = try uploadRequest(for: url, method: "POST")
+        try await uploadData(request: &request, data: data, contentType: contentType, progress: progress)
+    }
+
+    private func uploadData(
+        request: inout URLRequest,
+        data: Data,
+        contentType: String,
+        progress: @escaping @Sendable (Double) -> Void
+    ) async throws {
         request.timeoutInterval = 300
         request.setValue(contentType, forHTTPHeaderField: "Content-Type")
 
@@ -236,6 +244,30 @@ actor APIClient {
         return request
     }
 
+    private func uploadRequest(for url: URL, method: String) throws -> URLRequest {
+        guard Self.isTrustedUploadURL(url) else { throw APIError.invalidURL }
+        guard let token = TokenStore.current() else { throw APIError.notSignedIn }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = method
+        request.timeoutInterval = 30
+        request.cachePolicy = .reloadIgnoringLocalCacheData
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        return request
+    }
+
+    /// Les sessions d'upload peuvent être réparties sur un hôte dédié.
+    /// Ne jamais suivre une URL arbitraire : elle recevrait le jeton API.
+    static func isTrustedUploadURL(_ url: URL) -> Bool {
+        guard url.scheme?.lowercased() == "https",
+              let host = url.host?.lowercased()
+        else { return false }
+        return host == "api.infomaniak.com"
+            || host == "upload.kdrive.infomaniak.com"
+            || host.hasSuffix(".upload.kdrive.infomaniak.com")
+    }
+
     /// `/1/account` est appelé pendant la validation du token : accepter
     /// l'absence de token ne concernerait aucun autre endpoint de toute façon.
     private func requiresAuth(_ endpoint: Endpoint) -> Bool {
@@ -281,6 +313,24 @@ private final class UploadProgressDelegate: NSObject, URLSessionDataDelegate, @u
 
     func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive data: Data) {
         responseData.append(data)
+    }
+
+    /// Empêche qu'une redirection ne transforme une URL d'upload validée en
+    /// destination arbitraire tout en conservant l'en-tête d'autorisation.
+    func urlSession(
+        _ session: URLSession,
+        task: URLSessionTask,
+        willPerformHTTPRedirection response: HTTPURLResponse,
+        newRequest request: URLRequest,
+        completionHandler: @escaping (URLRequest?) -> Void
+    ) {
+        guard let redirectURL = request.url,
+              APIClient.isTrustedUploadURL(redirectURL)
+        else {
+            completionHandler(nil)
+            return
+        }
+        completionHandler(request)
     }
 
     func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {

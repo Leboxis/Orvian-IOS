@@ -1,5 +1,4 @@
 import Foundation
-import CryptoKit
 
 /// Lecture séquentielle hors du MainActor pour les uploads découpés.
 private actor UploadChunkReader {
@@ -13,10 +12,8 @@ private actor UploadChunkReader {
         try? handle.close()
     }
 
-    func next(maxLength: Int) throws -> (data: Data, sha256: String) {
-        let data = try handle.read(upToCount: maxLength) ?? Data()
-        let digest = SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
-        return (data, digest)
+    func next(maxLength: Int) throws -> Data {
+        try handle.read(upToCount: maxLength) ?? Data()
     }
 }
 
@@ -194,7 +191,9 @@ struct KDriveService {
 
     // MARK: - Création & upload
 
-    private static let directUploadLimit = 100 * 1_024 * 1_024
+    /// Infomaniak recommande une session à partir de 100 Mo. Une petite marge
+    /// évite qu'un fichier proche de la limite soit refusé par un intermédiaire.
+    private static let directUploadLimit = 95 * 1_024 * 1_024
     private static let uploadChunkSize = 20 * 1_024 * 1_024
 
     private struct StartUploadSessionRequest: Encodable {
@@ -203,6 +202,7 @@ struct KDriveService {
         let totalChunks: Int
         let conflict: String
         let directoryId: Int
+        let lastModifiedAt: Int
 
         enum CodingKeys: String, CodingKey {
             case conflict
@@ -210,15 +210,34 @@ struct KDriveService {
             case fileName = "file_name"
             case totalChunks = "total_chunks"
             case directoryId = "directory_id"
+            case lastModifiedAt = "last_modified_at"
         }
     }
 
     private struct UploadSession: Decodable {
-        let token: String
+        let token: String?
+        let sessionToken: String?
+        let uploadURL: URL?
+
+        enum CodingKeys: String, CodingKey {
+            case token
+            case sessionToken = "session_token"
+            case uploadURL = "upload_url"
+        }
+
+        var resolvedToken: String? { token ?? sessionToken }
     }
 
     private struct FinishedUpload: Decodable {
         let file: DriveFile
+    }
+
+    private struct FinishUploadSessionRequest: Encodable {
+        let lastModifiedAt: Int
+
+        enum CodingKeys: String, CodingKey {
+            case lastModifiedAt = "last_modified_at"
+        }
     }
 
     private struct CreateFolderRequest: Encodable {
@@ -234,7 +253,13 @@ struct KDriveService {
     /// Upload d'un fichier complet (corps brut) dans `directoryId`.
     func upload(driveId: Int, directoryId: Int, data: Data, fileName: String, mimeType: String) async throws {
         try await api.post(
-            .upload(driveId: driveId, directoryId: directoryId, fileName: fileName, totalSize: data.count),
+            .upload(
+                driveId: driveId,
+                directoryId: directoryId,
+                fileName: fileName,
+                totalSize: data.count,
+                lastModifiedAt: Int(Date().timeIntervalSince1970)
+            ),
             body: data,
             contentType: mimeType.isEmpty ? "application/octet-stream" : mimeType
         )
@@ -249,6 +274,7 @@ struct KDriveService {
         totalSize: Int,
         progress: @escaping @Sendable (Double) -> Void
     ) async throws -> DriveFile {
+        let lastModifiedAt = Self.modificationTimestamp(for: fileURL)
         if totalSize >= Self.directUploadLimit {
             return try await uploadFileInChunks(
                 driveId: driveId,
@@ -256,12 +282,19 @@ struct KDriveService {
                 fileURL: fileURL,
                 fileName: fileName,
                 totalSize: totalSize,
+                lastModifiedAt: lastModifiedAt,
                 progress: progress
             )
         }
 
         return try await api.uploadFile(
-            .upload(driveId: driveId, directoryId: directoryId, fileName: fileName, totalSize: totalSize),
+            .upload(
+                driveId: driveId,
+                directoryId: directoryId,
+                fileName: fileName,
+                totalSize: totalSize,
+                lastModifiedAt: lastModifiedAt
+            ),
             fileURL: fileURL,
             // L'endpoint reçoit le fichier comme corps binaire brut. Le type
             // réel reste transmis à kDrive via le nom et son extension.
@@ -270,14 +303,15 @@ struct KDriveService {
         )
     }
 
-    /// Les fichiers d'au moins 100 Mo suivent le protocole de session utilisé
-    /// par l'app kDrive officielle. Chaque morceau est confirmé avant le suivant.
+    /// Les fichiers d'au moins 95 Mo suivent le protocole de session recommandé
+    /// par Infomaniak. Chaque morceau est confirmé avant le suivant.
     private func uploadFileInChunks(
         driveId: Int,
         directoryId: Int,
         fileURL: URL,
         fileName: String,
         totalSize: Int,
+        lastModifiedAt: Int,
         progress: @escaping @Sendable (Double) -> Void
     ) async throws -> DriveFile {
         let totalChunks = max(1, Int(ceil(Double(totalSize) / Double(Self.uploadChunkSize))))
@@ -286,7 +320,8 @@ struct KDriveService {
             fileName: fileName,
             totalChunks: totalChunks,
             conflict: "rename",
-            directoryId: directoryId
+            directoryId: directoryId,
+            lastModifiedAt: lastModifiedAt
         )
         let body = try JSONEncoder().encode(request)
         let response = try await api.postDecoded(
@@ -294,8 +329,11 @@ struct KDriveService {
             .startUploadSession(driveId: driveId),
             body: body
         )
-        guard response.result == nil || response.result == "success",
-              let session = response.data
+        guard response.result == nil || response.result == "success" || response.result == "asynchronous",
+              let session = response.data,
+              let token = session.resolvedToken,
+              let uploadURL = session.uploadURL,
+              APIClient.isTrustedUploadURL(uploadURL)
         else { throw APIError.invalidResponse }
 
         do {
@@ -303,17 +341,18 @@ struct KDriveService {
             for number in 1...totalChunks {
                 try Task.checkCancellation()
                 let chunk = try await reader.next(maxLength: Self.uploadChunkSize)
-                guard !chunk.data.isEmpty else { throw APIError.invalidResponse }
+                guard !chunk.isEmpty else { throw APIError.invalidResponse }
+                let chunkURL = try Self.chunkURL(
+                    from: uploadURL,
+                    number: number,
+                    size: chunk.count
+                )
 
+                // `upload_url` est l'hôte désigné par Infomaniak pour les
+                // morceaux ; il ne faut pas les envoyer à api.infomaniak.com.
                 try await api.uploadData(
-                    .uploadChunk(
-                        driveId: driveId,
-                        token: session.token,
-                        number: number,
-                        size: chunk.data.count,
-                        sha256: chunk.sha256
-                    ),
-                    data: chunk.data,
+                    to: chunkURL,
+                    data: chunk,
                     contentType: "application/octet-stream",
                     progress: { chunkProgress in
                         let completedChunks = Double(number - 1)
@@ -324,20 +363,45 @@ struct KDriveService {
 
             let finished = try await api.postDecoded(
                 DataResponse<FinishedUpload>.self,
-                .finishUploadSession(driveId: driveId, token: session.token)
+                .finishUploadSession(driveId: driveId, token: token),
+                body: try JSONEncoder().encode(FinishUploadSessionRequest(lastModifiedAt: lastModifiedAt))
             )
-            guard finished.result == nil || finished.result == "success",
+            guard finished.result == nil || finished.result == "success" || finished.result == "asynchronous",
                   let file = finished.data?.file
             else { throw APIError.invalidResponse }
             progress(1)
             return file
         } catch {
             try? await api.sendEmpty(
-                .cancelUploadSession(driveId: driveId, token: session.token),
+                .cancelUploadSession(driveId: driveId, token: token),
                 method: "DELETE"
             )
             throw error
         }
+    }
+
+    private static func modificationTimestamp(for fileURL: URL) -> Int {
+        let attributes = try? FileManager.default.attributesOfItem(atPath: fileURL.path)
+        let date = attributes?[.modificationDate] as? Date
+        return Int((date ?? Date()).timeIntervalSince1970)
+    }
+
+    /// `upload_url` peut contenir des paramètres nécessaires à l'hôte de
+    /// transfert. Ils sont préservés et seuls les paramètres du morceau sont
+    /// ajoutés.
+    private static func chunkURL(from uploadURL: URL, number: Int, size: Int) throws -> URL {
+        guard APIClient.isTrustedUploadURL(uploadURL),
+              var components = URLComponents(url: uploadURL, resolvingAgainstBaseURL: false)
+        else { throw APIError.invalidURL }
+        let preservedQuery = (components.queryItems ?? []).filter {
+            $0.name != "chunk_number" && $0.name != "chunk_size"
+        }
+        components.queryItems = preservedQuery + [
+            URLQueryItem(name: "chunk_number", value: String(number)),
+            URLQueryItem(name: "chunk_size", value: String(size)),
+        ]
+        guard let url = components.url else { throw APIError.invalidURL }
+        return url
     }
 
     // MARK: - Suppression & renommage

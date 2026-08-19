@@ -78,6 +78,13 @@ actor ThumbnailProvider {
     private var pendingPrefetchIsTrashed = false
     private var prefetchTask: Task<Void, Never>?
     private let maxPendingPrefetch = 6
+    /// Les posters de vidéos sont produits de façon asynchrone côté kDrive.
+    /// Cette fenêtre couvre la majorité des encodages sans conserver une
+    /// absence en cache ni marteler l'API.
+    private let uploadedMediaRetryDelays: [Duration] = [
+        .zero, .seconds(2), .seconds(5), .seconds(10), .seconds(20),
+        .seconds(30), .seconds(60), .seconds(60), .seconds(60), .seconds(60),
+    ]
 
     private struct Key: Hashable {
         let driveId: Int
@@ -111,7 +118,9 @@ actor ThumbnailProvider {
                 Self.memory.setObject(image, forKey: key.nsString, cost: image.estimatedByteSize)
                 return image
             }
-            return nil
+            // Une ancienne réponse non image ne doit pas empêcher une
+            // nouvelle tentative réseau (cas des posters encore générés).
+            disk.removeEntry(driveId: driveId, fileId: fileId, pixels: pixels)
         }
 
         if let existing = inFlight[key] {
@@ -128,6 +137,45 @@ actor ThumbnailProvider {
             Self.memory.setObject(image, forKey: key.nsString, cost: image.estimatedByteSize)
         }
         return image
+    }
+
+    /// Attend la disponibilité d'une miniature récemment créée. Le travail est
+    /// annulable et chaque tentative passe par le cache/dédoublonnage normal.
+    func thumbnailWhenAvailable(
+        driveId: Int,
+        fileId: Int,
+        pixels: Int = DS.thumbnailPixels,
+        isTrashed: Bool = false,
+        includeImmediateAttempt: Bool = true
+    ) async -> UIImage? {
+        let delays = includeImmediateAttempt
+            ? uploadedMediaRetryDelays
+            : Array(uploadedMediaRetryDelays.dropFirst())
+        for delay in delays {
+            guard !Task.isCancelled else { return nil }
+            if delay != .zero {
+                do {
+                    try await Task.sleep(for: delay)
+                } catch {
+                    return nil
+                }
+            }
+            if let image = await thumbnail(
+                driveId: driveId,
+                fileId: fileId,
+                pixels: pixels,
+                isTrashed: isTrashed
+            ) {
+                return image
+            }
+        }
+        return nil
+    }
+
+    /// Amorce la génération des miniatures dès la confirmation de l'upload,
+    /// y compris si l'utilisateur quitte le dossier avant son affichage.
+    func primeUploadedThumbnail(driveId: Int, fileId: Int) async {
+        _ = await thumbnailWhenAvailable(driveId: driveId, fileId: fileId)
     }
 
     /// Préchargement discret avec régulation de concurrence et abandon des requêtes lointaines.
@@ -195,13 +243,14 @@ actor ThumbnailProvider {
             guard !data.isEmpty else {
                 return nil
             }
-            // 1. Sauvegarde directe des données brutes reçues (JPEG, PNG, WebP...) sans ré-encodage CPU
-            disk.store(data: data, driveId: key.driveId, fileId: key.fileId, pixels: key.pixels)
-
-            // 2. Décodage et préparation d'image hors du MainActor
+            // Vérifier le contenu avant de le placer dans le cache. Une page
+            // d'erreur renvoyée à tort en 2xx ne doit jamais devenir une
+            // absence de miniature persistante.
             guard let image = UIImage.decode(data) else {
                 return nil
             }
+            // Les données validées sont conservées sans ré-encodage CPU.
+            disk.store(data: data, driveId: key.driveId, fileId: key.fileId, pixels: key.pixels)
             return image
         } catch is CancellationError {
             return nil

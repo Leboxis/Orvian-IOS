@@ -287,31 +287,27 @@ struct FileCardView: View {
             thumbnailLoaded = true
             return
         }
-        // Un média fraîchement importé peut exister avant que sa miniature ne
-        // soit générée. Les nouvelles tentatives sont espacées et s'annulent
-        // automatiquement dès que la carte quitte l'écran.
-        let retryDelays: [Duration] = [.zero, .seconds(2), .seconds(5), .seconds(10)]
-        for delay in retryDelays {
-            if delay != .zero {
-                do {
-                    try await Task.sleep(for: delay)
-                } catch {
-                    return
-                }
-            }
-            if let image = await ThumbnailProvider.shared.thumbnail(
-                driveId: driveId,
-                fileId: file.id,
-                isTrashed: isTrashed
-            ) {
-                guard !Task.isCancelled else { return }
-                thumbnail = image
-                thumbnailLoaded = true
-                return
-            }
-            // Affiche immédiatement l'icône de remplacement pendant que les
-            // nouvelles tentatives continuent discrètement en arrière-plan.
+        if let image = await ThumbnailProvider.shared.thumbnail(
+            driveId: driveId,
+            fileId: file.id,
+            isTrashed: isTrashed
+        ) {
+            guard !Task.isCancelled else { return }
+            thumbnail = image
             thumbnailLoaded = true
+            return
+        }
+        // Affiche immédiatement le remplacement, puis continue d'attendre le
+        // poster vidéo sans figer un squelette pendant tout l'encodage.
+        thumbnailLoaded = true
+        if let image = await ThumbnailProvider.shared.thumbnailWhenAvailable(
+            driveId: driveId,
+            fileId: file.id,
+            isTrashed: isTrashed,
+            includeImmediateAttempt: false
+        ) {
+            guard !Task.isCancelled else { return }
+            thumbnail = image
         }
         guard !Task.isCancelled else { return }
         thumbnailLoaded = true

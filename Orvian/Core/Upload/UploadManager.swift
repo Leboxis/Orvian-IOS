@@ -338,6 +338,15 @@ final class UploadManager {
                 }
             )
             tasks[index].status = .completed
+            if uploadedFile.fileKind.supportsThumbnail {
+                let uploadedFileID = uploadedFile.id
+                Task.detached(priority: .utility) {
+                    await ThumbnailProvider.shared.primeUploadedThumbnail(
+                        driveId: driveId,
+                        fileId: uploadedFileID
+                    )
+                }
+            }
             if payload.isTemporary {
                 await UploadFileIO.removeTemporaryFile(payload.fileURL)
             }

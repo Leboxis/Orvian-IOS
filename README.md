@@ -133,7 +133,10 @@ Points clés :
 ## Sécurité
 
 - `.env.local` (token, IDs) est **exclu du dépôt** via `.gitignore` — aucun secret n'est commité.
-- Le token ne quitte l'app que vers `api.infomaniak.com` (en-tête `Authorization: Bearer`).
+- Le token est envoyé uniquement à `api.infomaniak.com` et aux hôtes HTTPS
+  dédiés `*.upload.kdrive.infomaniak.com` explicitement renvoyés par une
+  session d'upload Infomaniak ; toute autre URL, y compris après redirection,
+  est refusée.
 - `Api infomaniak.json` (spec OpenAPI officielle, licence MIT) est conservée comme référence.
 
 ## Compatibilité

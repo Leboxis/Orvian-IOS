@@ -55,6 +55,19 @@ final class DiskImageCache: @unchecked Sendable {
         return image.preparingForDisplay() ?? image
     }
 
+    /// Retire une entrée illisible afin qu'elle ne bloque jamais un nouveau
+    /// téléchargement de miniature valide.
+    func removeEntry(driveId: Int, fileId: Int, pixels: Int) {
+        let fileURL = url(driveId: driveId, fileId: fileId, pixels: pixels)
+        let size = (try? fileURL.resourceValues(forKeys: [.fileSizeKey]))?.fileSize ?? 0
+        guard (try? FileManager.default.removeItem(at: fileURL)) != nil else { return }
+        lock.lock()
+        if isSizeInitialized {
+            estimatedDiskSize = max(0, estimatedDiskSize - size)
+        }
+        lock.unlock()
+    }
+
     /// Enregistre directement les données brutes reçues du réseau (JPEG, PNG, WebP...) sans ré-encodage CPU.
     /// Utilise Data.write(options: .atomic) pour garantir qu'aucun fichier incomplet ne peut être lu.
     func store(data: Data, driveId: Int, fileId: Int, pixels: Int) {

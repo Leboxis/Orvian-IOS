@@ -140,26 +140,16 @@ extension Endpoint {
         Endpoint(path: "/2/drive/\(driveId)/categories/\(categoryId)")
     }
 
-    /// Miniature carrée (10…400 px).
-    static func thumbnail(driveId: Int, fileId: Int, pixels: Int) -> Endpoint {
-        Endpoint(
-            path: "/2/drive/\(driveId)/files/\(fileId)/thumbnail",
-            query: [
-                URLQueryItem(name: "width", value: String(pixels)),
-                URLQueryItem(name: "height", value: String(pixels)),
-            ]
-        )
+    /// Miniature d'un fichier. L'API choisit elle-même la représentation
+    /// disponible ; des dimensions forcées ont empêché certains posters vidéo
+    /// fraîchement générés d'être renvoyés.
+    static func thumbnail(driveId: Int, fileId: Int, pixels _: Int) -> Endpoint {
+        Endpoint(path: "/2/drive/\(driveId)/files/\(fileId)/thumbnail")
     }
 
     /// Miniature d'un fichier corbeillé (même format que `.thumbnail`).
-    static func trashedThumbnail(driveId: Int, fileId: Int, pixels: Int) -> Endpoint {
-        Endpoint(
-            path: "/2/drive/\(driveId)/trash/\(fileId)/thumbnail",
-            query: [
-                URLQueryItem(name: "width", value: String(pixels)),
-                URLQueryItem(name: "height", value: String(pixels)),
-            ]
-        )
+    static func trashedThumbnail(driveId: Int, fileId: Int, pixels _: Int) -> Endpoint {
+        Endpoint(path: "/2/drive/\(driveId)/trash/\(fileId)/thumbnail")
     }
 
     /// Restaurer un fichier depuis la corbeille : POST JSON
@@ -200,13 +190,20 @@ extension Endpoint {
 
     /// Upload d'un fichier : POST corps brut (`application/octet-stream`).
     /// `conflict=rename` : le serveur renomme si le nom existe déjà.
-    static func upload(driveId: Int, directoryId: Int, fileName: String, totalSize: Int) -> Endpoint {
+    static func upload(
+        driveId: Int,
+        directoryId: Int,
+        fileName: String,
+        totalSize: Int,
+        lastModifiedAt: Int
+    ) -> Endpoint {
         Endpoint(
             path: "/3/drive/\(driveId)/upload",
             query: [
                 URLQueryItem(name: "directory_id", value: String(directoryId)),
                 URLQueryItem(name: "file_name", value: fileName),
                 URLQueryItem(name: "total_size", value: String(totalSize)),
+                URLQueryItem(name: "last_modified_at", value: String(lastModifiedAt)),
                 URLQueryItem(name: "conflict", value: "rename"),
                 URLQueryItem(name: "with", value: "capabilities,conversion_capabilities,sorted_name"),
             ]
@@ -216,24 +213,6 @@ extension Endpoint {
     /// Ouvre une session pour les fichiers volumineux.
     static func startUploadSession(driveId: Int) -> Endpoint {
         Endpoint(path: "/3/drive/\(driveId)/upload/session/start")
-    }
-
-    /// Ajoute un morceau numéroté à une session d'upload.
-    static func uploadChunk(
-        driveId: Int,
-        token: String,
-        number: Int,
-        size: Int,
-        sha256: String
-    ) -> Endpoint {
-        Endpoint(
-            path: "/3/drive/\(driveId)/upload/session/\(token)/chunk",
-            query: [
-                URLQueryItem(name: "chunk_number", value: String(number)),
-                URLQueryItem(name: "chunk_size", value: String(size)),
-                URLQueryItem(name: "chunk_hash", value: "sha256:\(sha256)"),
-            ]
-        )
     }
 
     /// Ferme la session et renvoie le fichier définitivement créé.
