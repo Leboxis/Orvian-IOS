@@ -110,6 +110,24 @@ final class FileGridViewModel {
         }
     }
 
+    // MARK: - Tags
+
+    /// Met à jour localement les catégories (tags) d'un fichier après
+    /// confirmation de l'API, pour que les pastilles des cartes suivent
+    /// immédiatement (éditeur de tags et fiche détail).
+    func updateCategories(for file: DriveFile, category: Category, applied: Bool) {
+        guard let index = items.firstIndex(where: { $0.id == file.id }) else { return }
+        var current = items[index].categories ?? []
+        if applied {
+            if !current.contains(where: { $0.category?.id == category.id }) {
+                current.append(FileCategory(category: category))
+            }
+        } else {
+            current.removeAll { $0.category?.id == category.id }
+        }
+        items[index].categories = current
+    }
+
     // MARK: - Suppression, renommage & déplacement
 
     func trash(_ file: DriveFile) async {

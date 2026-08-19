@@ -240,7 +240,13 @@ struct DirectoryView: View {
         .toolbar {
             if selectionMode {
                 ToolbarItem(placement: .topBarLeading) {
-                    Button("Annuler") { endSelection() }
+                    Button {
+                        endSelection()
+                    } label: {
+                        Image(systemName: "xmark")
+                            .font(.system(size: 16, weight: .medium))
+                    }
+                    .accessibilityLabel("Annuler la sélection")
                 }
 
                 ToolbarItem(placement: .principal) {
@@ -719,8 +725,14 @@ private struct ApplyTagsSheet: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Annuler") { dismiss() }
-                        .disabled(busy)
+                    Button {
+                        dismiss()
+                    } label: {
+                        Image(systemName: "xmark")
+                            .font(.system(size: 16, weight: .medium))
+                    }
+                    .disabled(busy)
+                    .accessibilityLabel("Annuler")
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     if busy {

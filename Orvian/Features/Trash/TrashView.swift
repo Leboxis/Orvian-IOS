@@ -39,10 +39,14 @@ struct TrashView: View {
         .toolbar {
             if selectionMode {
                 ToolbarItem(placement: .topBarLeading) {
-                    Button("Annuler") {
+                    Button {
                         selectionMode = false
                         selectedIDs = []
+                    } label: {
+                        Image(systemName: "xmark")
+                            .font(.system(size: 16, weight: .medium))
                     }
+                    .accessibilityLabel("Annuler la sélection")
                 }
             } else {
                 ToolbarItem(placement: .topBarTrailing) {

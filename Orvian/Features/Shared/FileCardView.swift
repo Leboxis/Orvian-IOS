@@ -2,7 +2,7 @@ import SwiftUI
 
 /// Carte de fichier : miniature, étoile favori, nom, taille.
 /// Tap → ouverture du fichier/dossier. Appui long → menu contextuel
-/// (détails, favori, renommer, supprimer).
+/// (détails, télécharger, tags, favori, renommer, déplacer, supprimer).
 struct FileCardView: View {
     let file: DriveFile
     let driveId: Int
@@ -22,11 +22,15 @@ struct FileCardView: View {
     var onDelete: (() -> Void)?
     var onRename: ((String) -> Void)?
     var onMove: (() -> Void)?
+    /// Confirme localement un changement de tag pour rafraîchir les pastilles
+    /// des cartes derrière l'éditeur.
+    var onTagChanged: ((Category, Bool) -> Void)?
     var action: () -> Void
 
     @State private var thumbnail: UIImage?
     @State private var thumbnailLoaded = false
     @State private var showDetail = false
+    @State private var showTagsSheet = false
     @State private var showDeleteConfirm = false
     @State private var showRenameAlert = false
     @State private var renameText = ""
@@ -96,6 +100,11 @@ struct FileCardView: View {
                         }
                     }
                     Button {
+                        showTagsSheet = true
+                    } label: {
+                        Label("Tags", systemImage: "tag")
+                    }
+                    Button {
                         onToggleFavorite?()
                     } label: {
                         Label(
@@ -137,7 +146,15 @@ struct FileCardView: View {
                 onToggleFavorite: onToggleFavorite,
                 onDelete: onDelete,
                 onRename: onRename,
-                onMove: onMove
+                onMove: onMove,
+                onTagChanged: onTagChanged
+            )
+        }
+        .sheet(isPresented: $showTagsSheet) {
+            TagsEditorSheet(
+                driveId: driveId,
+                file: file,
+                onChanged: onTagChanged
             )
         }
         .alert("Supprimer", isPresented: $showDeleteConfirm) {
@@ -329,10 +346,14 @@ struct FileDetailSheet: View {
     let onDelete: (() -> Void)?
     let onRename: ((String) -> Void)?
     let onMove: (() -> Void)?
+    /// Confirme localement un changement de tag pour rafraîchir les pastilles
+    /// des cartes derrière la fiche.
+    var onTagChanged: ((Category, Bool) -> Void)?
 
     @Environment(\.dismiss) private var dismiss
     @State private var categories: [Category] = []
     @State private var appliedCategoryIds: Set<Int>
+    @State private var isFavorite: Bool
     @State private var showDeleteConfirm = false
     @State private var showRenameAlert = false
     @State private var renameText = ""
@@ -347,7 +368,8 @@ struct FileDetailSheet: View {
         onToggleFavorite: (() -> Void)?,
         onDelete: (() -> Void)?,
         onRename: ((String) -> Void)?,
-        onMove: (() -> Void)?
+        onMove: (() -> Void)?,
+        onTagChanged: ((Category, Bool) -> Void)? = nil
     ) {
         self.file = file
         self.driveId = driveId
@@ -357,7 +379,9 @@ struct FileDetailSheet: View {
         self.onDelete = onDelete
         self.onRename = onRename
         self.onMove = onMove
+        self.onTagChanged = onTagChanged
         _appliedCategoryIds = State(initialValue: Set((file.categories ?? []).compactMap { $0.category?.id }))
+        _isFavorite = State(initialValue: file.isFavorite == true)
     }
 
     var body: some View {
@@ -372,10 +396,36 @@ struct FileDetailSheet: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
-                    Button("Fermer") { dismiss() }
+                    Button {
+                        dismiss()
+                    } label: {
+                        Image(systemName: "xmark")
+                            .font(.system(size: 16, weight: .medium))
+                    }
+                    .accessibilityLabel("Fermer")
                 }
-                ToolbarItem(placement: .topBarTrailing) {
-                    ellipsisMenu
+                if !isTrashed {
+                    ToolbarItemGroup(placement: .topBarTrailing) {
+                        if onToggleFavorite != nil {
+                            Button {
+                                isFavorite.toggle()
+                                onToggleFavorite?()
+                            } label: {
+                                Image(systemName: isFavorite ? "star.fill" : "star")
+                                    .foregroundStyle(isFavorite ? .yellow : Color.accentColor)
+                            }
+                            .accessibilityLabel(isFavorite ? "Retirer des favoris" : "Ajouter aux favoris")
+                        }
+
+                        if onDelete != nil {
+                            Button(role: .destructive) {
+                                showDeleteConfirm = true
+                            } label: {
+                                Image(systemName: "trash")
+                            }
+                            .accessibilityLabel("Supprimer")
+                        }
+                    }
                 }
             }
             .alert("Supprimer", isPresented: $showDeleteConfirm) {
@@ -427,14 +477,15 @@ struct FileDetailSheet: View {
 
     private var favoriteRow: some View {
         Button {
+            isFavorite.toggle()
             onToggleFavorite?()
         } label: {
             HStack {
                 Text("Favori")
                     .foregroundStyle(.primary)
                 Spacer()
-                Image(systemName: file.isFavorite == true ? "star.fill" : "star")
-                    .foregroundStyle(file.isFavorite == true ? .yellow : .secondary)
+                Image(systemName: isFavorite ? "star.fill" : "star")
+                    .foregroundStyle(isFavorite ? .yellow : .secondary)
             }
         }
     }
@@ -495,55 +546,6 @@ struct FileDetailSheet: View {
         }
     }
 
-    private var ellipsisMenu: some View {
-        Menu {
-            if !file.isDirectory, !isTrashed {
-                Button {
-                    Task {
-                        await FileDownloadService.shared.downloadAndShare(driveId: driveId, file: file)
-                    }
-                } label: {
-                    Label("Télécharger", systemImage: "arrow.down.circle")
-                }
-            }
-            if !isTrashed, let onToggleFavorite {
-                Button {
-                    onToggleFavorite()
-                } label: {
-                    Label(
-                        file.isFavorite == true ? "Retirer des favoris" : "Ajouter aux favoris",
-                        systemImage: file.isFavorite == true ? "star.slash" : "star"
-                    )
-                }
-            }
-            if !isTrashed, onRename != nil {
-                Button {
-                    renameText = file.name
-                    showRenameAlert = true
-                } label: {
-                    Label("Renommer", systemImage: "pencil")
-                }
-            }
-            if !isTrashed, let onMove {
-                Button {
-                    dismiss()
-                    onMove()
-                } label: {
-                    Label("Déplacer", systemImage: "folder")
-                }
-            }
-            if !isTrashed, onDelete != nil {
-                Button(role: .destructive) {
-                    showDeleteConfirm = true
-                } label: {
-                    Label("Supprimer", systemImage: "trash")
-                }
-            }
-        } label: {
-            Image(systemName: "ellipsis.circle")
-        }
-    }
-
     @ViewBuilder
     private var thumbnailPreview: some View {
         let shape = RoundedRectangle(cornerRadius: 12, style: .continuous)
@@ -597,12 +599,138 @@ struct FileDetailSheet: View {
             } else {
                 try await service.removeCategory(driveId: driveId, fileId: file.id, categoryId: category.id)
             }
+            onTagChanged?(category, isApplying)
         } catch {
             if isApplying {
                 appliedCategoryIds.remove(category.id)
             } else {
                 appliedCategoryIds.insert(category.id)
             }
+        }
+    }
+}
+
+/// Éditeur de tags d'un seul élément (menu contextuel → « Tags ») :
+/// les tags déjà appliqués sont marqués d'une coche, un tap ajoute ou retire.
+private struct TagsEditorSheet: View {
+    let driveId: Int
+    let file: DriveFile
+    let onChanged: ((Category, Bool) -> Void)?
+
+    @Environment(\.dismiss) private var dismiss
+    @State private var categories: [Category] = []
+    @State private var appliedCategoryIds: Set<Int>
+    @State private var isLoading = true
+    @State private var errorMessage: String?
+
+    private let service = KDriveService()
+
+    init(driveId: Int, file: DriveFile, onChanged: ((Category, Bool) -> Void)?) {
+        self.driveId = driveId
+        self.file = file
+        self.onChanged = onChanged
+        _appliedCategoryIds = State(initialValue: Set((file.categories ?? []).compactMap { $0.category?.id }))
+    }
+
+    var body: some View {
+        NavigationStack {
+            Group {
+                if isLoading {
+                    ProgressView("Chargement des tags…")
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else if categories.isEmpty {
+                    ContentUnavailableView {
+                        Label("Aucun tag", systemImage: "tag")
+                    } description: {
+                        Text("Créez des tags dans l'onglet Tag pour les appliquer ici.")
+                    }
+                } else {
+                    List {
+                        Section {
+                            ForEach(categories) { category in
+                                Button {
+                                    Task { await toggle(category) }
+                                } label: {
+                                    tagRow(category)
+                                }
+                            }
+                        } footer: {
+                            Text("Cochez les tags à appliquer à « \(file.name) » ; décochez-les pour les retirer.")
+                        }
+                        if let errorMessage {
+                            Section {
+                                Text(errorMessage)
+                                    .font(.footnote)
+                                    .foregroundStyle(.red)
+                            }
+                        }
+                    }
+                }
+            }
+            .navigationTitle("Tags")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button {
+                        dismiss()
+                    } label: {
+                        Image(systemName: "xmark")
+                            .font(.system(size: 16, weight: .medium))
+                    }
+                    .accessibilityLabel("Fermer")
+                }
+            }
+        }
+        .task { await load() }
+    }
+
+    private func tagRow(_ category: Category) -> some View {
+        HStack {
+            Circle()
+                .fill(Color(hex: category.color) ?? .gray)
+                .frame(width: 12, height: 12)
+            Text(category.name)
+                .foregroundStyle(.primary)
+            Spacer()
+            if appliedCategoryIds.contains(category.id) {
+                Image(systemName: "checkmark")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(Color.accentColor)
+            }
+        }
+    }
+
+    private func load() async {
+        isLoading = true
+        defer { isLoading = false }
+        if let cats = try? await service.categories(driveId: driveId) {
+            categories = cats
+        }
+    }
+
+    private func toggle(_ category: Category) async {
+        let isApplying = !appliedCategoryIds.contains(category.id)
+        if isApplying {
+            appliedCategoryIds.insert(category.id)
+        } else {
+            appliedCategoryIds.remove(category.id)
+        }
+        errorMessage = nil
+        do {
+            if isApplying {
+                try await service.addCategory(driveId: driveId, fileId: file.id, categoryId: category.id)
+                TagUsageStore.markUsed(driveId: driveId, categoryId: category.id)
+            } else {
+                try await service.removeCategory(driveId: driveId, fileId: file.id, categoryId: category.id)
+            }
+            onChanged?(category, isApplying)
+        } catch {
+            if isApplying {
+                appliedCategoryIds.remove(category.id)
+            } else {
+                appliedCategoryIds.insert(category.id)
+            }
+            errorMessage = "Impossible de modifier le tag : \((error as? APIError)?.errorDescription ?? error.localizedDescription)"
         }
     }
 }

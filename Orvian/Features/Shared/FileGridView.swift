@@ -318,6 +318,9 @@ struct FileGridView: View {
             onMove: onMove == nil ? nil : {
                 onMove?(file)
             },
+            onTagChanged: { category, applied in
+                viewModel.updateCategories(for: file, category: category, applied: applied)
+            },
             action: {
                 if selectionMode {
                     onToggleSelection?(file)
