@@ -300,6 +300,7 @@ struct FileGridView: View {
         FileCardView(
             file: file,
             driveId: viewModel.driveId,
+            categoriesById: viewModel.categoriesById,
             enabled: selectionMode || !file.isDirectory || onOpenDirectory != nil,
             selectionMode: selectionMode,
             isTrashed: viewModel.source == .trash,

@@ -6,6 +6,9 @@ import SwiftUI
 struct FileCardView: View {
     let file: DriveFile
     let driveId: Int
+    /// Index id → catégorie du drive, pour les pastilles de tags des cartes
+    /// (l'API ne renvoie que des `categoryId` dans les listes).
+    var categoriesById: [Int: Category] = [:]
     var enabled = true
     /// Mode sélection : le tap coche au lieu d'ouvrir.
     var selectionMode = false
@@ -236,9 +239,9 @@ struct FileCardView: View {
     /// discrètement à droite du poids. Maximum 4 pour rester léger.
     @ViewBuilder
     private var categoryDots: some View {
-        let hexes = (file.categories ?? []).compactMap { $0.category?.color }
-        ForEach(hexes.prefix(4), id: \.self) { hex in
-            if let color = Color(hex: hex) {
+        let categories = (file.categories ?? []).compactMap { categoriesById[$0.categoryId] }
+        ForEach(categories.prefix(4), id: \.id) { category in
+            if let color = Color(hex: category.color) {
                 Circle()
                     .fill(color)
                     .frame(width: 6, height: 6)
@@ -581,12 +584,14 @@ struct FileDetailSheet: View {
 
     private func loadFileInfo() async {
         guard !isTrashed else { return }
+        await CategoryLibrary.shared.ensureLoaded(for: driveId)
+        let byId = CategoryLibrary.shared.categories(for: driveId)
         if let info = try? await service.fileInfo(driveId: driveId, fileId: file.id) {
-            appliedCategories = (info.categories ?? []).compactMap { $0.category }
+            appliedCategories = (info.categories ?? []).compactMap { byId[$0.categoryId] }
             isFavorite = info.isFavorite == true
         } else {
             // Repli : les catégories éventuellement fournies par la liste.
-            appliedCategories = (file.categories ?? []).compactMap { $0.category }
+            appliedCategories = (file.categories ?? []).compactMap { byId[$0.categoryId] }
         }
     }
 }
@@ -612,7 +617,7 @@ private struct TagsEditorSheet: View {
         self.driveId = driveId
         self.file = file
         self.onChanged = onChanged
-        _appliedCategoryIds = State(initialValue: Set((file.categories ?? []).compactMap { $0.category?.id }))
+        _appliedCategoryIds = State(initialValue: Set((file.categories ?? []).map(\.categoryId)))
     }
 
     var body: some View {
@@ -664,34 +669,40 @@ private struct TagsEditorSheet: View {
         .task { await load() }
     }
 
+    /// Cellule uniforme de la grille : pastille de couleur toujours en haut à
+    /// gauche, coche en haut à droite quand le tag est appliqué, nom dessous.
     private func tagCell(_ category: Category) -> some View {
         let isApplied = appliedCategoryIds.contains(category.id)
         return Button {
             Task { await toggle(category) }
         } label: {
-            HStack(spacing: 6) {
-                Circle()
-                    .fill(Color(hex: category.color) ?? .gray)
-                    .frame(width: 10, height: 10)
+            VStack(alignment: .leading, spacing: 6) {
+                HStack {
+                    Circle()
+                        .fill(Color(hex: category.color) ?? .gray)
+                        .frame(width: 10, height: 10)
+                    Spacer()
+                    if isApplied {
+                        Image(systemName: "checkmark")
+                            .font(.system(size: 11, weight: .bold))
+                            .foregroundStyle(Color.accentColor)
+                    }
+                }
                 Text(category.name)
                     .font(.footnote)
                     .lineLimit(1)
                     .truncationMode(.tail)
-                if isApplied {
-                    Image(systemName: "checkmark")
-                        .font(.system(size: 11, weight: .bold))
-                        .foregroundStyle(Color.accentColor)
-                }
+                    .foregroundStyle(.primary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
             }
-            .padding(.horizontal, 10)
-            .padding(.vertical, 8)
-            .frame(maxWidth: .infinity)
+            .padding(10)
+            .frame(maxWidth: .infinity, alignment: .leading)
             .background(
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
                     .fill(isApplied ? Color.accentColor.opacity(0.15) : Color(uiColor: .tertiarySystemFill))
             )
             .overlay(
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
                     .strokeBorder(isApplied ? Color.accentColor.opacity(0.45) : .clear, lineWidth: 1)
             )
         }
@@ -706,7 +717,7 @@ private struct TagsEditorSheet: View {
         // catégories : la fiche individuelle est la source fiable des coches.
         if let info = try? await service.fileInfo(driveId: driveId, fileId: file.id),
            let ids = info.categories {
-            appliedCategoryIds = Set(ids.compactMap { $0.category?.id })
+            appliedCategoryIds = Set(ids.map(\.categoryId))
         }
         if let cats = try? await categoriesTask {
             categories = cats

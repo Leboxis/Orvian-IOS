@@ -11,6 +11,9 @@ final class FileGridViewModel {
     private(set) var isLoadingMore = false
     private(set) var hasMore = false
     private(set) var errorMessage: String?
+    /// Index id → catégorie pour afficher les pastilles de tags des cartes
+    /// (les listes ne renvoient que des `categoryId`).
+    private(set) var categoriesById: [Int: Category] = [:]
 
     private var cursor: String?
     private var loadedOnce = false
@@ -38,8 +41,11 @@ final class FileGridViewModel {
         isInitialLoading = items.isEmpty
         errorMessage = nil
         do {
+            async let categoriesTask: Void = CategoryLibrary.shared.ensureLoaded(for: driveId)
             let page = try await service.page(source, driveId: driveId, cursor: nil)
+            await categoriesTask
             guard !Task.isCancelled else { return }
+            categoriesById = CategoryLibrary.shared.categories(for: driveId)
             items = filterItemsIfNeeded(page.data ?? [])
             cursor = page.cursor
             hasMore = page.hasMore ?? false
@@ -119,11 +125,11 @@ final class FileGridViewModel {
         guard let index = items.firstIndex(where: { $0.id == file.id }) else { return }
         var current = items[index].categories ?? []
         if applied {
-            if !current.contains(where: { $0.category?.id == category.id }) {
-                current.append(FileCategory(category: category))
+            if !current.contains(where: { $0.categoryId == category.id }) {
+                current.append(FileCategory(categoryId: category.id))
             }
         } else {
-            current.removeAll { $0.category?.id == category.id }
+            current.removeAll { $0.categoryId == category.id }
         }
         items[index].categories = current
     }

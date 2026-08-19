@@ -17,7 +17,14 @@ struct Category: Codable, Identifiable, Hashable {
 }
 
 /// Catégorie attachée à un fichier (`FileCategory` de l'API v3) :
-/// arrive dans les listes de fichiers avec `with=categories`.
+/// objet plat renvoyé dans les listes de fichiers avec `with=categories`.
+/// JSON réel : `{"categoryId": 5, "isGeneratedByAi": false,
+/// "userValidation": "CORRECT", "userId": 123, "addedAt": 1710000000}` —
+/// le nom et la couleur se résolvent via `GET /2/drive/{id}/categories`.
 struct FileCategory: Codable, Hashable {
-    let category: Category?
+    let categoryId: Int
+    let isGeneratedByAi: Bool?
+    let userValidation: String?
+    let userId: Int?
+    let addedAt: Double?
 }

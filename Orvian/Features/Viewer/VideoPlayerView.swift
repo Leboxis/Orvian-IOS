@@ -50,7 +50,7 @@ struct VideoPlayerView: View {
         self.file = file
         self.driveId = driveId
         _isFavorite = State(initialValue: file.isFavorite ?? false)
-        _appliedCategoryIds = State(initialValue: Set((file.categories ?? []).compactMap { $0.category?.id }))
+        _appliedCategoryIds = State(initialValue: Set((file.categories ?? []).map(\.categoryId)))
     }
 
     var body: some View {

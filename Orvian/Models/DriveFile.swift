@@ -44,14 +44,14 @@ struct DriveFile: Codable, Identifiable, Hashable {
 
     enum CodingKeys: String, CodingKey {
         case id, name, type, size, path
-        case mimeType = "mime_type"
-        case extensionType = "extension_type"
-        case isFavorite = "is_favorite"
-        case parentId = "parent_id"
+        case mimeType
+        case extensionType
+        case isFavorite
+        case parentId
         case color
         case categories
-        case addedAt = "added_at"
-        case lastModifiedAt = "last_modified_at"
+        case addedAt
+        case lastModifiedAt
     }
 }
 
