@@ -27,4 +27,18 @@ struct FileCategory: Codable, Hashable {
     let userValidation: String?
     let userId: Int?
     let addedAt: Double?
+
+    init(
+        categoryId: Int,
+        isGeneratedByAi: Bool? = nil,
+        userValidation: String? = nil,
+        userId: Int? = nil,
+        addedAt: Double? = nil
+    ) {
+        self.categoryId = categoryId
+        self.isGeneratedByAi = isGeneratedByAi
+        self.userValidation = userValidation
+        self.userId = userId
+        self.addedAt = addedAt
+    }
 }
