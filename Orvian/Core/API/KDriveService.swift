@@ -219,6 +219,7 @@ struct KDriveService {
             case token
             case sessionToken = "session_token"
             case uploadURL = "upload_url"
+            case result
         }
 
         var resolvedToken: String? { token ?? sessionToken }
