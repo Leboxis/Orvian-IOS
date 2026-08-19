@@ -189,6 +189,7 @@ struct KDriveService {
     /// évite qu'un fichier proche de la limite soit refusé par un intermédiaire.
     private static let directUploadLimit = 95 * 1_024 * 1_024
     private static let uploadChunkSize = 20 * 1_024 * 1_024
+    private static let uploadChunkMaximumAttempts = 3
 
     private struct StartUploadSessionRequest: Encodable {
         let totalSize: Int
@@ -212,6 +213,7 @@ struct KDriveService {
         let token: String?
         let sessionToken: String?
         let uploadURL: URL?
+        let result: Bool?
 
         enum CodingKeys: String, CodingKey {
             case token
@@ -220,6 +222,12 @@ struct KDriveService {
         }
 
         var resolvedToken: String? { token ?? sessionToken }
+    }
+
+    private struct UploadChunk: Decodable {
+        let number: Int?
+        let size: Int?
+        let status: String?
     }
 
     private struct FinishedUpload: Decodable {
@@ -325,6 +333,7 @@ struct KDriveService {
         )
         guard response.result == nil || response.result == "success" || response.result == "asynchronous",
               let session = response.data,
+              session.result != false,
               let token = session.resolvedToken,
               let uploadURL = session.uploadURL,
               APIClient.isTrustedUploadURL(uploadURL)
@@ -342,16 +351,12 @@ struct KDriveService {
                     size: chunk.count
                 )
 
-                // `upload_url` est l'hôte désigné par Infomaniak pour les
-                // morceaux ; il ne faut pas les envoyer à api.infomaniak.com.
-                try await api.uploadData(
+                try await uploadChunk(
                     to: chunkURL,
                     data: chunk,
-                    contentType: "application/octet-stream",
-                    progress: { chunkProgress in
-                        let completedChunks = Double(number - 1)
-                        progress((completedChunks + chunkProgress) / Double(totalChunks))
-                    }
+                    number: number,
+                    totalChunks: totalChunks,
+                    progress: progress
                 )
             }
 
@@ -372,6 +377,51 @@ struct KDriveService {
             )
             throw error
         }
+    }
+
+    /// Un statut HTTP 2xx ne confirme pas à lui seul qu'un morceau a été
+    /// enregistré : l'API peut répondre `error` ou `uploading` dans son JSON.
+    /// Réessayer le même numéro évite une clôture de session prématurée, qui
+    /// faisait échouer les fichiers dépassant la limite d'upload direct.
+    private func uploadChunk(
+        to url: URL,
+        data: Data,
+        number: Int,
+        totalChunks: Int,
+        progress: @escaping @Sendable (Double) -> Void
+    ) async throws {
+        var lastError: Error = APIError.invalidResponse
+
+        for attempt in 1...Self.uploadChunkMaximumAttempts {
+            try Task.checkCancellation()
+            do {
+                // `upload_url` est l'hôte désigné par Infomaniak pour les
+                // morceaux ; il ne faut pas les envoyer à api.infomaniak.com.
+                let responseData = try await api.uploadData(
+                    to: url,
+                    data: data,
+                    contentType: "application/octet-stream",
+                    progress: { chunkProgress in
+                        let completedChunks = Double(number - 1)
+                        progress((completedChunks + chunkProgress) / Double(totalChunks))
+                    }
+                )
+                let response = try JSONDecoder.api.decode(DataResponse<UploadChunk>.self, from: responseData)
+                guard response.result == nil || response.result == "success" || response.result == "asynchronous",
+                      let chunk = response.data,
+                      chunk.status == "ok",
+                      chunk.number == nil || chunk.number == number,
+                      chunk.size == nil || chunk.size == data.count
+                else { throw APIError.invalidResponse }
+                return
+            } catch {
+                lastError = error
+                guard attempt < Self.uploadChunkMaximumAttempts else { break }
+                try await Task.sleep(for: .seconds(Int64(attempt)))
+            }
+        }
+
+        throw lastError
     }
 
     private static func modificationTimestamp(for fileURL: URL) -> Int {
