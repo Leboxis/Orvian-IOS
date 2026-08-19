@@ -102,7 +102,7 @@ struct SettingsView: View {
     }
 
     private var displaySection: some View {
-        Section("Affichage") {
+        Section {
             Picker("Cartes par ligne", selection: $fileGridColumns) {
                 Text("2 cartes").tag(2)
                 Text("3 cartes").tag(3)
@@ -110,25 +110,31 @@ struct SettingsView: View {
             }
 
             Toggle("Recherche toujours visible", isOn: $alwaysShowSearch)
+        } header: {
+            Text("Affichage")
         } footer: {
             Text("La recherche reste affichée dans les dossiers de l'Accueil au lieu d'apparaître après un défilement vers le haut.")
         }
     }
 
     private var navigationSection: some View {
-        Section("Navigation") {
+        Section {
             Toggle("Favoris : retour en haut au second appui", isOn: $favoritesReselectScrollToTop)
+        } header: {
+            Text("Navigation")
         } footer: {
             Text("Un nouvel appui sur l'onglet Favoris revient à la racine ; activez cette option pour remonter aussi la liste en haut.")
         }
     }
 
     private var mediaSection: some View {
-        Section("Médias") {
+        Section {
             Toggle("Précharger les miniatures", isOn: $prefetchThumbnails)
             Toggle("Précharger les vidéos", isOn: $prefetchVideoURLs)
             Toggle("Précharger seulement en Wi-Fi", isOn: $prefetchOnWiFiOnly)
                 .disabled(!prefetchThumbnails && !prefetchVideoURLs)
+        } header: {
+            Text("Médias")
         } footer: {
             Text("Le préchargement prépare les éléments juste après la zone visible. Le désactiver économise les données, mais l'affichage ou le démarrage d'une vidéo peut être moins immédiat.")
         }
@@ -164,9 +170,11 @@ struct SettingsView: View {
     }
 
     private var comfortSection: some View {
-        Section("Confort") {
+        Section {
             Toggle("Retours haptiques", isOn: $hapticFeedbackEnabled)
             Toggle("Réduire les animations", isOn: $reduceMotion)
+        } header: {
+            Text("Confort")
         } footer: {
             Text("Les retours haptiques accompagnent les changements d'onglet. La réduction des animations privilégie des transitions plus sobres.")
         }
