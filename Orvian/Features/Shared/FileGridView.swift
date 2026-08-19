@@ -59,9 +59,15 @@ struct FileGridView: View {
 
     var body: some View {
         scrollContent
-            .onScrollGeometryChange(for: Bool.self, of: { $0.contentOffset.y < 0 }) { oldValue, newValue in
-                if oldValue != newValue {
-                    onScrolledPastTop?(newValue)
+            .onScrollGeometryChange(for: CGFloat.self, of: {
+                // Au repos, iOS applique déjà l'inset supérieur au décalage.
+                // Seul un dépassement réel de cette position doit afficher la recherche.
+                $0.contentOffset.y + $0.contentInsets.top
+            }) { oldValue, newValue in
+                if newValue >= 0 {
+                    onScrolledPastTop?(false)
+                } else if oldValue >= 0 && newValue < 0 {
+                    onScrolledPastTop?(true)
                 }
             }
             .background(Color(uiColor: .systemGroupedBackground))

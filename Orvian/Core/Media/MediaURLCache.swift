@@ -46,6 +46,15 @@ actor MediaURLCache {
         return await task.value
     }
 
+    /// Demande une nouvelle URL signée sans réutiliser celle conservée en
+    /// mémoire. Utilisé par le lecteur lorsqu'AVFoundation refuse une URL
+    /// devenue invalide entre le préchargement et la lecture.
+    func freshURL(driveId: Int, fileId: Int) async -> URL? {
+        let key = Key(driveId: driveId, fileId: fileId)
+        entries[key] = nil
+        return await url(driveId: driveId, fileId: fileId)
+    }
+
     /// Pré-résolution régulée pour que le tap sur une vidéo démarre plus vite.
     /// La dernière position visible remplace les anciennes demandes en attente,
     /// avec deux appels réseau simultanés au maximum.

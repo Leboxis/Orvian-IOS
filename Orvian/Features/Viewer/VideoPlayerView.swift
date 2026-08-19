@@ -35,8 +35,10 @@ struct VideoPlayerView: View {
     @State private var errorMessage: String?
     @State private var timeObserver: Any?
     @State private var endObserver: NSObjectProtocol?
+    @State private var itemStatusObserver: NSKeyValueObservation?
     @State private var isDisappeared = false
     @State private var isExternalPlaybackActive = false
+    @State private var didRetryPlaybackURL = false
 
     // Masquage automatique des contrôles après 2.5 secondes
     @State private var showControls = true
@@ -73,6 +75,7 @@ struct VideoPlayerView: View {
         }
         .onAppear {
             isDisappeared = false
+            didRetryPlaybackURL = false
             showControls = true
             scheduleControlsAutoHide(delay: 2.5)
             setupAudioSession()
@@ -433,9 +436,26 @@ struct VideoPlayerView: View {
 
         // Seule l'URL est nécessaire au démarrage. Le poster et les tags ne
         // doivent jamais retarder la création du player.
-        let url = await MediaURLCache.shared.url(driveId: driveId, fileId: file.id)
-        guard let url, !isDisappeared, !Task.isCancelled else { return }
+        let cachedURL = await MediaURLCache.shared.url(driveId: driveId, fileId: file.id)
+        let url = cachedURL ?? await MediaURLCache.shared.freshURL(driveId: driveId, fileId: file.id)
+        guard let url, !isDisappeared, !Task.isCancelled else {
+            errorMessage = "Impossible de préparer cette vidéo. Vérifiez votre connexion puis réessayez."
+            return
+        }
 
+        startPlayback(url: url)
+
+        let (loadedPoster, loadedCategories) = await (posterTask, categoriesTask)
+        guard !isDisappeared, !Task.isCancelled else { return }
+        if let loadedPoster {
+            poster = loadedPoster
+        }
+        if let loadedCategories, !loadedCategories.isEmpty {
+            categories = loadedCategories
+        }
+    }
+
+    private func startPlayback(url: URL) {
         let newPlayer = AVPlayer(url: url)
         newPlayer.automaticallyWaitsToMinimizeStalling = true
         newPlayer.isMuted = isMuted
@@ -452,14 +472,33 @@ struct VideoPlayerView: View {
         newPlayer.playImmediately(atRate: playbackRate)
         isPlaying = true
 
-        let (loadedPoster, loadedCategories) = await (posterTask, categoriesTask)
-        guard !isDisappeared, !Task.isCancelled else { return }
-        if let loadedPoster {
-            poster = loadedPoster
+        itemStatusObserver = newPlayer.currentItem?.observe(\.status, options: [.new]) { item, _ in
+            guard item.status == .failed else { return }
+            Task { @MainActor in
+                await self.recoverPlayback(after: item.error)
+            }
         }
-        if let loadedCategories, !loadedCategories.isEmpty {
-            categories = loadedCategories
+    }
+
+    /// Une URL peut expirer entre le préchargement et l'ouverture du lecteur.
+    /// Une seule nouvelle URL est tentée avant d'afficher une erreur exploitable.
+    private func recoverPlayback(after error: Error?) async {
+        guard !isDisappeared else { return }
+        guard !didRetryPlaybackURL else {
+            isPlaying = false
+            errorMessage = "Lecture impossible : \(error?.localizedDescription ?? "la vidéo n’est pas disponible")"
+            return
         }
+
+        didRetryPlaybackURL = true
+        guard let freshURL = await MediaURLCache.shared.freshURL(driveId: driveId, fileId: file.id), !isDisappeared else {
+            isPlaying = false
+            errorMessage = "Impossible d’obtenir une nouvelle URL de lecture. Réessayez dans un instant."
+            return
+        }
+
+        teardown()
+        startPlayback(url: freshURL)
     }
 
     private func addObservers(to player: AVPlayer) {
@@ -487,12 +526,16 @@ struct VideoPlayerView: View {
     }
 
     private func teardown() {
+        itemStatusObserver?.invalidate()
+        itemStatusObserver = nil
         if let timeObserver, let player {
             player.removeTimeObserver(timeObserver)
         }
+        timeObserver = nil
         if let endObserver {
             NotificationCenter.default.removeObserver(endObserver)
         }
+        endObserver = nil
         player?.pause()
         player = nil
     }

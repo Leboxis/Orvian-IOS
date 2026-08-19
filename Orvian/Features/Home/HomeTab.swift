@@ -215,15 +215,16 @@ struct DirectoryView: View {
                         .frame(maxWidth: .infinity)
 
                     if showsSearchBar && searchBarVisible {
-                        VStack(spacing: 7) {
+                        VStack(spacing: 0) {
                             searchBar
                             itemCountLabel
+                                .padding(.vertical, 10)
                         }
                         .transition(.move(edge: .top).combined(with: .opacity))
                     }
                 }
                 .padding(.top, 2)
-                .padding(.bottom, 4)
+                .padding(.bottom, searchBarVisible ? 0 : 4)
                 .animation(.snappy(duration: 0.25), value: searchBarVisible)
             }
         }
