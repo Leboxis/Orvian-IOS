@@ -9,6 +9,7 @@ actor MediaURLCache {
     private struct Key: Hashable, Sendable {
         let driveId: Int
         let fileId: Int
+        let credentialFingerprint: Int
     }
 
     private var entries: [Key: (url: URL, expiresAt: Date)] = [:]
@@ -23,7 +24,7 @@ actor MediaURLCache {
     }
 
     func url(driveId: Int, fileId: Int) async -> URL? {
-        let key = Key(driveId: driveId, fileId: fileId)
+        let key = makeKey(driveId: driveId, fileId: fileId)
         if let entry = entries[key], entry.expiresAt > Date().addingTimeInterval(30) {
             return entry.url
         }
@@ -50,9 +51,18 @@ actor MediaURLCache {
     /// mémoire. Utilisé par le lecteur lorsqu'AVFoundation refuse une URL
     /// devenue invalide entre le préchargement et la lecture.
     func freshURL(driveId: Int, fileId: Int) async -> URL? {
-        let key = Key(driveId: driveId, fileId: fileId)
+        let key = makeKey(driveId: driveId, fileId: fileId)
         entries[key] = nil
         return await url(driveId: driveId, fileId: fileId)
+    }
+
+    /// Invalide l'URL signée mémorisée après un échec de lecture ou une
+    /// expiration anticipée du lien côté stockage.
+    func invalidate(driveId: Int, fileId: Int) {
+        let key = makeKey(driveId: driveId, fileId: fileId)
+        entries[key] = nil
+        inFlight[key]?.cancel()
+        inFlight[key] = nil
     }
 
     /// Pré-résolution régulée pour que le tap sur une vidéo démarre plus vite.
@@ -61,7 +71,7 @@ actor MediaURLCache {
     func prefetch(driveId: Int, fileIds: [Int]) {
         let minimumExpiry = Date().addingTimeInterval(30)
         pendingPrefetchKeys = fileIds
-            .map { Key(driveId: driveId, fileId: $0) }
+            .map { makeKey(driveId: driveId, fileId: $0) }
             .filter {
                 inFlight[$0] == nil
                     && (entries[$0]?.expiresAt ?? .distantPast) <= minimumExpiry
@@ -107,5 +117,13 @@ actor MediaURLCache {
         if !pendingPrefetchKeys.isEmpty {
             schedulePrefetchWorker()
         }
+    }
+
+    private func makeKey(driveId: Int, fileId: Int) -> Key {
+        Key(
+            driveId: driveId,
+            fileId: fileId,
+            credentialFingerprint: TokenStore.current()?.hashValue ?? 0
+        )
     }
 }

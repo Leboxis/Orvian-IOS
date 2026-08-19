@@ -176,12 +176,6 @@ struct KDriveService {
         return url
     }
 
-    /// Requête de lecture progressive utilisée par AVFoundation. Le token
-    /// reste dans les en-têtes HTTP et n'apparaît jamais dans l'URL.
-    func videoPlaybackRequest(driveId: Int, fileId: Int) async throws -> URLRequest {
-        try await api.authenticatedRequest(.download(driveId: driveId, fileId: fileId))
-    }
-
     func thumbnailData(driveId: Int, fileId: Int, pixels: Int, isTrashed: Bool = false) async throws -> Data {
         let endpoint: Endpoint = isTrashed
             ? .trashedThumbnail(driveId: driveId, fileId: fileId, pixels: pixels)

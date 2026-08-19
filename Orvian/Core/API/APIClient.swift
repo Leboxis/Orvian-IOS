@@ -192,12 +192,6 @@ actor APIClient {
         }
     }
 
-    /// Requête authentifiée prête à être confiée à un autre client système,
-    /// par exemple AVFoundation pour la lecture progressive d'une vidéo.
-    func authenticatedRequest(_ endpoint: Endpoint) throws -> URLRequest {
-        try request(for: endpoint, method: "GET")
-    }
-
     // MARK: - Internes
 
     private func send(

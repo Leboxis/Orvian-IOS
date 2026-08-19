@@ -158,19 +158,12 @@ extension Endpoint {
         Endpoint(path: "/2/drive/\(driveId)/trash/\(fileId)/restore")
     }
 
-    /// Lien temporaire historique. Certains liens retournés par cet endpoint
-    /// sont désormais invalides pour la lecture média ; voir `.download`.
+    /// URL temporaire signée pour l'accès au contenu d'un fichier.
     static func temporaryURL(driveId: Int, fileId: Int, duration: Int = 3600) -> Endpoint {
         Endpoint(
             path: "/2/drive/\(driveId)/files/\(fileId)/temporary_url",
             query: [URLQueryItem(name: "duration", value: String(duration))]
         )
-    }
-
-    /// Téléchargement authentifié d'un fichier, utilisable directement par
-    /// AVFoundation avec le jeton transmis dans les en-têtes HTTP.
-    static func download(driveId: Int, fileId: Int) -> Endpoint {
-        Endpoint(path: "/2/drive/\(driveId)/files/\(fileId)/download")
     }
 
     /// Favori : POST pour ajouter, DELETE pour retirer (même chemin).
