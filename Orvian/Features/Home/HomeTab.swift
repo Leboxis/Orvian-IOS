@@ -661,8 +661,9 @@ struct DirectoryView: View {
 
 // MARK: - Application de tags sur une sélection
 
-/// Feuille « Mettre des tags » : coche les catégories à appliquer à tous les
-/// fichiers sélectionnés, puis applique en une passe (échecs partiels signalés).
+/// Feuille « Mettre des tags » : affiche les tags déjà présents sur la
+/// sélection (coche = sur tous les éléments, tiret = sur certains) et permet
+/// de les ajouter ou de les retirer en une passe (échecs partiels signalés).
 private struct ApplyTagsSheet: View {
     let driveId: Int
     let files: [DriveFile]
@@ -670,12 +671,19 @@ private struct ApplyTagsSheet: View {
 
     @Environment(\.dismiss) private var dismiss
     @State private var categories: [Category] = []
-    @State private var selectedCategoryIDs: Set<Int> = []
+    @State private var addIDs: Set<Int> = []
+    @State private var removeIDs: Set<Int> = []
     @State private var isLoading = true
     @State private var busy = false
     @State private var errorMessage: String?
 
     private let service = KDriveService()
+
+    private enum TagState {
+        case none
+        case partial
+        case all
+    }
 
     var body: some View {
         NavigationStack {
@@ -691,25 +699,26 @@ private struct ApplyTagsSheet: View {
                     }
                 } else {
                     List {
-                        Section("À appliquer aux \(files.count) élément\(files.count > 1 ? "s" : "") sélectionné\(files.count > 1 ? "s" : "")") {
+                        Section {
                             ForEach(categories) { category in
                                 Button {
                                     toggle(category)
                                 } label: {
-                                    HStack {
+                                    HStack(spacing: 12) {
                                         Circle()
                                             .fill(Color(hex: category.color) ?? .gray)
                                             .frame(width: 12, height: 12)
                                         Text(category.name)
                                             .foregroundStyle(.primary)
                                         Spacer()
-                                        if selectedCategoryIDs.contains(category.id) {
-                                            Image(systemName: "checkmark")
-                                                .foregroundStyle(Color.accentColor)
-                                        }
+                                        rowSymbol(category)
                                     }
                                 }
                             }
+                        } header: {
+                            Text("Tags des \(files.count) élément\(files.count > 1 ? "s" : "") sélectionné\(files.count > 1 ? "s" : "")")
+                        } footer: {
+                            Text("Coche : présent sur tous les éléments · tiret : présent sur certains. Touchez une coche pour retirer le tag de toute la sélection.")
                         }
                         if let errorMessage {
                             Section {
@@ -741,7 +750,7 @@ private struct ApplyTagsSheet: View {
                         Button("Appliquer") {
                             Task { await apply() }
                         }
-                        .disabled(selectedCategoryIDs.isEmpty)
+                        .disabled(addIDs.isEmpty && removeIDs.isEmpty)
                     }
                 }
             }
@@ -749,11 +758,57 @@ private struct ApplyTagsSheet: View {
         .task { await load() }
     }
 
-    private func toggle(_ category: Category) {
-        if selectedCategoryIDs.contains(category.id) {
-            selectedCategoryIDs.remove(category.id)
+    @ViewBuilder
+    private func rowSymbol(_ category: Category) -> some View {
+        let symbol = Image(systemName: "circle")
+            .font(.system(size: 18))
+        if removeIDs.contains(category.id) {
+            Image(systemName: "minus.circle.fill")
+                .foregroundStyle(.red)
+                .font(.system(size: 18))
+        } else if addIDs.contains(category.id) {
+            Image(systemName: "checkmark.circle.fill")
+                .foregroundStyle(Color.accentColor)
+                .font(.system(size: 18))
         } else {
-            selectedCategoryIDs.insert(category.id)
+            switch state(of: category.id) {
+            case .all:
+                Image(systemName: "checkmark.circle.fill")
+                    .foregroundStyle(Color.accentColor)
+                    .font(.system(size: 18))
+            case .partial:
+                Image(systemName: "minus.circle.fill")
+                    .foregroundStyle(Color.accentColor)
+                    .font(.system(size: 18))
+            case .none:
+                symbol.foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    /// Nombre d'éléments sélectionnés portant déjà ce tag (les listes kDrive
+    /// renvoient `categories` avec `with=is_favorite,categories`).
+    private func countHaving(_ categoryId: Int) -> Int {
+        files.count { file in
+            (file.categories ?? []).contains { $0.categoryId == categoryId }
+        }
+    }
+
+    private func state(of categoryId: Int) -> TagState {
+        let count = countHaving(categoryId)
+        if count == 0 { return .none }
+        if count == files.count { return .all }
+        return .partial
+    }
+
+    private func toggle(_ category: Category) {
+        switch state(of: category.id) {
+        case .none, .partial:
+            addIDs.insert(category.id)
+            removeIDs.remove(category.id)
+        case .all:
+            removeIDs.insert(category.id)
+            addIDs.remove(category.id)
         }
     }
 
@@ -768,16 +823,28 @@ private struct ApplyTagsSheet: View {
     private func apply() async {
         busy = true
         defer { busy = false }
-        let categoryIDs = selectedCategoryIDs
+        let toAdd = addIDs
+        let toRemove = removeIDs
         var firstError: Error?
-        var appliedCount = 0
+        var addedCount = 0
+        var removedCount = 0
 
         for file in files {
-            for categoryId in categoryIDs {
+            for categoryId in toRemove {
+                do {
+                    try await service.removeCategory(driveId: driveId, fileId: file.id, categoryId: categoryId)
+                    removedCount += 1
+                } catch {
+                    if firstError == nil { firstError = error }
+                }
+            }
+        }
+        for file in files {
+            for categoryId in toAdd {
                 do {
                     try await service.addCategory(driveId: driveId, fileId: file.id, categoryId: categoryId)
                     TagUsageStore.markUsed(driveId: driveId, categoryId: categoryId)
-                    appliedCount += 1
+                    addedCount += 1
                 } catch {
                     if firstError == nil { firstError = error }
                 }
@@ -785,7 +852,15 @@ private struct ApplyTagsSheet: View {
         }
 
         if let firstError {
-            errorMessage = "\(appliedCount) tag\(appliedCount > 1 ? "s" : "") appliqué\(appliedCount > 1 ? "s" : "") sur \(files.count) élément\(files.count > 1 ? "s" : "") — \(((firstError as? APIError)?.errorDescription) ?? firstError.localizedDescription)"
+            var details: [String] = []
+            if addedCount > 0 {
+                details.append("\(addedCount) tag\(addedCount > 1 ? "s" : "") appliqué\(addedCount > 1 ? "s" : "")")
+            }
+            if removedCount > 0 {
+                details.append("\(removedCount) tag\(removedCount > 1 ? "s" : "") retiré\(removedCount > 1 ? "s" : "")")
+            }
+            let summary = details.isEmpty ? "Aucune modification" : details.joined(separator: ", ")
+            errorMessage = "\(summary) sur \(files.count) élément\(files.count > 1 ? "s" : "") — \(((firstError as? APIError)?.errorDescription) ?? firstError.localizedDescription)"
         } else {
             dismiss()
             await onDone()
