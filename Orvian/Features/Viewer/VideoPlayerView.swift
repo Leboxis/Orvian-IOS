@@ -36,6 +36,7 @@ struct VideoPlayerView: View {
     @State private var timeObserver: Any?
     @State private var endObserver: NSObjectProtocol?
     @State private var itemStatusObserver: NSKeyValueObservation?
+    @State private var playbackRetryCount = 0
     @State private var isDisappeared = false
     @State private var isExternalPlaybackActive = false
 
@@ -468,16 +469,47 @@ struct VideoPlayerView: View {
         }
         player = newPlayer
         addObservers(to: newPlayer)
+        currentTime = 0
+        scrubValue = 0
+        newPlayer.seek(to: .zero, toleranceBefore: .zero, toleranceAfter: .zero)
         newPlayer.playImmediately(atRate: playbackRate)
         isPlaying = true
 
         itemStatusObserver = newPlayer.currentItem?.observe(\.status, options: [.new]) { item, _ in
             guard item.status == .failed else { return }
             Task { @MainActor in
-                self.isPlaying = false
-                self.errorMessage = "Lecture impossible : \(item.error?.localizedDescription ?? "la vidéo n’est pas disponible")"
+                await self.retryPlaybackAfterProcessingDelay(
+                    lastError: item.error?.localizedDescription ?? "la vidéo n’est pas disponible"
+                )
             }
         }
+    }
+
+    /// Après un upload, le fichier peut être listé avant d'être servi par le
+    /// endpoint de téléchargement. Deux nouvelles tentatives suffisent à
+    /// absorber ce court délai sans demander une action manuelle.
+    private func retryPlaybackAfterProcessingDelay(lastError: String) async {
+        guard !isDisappeared else { return }
+        guard playbackRetryCount < 2 else {
+            isPlaying = false
+            errorMessage = "Lecture impossible : \(lastError)"
+            return
+        }
+
+        playbackRetryCount += 1
+        isPlaying = false
+        teardown()
+        VideoAssetCache.shared.invalidate(driveId: driveId, fileId: file.id)
+
+        do {
+            try await Task.sleep(for: .seconds(playbackRetryCount * 2))
+        } catch {
+            return
+        }
+        guard !isDisappeared,
+              let asset = await VideoAssetCache.shared.asset(driveId: driveId, fileId: file.id)
+        else { return }
+        startPlayback(asset: asset)
     }
 
     private func addObservers(to player: AVPlayer) {

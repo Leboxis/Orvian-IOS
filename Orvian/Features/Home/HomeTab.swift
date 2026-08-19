@@ -504,7 +504,9 @@ struct DirectoryView: View {
             isBusy: $addBusy,
             busyMessage: $busyMessage,
             errorMessage: $addError,
-            onDone: { Task { await refreshAfterImport() } }
+            onDone: { uploadedFiles in
+                Task { await refreshAfterImport(uploadedFiles) }
+            }
         )
         .frame(width: 52, height: 52)
         .background(.ultraThinMaterial, in: Circle())
@@ -519,8 +521,9 @@ struct DirectoryView: View {
 
     /// Une seule synchronisation suffit : les requêtes API ignorent désormais
     /// le cache HTTP local et lisent donc l'état courant du dossier.
-    private func refreshAfterImport() async {
+    private func refreshAfterImport(_ uploadedFiles: [DriveFile]) async {
         await viewModel.reload()
+        viewModel.mergeUploaded(uploadedFiles)
         if isSearching {
             await searchViewModel?.reload()
         }

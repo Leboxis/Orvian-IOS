@@ -208,8 +208,45 @@ extension Endpoint {
                 URLQueryItem(name: "file_name", value: fileName),
                 URLQueryItem(name: "total_size", value: String(totalSize)),
                 URLQueryItem(name: "conflict", value: "rename"),
+                URLQueryItem(name: "with", value: "capabilities,conversion_capabilities,sorted_name"),
             ]
         )
+    }
+
+    /// Ouvre une session pour les fichiers volumineux.
+    static func startUploadSession(driveId: Int) -> Endpoint {
+        Endpoint(path: "/3/drive/\(driveId)/upload/session/start")
+    }
+
+    /// Ajoute un morceau numéroté à une session d'upload.
+    static func uploadChunk(
+        driveId: Int,
+        token: String,
+        number: Int,
+        size: Int,
+        sha256: String
+    ) -> Endpoint {
+        Endpoint(
+            path: "/3/drive/\(driveId)/upload/session/\(token)/chunk",
+            query: [
+                URLQueryItem(name: "chunk_number", value: String(number)),
+                URLQueryItem(name: "chunk_size", value: String(size)),
+                URLQueryItem(name: "chunk_hash", value: "sha256:\(sha256)"),
+            ]
+        )
+    }
+
+    /// Ferme la session et renvoie le fichier définitivement créé.
+    static func finishUploadSession(driveId: Int, token: String) -> Endpoint {
+        Endpoint(
+            path: "/3/drive/\(driveId)/upload/session/\(token)/finish",
+            query: [URLQueryItem(name: "with", value: "capabilities,conversion_capabilities,sorted_name")]
+        )
+    }
+
+    /// Annule une session incomplète après une erreur ou une annulation.
+    static func cancelUploadSession(driveId: Int, token: String) -> Endpoint {
+        Endpoint(path: "/3/drive/\(driveId)/upload/session/\(token)")
     }
 
     /// Supprimer un fichier (le déplacer dans la corbeille).

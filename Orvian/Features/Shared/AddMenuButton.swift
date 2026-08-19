@@ -29,7 +29,7 @@ struct AddMenuButton: View {
     @Binding var isBusy: Bool
     @Binding var busyMessage: String
     @Binding var errorMessage: String?
-    let onDone: () -> Void
+    let onDone: ([DriveFile]) -> Void
 
     @State private var showFolderAlert = false
     @State private var folderName = ""
@@ -75,8 +75,8 @@ struct AddMenuButton: View {
         .sheet(isPresented: $showDocumentPicker) {
             DocumentPicker { urls in
                 guard !urls.isEmpty else { return }
-                UploadManager.shared.enqueueDocuments(driveId: driveId, directoryId: directoryId, urls: urls) {
-                    onDone()
+                UploadManager.shared.enqueueDocuments(driveId: driveId, directoryId: directoryId, urls: urls) { uploadedFiles in
+                    onDone(uploadedFiles)
                 }
             }
         }
@@ -90,8 +90,8 @@ struct AddMenuButton: View {
             guard !items.isEmpty else { return }
             let picked = items
             photoItems = []
-            UploadManager.shared.enqueuePhotos(driveId: driveId, directoryId: directoryId, items: picked) {
-                onDone()
+            UploadManager.shared.enqueuePhotos(driveId: driveId, directoryId: directoryId, items: picked) { uploadedFiles in
+                onDone(uploadedFiles)
             }
         }
     }
@@ -107,7 +107,7 @@ struct AddMenuButton: View {
             errorMessage = "Dossier non créé : \(message(for: error))"
         }
         isBusy = false
-        onDone()
+        onDone([])
     }
 
     // MARK: - Helpers

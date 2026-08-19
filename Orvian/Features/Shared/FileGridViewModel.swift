@@ -79,6 +79,22 @@ final class FileGridViewModel {
         }
     }
 
+    /// Insère immédiatement les fichiers confirmés par la réponse d'upload.
+    /// Cela masque le léger délai possible de l'index du dossier côté serveur,
+    /// sans déclencher plusieurs rechargements réseau successifs.
+    func mergeUploaded(_ uploadedFiles: [DriveFile]) {
+        guard !uploadedFiles.isEmpty else { return }
+        let uploadedIDs = Set(uploadedFiles.map(\.id))
+        items.removeAll { uploadedIDs.contains($0.id) }
+        items.append(contentsOf: uploadedFiles)
+        items.sort { lhs, rhs in
+            if lhs.isDirectory != rhs.isDirectory {
+                return lhs.isDirectory
+            }
+            return lhs.name.localizedStandardCompare(rhs.name) == .orderedAscending
+        }
+    }
+
     // MARK: - Favoris
 
     /// Bascule optimiste : l'étoile change immédiatement, retour arrière si l'API refuse.

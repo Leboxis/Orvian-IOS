@@ -107,13 +107,16 @@ struct SettingsView: View {
                 Text("2 cartes").tag(2)
                 Text("3 cartes").tag(3)
                 Text("4 cartes").tag(4)
+                Text("5 cartes").tag(5)
+                Text("6 cartes").tag(6)
+                Text("7 cartes").tag(7)
             }
 
             Toggle("Recherche toujours visible", isOn: $alwaysShowSearch)
         } header: {
             Text("Affichage")
         } footer: {
-            Text("La recherche reste affichée dans les dossiers de l'Accueil au lieu d'apparaître après un défilement vers le haut.")
+            Text("La recherche reste affichée dans les dossiers de l'Accueil au lieu d'apparaître après un court geste vers le bas. Un nombre élevé de cartes réduit leur taille.")
         }
     }
 

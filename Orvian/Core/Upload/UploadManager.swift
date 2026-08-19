@@ -164,7 +164,7 @@ final class UploadManager {
     }
 
     /// Import immédiat et asynchrone des photos/vidéos depuis PhotosPicker (la bulle s'affiche instantanément)
-    func enqueuePhotos(driveId: Int, directoryId: Int, items: [PhotosPickerItem], onDone: (() -> Void)? = nil) {
+    func enqueuePhotos(driveId: Int, directoryId: Int, items: [PhotosPickerItem], onDone: (([DriveFile]) -> Void)? = nil) {
         guard !items.isEmpty else { return }
         hidePillTask?.cancel()
         hidePillTask = nil
@@ -181,6 +181,7 @@ final class UploadManager {
         tasks.append(contentsOf: newTasks)
 
         Task {
+            var uploadedFiles: [DriveFile] = []
             for (index, item) in items.enumerated() {
                 let taskId = newTasks[index].id
                 guard let taskIndex = tasks.firstIndex(where: { $0.id == taskId }) else { continue }
@@ -205,7 +206,9 @@ final class UploadManager {
                         tasks[curIdx].totalBytes = payload.totalBytes
                         tasks[curIdx].status = .inProgress(progress: 0.2)
                     }
-                    await uploadSingleFile(taskId: taskId, driveId: driveId, directoryId: directoryId, payload: payload)
+                    if let uploadedFile = await uploadSingleFile(taskId: taskId, driveId: driveId, directoryId: directoryId, payload: payload) {
+                        uploadedFiles.append(uploadedFile)
+                    }
                 } else {
                     if let curIdx = tasks.firstIndex(where: { $0.id == taskId }) {
                         tasks[curIdx].status = .failed(message: "Échec de lecture du média")
@@ -213,13 +216,13 @@ final class UploadManager {
                 }
             }
 
-            onDone?()
+            onDone?(uploadedFiles)
             schedulePillAutoDismiss()
         }
     }
 
     /// Import immédiat et asynchrone des documents (la bulle s'affiche instantanément)
-    func enqueueDocuments(driveId: Int, directoryId: Int, urls: [URL], onDone: (() -> Void)? = nil) {
+    func enqueueDocuments(driveId: Int, directoryId: Int, urls: [URL], onDone: (([DriveFile]) -> Void)? = nil) {
         guard !urls.isEmpty else { return }
         hidePillTask?.cancel()
         hidePillTask = nil
@@ -229,6 +232,7 @@ final class UploadManager {
         tasks.append(contentsOf: newTasks)
 
         Task {
+            var uploadedFiles: [DriveFile] = []
             for (index, url) in urls.enumerated() {
                 let taskId = newTasks[index].id
                 guard let taskIndex = tasks.firstIndex(where: { $0.id == taskId }) else { continue }
@@ -248,7 +252,9 @@ final class UploadManager {
                         tasks[curIdx].totalBytes = payload.totalBytes
                         tasks[curIdx].status = .inProgress(progress: 0.2)
                     }
-                    await uploadSingleFile(taskId: taskId, driveId: driveId, directoryId: directoryId, payload: payload)
+                    if let uploadedFile = await uploadSingleFile(taskId: taskId, driveId: driveId, directoryId: directoryId, payload: payload) {
+                        uploadedFiles.append(uploadedFile)
+                    }
                 } else {
                     if let curIdx = tasks.firstIndex(where: { $0.id == taskId }) {
                         tasks[curIdx].status = .failed(message: "Échec de copie du fichier")
@@ -256,13 +262,13 @@ final class UploadManager {
                 }
             }
 
-            onDone?()
+            onDone?(uploadedFiles)
             schedulePillAutoDismiss()
         }
     }
 
     /// Enfile et exécute une liste de fichiers à uploader par streaming direct depuis le disque.
-    func enqueue(driveId: Int, directoryId: Int, files: [UploadPayload], onDone: (() -> Void)? = nil) {
+    func enqueue(driveId: Int, directoryId: Int, files: [UploadPayload], onDone: (([DriveFile]) -> Void)? = nil) {
         hidePillTask?.cancel()
         hidePillTask = nil
         isPillVisible = true
@@ -271,23 +277,26 @@ final class UploadManager {
         tasks.append(contentsOf: newTasks)
 
         Task {
+            var uploadedFiles: [DriveFile] = []
             for (index, file) in files.enumerated() {
                 let taskId = newTasks[index].id
-                await uploadSingleFile(
+                if let uploadedFile = await uploadSingleFile(
                     taskId: taskId,
                     driveId: driveId,
                     directoryId: directoryId,
                     payload: file
-                )
+                ) {
+                    uploadedFiles.append(uploadedFile)
+                }
             }
 
-            onDone?()
+            onDone?(uploadedFiles)
             schedulePillAutoDismiss()
         }
     }
 
     /// Rétrocompatibilité : convertit les données en fichiers temporaires avant enfilage.
-    func enqueue(driveId: Int, directoryId: Int, files: [(data: Data, name: String)], onDone: (() -> Void)? = nil) {
+    func enqueue(driveId: Int, directoryId: Int, files: [(data: Data, name: String)], onDone: (([DriveFile]) -> Void)? = nil) {
         Task {
             var payloads: [UploadPayload] = []
             for item in files {
@@ -299,29 +308,40 @@ final class UploadManager {
         }
     }
 
-    private func uploadSingleFile(taskId: UUID, driveId: Int, directoryId: Int, payload: UploadPayload) async {
+    private func uploadSingleFile(taskId: UUID, driveId: Int, directoryId: Int, payload: UploadPayload) async -> DriveFile? {
         guard let index = tasks.firstIndex(where: { $0.id == taskId }) else {
             if payload.isTemporary {
                 await UploadFileIO.removeTemporaryFile(payload.fileURL)
             }
-            return
+            return nil
         }
         tasks[index].status = .inProgress(progress: 0.15)
 
-        let mimeType = UTType(filenameExtension: (payload.fileName as NSString).pathExtension)?.preferredMIMEType
-            ?? "application/octet-stream"
-
         do {
-            tasks[index].status = .inProgress(progress: 0.5)
-            try await service.uploadFile(
+            tasks[index].status = .inProgress(progress: 0.2)
+            let uploadedFile = try await service.uploadFile(
                 driveId: driveId,
                 directoryId: directoryId,
                 fileURL: payload.fileURL,
                 fileName: payload.fileName,
                 totalSize: payload.totalBytes,
-                mimeType: mimeType
+                progress: { [weak self] fraction in
+                    Task { @MainActor in
+                        guard let self,
+                              let currentIndex = self.tasks.firstIndex(where: { $0.id == taskId })
+                        else { return }
+                        guard case .inProgress = self.tasks[currentIndex].status else { return }
+                        // Les 20 premiers pourcents représentent la préparation
+                        // locale ; les 80 suivants correspondent aux octets envoyés.
+                        self.tasks[currentIndex].status = .inProgress(progress: 0.2 + fraction * 0.8)
+                    }
+                }
             )
             tasks[index].status = .completed
+            if payload.isTemporary {
+                await UploadFileIO.removeTemporaryFile(payload.fileURL)
+            }
+            return uploadedFile
         } catch {
             let desc = (error as? APIError)?.errorDescription ?? error.localizedDescription
             tasks[index].status = .failed(message: desc)
@@ -330,6 +350,7 @@ final class UploadManager {
         if payload.isTemporary {
             await UploadFileIO.removeTemporaryFile(payload.fileURL)
         }
+        return nil
     }
 
     func clearCompleted() {
@@ -349,7 +370,7 @@ final class UploadManager {
         hidePillTask = Task {
             try? await Task.sleep(for: .seconds(5))
             guard !Task.isCancelled else { return }
-            if activeTasksCount == 0 {
+            if activeTasksCount == 0 && !hasFailures {
                 withAnimation(.snappy(duration: 0.3)) {
                     isPillVisible = false
                 }

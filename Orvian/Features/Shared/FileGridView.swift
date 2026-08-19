@@ -19,7 +19,7 @@ struct FileGridView: View {
     /// Options de tri et de filtrage (bouton filtre de l'Accueil).
     var filters: FileFilters = .init()
 
-    /// Remonte true quand l'utilisateur défile vers le haut (offset négatif).
+    /// Remonte true après un court geste vers le bas depuis le haut de la liste.
     var onScrolledPastTop: ((Bool) -> Void)?
 
     /// Décalage ajouté en haut du contenu (barre de recherche flottante) pour
@@ -64,9 +64,9 @@ struct FileGridView: View {
                 // Seul un dépassement réel de cette position doit afficher la recherche.
                 $0.contentOffset.y + $0.contentInsets.top
             }) { oldValue, newValue in
-                if newValue >= 0 {
+                if newValue > 24 {
                     onScrolledPastTop?(false)
-                } else if oldValue >= 0 && newValue < 0 {
+                } else if newValue < -8 {
                     onScrolledPastTop?(true)
                 }
             }
@@ -124,6 +124,18 @@ struct FileGridView: View {
             // Même un dossier trop court pour défiler peut être tiré vers le
             // bas : ce geste révèle la recherche sur l'Accueil.
             .scrollBounceBehavior(.always, axes: .vertical)
+            .scrollIndicators(.hidden)
+            .simultaneousGesture(
+                DragGesture(minimumDistance: 8)
+                    .onChanged { value in
+                        // Secours pour les dossiers très courts : même si le
+                        // ScrollView ne bouge pas visuellement, le geste révèle
+                        // tout de même la recherche.
+                        if value.translation.height > 12 {
+                            onScrolledPastTop?(true)
+                        }
+                    }
+            )
             .onChange(of: scrollToTopRequest) { oldValue, newValue in
                 guard oldValue != newValue else { return }
                 withAnimation(.snappy(duration: 0.3)) {
@@ -251,7 +263,7 @@ struct FileGridView: View {
     private var columns: [GridItem] {
         Array(
             repeating: GridItem(.flexible(), spacing: DS.gridSpacing),
-            count: min(max(fileGridColumns, 2), 4)
+            count: min(max(fileGridColumns, 2), 7)
         )
     }
 

@@ -1,4 +1,24 @@
 import Foundation
+import CryptoKit
+
+/// Lecture séquentielle hors du MainActor pour les uploads découpés.
+private actor UploadChunkReader {
+    private let handle: FileHandle
+
+    init(url: URL) throws {
+        handle = try FileHandle(forReadingFrom: url)
+    }
+
+    deinit {
+        try? handle.close()
+    }
+
+    func next(maxLength: Int) throws -> (data: Data, sha256: String) {
+        let data = try handle.read(upToCount: maxLength) ?? Data()
+        let digest = SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
+        return (data, digest)
+    }
+}
 
 /// Source de fichiers pour les grilles paginées.
 enum FileSource: Hashable {
@@ -174,6 +194,33 @@ struct KDriveService {
 
     // MARK: - Création & upload
 
+    private static let directUploadLimit = 100 * 1_024 * 1_024
+    private static let uploadChunkSize = 20 * 1_024 * 1_024
+
+    private struct StartUploadSessionRequest: Encodable {
+        let totalSize: Int
+        let fileName: String
+        let totalChunks: Int
+        let conflict: String
+        let directoryId: Int
+
+        enum CodingKeys: String, CodingKey {
+            case conflict
+            case totalSize = "total_size"
+            case fileName = "file_name"
+            case totalChunks = "total_chunks"
+            case directoryId = "directory_id"
+        }
+    }
+
+    private struct UploadSession: Decodable {
+        let token: String
+    }
+
+    private struct FinishedUpload: Decodable {
+        let file: DriveFile
+    }
+
     private struct CreateFolderRequest: Encodable {
         let name: String
     }
@@ -194,12 +241,103 @@ struct KDriveService {
     }
 
     /// Upload d'un fichier local par streaming (sans buffer Data en mémoire) dans `directoryId`.
-    func uploadFile(driveId: Int, directoryId: Int, fileURL: URL, fileName: String, totalSize: Int, mimeType: String) async throws {
-        try await api.uploadFile(
+    func uploadFile(
+        driveId: Int,
+        directoryId: Int,
+        fileURL: URL,
+        fileName: String,
+        totalSize: Int,
+        progress: @escaping @Sendable (Double) -> Void
+    ) async throws -> DriveFile {
+        if totalSize >= Self.directUploadLimit {
+            return try await uploadFileInChunks(
+                driveId: driveId,
+                directoryId: directoryId,
+                fileURL: fileURL,
+                fileName: fileName,
+                totalSize: totalSize,
+                progress: progress
+            )
+        }
+
+        return try await api.uploadFile(
             .upload(driveId: driveId, directoryId: directoryId, fileName: fileName, totalSize: totalSize),
             fileURL: fileURL,
-            contentType: mimeType.isEmpty ? "application/octet-stream" : mimeType
+            // L'endpoint reçoit le fichier comme corps binaire brut. Le type
+            // réel reste transmis à kDrive via le nom et son extension.
+            contentType: "application/octet-stream",
+            progress: progress
         )
+    }
+
+    /// Les fichiers d'au moins 100 Mo suivent le protocole de session utilisé
+    /// par l'app kDrive officielle. Chaque morceau est confirmé avant le suivant.
+    private func uploadFileInChunks(
+        driveId: Int,
+        directoryId: Int,
+        fileURL: URL,
+        fileName: String,
+        totalSize: Int,
+        progress: @escaping @Sendable (Double) -> Void
+    ) async throws -> DriveFile {
+        let totalChunks = max(1, Int(ceil(Double(totalSize) / Double(Self.uploadChunkSize))))
+        let request = StartUploadSessionRequest(
+            totalSize: totalSize,
+            fileName: fileName,
+            totalChunks: totalChunks,
+            conflict: "rename",
+            directoryId: directoryId
+        )
+        let body = try JSONEncoder().encode(request)
+        let response = try await api.postDecoded(
+            DataResponse<UploadSession>.self,
+            .startUploadSession(driveId: driveId),
+            body: body
+        )
+        guard response.result == nil || response.result == "success",
+              let session = response.data
+        else { throw APIError.invalidResponse }
+
+        do {
+            let reader = try UploadChunkReader(url: fileURL)
+            for number in 1...totalChunks {
+                try Task.checkCancellation()
+                let chunk = try await reader.next(maxLength: Self.uploadChunkSize)
+                guard !chunk.data.isEmpty else { throw APIError.invalidResponse }
+
+                try await api.uploadData(
+                    .uploadChunk(
+                        driveId: driveId,
+                        token: session.token,
+                        number: number,
+                        size: chunk.data.count,
+                        sha256: chunk.sha256
+                    ),
+                    data: chunk.data,
+                    contentType: "application/octet-stream",
+                    progress: { chunkProgress in
+                        let completedChunks = Double(number - 1)
+                        progress((completedChunks + chunkProgress) / Double(totalChunks))
+                    }
+                )
+            }
+
+            let finished = try await api.postDecoded(
+                DataResponse<FinishedUpload>.self,
+                .finishUploadSession(driveId: driveId, token: session.token)
+            )
+            guard finished.result == nil || finished.result == "success",
+                  let file = finished.data?.file
+            else { throw APIError.invalidResponse }
+            progress(1)
+            return file
+        } catch {
+            try? await api.sendEmpty(
+                .cancelUploadSession(driveId: driveId, token: session.token),
+                method: "DELETE"
+            )
+            throw error
+        }
     }
 
     // MARK: - Suppression & renommage

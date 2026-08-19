@@ -56,7 +56,8 @@ private final class AsyncThrottler: @unchecked Sendable {
 /// - régule la concurrence réseau (max 5 téléchargements simultanés sans bloquer de thread) ;
 /// - priorise les cellules visibles sur le préchargement ;
 /// - purge les requêtes de préchargement obsolètes lors d'un défilement rapide ;
-/// - mémorise les « pas de miniature » pour ne pas re-demander ;
+/// - ne mémorise jamais une absence : un 404 ou une réponse vide peut
+///   simplement signifier qu'un média importé est encore en préparation ;
 /// - le décodage et la préparation s'exécutent hors du MainActor.
 actor ThumbnailProvider {
     static let shared = ThumbnailProvider()
@@ -110,7 +111,7 @@ actor ThumbnailProvider {
                 Self.memory.setObject(image, forKey: key.nsString, cost: image.estimatedByteSize)
                 return image
             }
-            return nil // marqueur « pas de miniature » déjà sur disque
+            return nil
         }
 
         if let existing = inFlight[key] {
@@ -192,7 +193,6 @@ actor ThumbnailProvider {
             }
             guard !Task.isCancelled else { return nil }
             guard !data.isEmpty else {
-                disk.storeMarker(driveId: key.driveId, fileId: key.fileId, pixels: key.pixels)
                 return nil
             }
             // 1. Sauvegarde directe des données brutes reçues (JPEG, PNG, WebP...) sans ré-encodage CPU
@@ -200,17 +200,15 @@ actor ThumbnailProvider {
 
             // 2. Décodage et préparation d'image hors du MainActor
             guard let image = UIImage.decode(data) else {
-                disk.storeMarker(driveId: key.driveId, fileId: key.fileId, pixels: key.pixels)
                 return nil
             }
             return image
         } catch is CancellationError {
             return nil
         } catch {
-            // Erreur réseau/HTTP ponctuelle : pas de marqueur, on réessaiera.
-            if let apiError = error as? APIError, case let .http(status, _, _) = apiError, status == 404 {
-                disk.storeMarker(driveId: key.driveId, fileId: key.fileId, pixels: key.pixels)
-            }
+            // Erreur réseau/HTTP ponctuelle : aucun marqueur. Juste après un
+            // upload, kDrive peut répondre 404 quelques secondes avant que la
+            // miniature soit générée ; une carte visible pourra donc réessayer.
             return nil
         }
     }

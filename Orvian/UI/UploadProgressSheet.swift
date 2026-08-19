@@ -96,6 +96,21 @@ struct UploadProgressSheet: View {
                 Text(ByteFormatter.format(task.totalBytes))
                     .font(.caption2)
                     .foregroundStyle(.secondary)
+
+                if case let .inProgress(progress) = task.status {
+                    ProgressView(value: progress)
+                        .tint(Color.accentColor)
+                    Text("\(Int(progress * 100)) %")
+                        .font(.caption2.monospacedDigit())
+                        .foregroundStyle(.secondary)
+                }
+
+                if case let .failed(message) = task.status {
+                    Text(message)
+                        .font(.caption2)
+                        .foregroundStyle(.orange)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
             }
 
             Spacer()
@@ -105,16 +120,16 @@ struct UploadProgressSheet: View {
                 Text("En attente")
                     .font(.caption2)
                     .foregroundStyle(.tertiary)
-            case .inProgress:
-                ProgressView()
-                    .controlSize(.small)
+            case let .inProgress(progress):
+                Text("\(Int(progress * 100)) %")
+                    .font(.caption2.weight(.semibold).monospacedDigit())
+                    .foregroundStyle(.secondary)
             case .completed:
                 Image(systemName: "checkmark.circle.fill")
                     .foregroundStyle(.green)
-            case let .failed(msg):
+            case .failed:
                 Image(systemName: "exclamationmark.circle.fill")
                     .foregroundStyle(.orange)
-                    .help(msg)
             }
         }
         .padding(.vertical, 2)

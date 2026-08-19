@@ -63,6 +63,16 @@ final class VideoAssetCache {
         prefetchTasks.removeAll()
     }
 
+    /// Oublie une ressource qui a échoué pendant le traitement initial du
+    /// média côté serveur afin que la tentative suivante reparte proprement.
+    func invalidate(driveId: Int, fileId: Int) {
+        let key = makeKey(driveId: driveId, fileId: fileId)
+        prefetchTasks[key]?.cancel()
+        prefetchTasks[key] = nil
+        assets[key] = nil
+        insertionOrder.removeAll { $0 == key }
+    }
+
     private func makeKey(driveId: Int, fileId: Int) -> Key {
         Key(
             driveId: driveId,

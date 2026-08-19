@@ -47,6 +47,28 @@ actor APIClient {
         try Self.check(response: response, data: data)
     }
 
+    /// POST décodé, notamment pour l'ouverture et la fermeture des sessions
+    /// d'upload où le corps de réponse fait partie de la confirmation.
+    func postDecoded<T: Decodable>(
+        _ type: T.Type = T.self,
+        _ endpoint: Endpoint,
+        body: Data? = nil,
+        contentType: String = "application/json"
+    ) async throws -> T {
+        let (data, response) = try await send(
+            endpoint,
+            method: "POST",
+            httpBody: body,
+            contentType: body == nil ? nil : contentType
+        )
+        try Self.check(response: response, data: data)
+        do {
+            return try JSONDecoder.api.decode(T.self, from: data)
+        } catch {
+            throw APIError.decoding(error)
+        }
+    }
+
     /// PUT avec corps brut (JSON…). Lève une erreur si le statut HTTP n'est pas 2xx.
     func put(_ endpoint: Endpoint, body: Data, contentType: String = "application/json") async throws {
         let (data, response) = try await send(endpoint, method: "PUT", httpBody: body, contentType: contentType)
@@ -54,7 +76,14 @@ actor APIClient {
     }
 
     /// Upload d'un fichier local par streaming (évite le chargement du fichier en RAM).
-    func uploadFile(_ endpoint: Endpoint, fileURL: URL, contentType: String) async throws {
+    /// La réponse doit contenir le fichier créé : un simple statut HTTP 2xx ne
+    /// suffit pas à confirmer que kDrive l'a effectivement enregistré.
+    func uploadFile(
+        _ endpoint: Endpoint,
+        fileURL: URL,
+        contentType: String,
+        progress: @escaping @Sendable (Double) -> Void
+    ) async throws -> DriveFile {
         guard var components = URLComponents(url: Self.baseURL, resolvingAgainstBaseURL: false) else {
             throw APIError.invalidURL
         }
@@ -77,12 +106,80 @@ actor APIClient {
         }
 
         do {
-            let (data, response) = try await session.upload(for: request, fromFile: fileURL)
+            let delegate = UploadProgressDelegate(progress: progress)
+            let delegateQueue = OperationQueue()
+            delegateQueue.maxConcurrentOperationCount = 1
+            let uploadSession = URLSession(
+                configuration: .default,
+                delegate: delegate,
+                delegateQueue: delegateQueue
+            )
+            defer { uploadSession.finishTasksAndInvalidate() }
+
+            let (data, response) = try await withTaskCancellationHandler {
+                try await withCheckedThrowingContinuation { continuation in
+                    delegate.continuation = continuation
+                    uploadSession.uploadTask(with: request, fromFile: fileURL).resume()
+                }
+            } onCancel: {
+                uploadSession.invalidateAndCancel()
+            }
             try Self.check(response: response, data: data)
+            do {
+                let envelope = try JSONDecoder.api.decode(DataResponse<DriveFile>.self, from: data)
+                guard envelope.result == nil || envelope.result == "success" else {
+                    throw APIError.invalidResponse
+                }
+                guard let uploadedFile = envelope.data else {
+                    throw APIError.invalidResponse
+                }
+                return uploadedFile
+            } catch let error as APIError {
+                throw error
+            } catch {
+                throw APIError.decoding(error)
+            }
         } catch {
             if error is APIError {
                 throw error
             }
+            throw APIError.network(error)
+        }
+    }
+
+    /// Envoie un morceau binaire d'une session avec une progression réelle.
+    func uploadData(
+        _ endpoint: Endpoint,
+        data: Data,
+        contentType: String,
+        progress: @escaping @Sendable (Double) -> Void
+    ) async throws {
+        var request = try request(for: endpoint, method: "POST")
+        request.timeoutInterval = 300
+        request.setValue(contentType, forHTTPHeaderField: "Content-Type")
+
+        do {
+            let delegate = UploadProgressDelegate(progress: progress)
+            let delegateQueue = OperationQueue()
+            delegateQueue.maxConcurrentOperationCount = 1
+            let uploadSession = URLSession(
+                configuration: .default,
+                delegate: delegate,
+                delegateQueue: delegateQueue
+            )
+            defer { uploadSession.finishTasksAndInvalidate() }
+
+            let (responseData, response) = try await withTaskCancellationHandler {
+                try await withCheckedThrowingContinuation { continuation in
+                    delegate.continuation = continuation
+                    uploadSession.uploadTask(with: request, from: data).resume()
+                }
+            } onCancel: {
+                uploadSession.invalidateAndCancel()
+            }
+            try Self.check(response: response, data: responseData)
+        } catch {
+            if error is APIError { throw error }
             throw APIError.network(error)
         }
     }
@@ -156,6 +253,46 @@ actor APIClient {
     private static func decodeError(data: Data) -> (code: String?, description: String?)? {
         guard let envelope = try? JSONDecoder.api.decode(ErrorEnvelope.self, from: data) else { return nil }
         return (envelope.error?.code, envelope.error?.description)
+    }
+}
+
+/// Délégué isolé par transfert : il collecte la petite réponse JSON et remonte
+/// les octets réellement envoyés par URLSession.
+private final class UploadProgressDelegate: NSObject, URLSessionDataDelegate, @unchecked Sendable {
+    let progress: @Sendable (Double) -> Void
+    var continuation: CheckedContinuation<(Data, URLResponse), Error>?
+    private var responseData = Data()
+
+    init(progress: @escaping @Sendable (Double) -> Void) {
+        self.progress = progress
+    }
+
+    func urlSession(
+        _ session: URLSession,
+        task: URLSessionTask,
+        didSendBodyData bytesSent: Int64,
+        totalBytesSent: Int64,
+        totalBytesExpectedToSend: Int64
+    ) {
+        guard totalBytesExpectedToSend > 0 else { return }
+        let fraction = Double(totalBytesSent) / Double(totalBytesExpectedToSend)
+        progress(min(max(fraction, 0), 1))
+    }
+
+    func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive data: Data) {
+        responseData.append(data)
+    }
+
+    func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
+        guard let continuation else { return }
+        self.continuation = nil
+        if let error {
+            continuation.resume(throwing: error)
+        } else if let response = task.response {
+            continuation.resume(returning: (responseData, response))
+        } else {
+            continuation.resume(throwing: APIError.invalidResponse)
+        }
     }
 }
 

@@ -6,7 +6,6 @@ import UIKit
 /// les plus anciens fichiers jusqu'à 80 % de cette limite.
 final class DiskImageCache: @unchecked Sendable {
     private let root: URL
-    private let markerSuffix = ".none"
 
     private let lock = NSLock()
     private var estimatedDiskSize: Int = 0
@@ -33,18 +32,20 @@ final class DiskImageCache: @unchecked Sendable {
         try? FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
     }
 
-    private func url(driveId: Int, fileId: Int, pixels: Int, marker: Bool = false) -> URL {
+    private func url(driveId: Int, fileId: Int, pixels: Int) -> URL {
         root
             .appendingPathComponent("\(driveId)", isDirectory: true)
-            .appendingPathComponent("\(fileId)-\(pixels).jpg\(marker ? markerSuffix : "")")
+            .appendingPathComponent("\(fileId)-\(pixels).jpg")
     }
 
     // MARK: - Lecture / écriture
 
     func hasEntry(driveId: Int, fileId: Int, pixels: Int) -> Bool {
         let fileURL = url(driveId: driveId, fileId: fileId, pixels: pixels)
-        if FileManager.default.fileExists(atPath: fileURL.path) { return true }
-        return FileManager.default.fileExists(atPath: fileURL.path + markerSuffix)
+        // Les anciens marqueurs `.none` ne sont plus pris en compte : un 404
+        // juste après un upload pouvait être temporaire et ne doit jamais
+        // condamner définitivement la miniature sur les versions suivantes.
+        return FileManager.default.fileExists(atPath: fileURL.path)
     }
 
     func loadImage(driveId: Int, fileId: Int, pixels: Int) -> UIImage? {
@@ -74,13 +75,6 @@ final class DiskImageCache: @unchecked Sendable {
     func store(image: UIImage, driveId: Int, fileId: Int, pixels: Int) {
         guard let data = image.jpegData(compressionQuality: 0.85) ?? image.pngData() else { return }
         store(data: data, driveId: driveId, fileId: fileId, pixels: pixels)
-    }
-
-    /// Mémorise « ce fichier n'a pas de miniature » (zéro octet).
-    func storeMarker(driveId: Int, fileId: Int, pixels: Int) {
-        let fileURL = url(driveId: driveId, fileId: fileId, pixels: pixels, marker: true)
-        try? FileManager.default.createDirectory(at: fileURL.deletingLastPathComponent(), withIntermediateDirectories: true)
-        FileManager.default.createFile(atPath: fileURL.path, contents: Data())
     }
 
     // MARK: - Maintenance
