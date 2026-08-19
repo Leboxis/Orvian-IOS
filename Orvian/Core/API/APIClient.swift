@@ -30,7 +30,7 @@ actor APIClient {
         do {
             return try JSONDecoder.api.decode(T.self, from: data)
         } catch {
-            throw APIError.decoding(error)
+            throw APIError.decoding(error, raw: data)
         }
     }
 
@@ -65,7 +65,7 @@ actor APIClient {
         do {
             return try JSONDecoder.api.decode(T.self, from: data)
         } catch {
-            throw APIError.decoding(error)
+            throw APIError.decoding(error, raw: data)
         }
     }
 
@@ -123,7 +123,7 @@ actor APIClient {
             } catch let error as APIError {
                 throw error
             } catch {
-                throw APIError.decoding(error)
+                throw APIError.decoding(error, raw: data)
             }
         } catch {
             if error is APIError {
