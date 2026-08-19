@@ -139,9 +139,9 @@ actor APIClient {
         data: Data,
         contentType: String,
         progress: @escaping @Sendable (Double) -> Void
-    ) async throws {
+    ) async throws -> Data {
         var request = try request(for: endpoint, method: "POST")
-        try await uploadData(request: &request, data: data, contentType: contentType, progress: progress)
+        return try await uploadData(request: &request, data: data, contentType: contentType, progress: progress)
     }
 
     /// Envoie un morceau vers l'URL dédiée renvoyée par `upload/session/start`.
@@ -152,9 +152,9 @@ actor APIClient {
         data: Data,
         contentType: String,
         progress: @escaping @Sendable (Double) -> Void
-    ) async throws {
+    ) async throws -> Data {
         var request = try uploadRequest(for: url, method: "POST")
-        try await uploadData(request: &request, data: data, contentType: contentType, progress: progress)
+        return try await uploadData(request: &request, data: data, contentType: contentType, progress: progress)
     }
 
     private func uploadData(
@@ -162,7 +162,7 @@ actor APIClient {
         data: Data,
         contentType: String,
         progress: @escaping @Sendable (Double) -> Void
-    ) async throws {
+    ) async throws -> Data {
         request.timeoutInterval = 300
         request.setValue(contentType, forHTTPHeaderField: "Content-Type")
 
@@ -186,6 +186,7 @@ actor APIClient {
                 uploadSession.invalidateAndCancel()
             }
             try Self.check(response: response, data: responseData)
+            return responseData
         } catch {
             if error is APIError { throw error }
             throw APIError.network(error)
