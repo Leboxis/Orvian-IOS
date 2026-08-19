@@ -120,6 +120,18 @@ struct KDriveService {
         return try await api.get(CursorPage<DriveFile>.self, endpoint)
     }
 
+    // MARK: - Fiche fichier
+
+    /// Fiche complète d'un fichier (v3). Les listes (notamment la recherche
+    /// par tag) ne renvoient pas toujours `categories` : cette fiche est la
+    /// source fiable pour connaître les tags réellement appliqués.
+    func fileInfo(driveId: Int, fileId: Int) async throws -> DriveFile {
+        guard let file = try await api.get(DataResponse<DriveFile>.self, .fileInfo(driveId: driveId, fileId: fileId)).data else {
+            throw APIError.invalidResponse
+        }
+        return file
+    }
+
     // MARK: - Catégories
 
     func categories(driveId: Int) async throws -> [Category] {

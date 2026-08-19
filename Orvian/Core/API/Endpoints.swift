@@ -118,6 +118,14 @@ extension Endpoint {
         return Endpoint(path: "/3/drive/\(driveId)/files/search", query: queryItems)
     }
 
+    /// Fiche complète d'un fichier (v3). Contrairement aux listes (dont la
+    /// recherche par tag), elle renvoie toujours les catégories et le favori.
+    static func fileInfo(driveId: Int, fileId: Int) -> Endpoint {
+        Endpoint(
+            path: "/3/drive/\(driveId)/files/\(fileId)",
+            query: [URLQueryItem(name: "with", value: "is_favorite,categories")]
+        )
+    }
 
     /// Contenu de la corbeille (v3, pagination curseur).
     static func trashContent(driveId: Int, cursor: String?, limit: Int = 60) -> Endpoint {

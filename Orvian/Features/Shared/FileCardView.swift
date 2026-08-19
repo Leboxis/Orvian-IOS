@@ -146,8 +146,7 @@ struct FileCardView: View {
                 onToggleFavorite: onToggleFavorite,
                 onDelete: onDelete,
                 onRename: onRename,
-                onMove: onMove,
-                onTagChanged: onTagChanged
+                onMove: onMove
             )
         }
         .sheet(isPresented: $showTagsSheet) {
@@ -346,13 +345,10 @@ struct FileDetailSheet: View {
     let onDelete: (() -> Void)?
     let onRename: ((String) -> Void)?
     let onMove: (() -> Void)?
-    /// Confirme localement un changement de tag pour rafraîchir les pastilles
-    /// des cartes derrière la fiche.
-    var onTagChanged: ((Category, Bool) -> Void)?
 
     @Environment(\.dismiss) private var dismiss
-    @State private var categories: [Category] = []
-    @State private var appliedCategoryIds: Set<Int>
+    /// Tags réellement appliqués au fichier (source : fiche individuelle).
+    @State private var appliedCategories: [Category] = []
     @State private var isFavorite: Bool
     @State private var showDeleteConfirm = false
     @State private var showRenameAlert = false
@@ -368,8 +364,7 @@ struct FileDetailSheet: View {
         onToggleFavorite: (() -> Void)?,
         onDelete: (() -> Void)?,
         onRename: ((String) -> Void)?,
-        onMove: (() -> Void)?,
-        onTagChanged: ((Category, Bool) -> Void)? = nil
+        onMove: (() -> Void)?
     ) {
         self.file = file
         self.driveId = driveId
@@ -379,8 +374,6 @@ struct FileDetailSheet: View {
         self.onDelete = onDelete
         self.onRename = onRename
         self.onMove = onMove
-        self.onTagChanged = onTagChanged
-        _appliedCategoryIds = State(initialValue: Set((file.categories ?? []).compactMap { $0.category?.id }))
         _isFavorite = State(initialValue: file.isFavorite == true)
     }
 
@@ -445,7 +438,7 @@ struct FileDetailSheet: View {
             } message: {
                 Text("Ancien nom : \(file.name)")
             }
-            .task { await loadCategories() }
+            .task { await loadFileInfo() }
         }
     }
 
@@ -495,34 +488,41 @@ struct FileDetailSheet: View {
             if isTrashed {
                 Text("Restaurer le fichier pour modifier ses tags.")
                     .foregroundStyle(.secondary)
-            } else if categories.isEmpty {
-                Text("Aucun tag disponible")
+            } else if appliedCategories.isEmpty {
+                Text("Aucun tag")
                     .foregroundStyle(.secondary)
             } else {
-                ForEach(categories) { category in
-                    categoryRow(category)
+                LazyVGrid(
+                    columns: [GridItem(.adaptive(minimum: 100), spacing: 8)],
+                    spacing: 8
+                ) {
+                    ForEach(appliedCategories) { category in
+                        tagChip(category)
+                    }
                 }
+                .padding(.vertical, 4)
             }
         }
     }
 
-    private func categoryRow(_ category: Category) -> some View {
-        Button {
-            Task { await toggleCategory(category) }
-        } label: {
-            HStack {
-                Circle()
-                    .fill(Color(hex: category.color) ?? .gray)
-                    .frame(width: 10, height: 10)
-                Text(category.name)
-                    .foregroundStyle(.primary)
-                Spacer()
-                if appliedCategoryIds.contains(category.id) {
-                    Image(systemName: "checkmark")
-                        .foregroundStyle(Color.accentColor)
-                }
-            }
+    /// Pastille de tag (rond de couleur + nom) pour la grille de la fiche.
+    private func tagChip(_ category: Category) -> some View {
+        HStack(spacing: 6) {
+            Circle()
+                .fill(Color(hex: category.color) ?? .gray)
+                .frame(width: 10, height: 10)
+            Text(category.name)
+                .font(.footnote)
+                .lineLimit(1)
+                .truncationMode(.tail)
         }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 8)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .fill(Color(uiColor: .tertiarySystemFill))
+        )
     }
 
     private var openSection: some View {
@@ -579,39 +579,21 @@ struct FileDetailSheet: View {
         return date.formatted(date: .abbreviated, time: .shortened)
     }
 
-    private func loadCategories() async {
-        if let cats = try? await service.categories(driveId: driveId) {
-            categories = cats
-        }
-    }
-
-    private func toggleCategory(_ category: Category) async {
-        let isApplying = !appliedCategoryIds.contains(category.id)
-        if isApplying {
-            appliedCategoryIds.insert(category.id)
+    private func loadFileInfo() async {
+        guard !isTrashed else { return }
+        if let info = try? await service.fileInfo(driveId: driveId, fileId: file.id) {
+            appliedCategories = (info.categories ?? []).compactMap { $0.category }
+            isFavorite = info.isFavorite == true
         } else {
-            appliedCategoryIds.remove(category.id)
-        }
-        do {
-            if isApplying {
-                try await service.addCategory(driveId: driveId, fileId: file.id, categoryId: category.id)
-                TagUsageStore.markUsed(driveId: driveId, categoryId: category.id)
-            } else {
-                try await service.removeCategory(driveId: driveId, fileId: file.id, categoryId: category.id)
-            }
-            onTagChanged?(category, isApplying)
-        } catch {
-            if isApplying {
-                appliedCategoryIds.remove(category.id)
-            } else {
-                appliedCategoryIds.insert(category.id)
-            }
+            // Repli : les catégories éventuellement fournies par la liste.
+            appliedCategories = (file.categories ?? []).compactMap { $0.category }
         }
     }
 }
 
 /// Éditeur de tags d'un seul élément (menu contextuel → « Tags ») :
-/// les tags déjà appliqués sont marqués d'une coche, un tap ajoute ou retire.
+/// grille compacte de tous les tags — coche sur ceux déjà appliqués,
+/// un tap ajoute ou retire.
 private struct TagsEditorSheet: View {
     let driveId: Int
     let file: DriveFile
@@ -624,6 +606,7 @@ private struct TagsEditorSheet: View {
     @State private var errorMessage: String?
 
     private let service = KDriveService()
+    private let columns = [GridItem(.adaptive(minimum: 110), spacing: 8)]
 
     init(driveId: Int, file: DriveFile, onChanged: ((Category, Bool) -> Void)?) {
         self.driveId = driveId
@@ -645,24 +628,21 @@ private struct TagsEditorSheet: View {
                         Text("Créez des tags dans l'onglet Tag pour les appliquer ici.")
                     }
                 } else {
-                    List {
-                        Section {
+                    ScrollView {
+                        LazyVGrid(columns: columns, spacing: 8) {
                             ForEach(categories) { category in
-                                Button {
-                                    Task { await toggle(category) }
-                                } label: {
-                                    tagRow(category)
-                                }
+                                tagCell(category)
                             }
-                        } footer: {
-                            Text("Cochez les tags à appliquer à « \(file.name) » ; décochez-les pour les retirer.")
                         }
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 12)
                         if let errorMessage {
-                            Section {
-                                Text(errorMessage)
-                                    .font(.footnote)
-                                    .foregroundStyle(.red)
-                            }
+                            Text(errorMessage)
+                                .font(.footnote)
+                                .foregroundStyle(.red)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .padding(.horizontal, 16)
+                                .padding(.bottom, 12)
                         }
                     }
                 }
@@ -684,26 +664,51 @@ private struct TagsEditorSheet: View {
         .task { await load() }
     }
 
-    private func tagRow(_ category: Category) -> some View {
-        HStack {
-            Circle()
-                .fill(Color(hex: category.color) ?? .gray)
-                .frame(width: 12, height: 12)
-            Text(category.name)
-                .foregroundStyle(.primary)
-            Spacer()
-            if appliedCategoryIds.contains(category.id) {
-                Image(systemName: "checkmark")
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(Color.accentColor)
+    private func tagCell(_ category: Category) -> some View {
+        let isApplied = appliedCategoryIds.contains(category.id)
+        return Button {
+            Task { await toggle(category) }
+        } label: {
+            HStack(spacing: 6) {
+                Circle()
+                    .fill(Color(hex: category.color) ?? .gray)
+                    .frame(width: 10, height: 10)
+                Text(category.name)
+                    .font(.footnote)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                if isApplied {
+                    Image(systemName: "checkmark")
+                        .font(.system(size: 11, weight: .bold))
+                        .foregroundStyle(Color.accentColor)
+                }
             }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 8)
+            .frame(maxWidth: .infinity)
+            .background(
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .fill(isApplied ? Color.accentColor.opacity(0.15) : Color(uiColor: .tertiarySystemFill))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .strokeBorder(isApplied ? Color.accentColor.opacity(0.45) : .clear, lineWidth: 1)
+            )
         }
+        .buttonStyle(.plain)
     }
 
     private func load() async {
         isLoading = true
         defer { isLoading = false }
-        if let cats = try? await service.categories(driveId: driveId) {
+        async let categoriesTask = service.categories(driveId: driveId)
+        // Les listes (recherche par tag…) ne renvoient pas toujours les
+        // catégories : la fiche individuelle est la source fiable des coches.
+        if let info = try? await service.fileInfo(driveId: driveId, fileId: file.id),
+           let ids = info.categories {
+            appliedCategoryIds = Set(ids.compactMap { $0.category?.id })
+        }
+        if let cats = try? await categoriesTask {
             categories = cats
         }
     }
