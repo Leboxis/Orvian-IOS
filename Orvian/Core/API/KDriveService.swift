@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 
 /// Lecture séquentielle hors du MainActor pour les uploads découpés.
@@ -12,8 +13,10 @@ private actor UploadChunkReader {
         try? handle.close()
     }
 
-    func next(maxLength: Int) throws -> Data {
-        try handle.read(upToCount: maxLength) ?? Data()
+    func next(maxLength: Int) throws -> (data: Data, sha256: String) {
+        let data = try handle.read(upToCount: maxLength) ?? Data()
+        let digest = SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
+        return (data, digest)
     }
 }
 
@@ -345,16 +348,19 @@ struct KDriveService {
             for number in 1...totalChunks {
                 try Task.checkCancellation()
                 let chunk = try await reader.next(maxLength: Self.uploadChunkSize)
-                guard !chunk.isEmpty else { throw APIError.invalidResponse }
+                guard !chunk.data.isEmpty else { throw APIError.invalidResponse }
                 let chunkURL = try Self.chunkURL(
                     from: uploadURL,
+                    driveId: driveId,
+                    token: token,
                     number: number,
-                    size: chunk.count
+                    size: chunk.data.count,
+                    hash: chunk.sha256
                 )
 
                 try await uploadChunk(
                     to: chunkURL,
-                    data: chunk,
+                    data: chunk.data,
                     number: number,
                     totalChunks: totalChunks,
                     progress: progress
@@ -431,19 +437,36 @@ struct KDriveService {
         return Int((date ?? Date()).timeIntervalSince1970)
     }
 
-    /// `upload_url` peut contenir des paramètres nécessaires à l'hôte de
-    /// transfert. Ils sont préservés et seuls les paramètres du morceau sont
-    /// ajoutés.
-    private static func chunkURL(from uploadURL: URL, number: Int, size: Int) throws -> URL {
+    /// `upload_url` renvoyé par `/upload/session/start` est l'**hôte** dédié au
+    /// transfert des morceaux (ex. `upload.kdrive.infomaniak.com`), pas l'URL
+    /// complète du chunk. Comme l'app kDrive officielle, on repart du chemin
+    /// canonique `/3/drive/{drive_id}/upload/session/{token}/chunk` et on ne
+    /// remplace que l'hôte, en préservant les éventuels paramètres renvoyés
+    /// par l'API.
+    private static func chunkURL(
+        from uploadURL: URL,
+        driveId: Int,
+        token: String,
+        number: Int,
+        size: Int,
+        hash: String
+    ) throws -> URL {
         guard APIClient.isTrustedUploadURL(uploadURL),
-              var components = URLComponents(url: uploadURL, resolvingAgainstBaseURL: false)
+              let host = uploadURL.host?.lowercased(),
+              let sourceComponents = URLComponents(url: uploadURL, resolvingAgainstBaseURL: false)
         else { throw APIError.invalidURL }
-        let preservedQuery = (components.queryItems ?? []).filter {
-            $0.name != "chunk_number" && $0.name != "chunk_size"
+        var components = URLComponents()
+        components.scheme = "https"
+        components.host = host
+        components.port = uploadURL.port
+        components.path = "/3/drive/\(driveId)/upload/session/\(token)/chunk"
+        let preservedQuery = (sourceComponents.queryItems ?? []).filter {
+            $0.name != "chunk_number" && $0.name != "chunk_size" && $0.name != "chunk_hash"
         }
         components.queryItems = preservedQuery + [
             URLQueryItem(name: "chunk_number", value: String(number)),
             URLQueryItem(name: "chunk_size", value: String(size)),
+            URLQueryItem(name: "chunk_hash", value: "sha256:\(hash)"),
         ]
         guard let url = components.url else { throw APIError.invalidURL }
         return url
