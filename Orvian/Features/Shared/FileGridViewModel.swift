@@ -121,6 +121,36 @@ final class FileGridViewModel {
         }
     }
 
+    /// Corbeille une sélection entière ; les échecs partiels sont signalés
+    /// dans `errorMessage` sans bloquer les autres suppressions.
+    @discardableResult
+    func trash(ids: Set<Int>) async -> Set<Int> {
+        errorMessage = nil
+        var trashedIDs: Set<Int> = []
+        var firstError: Error?
+
+        for id in ids {
+            do {
+                try await service.trash(driveId: driveId, fileId: id)
+                trashedIDs.insert(id)
+            } catch {
+                if firstError == nil { firstError = error }
+            }
+        }
+
+        items.removeAll { trashedIDs.contains($0.id) }
+
+        if let firstError {
+            let failedCount = ids.count - trashedIDs.count
+            let detail = (firstError as? APIError)?.errorDescription ?? firstError.localizedDescription
+            errorMessage = failedCount == 1
+                ? "Un élément n’a pas pu être supprimé : \(detail)"
+                : "\(failedCount) éléments n’ont pas pu être supprimés : \(detail)"
+        }
+
+        return trashedIDs
+    }
+
     func rename(_ file: DriveFile, name: String) async {
         guard let index = items.firstIndex(where: { $0.id == file.id }) else { return }
         let oldName = items[index].name

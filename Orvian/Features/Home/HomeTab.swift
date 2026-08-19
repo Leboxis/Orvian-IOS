@@ -147,7 +147,10 @@ struct DirectoryView: View {
     @State private var selectionMode = false
     @State private var selectedIDs: Set<Int> = []
     @State private var pendingMove: MoveRequest?
+    @State private var pendingTags: TagRequest?
     @State private var moveBusy = false
+    @State private var deleteBusy = false
+    @State private var showDeleteConfirm = false
     @AppStorage("alwaysShowSearch") private var alwaysShowSearch = false
     @FocusState private var searchFocused: Bool
 
@@ -158,6 +161,12 @@ struct DirectoryView: View {
     /// La feuille peut ainsi naviguer sans dépendre d'un état de sélection qui
     /// changerait pendant sa présentation.
     private struct MoveRequest: Identifiable {
+        let id = UUID()
+        let files: [DriveFile]
+    }
+
+    /// Fige la sélection au moment où la feuille de tags s'ouvre.
+    private struct TagRequest: Identifiable {
         let id = UUID()
         let files: [DriveFile]
     }
@@ -249,12 +258,28 @@ struct DirectoryView: View {
                     .accessibilityLabel(allSelected ? "Tout désélectionner" : "Tout sélectionner")
 
                     Button {
+                        prepareTagSheet()
+                    } label: {
+                        Image(systemName: "tag")
+                    }
+                    .disabled(selectedIDs.isEmpty)
+                    .accessibilityLabel("Mettre des tags")
+
+                    Button {
                         prepareSelectedMove()
                     } label: {
-                        Text("Déplacer")
-                            .fontWeight(.semibold)
+                        Image(systemName: "folder")
                     }
                     .disabled(selectedIDs.isEmpty || moveBusy)
+                    .accessibilityLabel("Déplacer")
+
+                    Button(role: .destructive) {
+                        showDeleteConfirm = true
+                    } label: {
+                        Image(systemName: "trash")
+                    }
+                    .disabled(selectedIDs.isEmpty || deleteBusy)
+                    .accessibilityLabel("Supprimer")
                 }
             } else {
                 ToolbarItem(placement: .topBarLeading) {
@@ -281,7 +306,7 @@ struct DirectoryView: View {
             }
         }
         .overlay(alignment: .bottom) {
-            if addBusy || moveBusy {
+            if addBusy || moveBusy || deleteBusy {
                 busyIndicator
             }
         }
@@ -306,6 +331,27 @@ struct DirectoryView: View {
                     Task { await move(request.files, to: destination) }
                 }
             )
+        }
+        .sheet(item: $pendingTags) { request in
+            ApplyTagsSheet(
+                driveId: driveId,
+                files: request.files,
+                onDone: {
+                    Task { await refreshAfterTags() }
+                }
+            )
+        }
+        .confirmationDialog(
+            "Supprimer \(selectedIDs.count) élément\(selectedIDs.count > 1 ? "s" : "") ?",
+            isPresented: $showDeleteConfirm,
+            titleVisibility: .visible
+        ) {
+            Button("Déplacer vers la corbeille", role: .destructive) {
+                Task { await deleteSelected() }
+            }
+            Button("Annuler", role: .cancel) {}
+        } message: {
+            Text("Les éléments sélectionnés seront déplacés dans la corbeille.")
         }
         .onChange(of: searchText) { _, _ in
             if selectionMode { endSelection() }
@@ -437,6 +483,46 @@ struct DirectoryView: View {
         prepareMove(files: files)
     }
 
+    private func prepareTagSheet() {
+        let files = activeViewModel.items.filter { selectedIDs.contains($0.id) }
+        guard !files.isEmpty else { return }
+        pendingTags = TagRequest(files: files)
+    }
+
+    private func deleteSelected() async {
+        let ids = selectedIDs
+        guard !ids.isEmpty else { return }
+
+        deleteBusy = true
+        busyMessage = "Suppression de \(ids.count) élément\(ids.count > 1 ? "s" : "")…"
+        let deletedIDs = await activeViewModel.trash(ids: ids)
+
+        // La recherche possède sa propre vue-modèle ; rafraîchir également le
+        // dossier courant évite d'y conserver une carte devenue obsolète.
+        if isSearching {
+            await viewModel.reload()
+        }
+
+        selectedIDs.subtract(deletedIDs)
+        deleteBusy = false
+
+        if deletedIDs.count < ids.count {
+            addError = activeViewModel.errorMessage ?? "Certains éléments n’ont pas pu être supprimés."
+        }
+        if selectedIDs.isEmpty {
+            selectionMode = false
+        }
+    }
+
+    /// Après application des tags : recharge les cartes pour afficher les
+    /// pastilles de couleur, dans le dossier courant et dans la recherche.
+    private func refreshAfterTags() async {
+        await viewModel.reload()
+        if isSearching {
+            await searchViewModel?.reload()
+        }
+    }
+
     /// Le dossier parent commun est désactivé : y déplacer tous les éléments
     /// ne produirait aucun changement.
     private func unavailableDestinationIDs(for files: [DriveFile]) -> Set<Int> {
@@ -564,5 +650,133 @@ struct DirectoryView: View {
                 Capsule().strokeBorder(.quaternary.opacity(0.5), lineWidth: 0.5)
             }
             .accessibilityLabel("\(count) élément\(count > 1 ? "s" : "") dans ce dossier")
+    }
+}
+
+// MARK: - Application de tags sur une sélection
+
+/// Feuille « Mettre des tags » : coche les catégories à appliquer à tous les
+/// fichiers sélectionnés, puis applique en une passe (échecs partiels signalés).
+private struct ApplyTagsSheet: View {
+    let driveId: Int
+    let files: [DriveFile]
+    let onDone: () async -> Void
+
+    @Environment(\.dismiss) private var dismiss
+    @State private var categories: [Category] = []
+    @State private var selectedCategoryIDs: Set<Int> = []
+    @State private var isLoading = true
+    @State private var busy = false
+    @State private var errorMessage: String?
+
+    private let service = KDriveService()
+
+    var body: some View {
+        NavigationStack {
+            Group {
+                if isLoading {
+                    ProgressView("Chargement des tags…")
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else if categories.isEmpty {
+                    ContentUnavailableView {
+                        Label("Aucun tag", systemImage: "tag")
+                    } description: {
+                        Text("Créez des tags dans l'onglet Tag pour les appliquer ici.")
+                    }
+                } else {
+                    List {
+                        Section("À appliquer aux \(files.count) élément\(files.count > 1 ? "s" : "") sélectionné\(files.count > 1 ? "s" : "")") {
+                            ForEach(categories) { category in
+                                Button {
+                                    toggle(category)
+                                } label: {
+                                    HStack {
+                                        Circle()
+                                            .fill(Color(hex: category.color) ?? .gray)
+                                            .frame(width: 12, height: 12)
+                                        Text(category.name)
+                                            .foregroundStyle(.primary)
+                                        Spacer()
+                                        if selectedCategoryIDs.contains(category.id) {
+                                            Image(systemName: "checkmark")
+                                                .foregroundStyle(Color.accentColor)
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        if let errorMessage {
+                            Section {
+                                Text(errorMessage)
+                                    .font(.footnote)
+                                    .foregroundStyle(.red)
+                            }
+                        }
+                    }
+                }
+            }
+            .navigationTitle("Mettre des tags")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Annuler") { dismiss() }
+                        .disabled(busy)
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    if busy {
+                        ProgressView()
+                    } else {
+                        Button("Appliquer") {
+                            Task { await apply() }
+                        }
+                        .disabled(selectedCategoryIDs.isEmpty)
+                    }
+                }
+            }
+        }
+        .task { await load() }
+    }
+
+    private func toggle(_ category: Category) {
+        if selectedCategoryIDs.contains(category.id) {
+            selectedCategoryIDs.remove(category.id)
+        } else {
+            selectedCategoryIDs.insert(category.id)
+        }
+    }
+
+    private func load() async {
+        isLoading = true
+        defer { isLoading = false }
+        if let cats = try? await service.categories(driveId: driveId) {
+            categories = cats
+        }
+    }
+
+    private func apply() async {
+        busy = true
+        defer { busy = false }
+        let categoryIDs = selectedCategoryIDs
+        var firstError: Error?
+        var appliedCount = 0
+
+        for file in files {
+            for categoryId in categoryIDs {
+                do {
+                    try await service.addCategory(driveId: driveId, fileId: file.id, categoryId: categoryId)
+                    TagUsageStore.markUsed(driveId: driveId, categoryId: categoryId)
+                    appliedCount += 1
+                } catch {
+                    if firstError == nil { firstError = error }
+                }
+            }
+        }
+
+        if let firstError {
+            errorMessage = "\(appliedCount) tag\(appliedCount > 1 ? "s" : "") appliqué\(appliedCount > 1 ? "s" : "") sur \(files.count) élément\(files.count > 1 ? "s" : "") — \(((firstError as? APIError)?.errorDescription) ?? firstError.localizedDescription)"
+        } else {
+            dismiss()
+            await onDone()
+        }
     }
 }
