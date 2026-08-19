@@ -504,7 +504,7 @@ struct DirectoryView: View {
             isBusy: $addBusy,
             busyMessage: $busyMessage,
             errorMessage: $addError,
-            onDone: { Task { await activeViewModel.reload() } }
+            onDone: { Task { await refreshAfterImport() } }
         )
         .frame(width: 52, height: 52)
         .background(.ultraThinMaterial, in: Circle())
@@ -515,6 +515,15 @@ struct DirectoryView: View {
         .padding(.trailing, DS.gridMargin + 4)
         .padding(.bottom, 104)
         .accessibilityLabel("Ajouter ou importer")
+    }
+
+    /// Une seule synchronisation suffit : les requêtes API ignorent désormais
+    /// le cache HTTP local et lisent donc l'état courant du dossier.
+    private func refreshAfterImport() async {
+        await viewModel.reload()
+        if isSearching {
+            await searchViewModel?.reload()
+        }
     }
 
     /// Bulle compacte indiquant le chemin du dossier.

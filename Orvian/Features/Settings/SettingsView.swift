@@ -54,13 +54,13 @@ struct SettingsView: View {
         }
         .onChange(of: prefetchVideoURLs) { _, enabled in
             guard !enabled else { return }
-            Task { await MediaURLCache.shared.cancelPrefetch() }
+            Task { await VideoAssetCache.shared.cancelPrefetch() }
         }
         .onChange(of: prefetchOnWiFiOnly) { _, enabled in
             guard enabled else { return }
             Task {
                 await ThumbnailProvider.shared.cancelPrefetch()
-                await MediaURLCache.shared.cancelPrefetch()
+                await VideoAssetCache.shared.cancelPrefetch()
             }
         }
         .onChange(of: thumbnailCacheLimitMB) { _, _ in

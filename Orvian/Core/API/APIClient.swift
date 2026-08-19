@@ -87,6 +87,12 @@ actor APIClient {
         }
     }
 
+    /// Requête authentifiée prête à être confiée à un autre client système,
+    /// par exemple AVFoundation pour la lecture progressive d'une vidéo.
+    func authenticatedRequest(_ endpoint: Endpoint) throws -> URLRequest {
+        try request(for: endpoint, method: "GET")
+    }
+
     // MARK: - Internes
 
     private func send(
@@ -95,6 +101,20 @@ actor APIClient {
         httpBody: Data? = nil,
         contentType: String? = nil
     ) async throws -> (Data, URLResponse) {
+        var request = try request(for: endpoint, method: method)
+        if let httpBody {
+            request.httpBody = httpBody
+            request.setValue(contentType, forHTTPHeaderField: "Content-Type")
+        }
+
+        do {
+            return try await session.data(for: request)
+        } catch {
+            throw APIError.network(error)
+        }
+    }
+
+    private func request(for endpoint: Endpoint, method: String) throws -> URLRequest {
         guard var components = URLComponents(url: Self.baseURL, resolvingAgainstBaseURL: false) else {
             throw APIError.invalidURL
         }
@@ -107,22 +127,16 @@ actor APIClient {
         var request = URLRequest(url: url)
         request.httpMethod = method
         request.timeoutInterval = 30
+        // Les ressources kDrive sont dynamiques. Une actualisation doit lire
+        // l'état courant du serveur, pas une ancienne liste conservée par iOS.
+        request.cachePolicy = .reloadIgnoringLocalCacheData
         request.setValue("application/json", forHTTPHeaderField: "Accept")
-        if let httpBody {
-            request.httpBody = httpBody
-            request.setValue(contentType, forHTTPHeaderField: "Content-Type")
-        }
         if let token = TokenStore.current() {
             request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         } else if requiresAuth(endpoint) {
             throw APIError.notSignedIn
         }
-
-        do {
-            return try await session.data(for: request)
-        } catch {
-            throw APIError.network(error)
-        }
+        return request
     }
 
     /// `/1/account` est appelé pendant la validation du token : accepter

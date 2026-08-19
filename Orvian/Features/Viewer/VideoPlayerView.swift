@@ -38,7 +38,6 @@ struct VideoPlayerView: View {
     @State private var itemStatusObserver: NSKeyValueObservation?
     @State private var isDisappeared = false
     @State private var isExternalPlaybackActive = false
-    @State private var didRetryPlaybackURL = false
 
     // Masquage automatique des contrôles après 2.5 secondes
     @State private var showControls = true
@@ -75,7 +74,6 @@ struct VideoPlayerView: View {
         }
         .onAppear {
             isDisappeared = false
-            didRetryPlaybackURL = false
             showControls = true
             scheduleControlsAutoHide(delay: 2.5)
             setupAudioSession()
@@ -434,21 +432,17 @@ struct VideoPlayerView: View {
         async let posterTask: UIImage? = ThumbnailProvider.shared.thumbnail(driveId: driveId, fileId: file.id, pixels: 400)
         async let categoriesTask: [Category]? = try? service.categories(driveId: driveId)
 
-        // Seule l'URL est nécessaire au démarrage. Le poster et les tags ne
-        // doivent jamais retarder la création du player.
-        let cachedURL = await MediaURLCache.shared.url(driveId: driveId, fileId: file.id)
-        let url: URL?
-        if let cachedURL {
-            url = cachedURL
-        } else {
-            url = await MediaURLCache.shared.freshURL(driveId: driveId, fileId: file.id)
-        }
-        guard let url, !isDisappeared, !Task.isCancelled else {
+        // La ressource authentifiée peut déjà avoir été préparée juste avant
+        // le tap. Le poster et les tags ne retardent jamais le lecteur.
+        guard let asset = await VideoAssetCache.shared.asset(driveId: driveId, fileId: file.id),
+              !isDisappeared,
+              !Task.isCancelled
+        else {
             errorMessage = "Impossible de préparer cette vidéo. Vérifiez votre connexion puis réessayez."
             return
         }
 
-        startPlayback(url: url)
+        startPlayback(asset: asset)
 
         let (loadedPoster, loadedCategories) = await (posterTask, categoriesTask)
         guard !isDisappeared, !Task.isCancelled else { return }
@@ -460,8 +454,8 @@ struct VideoPlayerView: View {
         }
     }
 
-    private func startPlayback(url: URL) {
-        let newPlayer = AVPlayer(url: url)
+    private func startPlayback(asset: AVURLAsset) {
+        let newPlayer = AVPlayer(playerItem: AVPlayerItem(asset: asset))
         newPlayer.automaticallyWaitsToMinimizeStalling = true
         newPlayer.isMuted = isMuted
         newPlayer.defaultRate = playbackRate
@@ -480,30 +474,10 @@ struct VideoPlayerView: View {
         itemStatusObserver = newPlayer.currentItem?.observe(\.status, options: [.new]) { item, _ in
             guard item.status == .failed else { return }
             Task { @MainActor in
-                await self.recoverPlayback(after: item.error)
+                self.isPlaying = false
+                self.errorMessage = "Lecture impossible : \(item.error?.localizedDescription ?? "la vidéo n’est pas disponible")"
             }
         }
-    }
-
-    /// Une URL peut expirer entre le préchargement et l'ouverture du lecteur.
-    /// Une seule nouvelle URL est tentée avant d'afficher une erreur exploitable.
-    private func recoverPlayback(after error: Error?) async {
-        guard !isDisappeared else { return }
-        guard !didRetryPlaybackURL else {
-            isPlaying = false
-            errorMessage = "Lecture impossible : \(error?.localizedDescription ?? "la vidéo n’est pas disponible")"
-            return
-        }
-
-        didRetryPlaybackURL = true
-        guard let freshURL = await MediaURLCache.shared.freshURL(driveId: driveId, fileId: file.id), !isDisappeared else {
-            isPlaying = false
-            errorMessage = "Impossible d’obtenir une nouvelle URL de lecture. Réessayez dans un instant."
-            return
-        }
-
-        teardown()
-        startPlayback(url: freshURL)
     }
 
     private func addObservers(to player: AVPlayer) {

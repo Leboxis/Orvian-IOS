@@ -121,6 +121,9 @@ struct FileGridView: View {
                 .padding(.top, 6 + contentTopInset)
                 .padding(.bottom, 110) // barre flottante
             }
+            // Même un dossier trop court pour défiler peut être tiré vers le
+            // bas : ce geste révèle la recherche sur l'Accueil.
+            .scrollBounceBehavior(.always, axes: .vertical)
             .onChange(of: scrollToTopRequest) { oldValue, newValue in
                 guard oldValue != newValue else { return }
                 withAnimation(.snappy(duration: 0.3)) {
@@ -355,7 +358,7 @@ struct FileGridView: View {
                 )
             }
             if prefetchVideoURLs, !videoIds.isEmpty {
-                await MediaURLCache.shared.prefetch(driveId: driveId, fileIds: videoIds)
+                await VideoAssetCache.shared.prefetch(driveId: driveId, fileIds: videoIds)
             }
         }
     }
