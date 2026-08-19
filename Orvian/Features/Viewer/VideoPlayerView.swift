@@ -437,7 +437,12 @@ struct VideoPlayerView: View {
         // Seule l'URL est nécessaire au démarrage. Le poster et les tags ne
         // doivent jamais retarder la création du player.
         let cachedURL = await MediaURLCache.shared.url(driveId: driveId, fileId: file.id)
-        let url = cachedURL ?? await MediaURLCache.shared.freshURL(driveId: driveId, fileId: file.id)
+        let url: URL?
+        if let cachedURL {
+            url = cachedURL
+        } else {
+            url = await MediaURLCache.shared.freshURL(driveId: driveId, fileId: file.id)
+        }
         guard let url, !isDisappeared, !Task.isCancelled else {
             errorMessage = "Impossible de préparer cette vidéo. Vérifiez votre connexion puis réessayez."
             return
