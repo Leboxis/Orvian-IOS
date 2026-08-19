@@ -64,7 +64,7 @@ Le dépôt ne contient **pas** de `.xcodeproj` : il est généré par [XcodeGen]
 
 1. Poussez ce dépôt sur GitHub
 2. Chaque push sur `main` produit un artefact **IPA non signé** (onglet Actions du repo)
-3. Un tag (`git tag v0.1.0 && git push --tags`) crée une **Release** avec l'IPA
+3. Chaque push sur `main` crée aussi automatiquement la prochaine version, sa **Release** et met à jour la source LiveContainer
 4. Téléchargez l'IPA sur l'iPhone → partagez-le vers **LiveContainer** → importez
 
 **En local (macOS)** :
@@ -78,7 +78,7 @@ open Orvian.xcodeproj   # puis Cmd+R avec son certificat de développement
 ### 3. Installation directe via la source LiveContainer
 
 LiveContainer sait lire les sources de type AltStore (`repo.json`) : à chaque
-version, la CI met automatiquement le JSON à jour.
+push sur `main`, la CI publie la prochaine version et met automatiquement le JSON à jour.
 
 1. Dans LiveContainer : onglet **Sources → Add Source**
 2. Collez : `https://raw.githubusercontent.com/Leboxis/Orvian-IOS/refs/heads/main/repo.json`

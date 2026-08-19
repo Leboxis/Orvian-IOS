@@ -60,6 +60,14 @@ actor MediaURLCache {
         schedulePrefetchWorker()
     }
 
+    /// Annule les résolutions préparatoires qui n'ont pas encore démarré.
+    /// Les URL déjà obtenues restent disponibles dans le cache de session.
+    func cancelPrefetch() {
+        pendingPrefetchKeys.removeAll()
+        prefetchWorker?.cancel()
+        prefetchWorker = nil
+    }
+
     private func schedulePrefetchWorker() {
         guard prefetchWorker == nil, !pendingPrefetchKeys.isEmpty else { return }
         prefetchWorker = Task { [weak self] in

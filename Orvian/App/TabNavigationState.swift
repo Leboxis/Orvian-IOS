@@ -8,24 +8,28 @@ import Observation
 final class TabNavigationState {
     var homePath: [DriveFile] = []
     var favoritesPath: [DriveFile] = []
+    /// Incrémente à chaque nouvel appui sur Favoris afin de demander à la
+    /// grille racine de revenir au tout début, même sans navigation ouverte.
+    var favoritesScrollToTopRequest = 0
     var tagsPath = NavigationPath()
     var profilePath = NavigationPath()
     var settingsPath = NavigationPath()
 
-    func reset(tab: AppTab) {
-        withAnimation(.snappy(duration: 0.25)) {
-            switch tab {
-            case .home:
-                homePath = []
-            case .favorites:
-                favoritesPath = []
-            case .tag:
-                tagsPath = NavigationPath()
-            case .profile:
-                profilePath = NavigationPath()
-            case .settings:
-                settingsPath = NavigationPath()
+    func reset(tab: AppTab, scrollFavoritesToTop: Bool = true) {
+        switch tab {
+        case .home:
+            homePath = []
+        case .favorites:
+            favoritesPath = []
+            if scrollFavoritesToTop {
+                favoritesScrollToTopRequest += 1
             }
+        case .tag:
+            tagsPath = NavigationPath()
+        case .profile:
+            profilePath = NavigationPath()
+        case .settings:
+            settingsPath = NavigationPath()
         }
     }
 }

@@ -2,12 +2,10 @@ import UIKit
 
 /// Cache disque des miniatures (`Library/Caches`), thread-safe avec éviction FIFO (Oldest-Written-First) en arrière-plan.
 ///
-/// L'éviction est déclenchée sur un seuil de taille haute (highWaterMark = 250 Mo)
-/// et purge les plus anciens fichiers écrits jusqu'au seuil bas (lowWaterMark = 200 Mo).
+/// L'éviction est déclenchée sur une limite choisie dans Réglages et purge
+/// les plus anciens fichiers jusqu'à 80 % de cette limite.
 final class DiskImageCache: @unchecked Sendable {
     private let root: URL
-    private let highWaterMark = 250 * 1024 * 1024 // 250 Mo
-    private let lowWaterMark = 200 * 1024 * 1024  // 200 Mo (hystérésis de 50 Mo)
     private let markerSuffix = ".none"
 
     private let lock = NSLock()
@@ -16,6 +14,16 @@ final class DiskImageCache: @unchecked Sendable {
     private var isEvicting = false
     private var writeCountSinceScan = 0
     private let scanIntervalWrites = 150
+
+    private var highWaterMark: Int {
+        let limitMB = UserDefaults.standard.object(forKey: "thumbnailCacheLimitMB") as? Int ?? 250
+        guard limitMB > 0 else { return .max }
+        return limitMB * 1024 * 1024
+    }
+
+    private var lowWaterMark: Int {
+        Int(Double(highWaterMark) * 0.8)
+    }
 
     init(directory: URL? = nil) {
         let base = directory ?? FileManager.default
@@ -94,6 +102,27 @@ final class DiskImageCache: @unchecked Sendable {
         estimatedDiskSize = size
         isSizeInitialized = true
         return size
+    }
+
+    /// Applique immédiatement une nouvelle limite, notamment après sa
+    /// modification dans les réglages.
+    func enforceSizeLimit() {
+        var shouldEvict = false
+
+        lock.lock()
+        estimatedDiskSize = computeDiskSize()
+        isSizeInitialized = true
+        if estimatedDiskSize > highWaterMark, !isEvicting {
+            isEvicting = true
+            shouldEvict = true
+        }
+        lock.unlock()
+
+        if shouldEvict {
+            Task.detached(priority: .utility) { [weak self] in
+                self?.evictOldestFiles()
+            }
+        }
     }
 
     // MARK: - Gestion de la taille et éviction

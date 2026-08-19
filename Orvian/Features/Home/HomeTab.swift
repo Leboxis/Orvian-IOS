@@ -146,13 +146,21 @@ struct DirectoryView: View {
     @State private var filters = FileFilters()
     @State private var selectionMode = false
     @State private var selectedIDs: Set<Int> = []
-    @State private var pendingMoveFiles: [DriveFile] = []
-    @State private var showMovePicker = false
+    @State private var pendingMove: MoveRequest?
     @State private var moveBusy = false
+    @AppStorage("alwaysShowSearch") private var alwaysShowSearch = false
     @FocusState private var searchFocused: Bool
 
     private let router: ViewerRouter
     private let onOpenFolder: (DriveFile) -> Void
+
+    /// Fige la sélection au moment où le sélecteur de destination s'ouvre.
+    /// La feuille peut ainsi naviguer sans dépendre d'un état de sélection qui
+    /// changerait pendant sa présentation.
+    private struct MoveRequest: Identifiable {
+        let id = UUID()
+        let files: [DriveFile]
+    }
 
     init(
         directory: DriveFile,
@@ -198,17 +206,20 @@ struct DirectoryView: View {
             onToggleSelection: { toggleSelection($0) },
             onMove: { prepareMove(files: [$0]) }
         )
-        .navigationTitle(selectionMode ? "" : (crumbs.last ?? directory.name))
+        .navigationTitle("")
         .navigationBarTitleDisplayMode(.inline)
         .safeAreaInset(edge: .top, spacing: 0) {
             if !selectionMode {
-                VStack(spacing: 6) {
+                VStack(spacing: 8) {
                     breadcrumb
                         .frame(maxWidth: .infinity)
 
                     if showsSearchBar && searchBarVisible {
-                        searchBar
-                            .transition(.move(edge: .top).combined(with: .opacity))
+                        VStack(spacing: 7) {
+                            searchBar
+                            itemCountLabel
+                        }
+                        .transition(.move(edge: .top).combined(with: .opacity))
                     }
                 }
                 .padding(.top, 2)
@@ -249,24 +260,22 @@ struct DirectoryView: View {
                     FilterMenu(filters: $filters)
                 }
 
+                ToolbarItem(placement: .principal) {
+                    Text(crumbs.last ?? directory.name)
+                        .font(.headline)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                }
+
                 ToolbarItemGroup(placement: .topBarTrailing) {
+                    randomFileButton
+
                     Button {
                         startSelection()
                     } label: {
                         Label("Sélectionner", systemImage: "checkmark.circle")
                     }
                     .disabled(activeViewModel.items.isEmpty || moveBusy || addBusy)
-
-                    randomFileButton
-
-                    AddMenuButton(
-                        directoryId: directory.id,
-                        driveId: driveId,
-                        isBusy: $addBusy,
-                        busyMessage: $busyMessage,
-                        errorMessage: $addError,
-                        onDone: { Task { await activeViewModel.reload() } }
-                    )
                 }
             }
         }
@@ -275,20 +284,25 @@ struct DirectoryView: View {
                 busyIndicator
             }
         }
+        .overlay(alignment: .bottomTrailing) {
+            if !selectionMode {
+                floatingAddButton
+            }
+        }
         .alert("Impossible", isPresented: addErrorBinding) {
             Button("OK", role: .cancel) {}
         } message: {
             Text(addError ?? "")
         }
-        .sheet(isPresented: $showMovePicker) {
+        .sheet(item: $pendingMove) { request in
             MoveDestinationPicker(
                 driveId: driveId,
-                itemCount: pendingMoveFiles.count,
-                excludedDirectoryIDs: Set(pendingMoveFiles.filter(\.isDirectory).map(\.id)),
-                unavailableDestinationIDs: unavailableDestinationIDs,
+                itemCount: request.files.count,
+                excludedDirectoryIDs: Set(request.files.filter(\.isDirectory).map(\.id)),
+                unavailableDestinationIDs: unavailableDestinationIDs(for: request.files),
                 onSelect: { destination in
-                    showMovePicker = false
-                    Task { await movePendingFiles(to: destination) }
+                    pendingMove = nil
+                    Task { await move(request.files, to: destination) }
                 }
             )
         }
@@ -318,7 +332,7 @@ struct DirectoryView: View {
 
     /// La barre apparaît lors d'un défilé vers le haut ou lorsque la recherche est active.
     private var searchBarVisible: Bool {
-        searchFocused || !searchText.isEmpty || scrolledPastTop
+        alwaysShowSearch || searchFocused || !searchText.isEmpty || scrolledPastTop
     }
 
     /// Pastille de recherche centrée et compacte.
@@ -414,8 +428,7 @@ struct DirectoryView: View {
 
     private func prepareMove(files: [DriveFile]) {
         guard !files.isEmpty else { return }
-        pendingMoveFiles = files
-        showMovePicker = true
+        pendingMove = MoveRequest(files: files)
     }
 
     private func prepareSelectedMove() {
@@ -425,14 +438,13 @@ struct DirectoryView: View {
 
     /// Le dossier parent commun est désactivé : y déplacer tous les éléments
     /// ne produirait aucun changement.
-    private var unavailableDestinationIDs: Set<Int> {
-        guard pendingMoveFiles.allSatisfy({ $0.parentId != nil }) else { return [] }
-        let parentIDs = Set(pendingMoveFiles.compactMap(\.parentId))
+    private func unavailableDestinationIDs(for files: [DriveFile]) -> Set<Int> {
+        guard files.allSatisfy({ $0.parentId != nil }) else { return [] }
+        let parentIDs = Set(files.compactMap(\.parentId))
         return parentIDs.count == 1 ? parentIDs : []
     }
 
-    private func movePendingFiles(to destination: DriveFile) async {
-        let files = pendingMoveFiles
+    private func move(_ files: [DriveFile], to destination: DriveFile) async {
         let ids = Set(files.map(\.id))
         guard !ids.isEmpty else { return }
 
@@ -448,7 +460,6 @@ struct DirectoryView: View {
         }
 
         selectedIDs.subtract(movedIDs)
-        pendingMoveFiles.removeAll()
         moveBusy = false
 
         if movedIDs.count < ids.count {
@@ -482,7 +493,30 @@ struct DirectoryView: View {
         .transition(.opacity)
     }
 
-    /// Bulle compacte indiquant le chemin et le nombre d'éléments, rapprochée du titre.
+    /// Action d'import séparée de la barre d'outils pour préserver la place
+    /// du titre du dossier. La marge basse l'aligne au-dessus de la barre
+    /// d'onglets flottante sans recouvrir la dernière rangée de cartes.
+    private var floatingAddButton: some View {
+        AddMenuButton(
+            directoryId: directory.id,
+            driveId: driveId,
+            isBusy: $addBusy,
+            busyMessage: $busyMessage,
+            errorMessage: $addError,
+            onDone: { Task { await activeViewModel.reload() } }
+        )
+        .frame(width: 52, height: 52)
+        .background(.ultraThinMaterial, in: Circle())
+        .overlay {
+            Circle().strokeBorder(.quaternary, lineWidth: 0.5)
+        }
+        .shadow(color: .black.opacity(0.15), radius: 10, x: 0, y: 4)
+        .padding(.trailing, DS.gridMargin + 4)
+        .padding(.bottom, 104)
+        .accessibilityLabel("Ajouter ou importer")
+    }
+
+    /// Bulle compacte indiquant le chemin du dossier.
     private var breadcrumb: some View {
         HStack(spacing: 5) {
             Image(systemName: "folder.fill")
@@ -490,14 +524,6 @@ struct DirectoryView: View {
             Text(crumbs.joined(separator: "  ›  "))
                 .lineLimit(1)
                 .truncationMode(.head)
-
-            Text("•")
-                .font(.system(size: 8))
-                .foregroundStyle(.tertiary)
-
-            let count = activeViewModel.items.count
-            Text("\(count) élément\(count > 1 ? "s" : "")")
-                .lineLimit(1)
         }
         .font(.system(size: 11, weight: .medium))
         .foregroundStyle(.secondary)
@@ -508,6 +534,22 @@ struct DirectoryView: View {
             Capsule().strokeBorder(.quaternary.opacity(0.5), lineWidth: 0.5)
         }
         .shadow(color: .black.opacity(0.04), radius: 2, x: 0, y: 1)
-        .accessibilityLabel("Chemin : " + crumbs.joined(separator: ", ") + ", \(activeViewModel.items.count) éléments")
+        .accessibilityLabel("Chemin : " + crumbs.joined(separator: ", "))
+    }
+
+    /// Le nombre d'éléments est volontairement séparé du fil d'Ariane et
+    /// placé entre la recherche et le début de la grille.
+    private var itemCountLabel: some View {
+        let count = activeViewModel.items.count
+        return Text("\(count) élément\(count > 1 ? "s" : "")")
+            .font(.caption.weight(.medium))
+            .foregroundStyle(.secondary)
+            .padding(.horizontal, 11)
+            .padding(.vertical, 5)
+            .background(.thinMaterial, in: Capsule())
+            .overlay {
+                Capsule().strokeBorder(.quaternary.opacity(0.5), lineWidth: 0.5)
+            }
+            .accessibilityLabel("\(count) élément\(count > 1 ? "s" : "") dans ce dossier")
     }
 }

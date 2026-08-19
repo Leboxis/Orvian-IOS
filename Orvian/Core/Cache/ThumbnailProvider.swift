@@ -152,6 +152,14 @@ actor ThumbnailProvider {
         schedulePrefetchWorker(isTrashed: isTrashed)
     }
 
+    /// Annule les téléchargements anticipés en attente. Les miniatures déjà
+    /// présentes dans les caches mémoire ou disque ne sont pas supprimées.
+    func cancelPrefetch() {
+        pendingPrefetchKeys.removeAll()
+        prefetchTask?.cancel()
+        prefetchTask = nil
+    }
+
     private func schedulePrefetchWorker(isTrashed: Bool) {
         guard prefetchTask == nil else { return }
         prefetchTask = Task { [weak self] in
@@ -219,6 +227,10 @@ actor ThumbnailProvider {
 
     func diskCacheSize() -> Int {
         disk.totalSize()
+    }
+
+    func enforceDiskLimit() {
+        disk.enforceSizeLimit()
     }
 }
 

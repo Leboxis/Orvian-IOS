@@ -14,6 +14,8 @@ struct MainTabView: View {
     @State private var router: ViewerRouter
     @State private var navState = TabNavigationState()
     @State private var showUploadSheet = false
+    @AppStorage("favoritesReselectScrollToTop") private var favoritesReselectScrollToTop = true
+    @AppStorage("reduceMotion") private var reduceMotion = false
 
     private let uploadManager = UploadManager.shared
 
@@ -39,7 +41,10 @@ struct MainTabView: View {
                 }
 
                 FloatingTabBar(selection: $tab, onReselect: { targetTab in
-                    navState.reset(tab: targetTab)
+                    navState.reset(
+                        tab: targetTab,
+                        scrollFavoritesToTop: favoritesReselectScrollToTop
+                    )
                 })
             }
             .padding(.bottom, 4)
@@ -47,6 +52,11 @@ struct MainTabView: View {
         }
         .ignoresSafeArea(.keyboard, edges: .bottom)
         .tint(.accentColor)
+        .transaction { transaction in
+            if reduceMotion {
+                transaction.disablesAnimations = true
+            }
+        }
         .onChange(of: tab, initial: true) { _, newTab in
             if !loadedTabs.contains(newTab) {
                 loadedTabs.insert(newTab)
@@ -76,7 +86,12 @@ struct MainTabView: View {
                 HomeTab(driveId: drive.id, router: router, path: $navState.homePath)
             }
             tabPane(.favorites) {
-                FavoritesView(driveId: drive.id, router: router, path: $navState.favoritesPath)
+                FavoritesView(
+                    driveId: drive.id,
+                    router: router,
+                    path: $navState.favoritesPath,
+                    scrollToTopRequest: navState.favoritesScrollToTopRequest
+                )
             }
             tabPane(.profile) {
                 ProfileView(session: session, router: router, path: $navState.profilePath, isSelected: tab == .profile)

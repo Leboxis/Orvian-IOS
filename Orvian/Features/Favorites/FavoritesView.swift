@@ -7,10 +7,17 @@ struct FavoritesView: View {
     @State private var filters = FileFilters()
     private let router: ViewerRouter
     @Binding var path: [DriveFile]
+    let scrollToTopRequest: Int
 
-    init(driveId: Int, router: ViewerRouter, path: Binding<[DriveFile]>) {
+    init(
+        driveId: Int,
+        router: ViewerRouter,
+        path: Binding<[DriveFile]>,
+        scrollToTopRequest: Int = 0
+    ) {
         self.router = router
         self._path = path
+        self.scrollToTopRequest = scrollToTopRequest
         _viewModel = State(initialValue: FileGridViewModel(source: .favorites, driveId: driveId))
     }
 
@@ -24,7 +31,8 @@ struct FavoritesView: View {
                 onOpenFile: { file, siblings in
                     router.open(file, siblings: siblings)
                 },
-                filters: filters
+                filters: filters,
+                scrollToTopRequest: scrollToTopRequest
             )
             .navigationTitle("Favoris")
             .navigationBarTitleDisplayMode(.large)

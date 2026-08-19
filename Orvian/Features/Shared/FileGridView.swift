@@ -41,7 +41,15 @@ struct FileGridView: View {
     /// Demande de déplacement individuel depuis une carte.
     var onMove: ((DriveFile) -> Void)?
 
+    /// Jeton incrémenté par l'écran parent pour ramener la grille au début.
+    /// Il ne modifie ni les filtres ni les données déjà chargées.
+    var scrollToTopRequest = 0
+
     private let mediaMetadata = MediaMetadataStore.shared
+    @AppStorage("prefetchThumbnails") private var prefetchThumbnails = true
+    @AppStorage("prefetchVideoURLs") private var prefetchVideoURLs = true
+    @AppStorage("prefetchOnWiFiOnly") private var prefetchOnWiFiOnly = false
+    @AppStorage("fileGridColumns") private var fileGridColumns = 3
     @State private var metadataRevision = 0
     @State private var prefetchTask: Task<Void, Never>?
 
@@ -94,13 +102,25 @@ struct FileGridView: View {
     }
 
     private var baseScroll: some View {
-        ScrollView {
-            LazyVStack(alignment: .leading, spacing: 18, pinnedViews: []) {
-                content
+        ScrollViewReader { proxy in
+            ScrollView {
+                Color.clear
+                    .frame(height: 0)
+                    .id("file-grid-top")
+
+                LazyVStack(alignment: .leading, spacing: 18, pinnedViews: []) {
+                    content
+                }
+                .padding(.horizontal, DS.gridMargin)
+                .padding(.top, 6 + contentTopInset)
+                .padding(.bottom, 110) // barre flottante
             }
-            .padding(.horizontal, DS.gridMargin)
-            .padding(.top, 6 + contentTopInset)
-            .padding(.bottom, 110) // barre flottante
+            .onChange(of: scrollToTopRequest) { oldValue, newValue in
+                guard oldValue != newValue else { return }
+                withAnimation(.snappy(duration: 0.3)) {
+                    proxy.scrollTo("file-grid-top", anchor: .top)
+                }
+            }
         }
     }
 
@@ -220,7 +240,10 @@ struct FileGridView: View {
     }
 
     private var columns: [GridItem] {
-        Array(repeating: GridItem(.flexible(), spacing: DS.gridSpacing), count: 3)
+        Array(
+            repeating: GridItem(.flexible(), spacing: DS.gridSpacing),
+            count: min(max(fileGridColumns, 2), 4)
+        )
     }
 
     @ViewBuilder
@@ -306,6 +329,10 @@ struct FileGridView: View {
         let isTrashed = viewModel.source == .trash
 
         prefetchTask?.cancel()
+        guard prefetchThumbnails || prefetchVideoURLs,
+              !prefetchOnWiFiOnly || NetworkMonitor.shared.allowsBackgroundPrefetch
+        else { return }
+
         prefetchTask = Task {
             do {
                 try await Task.sleep(for: .milliseconds(180))
@@ -314,14 +341,14 @@ struct FileGridView: View {
             }
             guard !Task.isCancelled else { return }
 
-            if !thumbnailIds.isEmpty {
+            if prefetchThumbnails, !thumbnailIds.isEmpty {
                 await ThumbnailProvider.shared.prefetch(
                     driveId: driveId,
                     fileIds: Array(thumbnailIds),
                     isTrashed: isTrashed
                 )
             }
-            if !videoIds.isEmpty {
+            if prefetchVideoURLs, !videoIds.isEmpty {
                 await MediaURLCache.shared.prefetch(driveId: driveId, fileIds: videoIds)
             }
         }

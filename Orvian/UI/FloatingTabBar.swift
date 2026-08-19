@@ -4,6 +4,8 @@ import SwiftUI
 struct FloatingTabBar: View {
     @Binding var selection: AppTab
     var onReselect: ((AppTab) -> Void)? = nil
+    @AppStorage("hapticFeedbackEnabled") private var hapticFeedbackEnabled = true
+    @AppStorage("reduceMotion") private var reduceMotion = false
 
     var body: some View {
         HStack(spacing: 4) {
@@ -11,6 +13,8 @@ struct FloatingTabBar: View {
                 TabButton(tab: tab, isSelected: selection == tab) {
                     if selection == tab {
                         onReselect?(tab)
+                    } else if reduceMotion {
+                        selection = tab
                     } else {
                         withAnimation(.snappy(duration: 0.25)) {
                             selection = tab
@@ -28,6 +32,9 @@ struct FloatingTabBar: View {
         }
         .shadow(color: .black.opacity(0.12), radius: 14, x: 0, y: 6)
         .padding(.horizontal, DS.gridMargin + 8)
+        .sensoryFeedback(.selection, trigger: selection) { oldValue, newValue in
+            hapticFeedbackEnabled && oldValue != newValue
+        }
     }
 }
 

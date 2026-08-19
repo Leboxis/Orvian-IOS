@@ -3,7 +3,6 @@ name: Build IPA
 on:
   push:
     branches: [main]
-    tags: ["v*"]
   pull_request:
     branches: [main]
   workflow_dispatch:
@@ -13,11 +12,62 @@ permissions:
 
 jobs:
   build:
+    # La mise à jour du catalogue LiveContainer est poussée par ce workflow.
+    # Elle ne doit pas déclencher une seconde publication.
+    if: github.event_name != 'push' || github.actor != 'github-actions[bot]'
     name: Build unsigned IPA (LiveContainer ready)
     runs-on: macos-26
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Compute next LiveContainer version
+        id: version
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        shell: bash
+        run: |
+          LATEST_TAG=$(git tag --list 'v[0-9]*' --sort=-version:refname | head -n 1)
+          NEXT_VERSION=$(python3 - "$LATEST_TAG" <<'PY'
+          import sys
+
+          tag = sys.argv[1]
+          if not tag:
+              print("0.1.0")
+              raise SystemExit
+
+          try:
+              major, minor, patch = map(int, tag.removeprefix("v").split("."))
+          except ValueError as error:
+              raise SystemExit(f"Version de tag invalide : {tag}") from error
+          print(f"{major}.{minor}.{patch + 1}")
+          PY
+          echo "value=$NEXT_VERSION" >> "$GITHUB_OUTPUT"
+          echo "previous_tag=$LATEST_TAG" >> "$GITHUB_OUTPUT"
+
+      - name: Set release version
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        env:
+          VERSION: ${{ steps.version.outputs.value }}
+        run: |
+          python3 - "$VERSION" <<'PY'
+          from pathlib import Path
+          import re
+          import sys
+
+          path = Path("project.yml")
+          content = path.read_text(encoding="utf-8")
+          updated, count = re.subn(
+              r'MARKETING_VERSION: "[^"]+"',
+              f'MARKETING_VERSION: "{sys.argv[1]}"',
+              content,
+              count=1,
+          )
+          if count != 1:
+              raise SystemExit("MARKETING_VERSION introuvable dans project.yml")
+          path.write_text(updated, encoding="utf-8")
+          PY
 
       - name: Install XcodeGen
         run: brew install xcodegen
@@ -54,29 +104,35 @@ jobs:
           name: Orvian-unsigned-ipa
           path: Orvian-*-unsigned.ipa
 
-      - name: Create GitHub Release (tags only)
-        if: startsWith(github.ref, 'refs/tags/v')
-        uses: softprops/action-gh-release@v2
-        with:
-          files: Orvian-*-unsigned.ipa
-          generate_release_notes: true
-
-      - name: Update LiveContainer source (repo.json, tags only)
-        if: startsWith(github.ref, 'refs/tags/v')
+      - name: Publish LiveContainer version
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        env:
+          VERSION: ${{ steps.version.outputs.value }}
+          PREVIOUS_TAG: ${{ steps.version.outputs.previous_tag }}
         run: |
-          VERSION="${GITHUB_REF_NAME#v}"
           SIZE=$(stat -f%z "Orvian-${VERSION}-unsigned.ipa")
           TODAY=$(date +%Y-%m-%d)
-          python3 .github/scripts/update_repo.py "$VERSION" "$GITHUB_REF_NAME" "$SIZE" "$TODAY" > repo.json
-          if ! git diff --quiet repo.json; then
-            git config user.name "github-actions[bot]"
-            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-            git add repo.json
-            git commit -m "repo.json : Orvian $VERSION (source LiveContainer)"
-            # Le checkout d'un tag est en detached HEAD : pousser explicitement vers main
-            if ! git push origin HEAD:main; then
-              echo "::warning::repo.json non poussé (conflit de branche ?) — mise à jour manuelle requise"
-            fi
+          TAG="v${VERSION}"
+          if [ -n "$PREVIOUS_TAG" ]; then
+            NOTES=$(git log "${PREVIOUS_TAG}..HEAD" --no-merges --format='• %s')
           else
-            echo "repo.json déjà à jour."
+            NOTES="• Première version publiée automatiquement"
           fi
+          NOTES=${NOTES:-"• Version publiée automatiquement depuis main"}
+          python3 .github/scripts/update_repo.py "$VERSION" "$TAG" "$SIZE" "$TODAY" "$NOTES" > repo.json
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add project.yml repo.json
+          git commit -m "Release Orvian $VERSION (LiveContainer)"
+          git push origin HEAD:main
+          git tag -a "$TAG" -m "Orvian $VERSION"
+          git push origin "$TAG"
+
+      - name: Create GitHub Release
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ steps.version.outputs.value }}
+          files: Orvian-${{ steps.version.outputs.value }}-unsigned.ipa
+          generate_release_notes: true

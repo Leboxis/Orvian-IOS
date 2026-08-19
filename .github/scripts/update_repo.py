@@ -1,10 +1,10 @@
 """Régénère repo.json (source AltStore/LiveContainer) pour la version donnée.
 
-Usage: python3 update_repo.py <version> <tag> <size_octets> [version_date]
-Exemple: python3 update_repo.py 0.4.0 v0.4.0 596772 2026-08-16
+Usage: python3 update_repo.py <version> <tag> <size_octets> [version_date] [notes]
+Exemple: python3 update_repo.py 0.4.0 v0.4.0 596772 2026-08-16 "• Correction importante"
 
-Écrit le JSON sur stdout. Le contenu du changelog doit être maintenu dans
-la constante CHANGELOG (dernière version en premier).
+Écrit le JSON sur stdout. Les notes de la nouvelle version sont fournies par
+la CI ; l'historique de référence reste dans la constante HISTORY.
 """
 import json
 import sys
@@ -12,7 +12,7 @@ import sys
 REPO = "Leboxis/Orvian-IOS"
 ICON = "https://raw.githubusercontent.com/Leboxis/Orvian-IOS/refs/heads/main/Orvian/Assets.xcassets/AppIcon.appiconset/icon-1024.png"
 
-CHANGELOG = """v0.8.16
+HISTORY = """v0.8.16
 • Sélection multiple : interface supérieure simplifiée avec compteur centré
 • Déplacement : bouton toujours visible dans la barre de navigation
 • Affichage : suppression de la barre d’action masquée par la navigation flottante
@@ -56,6 +56,7 @@ v0.8.5
 
 def main() -> int:
     version, tag, size, version_date = sys.argv[1:5]
+    notes = sys.argv[5] if len(sys.argv) > 5 else "• Version publiée automatiquement depuis main"
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(encoding="utf-8")  # Windows : évite cp1252
     source = {
@@ -74,7 +75,7 @@ def main() -> int:
                 "subtitle": "Client kDrive non officiel",
                 "version": version,
                 "versionDate": version_date,
-                "versionDescription": CHANGELOG,
+                "versionDescription": f"v{version}\n{notes}\n\n{HISTORY}",
                 "downloadURL": f"https://github.com/{REPO}/releases/download/{tag}/Orvian-{version}-unsigned.ipa",
                 "localizedDescription": (
                     "Client iOS natif non officiel pour kDrive (Infomaniak) : navigation dans "
