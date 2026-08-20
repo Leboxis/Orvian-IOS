@@ -182,7 +182,6 @@ private struct ZoomablePhotoPage: View {
                     .scaleEffect(scale)
                     .offset(panOffset)
                     .opacity(1 - dismissProgress)
-                    .gesture(magnifyGesture(in: proxy.size))
                     .onTapGesture(count: 2) {
                         withAnimation(.snappy(duration: 0.3)) {
                             if isZoomed {
@@ -199,6 +198,7 @@ private struct ZoomablePhotoPage: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .contentShape(Rectangle())
+            .gesture(magnifyGesture(in: proxy.size))
         }
         .task(id: file.id) {
             await loadImages()
@@ -249,7 +249,21 @@ private struct ZoomablePhotoPage: View {
     private func magnifyGesture(in screenSize: CGSize) -> some Gesture {
         MagnifyGesture()
             .onChanged { value in
-                scale = min(6, max(1, lastScale * value.magnification))
+                let newScale = min(6, max(1, lastScale * value.magnification))
+                // Ancre le zoom sur le milieu des deux doigts : le point situé
+                // sous l'ancre de départ reste fixe pendant tout le geste.
+                let previousScale = scale
+                let ratio = previousScale > 0 ? newScale / previousScale : 1
+                let anchor = value.startLocation
+                let d = CGPoint(
+                    x: anchor.x - screenSize.width / 2,
+                    y: anchor.y - screenSize.height / 2
+                )
+                offset = CGSize(
+                    width: d.x * (1 - ratio) + offset.width * ratio,
+                    height: d.y * (1 - ratio) + offset.height * ratio
+                )
+                scale = newScale
             }
             .onEnded { _ in
                 if scale < 1.15 {
