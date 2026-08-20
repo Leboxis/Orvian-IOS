@@ -214,15 +214,20 @@ private struct ZoomablePhotoPage: View {
 
     // MARK: - Chargement
 
+    /// Miniature (placeholder instantané) et haute résolution téléchargées en
+    /// parallèle : la pleine qualité démarre dès l'ouverture, sans attendre la
+    /// miniature, et s'affiche dès qu'elle est prête.
     private func loadImages() async {
-        // Miniature d'abord (instantanée, déjà en cache généralement).
-        if let thumb = await ThumbnailProvider.shared.thumbnail(driveId: driveId, fileId: file.id, pixels: 400),
-           !Task.isCancelled, hires == nil {
+        async let thumbnailTask = ThumbnailProvider.shared.thumbnail(
+            driveId: driveId,
+            fileId: file.id,
+            pixels: 400
+        )
+        async let hiresTask = HiresImageStore.shared.image(driveId: driveId, fileId: file.id)
+        if let thumb = await thumbnailTask, !Task.isCancelled, hires == nil {
             thumbnail = thumb
         }
-        // Puis la haute résolution en arrière-plan.
-        if let full = await HiresImageStore.shared.image(driveId: driveId, fileId: file.id),
-           !Task.isCancelled {
+        if let full = await hiresTask, !Task.isCancelled {
             withAnimation(.easeIn(duration: 0.2)) {
                 hires = full
             }

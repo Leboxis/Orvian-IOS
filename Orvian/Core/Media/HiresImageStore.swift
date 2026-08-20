@@ -3,7 +3,9 @@ import ImageIO
 
 /// Images haute résolution pour la visionneuse : téléchargées via l'URL
 /// temporaire publique puis sous-échantillonnées avec ImageIO pour limiter
-/// la mémoire (jamais de bitmap 4K décompressée inutilement).
+/// la mémoire (jamais de bitmap décompressée au-delà du besoin réel :
+/// 5120 px couvre la quasi-totalité des photos, pleine qualité 12-24 MP
+/// et qualité quasi native pour les 48 MP).
 actor HiresImageStore {
     static let shared = HiresImageStore()
 
@@ -14,8 +16,8 @@ actor HiresImageStore {
     private var inFlight: [String: Task<UIImage?, Never>] = [:]
 
     init() {
-        memory.countLimit = 30
-        memory.totalCostLimit = 150 * 1024 * 1024
+        memory.countLimit = 12
+        memory.totalCostLimit = 300 * 1024 * 1024
     }
 
     private func memoryKey(driveId: Int, fileId: Int) -> NSString {
@@ -26,7 +28,7 @@ actor HiresImageStore {
         "\(driveId)-\(fileId)"
     }
 
-    func image(driveId: Int, fileId: Int, maxPixelSize: Int = 2560) async -> UIImage? {
+    func image(driveId: Int, fileId: Int, maxPixelSize: Int = 5120) async -> UIImage? {
         let memoryKey = memoryKey(driveId: driveId, fileId: fileId)
         let taskKey = taskKey(driveId: driveId, fileId: fileId)
         if let cached = memory.object(forKey: memoryKey) {
