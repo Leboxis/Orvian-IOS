@@ -290,6 +290,9 @@ struct FileGridView: View {
             onRename: { newName in
                 Task { await viewModel.rename(file, name: newName) }
             },
+            onSetColor: { color in
+                Task { await viewModel.setColor(file, color: color) }
+            },
             onMove: onMove == nil ? nil : {
                 onMove?(file)
             },

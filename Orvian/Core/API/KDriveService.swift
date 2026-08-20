@@ -538,6 +538,12 @@ struct KDriveService {
         try await api.post(.rename(driveId: driveId, fileId: fileId), body: body, contentType: "application/json")
     }
 
+    /// Change la couleur d'un dossier (`#rrggbb`).
+    func setFolderColor(driveId: Int, fileId: Int, color: String) async throws {
+        let body = try JSONEncoder().encode(["color": color])
+        try await api.post(.updateFolderColor(driveId: driveId, fileId: fileId), body: body, contentType: "application/json")
+    }
+
     /// Déplace un fichier ou dossier vers `destinationDirectoryId`.
     func move(driveId: Int, fileId: Int, destinationDirectoryId: Int) async throws {
         try await api.sendEmpty(

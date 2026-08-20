@@ -2,7 +2,8 @@ import SwiftUI
 
 /// Carte de fichier : miniature, étoile favori, nom, taille.
 /// Tap → ouverture du fichier/dossier. Appui long → menu contextuel
-/// (détails, télécharger, tags, favori, renommer, déplacer, supprimer).
+/// (détails, couleur pour les dossiers, télécharger, tags, favori,
+/// renommer, déplacer, supprimer).
 struct FileCardView: View {
     let file: DriveFile
     let driveId: Int
@@ -25,6 +26,8 @@ struct FileCardView: View {
     var onDelete: (() -> Void)?
     var onRename: ((String) -> Void)?
     var onMove: (() -> Void)?
+    /// Change la couleur d'un dossier (menu contextuel des dossiers).
+    var onSetColor: ((String) -> Void)?
     /// Confirme localement un changement de tag pour rafraîchir les pastilles
     /// des cartes derrière l'éditeur.
     var onTagChanged: ((Category, Bool) -> Void)?
@@ -34,6 +37,7 @@ struct FileCardView: View {
     @State private var thumbnailLoaded = false
     @State private var showDetail = false
     @State private var showTagsSheet = false
+    @State private var showColorPicker = false
     @State private var showDeleteConfirm = false
     @State private var showRenameAlert = false
     @State private var renameText = ""
@@ -93,6 +97,13 @@ struct FileCardView: View {
                     Label("Détails", systemImage: "info.circle")
                 }
                 if !isTrashed {
+                    if file.isDirectory, onSetColor != nil {
+                        Button {
+                            showColorPicker = true
+                        } label: {
+                            Label("Changer la couleur", systemImage: "paintpalette")
+                        }
+                    }
                     if !file.isDirectory {
                         Button {
                             Task {
@@ -157,6 +168,12 @@ struct FileCardView: View {
                 driveId: driveId,
                 file: file,
                 onChanged: onTagChanged
+            )
+        }
+        .sheet(isPresented: $showColorPicker) {
+            FolderColorPickerSheet(
+                file: file,
+                onSetColor: onSetColor
             )
         }
         .alert("Supprimer", isPresented: $showDeleteConfirm) {
@@ -815,5 +832,84 @@ private struct AsyncThumbnail<S: InsettableShape>: View {
         .task {
             image = await ThumbnailProvider.shared.thumbnail(driveId: driveId, fileId: fileId, pixels: 200, isTrashed: isTrashed)
         }
+    }
+}
+
+/// Sélecteur de couleur d'un dossier (menu contextuel → « Changer la couleur »).
+/// Grille des couleurs officielles de kDrive ; un tap applique la couleur
+/// directement via l'API et referme la feuille.
+private struct FolderColorPickerSheet: View {
+    let file: DriveFile
+    let onSetColor: ((String) -> Void)?
+
+    @Environment(\.dismiss) private var dismiss
+    @State private var selectedColor: String?
+
+    /// Palette officielle de l'application kDrive.
+    private static let palette = [
+        "#9f9f9f", "#F44336", "#E91E63", "#9C26B0",
+        "#673AB7", "#4051B5", "#4BAF50", "#009688",
+        "#00BCD4", "#02A9F4", "#2196F3", "#8BC34A",
+        "#CDDC3A", "#FFC10A", "#FF9802", "#607D8B",
+        "#795548",
+    ]
+
+    private let columns = [GridItem(.adaptive(minimum: 52), spacing: 16)]
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                LazyVGrid(columns: columns, spacing: 16) {
+                    ForEach(Self.palette, id: \.self) { hex in
+                        colorSwatch(hex)
+                    }
+                }
+                .padding(.horizontal, 24)
+                .padding(.vertical, 20)
+            }
+            .navigationTitle("Couleur du dossier")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button {
+                        dismiss()
+                    } label: {
+                        Image(systemName: "xmark")
+                            .font(.system(size: 16, weight: .medium))
+                    }
+                    .accessibilityLabel("Fermer")
+                }
+            }
+        }
+        .onAppear {
+            selectedColor = file.color
+        }
+    }
+
+    /// Pastille ronde de couleur, avec coche sur la couleur actuelle.
+    private func colorSwatch(_ hex: String) -> some View {
+        let isSelected = selectedColor?.lowercased() == hex.lowercased()
+        return Button {
+            selectedColor = hex
+            onSetColor?(hex)
+            dismiss()
+        } label: {
+            Circle()
+                .fill(Color(hex: hex) ?? .gray)
+                .frame(width: 48, height: 48)
+                .overlay {
+                    if isSelected {
+                        Image(systemName: "checkmark")
+                            .font(.system(size: 17, weight: .bold))
+                            .foregroundStyle(.white)
+                            .shadow(color: .black.opacity(0.4), radius: 1)
+                    }
+                }
+                .overlay {
+                    Circle().strokeBorder(.black.opacity(0.08), lineWidth: 1)
+                }
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Couleur \(hex)")
     }
 }

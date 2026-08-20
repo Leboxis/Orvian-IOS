@@ -19,7 +19,7 @@ struct DriveFile: Codable, Identifiable, Hashable {
     let parentId: Int?
     let path: String?
     /// Couleur hexadécimale (#rrggbb) des dossiers, définie côté kDrive.
-    let color: String?
+    var color: String?
     /// Catégories (tags) du fichier — renvoyées uniquement avec `with=categories`.
     var categories: [FileCategory]?
     /// Timestamps Unix (secondes)

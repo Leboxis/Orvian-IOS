@@ -271,6 +271,11 @@ extension Endpoint {
         Endpoint(path: "/2/drive/\(driveId)/files/\(fileId)/rename")
     }
 
+    /// Changer la couleur d'un dossier : POST JSON `{"color": "#rrggbb"}` (v2).
+    static func updateFolderColor(driveId: Int, fileId: Int) -> Endpoint {
+        Endpoint(path: "/2/drive/\(driveId)/files/\(fileId)/color")
+    }
+
     /// Déplacer un fichier ou dossier dans un autre dossier (v3).
     static func move(driveId: Int, fileId: Int, destinationDirectoryId: Int) -> Endpoint {
         Endpoint(path: "/3/drive/\(driveId)/files/\(fileId)/move/\(destinationDirectoryId)")

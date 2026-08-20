@@ -232,6 +232,20 @@ final class FileGridViewModel {
         }
     }
 
+    /// Change la couleur d'un dossier : mise à jour optimiste, retour arrière
+    /// si l'API refuse.
+    func setColor(_ file: DriveFile, color: String) async {
+        guard let index = items.firstIndex(where: { $0.id == file.id }) else { return }
+        let oldColor = items[index].color
+        items[index].color = color
+        do {
+            try await service.setFolderColor(driveId: driveId, fileId: file.id, color: color)
+        } catch {
+            items[index].color = oldColor
+            errorMessage = "Couleur impossible à modifier : \((error as? APIError)?.errorDescription ?? error.localizedDescription)"
+        }
+    }
+
     /// Déplace tous les éléments demandés. Les réussites disparaissent
     /// immédiatement de la grille ; les éventuels échecs restent affichés.
     @discardableResult
