@@ -79,11 +79,12 @@ actor ThumbnailProvider {
     private var prefetchTask: Task<Void, Never>?
     private let maxPendingPrefetch = 6
     /// Les posters de vidéos sont produits de façon asynchrone côté kDrive.
-    /// Cette fenêtre couvre la majorité des encodages sans conserver une
-    /// absence en cache ni marteler l'API.
+    /// Fenêtre de réessais plafonnée à ~60 s : couvre la majorité des
+    /// encodages sans laisser une activité réseau/batterie persister
+    /// plusieurs minutes après l'upload.
     private let uploadedMediaRetryDelays: [Duration] = [
-        .zero, .seconds(2), .seconds(5), .seconds(10), .seconds(20),
-        .seconds(30), .seconds(60), .seconds(60), .seconds(60), .seconds(60),
+        .zero, .seconds(2), .seconds(3), .seconds(5),
+        .seconds(8), .seconds(12), .seconds(15), .seconds(15),
     ]
 
     private struct Key: Hashable {

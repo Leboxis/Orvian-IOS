@@ -52,6 +52,10 @@ struct FileGridView: View {
     @AppStorage("fileGridColumns") private var fileGridColumns = 3
     @State private var metadataRevision = 0
     @State private var prefetchTask: Task<Void, Never>?
+    /// Cache du calcul `visibleItems` : les filtres/tri/regroupement ne sont
+    /// recalculés que si les données, les filtres, la recherche ou les
+    /// métadonnées vidéo changent — pas à chaque rendu du body.
+    @State private var visibleItemsCache = VisibleItemsCache()
 
     private var needsVideoMetadata: Bool {
         filters.sort == .duration || filters.orientation != nil
@@ -76,12 +80,13 @@ struct FileGridView: View {
             }
             // Un changement de tri (dates, type, poids) relit le serveur avec
             // l'ordre demandé : la pagination entière respecte alors le tri,
-            // et pas seulement les éléments déjà chargés.
-            .onChange(of: filters.sort) { _, _ in
-                Task { await viewModel.reload(sortedBy: filters) }
-            }
-            .onChange(of: filters.direction) { _, _ in
-                Task { await viewModel.reload(sortedBy: filters) }
+            // et pas seulement les éléments déjà chargés. Un seul déclencheur
+            // sur l'ensemble `filters` : changer le tri ET le sens en même
+            // temps ne lance plus deux rechargements réseau.
+            .onChange(of: filters) { oldFilters, newFilters in
+                if oldFilters.sort != newFilters.sort || oldFilters.direction != newFilters.direction {
+                    Task { await viewModel.reload(sortedBy: newFilters) }
+                }
             }
             .task(id: filterTaskKey) {
                 guard needsVideoMetadata else { return }
@@ -98,10 +103,17 @@ struct FileGridView: View {
             }
     }
 
-    /// Relance la résolution des métadonnées vidéo uniquement quand un tri ou
-    /// un filtre en a besoin.
+    /// Relance la résolution des métadonnées vidéo uniquement quand il y a de
+    /// nouvelles vidéos à résoudre : la clé repose sur l'ensemble des
+    /// identifiants encore non résolus, pas sur le compteur d'éléments (qui
+    /// change à chaque page chargée et relançait inutilement le travail).
     private var filterTaskKey: String {
-        return needsVideoMetadata ? "resolve-\(viewModel.items.count)" : "none"
+        guard needsVideoMetadata else { return "none" }
+        let pending = mediaMetadata.unresolvedVideoIDs(in: viewModel.items)
+        if pending.isEmpty {
+            return "resolved-\(viewModel.driveId)"
+        }
+        return "resolve-\(pending.sorted())"
     }
 
     @ViewBuilder
@@ -169,41 +181,14 @@ struct FileGridView: View {
 
     /// Éléments après filtres (type, orientation, recherche) et tri.
     private var visibleItems: [DriveFile] {
-        var result = viewModel.items
-
-        switch filters.media {
-        case .all: break
-        case .videos: result = result.filter(\.isVideo)
-        case .images: result = result.filter(\.isImage)
-        case .other: result = result.filter { !$0.isVideo && !$0.isImage }
-        }
-
-        if let orientation = filters.orientation {
-            result = result.filter { file in
-                guard file.isVideo, let info = mediaMetadata.info(for: file.id) else { return false }
-                return info.orientation == orientation
-            }
-        }
-
-        if isSearching {
-            result = result.filter { $0.matchesSearchKeywords(searchKeywords) }
-        }
-
-        // Les tris dates/type/poids sont déjà appliqués par le serveur
-        // (`order_by[]` + `order`) sur toute la pagination : les re-trier ici
-        // serait un travail inutile et pourrait même contredire l'ordre des
-        // pages (fichiers sans date relégués en bas par le tri local alors
-        // que le serveur les avait placés ailleurs). Seule la durée, qui ne
-        // peut pas être exprimée par l'API, reste triée localement.
-        if filters.sort == .duration {
-            result = result.sorted {
-                let lhs = mediaMetadata.info(for: $0.id)?.duration ?? -1
-                let rhs = mediaMetadata.info(for: $1.id)?.duration ?? -1
-                return filters.direction == .descending ? lhs > rhs : lhs < rhs
-            }
-        }
-
-        return result
+        visibleItemsCache.visibleItems(
+            items: viewModel.items,
+            filters: filters,
+            isSearching: isSearching,
+            searchKeywords: searchKeywords,
+            metadataRevision: metadataRevision,
+            mediaMetadata: mediaMetadata
+        )
     }
 
     /// Message quand aucun élément ne correspond aux filtres ou à la recherche.
@@ -424,5 +409,95 @@ struct FileGridView: View {
         case .trash: return "Corbeille vide"
         case .search: return "Aucun résultat"
         }
+    }
+}
+
+/// Mémoïse le résultat des filtres/tri de la grille : tant que les données
+/// (items), les filtres, la recherche et la révision des métadonnées vidéo
+/// n'ont pas changé, la liste visible n'est pas recalculée à chaque rendu.
+@MainActor
+private struct VisibleItemsCache {
+    private struct Key: Hashable {
+        let items: [DriveFile]
+        let filters: FileFilters
+        let isSearching: Bool
+        let searchKeywords: [String]
+        let metadataRevision: Int
+    }
+
+    private var cachedKey: Key?
+    private var cachedResult: [DriveFile] = []
+
+    mutating func visibleItems(
+        items: [DriveFile],
+        filters: FileFilters,
+        isSearching: Bool,
+        searchKeywords: [String],
+        metadataRevision: Int,
+        mediaMetadata: MediaMetadataStore
+    ) -> [DriveFile] {
+        let key = Key(
+            items: items,
+            filters: filters,
+            isSearching: isSearching,
+            searchKeywords: searchKeywords,
+            metadataRevision: metadataRevision
+        )
+        if key == cachedKey {
+            return cachedResult
+        }
+        cachedKey = key
+        cachedResult = Self.computeVisible(
+            items: items,
+            filters: filters,
+            isSearching: isSearching,
+            searchKeywords: searchKeywords,
+            mediaMetadata: mediaMetadata
+        )
+        return cachedResult
+    }
+
+    private static func computeVisible(
+        items: [DriveFile],
+        filters: FileFilters,
+        isSearching: Bool,
+        searchKeywords: [String],
+        mediaMetadata: MediaMetadataStore
+    ) -> [DriveFile] {
+        var result = items
+
+        switch filters.media {
+        case .all: break
+        case .videos: result = result.filter(\.isVideo)
+        case .images: result = result.filter(\.isImage)
+        case .other: result = result.filter { !$0.isVideo && !$0.isImage }
+        }
+
+        if let orientation = filters.orientation {
+            result = result.filter { file in
+                guard file.isVideo, let info = mediaMetadata.info(for: file.id) else { return false }
+                return info.orientation == orientation
+            }
+        }
+
+        if isSearching {
+            result = result.filter { $0.matchesSearchKeywords(searchKeywords) }
+        }
+
+        // Les tris dates/type/poids sont déjà appliqués par le serveur
+        // (`order_by[]` + `order`) sur toute la pagination : les re-trier ici
+        // serait un travail inutile et pourrait même contredire l'ordre des
+        // pages (fichiers sans date relégués en bas par le tri local alors
+        // que le serveur les avait placés ailleurs). Seule la durée, qui ne
+        // peut pas être exprimée par l'API, reste triée localement.
+        if filters.sort == .duration {
+            result = result.sorted {
+                let lhs = mediaMetadata.info(for: $0.id)?.duration ?? -1
+                let rhs = mediaMetadata.info(for: $1.id)?.duration ?? -1
+                return filters.direction == .descending ? lhs > rhs : lhs < rhs
+            }
+        }
+
+        return result
     }
 }

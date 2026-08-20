@@ -46,20 +46,33 @@ final class MediaMetadataStore: ObservableObject {
                     }
                 }
             }
+            // Un seul signal de rafraîchissement par lot terminé : la grille
+            // se re-trie une fois par lot au lieu d'une fois par vidéo.
+            revision += 1
             index += batch
         }
     }
 
+    /// Les identifiants des vidéos d'une liste dont les métadonnées manquent
+    /// encore (ni en cache, ni en cours de résolution). Utilisé par la grille
+    /// pour ne relancer la résolution que s'il y a du nouveau travail.
+    func unresolvedVideoIDs(in items: [DriveFile]) -> Set<Int> {
+        Set(
+            items.lazy
+                .filter { $0.isVideo && cache[$0.id] == nil && !inFlight.contains($0.id) }
+                .map(\.id)
+        )
+    }
+
     private func resolve(driveId: Int, fileId: Int) async {
         defer { inFlight.remove(fileId) }
-        // Réutilise l'URL temporaire déjà en cache (préchargements vidéo,
-        // visionneuse…) : pas de nouvelle requête réseau si elle existe.
-        guard let url = await MediaURLCache.shared.url(driveId: driveId, fileId: fileId) else { return }
-        let asset = AVURLAsset(url: url)
+        // Réutilise l'asset déjà préparé par VideoAssetCache (URL temporaire en
+        // cache, option de durée précise) : pas de second AVURLAsset ni de
+        // double sondage réseau pour la même vidéo.
+        guard let asset = await VideoAssetCache.shared.asset(driveId: driveId, fileId: fileId) else { return }
         guard let duration = try? await asset.load(.duration) else { return }
         let orientation = await orientation(of: asset)
         cache[fileId] = Info(duration: duration.seconds, orientation: orientation)
-        revision += 1
     }
 
     private func orientation(of asset: AVURLAsset) async -> FileFilters.Orientation {

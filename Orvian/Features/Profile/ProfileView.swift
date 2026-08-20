@@ -203,8 +203,8 @@ struct ProfileView: View {
     private func loadPreviews() async {
         guard let drive = session.selectedDrive else { return }
 
-        // Chargement immédiat des médias les plus consultés (synchrone local)
-        let tracked = MediaUsageStore.mostViewedFiles(driveId: drive.id, limit: 12)
+        // Chargement immédiat des médias les plus consultés (lecture locale asynchrone)
+        let tracked = await MediaUsageStore.mostViewedFiles(driveId: drive.id, limit: 12)
         if !tracked.isEmpty {
             frequentFavorites = tracked
             isLoadingFavorites = false

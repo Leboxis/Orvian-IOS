@@ -1,7 +1,7 @@
 import Foundation
 
 /// Options de tri et de filtrage de la grille de fichiers.
-struct FileFilters: Equatable {
+struct FileFilters: Equatable, Hashable {
     /// Ordre de tri.
     enum SortMode: String, CaseIterable, Identifiable {
         case original, modifiedDate, addedDate, type, size, duration

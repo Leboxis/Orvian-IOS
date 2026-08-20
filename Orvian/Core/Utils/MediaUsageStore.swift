@@ -33,22 +33,26 @@ final class MediaUsageStore {
         }
     }
 
-    /// Renvoie les fichiers les plus consultés d'un drive donné.
-    static func mostViewedFiles(driveId: Int, limit: Int = 12) -> [DriveFile] {
-        shared.queue.sync {
-            let prefix = "\(driveId)-"
-            let sorted = shared.records
-                .filter { $0.key.hasPrefix(prefix) }
-                .map(\.value)
-                .filter { !$0.file.isDirectory }
-                .sorted { lhs, rhs in
-                    if lhs.count != rhs.count {
-                        return lhs.count > rhs.count
+    /// Renvoie les fichiers les plus consultés d'un drive donné. Lecture
+    /// asynchrone sur la queue privée : aucun verrou n'attend sur le fil
+    /// principal, même si une sauvegarde est en cours.
+    static func mostViewedFiles(driveId: Int, limit: Int = 12) async -> [DriveFile] {
+        await withCheckedContinuation { continuation in
+            shared.queue.async {
+                let prefix = "\(driveId)-"
+                let sorted = shared.records
+                    .filter { $0.key.hasPrefix(prefix) }
+                    .map(\.value)
+                    .filter { !$0.file.isDirectory }
+                    .sorted { lhs, rhs in
+                        if lhs.count != rhs.count {
+                            return lhs.count > rhs.count
+                        }
+                        return lhs.lastViewedAt > rhs.lastViewedAt
                     }
-                    return lhs.lastViewedAt > rhs.lastViewedAt
-                }
 
-            return Array(sorted.prefix(limit).map(\.file))
+                continuation.resume(returning: Array(sorted.prefix(limit).map(\.file)))
+            }
         }
     }
 

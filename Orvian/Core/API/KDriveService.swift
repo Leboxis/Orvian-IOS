@@ -121,7 +121,7 @@ struct KDriveService {
                 }
             }
         case let .mostViewed(limit):
-            let files = MediaUsageStore.mostViewedFiles(driveId: driveId, limit: limit)
+            let files = await MediaUsageStore.mostViewedFiles(driveId: driveId, limit: limit)
             return CursorPage<DriveFile>(data: files, cursor: nil, hasMore: false)
         case let .category(categoryId):
             endpoint = ordering(.categoryFiles(driveId: driveId, categoryId: categoryId, cursor: cursor))

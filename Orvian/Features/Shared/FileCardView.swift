@@ -611,6 +611,15 @@ struct FileDetailSheet: View {
         filePath = file.path
         await CategoryLibrary.shared.ensureLoaded(for: driveId)
         let byId = CategoryLibrary.shared.categories(for: driveId)
+        // Les listes (`with=is_favorite,categories,path`) fournissent déjà les
+        // catégories, le favori et le chemin : la fiche s'affiche sans appel
+        // réseau. Seule la recherche par tag (qui ne renvoie pas les
+        // catégories) déclenche la fiche individuelle.
+        if let categories = file.categories {
+            appliedCategories = categories.compactMap { byId[$0.categoryId] }
+            isFavorite = file.isFavorite == true
+            return
+        }
         if let info = try? await service.fileInfo(driveId: driveId, fileId: file.id) {
             appliedCategories = (info.categories ?? []).compactMap { byId[$0.categoryId] }
             isFavorite = info.isFavorite == true
@@ -741,11 +750,14 @@ private struct TagsEditorSheet: View {
         isLoading = true
         defer { isLoading = false }
         async let categoriesTask = service.categories(driveId: driveId)
-        // Les listes (recherche par tag…) ne renvoient pas toujours les
-        // catégories : la fiche individuelle est la source fiable des coches.
-        if let info = try? await service.fileInfo(driveId: driveId, fileId: file.id),
-           let ids = info.categories {
+        // Les listes (`with=is_favorite,categories`) fournissent les coches ;
+        // la fiche individuelle n'est consultée que si elles manquent
+        // (recherche par tag…).
+        if let ids = file.categories {
             appliedCategoryIds = Set(ids.map(\.categoryId))
+        } else if let info = try? await service.fileInfo(driveId: driveId, fileId: file.id),
+                  let infoCategories = info.categories {
+            appliedCategoryIds = Set(infoCategories.map(\.categoryId))
         }
         if let cats = try? await categoriesTask {
             categories = cats
