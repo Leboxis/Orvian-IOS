@@ -184,8 +184,7 @@ struct FileGridView: View {
         visibleItemsCache.visibleItems(
             items: viewModel.items,
             filters: filters,
-            isSearching: isSearching,
-            searchKeywords: searchKeywords,
+            searchText: searchText,
             metadataRevision: metadataRevision,
             mediaMetadata: mediaMetadata
         )
@@ -423,8 +422,7 @@ private struct VisibleItemsCache {
     private struct Key: Hashable {
         let items: [DriveFile]
         let filters: FileFilters
-        let isSearching: Bool
-        let searchKeywords: [String]
+        let searchText: String
         let metadataRevision: Int
     }
 
@@ -434,73 +432,21 @@ private struct VisibleItemsCache {
     mutating func visibleItems(
         items: [DriveFile],
         filters: FileFilters,
-        isSearching: Bool,
-        searchKeywords: [String],
+        searchText: String,
         metadataRevision: Int,
         mediaMetadata: MediaMetadataStore
     ) -> [DriveFile] {
         let key = Key(
             items: items,
             filters: filters,
-            isSearching: isSearching,
-            searchKeywords: searchKeywords,
+            searchText: searchText,
             metadataRevision: metadataRevision
         )
         if key == cachedKey {
             return cachedResult
         }
         cachedKey = key
-        cachedResult = Self.computeVisible(
-            items: items,
-            filters: filters,
-            isSearching: isSearching,
-            searchKeywords: searchKeywords,
-            mediaMetadata: mediaMetadata
-        )
+        cachedResult = filters.visible(items, searchText: searchText, mediaMetadata: mediaMetadata)
         return cachedResult
-    }
-
-    private static func computeVisible(
-        items: [DriveFile],
-        filters: FileFilters,
-        isSearching: Bool,
-        searchKeywords: [String],
-        mediaMetadata: MediaMetadataStore
-    ) -> [DriveFile] {
-        var result = items
-
-        switch filters.media {
-        case .all: break
-        case .videos: result = result.filter(\.isVideo)
-        case .images: result = result.filter(\.isImage)
-        case .other: result = result.filter { !$0.isVideo && !$0.isImage }
-        }
-
-        if let orientation = filters.orientation {
-            result = result.filter { file in
-                guard file.isVideo, let info = mediaMetadata.info(for: file.id) else { return false }
-                return info.orientation == orientation
-            }
-        }
-
-        if isSearching {
-            result = result.filter { $0.matchesSearchKeywords(searchKeywords) }
-        }
-
-        // Les tris dates/type/poids sont déjà appliqués par le serveur
-        // (`order_by[]` + `order`) sur toute la pagination : les re-trier ici
-        // serait un travail inutile et pourrait même contredire l'ordre des
-        // pages (fichiers sans date relégués en bas par le tri local alors
-        // que le serveur les avait placés ailleurs). Seule la durée, qui ne
-        // peut pas être exprimée par l'API, reste triée localement.
-        if filters.sort == .duration {
-            result = result.sorted {
-                let lhs = mediaMetadata.info(for: $0.id)?.duration ?? -1
-                let rhs = mediaMetadata.info(for: $1.id)?.duration ?? -1
-                return filters.direction == .descending ? lhs > rhs : lhs < rhs
-            }
-        }
-
-        return result
     }
 }

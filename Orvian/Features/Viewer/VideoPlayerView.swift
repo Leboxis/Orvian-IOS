@@ -9,6 +9,10 @@ import AVKit
 struct VideoPlayerView: View {
     let file: DriveFile
     let driveId: Int
+    /// Vrai quand la page est l'élément courant d'un pager : seule la page
+    /// active charge et lit la vidéo. Toujours vrai quand le lecteur est
+    /// présenté seul (visionneuse directe).
+    let isActive: Bool
 
     @Environment(\.dismiss) private var dismiss
     @State private var player: AVPlayer?
@@ -39,6 +43,9 @@ struct VideoPlayerView: View {
     @State private var playbackRetryCount = 0
     @State private var isDisappeared = false
     @State private var isExternalPlaybackActive = false
+    /// Empêche deux appels concurrents à `load()` (apparition + retour de page)
+    /// de créer deux lecteurs pour la même vidéo.
+    @State private var isLoadingVideo = false
 
     // Masquage automatique des contrôles après 2.5 secondes
     @State private var showControls = true
@@ -46,9 +53,10 @@ struct VideoPlayerView: View {
 
     private let service = KDriveService()
 
-    init(file: DriveFile, driveId: Int) {
+    init(file: DriveFile, driveId: Int, isActive: Bool = true) {
         self.file = file
         self.driveId = driveId
+        self.isActive = isActive
         _isFavorite = State(initialValue: file.isFavorite ?? false)
         _appliedCategoryIds = State(initialValue: Set((file.categories ?? []).map(\.categoryId)))
     }
@@ -79,8 +87,32 @@ struct VideoPlayerView: View {
             scheduleControlsAutoHide(delay: 2.5)
             setupAudioSession()
         }
-        .task {
+        .task(id: isActive) {
+            // Dans un pager, les pages hors écran ne chargent jamais : seule
+            // la page courante (re)prépare et lit sa vidéo.
+            guard isActive else { return }
+            isDisappeared = false
             await load()
+        }
+        .onChange(of: isActive) { _, active in
+            if active {
+                showControls = true
+                scheduleControlsAutoHide(delay: 2.5)
+                // Si le lecteur existe encore (page restée en mémoire), on
+                // reprend simplement la lecture ; sinon le `.task(id:)`
+                // déclenché par le même changement s'occupe de (re)charger.
+                if let player {
+                    if !isPlaying {
+                        player.playImmediately(atRate: playbackRate)
+                        isPlaying = true
+                    }
+                }
+            } else {
+                // Page quittée : la lecture s'arrête, le lecteur reste prêt.
+                hideControlsTask?.cancel()
+                player?.pause()
+                isPlaying = false
+            }
         }
         .onDisappear {
             isDisappeared = true
@@ -430,6 +462,19 @@ struct VideoPlayerView: View {
     // MARK: - Chargement
 
     private func load() async {
+        // Retour sur une page encore en mémoire : le lecteur existe, on
+        // reprend simplement la lecture.
+        if let player {
+            if !isPlaying {
+                player.playImmediately(atRate: playbackRate)
+                isPlaying = true
+            }
+            return
+        }
+        guard !isLoadingVideo else { return }
+        isLoadingVideo = true
+        defer { isLoadingVideo = false }
+
         async let posterTask: UIImage? = ThumbnailProvider.shared.thumbnail(driveId: driveId, fileId: file.id, pixels: 400)
         async let categoriesTask: [Category]? = try? service.categories(driveId: driveId)
 
@@ -489,7 +534,7 @@ struct VideoPlayerView: View {
     /// endpoint de téléchargement. Deux nouvelles tentatives suffisent à
     /// absorber ce court délai sans demander une action manuelle.
     private func retryPlaybackAfterProcessingDelay(lastError: String) async {
-        guard !isDisappeared else { return }
+        guard !isDisappeared, isActive else { return }
         guard playbackRetryCount < 2 else {
             isPlaying = false
             errorMessage = "Lecture impossible : \(lastError)"
@@ -506,7 +551,7 @@ struct VideoPlayerView: View {
         } catch {
             return
         }
-        guard !isDisappeared,
+        guard !isDisappeared, isActive,
               let asset = await VideoAssetCache.shared.asset(driveId: driveId, fileId: file.id)
         else { return }
         startPlayback(asset: asset)

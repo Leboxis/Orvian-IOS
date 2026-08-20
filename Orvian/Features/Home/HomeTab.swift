@@ -204,7 +204,13 @@ struct DirectoryView: View {
             viewModel: activeViewModel,
             onOpenDirectory: onOpenFolder,
             onOpenFile: { file, siblings in
-                router.open(file, siblings: siblings)
+                router.open(
+                    file,
+                    siblings: siblings,
+                    filters: filters,
+                    searchText: searchText,
+                    viewModel: activeViewModel
+                )
             },
             searchText: searchText,
             filters: filters,
@@ -439,7 +445,13 @@ struct DirectoryView: View {
 
     private func openRandomFile() {
         guard let random = playableFiles.randomElement() else { return }
-        router.open(random, siblings: playableFiles)
+        router.open(
+            random,
+            siblings: playableFiles,
+            filters: filters,
+            searchText: searchText,
+            viewModel: activeViewModel
+        )
     }
 
     private var allSelected: Bool {

@@ -119,4 +119,49 @@ struct FileFilters: Equatable, Hashable {
     var isActive: Bool {
         sort != .original || orientation != nil || media != .all
     }
+
+    /// Applique les filtres (média, orientation vidéo, recherche) et le tri
+    /// local (durée) sur une liste brute. Partagé entre la grille et la
+    /// visionneuse pour garantir exactement le même ordre des éléments.
+    ///
+    /// Les tris dates/type/poids sont déjà appliqués par le serveur
+    /// (`order_by[]` + `order`) sur toute la pagination : les re-trier ici
+    /// serait inutile et pourrait contredire l'ordre des pages. Seule la durée,
+    /// qui ne peut pas être exprimée par l'API, est triée localement.
+    @MainActor
+    func visible(_ items: [DriveFile], searchText: String, mediaMetadata: MediaMetadataStore) -> [DriveFile] {
+        var result = items
+
+        switch media {
+        case .all: break
+        case .videos: result = result.filter(\.isVideo)
+        case .images: result = result.filter(\.isImage)
+        case .other: result = result.filter { !$0.isVideo && !$0.isImage }
+        }
+
+        if let orientation {
+            result = result.filter { file in
+                guard file.isVideo, let info = mediaMetadata.info(for: file.id) else { return false }
+                return info.orientation == orientation
+            }
+        }
+
+        let keywords = searchText
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .split(whereSeparator: \.isWhitespace)
+            .map(String.init)
+        if !keywords.isEmpty {
+            result = result.filter { $0.matchesSearchKeywords(keywords) }
+        }
+
+        if sort == .duration {
+            result = result.sorted {
+                let lhs = mediaMetadata.info(for: $0.id)?.duration ?? -1
+                let rhs = mediaMetadata.info(for: $1.id)?.duration ?? -1
+                return direction == .descending ? lhs > rhs : lhs < rhs
+            }
+        }
+
+        return result
+    }
 }

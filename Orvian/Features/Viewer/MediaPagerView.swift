@@ -1,27 +1,42 @@
 import SwiftUI
 
-/// Visionneuse plein écran : pager, zoom, double-tap, fermeture au swipe.
-struct PhotoViewerView: View {
-    let context: PhotoViewerContext
+/// Visionneuse plein écran de médias : pager horizontal sur les images et
+/// vidéos voisines. L'ordre et la composition de la liste respectent le tri et
+/// les filtres de la grille d'origine (média, orientation, recherche, tri par
+/// durée), et la pagination continue depuis le curseur de cette grille.
+struct MediaPagerView: View {
+    let context: MediaViewerContext
 
     @Environment(\.dismiss) private var dismiss
-    @State private var pageIndex: Int
+    /// Média affiché : identifié par son ID (et non par un index) pour rester
+    /// stable quand la liste se réordonne ou s'allonge pendant la pagination.
+    @State private var selectedFileID: Int
+    /// Médias affichés : instantané de la grille, complété par les pages
+    /// suivantes chargées depuis la vue-modèle d'origine.
+    @State private var files: [DriveFile]
 
-    init(context: PhotoViewerContext) {
+    init(context: MediaViewerContext) {
         self.context = context
-        _pageIndex = State(initialValue: context.startIndex)
+        let firstID = context.files.indices.contains(context.startIndex)
+            ? context.files[context.startIndex].id
+            : context.files.first?.id ?? 0
+        _selectedFileID = State(initialValue: firstID)
+        _files = State(initialValue: context.files)
     }
 
     var body: some View {
         ZStack {
             Color.black.ignoresSafeArea()
 
-            TabView(selection: $pageIndex) {
-                ForEach(Array(context.files.enumerated()), id: \.element.id) { index, file in
-                    ZoomablePhotoPage(file: file, driveId: context.driveId) {
-                        dismiss()
-                    }
-                    .tag(index)
+            TabView(selection: $selectedFileID) {
+                ForEach(files) { file in
+                    MediaPagerPage(
+                        file: file,
+                        driveId: context.driveId,
+                        isActive: selectedFileID == file.id,
+                        onClose: { dismiss() }
+                    )
+                    .tag(file.id)
                 }
             }
             .tabViewStyle(.page(indexDisplayMode: .never))
@@ -30,44 +45,115 @@ struct PhotoViewerView: View {
         }
         .statusBarHidden(false)
         .persistentSystemOverlays(.hidden)
+        .onChange(of: selectedFileID) { _, newID in
+            guard let index = files.firstIndex(where: { $0.id == newID }) else { return }
+            // Consigne la consultation pour les « médias les plus consultés ».
+            MediaUsageStore.recordView(driveId: context.driveId, file: files[index])
+            // Proche de la fin de la liste : demande la page suivante à la
+            // vue-modèle de la grille, qui reprend là où elle s'était arrêtée.
+            if let viewModel = context.viewModel, index >= files.count - 2 {
+                Task { await viewModel.loadMoreIfNeeded() }
+            }
+        }
+        .onChange(of: context.viewModel?.items) { _, _ in
+            refreshFiles()
+        }
+    }
+
+    /// Reconstruit la liste des médias après un chargement de page : réapplique
+    /// les mêmes filtres/tri que la grille d'origine, puis conserve la position.
+    private func refreshFiles() {
+        guard let viewModel = context.viewModel else { return }
+        let visible = context.filters.visible(
+            viewModel.items,
+            searchText: context.searchText,
+            mediaMetadata: MediaMetadataStore.shared
+        )
+        let media = visible.filter { $0.isImage || $0.isVideo }
+        guard media.map(\.id) != files.map(\.id) else { return }
+        files = media
+        if !files.contains(where: { $0.id == selectedFileID }) {
+            selectedFileID = files.first?.id ?? 0
+        }
+    }
+
+    private var currentFile: DriveFile? {
+        files.first { $0.id == selectedFileID }
     }
 
     @ViewBuilder
     private var overlay: some View {
         VStack {
-            HStack(spacing: 12) {
-                Button {
-                    dismiss()
-                } label: {
-                    Image(systemName: "xmark")
-                        .font(.system(size: 15, weight: .semibold))
-                        .foregroundStyle(.white)
-                        .padding(10)
-                        .background(.ultraThinMaterial, in: Circle())
-                }
-                .accessibilityLabel("Fermer")
+            // Les vidéos possèdent leur propre barre (titre, favori, tags,
+            // transport, fermer) : on n'ajoute rien au-dessus. Les images, en
+            // revanche, n'ont aucun chrome propre : la barre du pager les sert.
+            if let currentFile, currentFile.isImage {
+                HStack(spacing: 12) {
+                    Button {
+                        dismiss()
+                    } label: {
+                        Image(systemName: "xmark")
+                            .font(.system(size: 15, weight: .semibold))
+                            .foregroundStyle(.white)
+                            .padding(10)
+                            .background(.ultraThinMaterial, in: Circle())
+                    }
+                    .accessibilityLabel("Fermer")
 
-                if context.files.indices.contains(pageIndex) {
                     VStack(spacing: 1) {
-                        Text(context.files[pageIndex].name)
+                        Text(currentFile.name)
                             .font(.footnote.weight(.medium))
                             .foregroundStyle(.white)
                             .lineLimit(1)
-                        Text("\(pageIndex + 1) / \(context.files.count)")
-                            .font(.caption2)
-                            .foregroundStyle(.white.opacity(0.7))
+                        if let index = files.firstIndex(where: { $0.id == selectedFileID }) {
+                            Text("\(index + 1) / \(files.count)")
+                                .font(.caption2)
+                                .foregroundStyle(.white.opacity(0.7))
+                        }
                     }
                     .frame(maxWidth: .infinity)
                     .padding(.horizontal, 8)
-                } else {
-                    Spacer()
-                }
 
-                Color.clear.frame(width: 35, height: 35)
+                    Color.clear.frame(width: 35, height: 35)
+                }
+                .padding(.horizontal, 14)
+                .padding(.top, 6)
             }
-            .padding(.horizontal, 14)
-            .padding(.top, 6)
             Spacer()
+        }
+    }
+}
+
+/// Une page du pager : image (miniature → haute résolution, zoom, fermeture au
+/// swipe vertical) ou vidéo (lecteur personnalisé qui ne lit que lorsqu'elle
+/// est l'élément courant du pager).
+private struct MediaPagerPage: View {
+    let file: DriveFile
+    let driveId: Int
+    let isActive: Bool
+    let onClose: () -> Void
+
+    var body: some View {
+        Group {
+            if file.isImage {
+                ZoomablePhotoPage(file: file, driveId: driveId, onClose: onClose)
+            } else if file.isVideo {
+                VideoPlayerView(file: file, driveId: driveId, isActive: isActive)
+            } else {
+                // Défensif : le pager ne contient que des images et des vidéos.
+                VStack(spacing: 12) {
+                    Image(systemName: "doc.fill")
+                        .font(.system(size: 44))
+                        .foregroundStyle(.white.opacity(0.6))
+                    Text(file.name)
+                        .font(.footnote)
+                        .foregroundStyle(.white.opacity(0.7))
+                        .lineLimit(2)
+                        .multilineTextAlignment(.center)
+                        .padding(.horizontal, 24)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
         }
     }
 }

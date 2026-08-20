@@ -29,7 +29,13 @@ struct FavoritesView: View {
                     path.append(folder)
                 },
                 onOpenFile: { file, siblings in
-                    router.open(file, siblings: siblings)
+                    router.open(
+                        file,
+                        siblings: siblings,
+                        filters: filters,
+                        searchText: "",
+                        viewModel: viewModel
+                    )
                 },
                 filters: filters,
                 scrollToTopRequest: scrollToTopRequest

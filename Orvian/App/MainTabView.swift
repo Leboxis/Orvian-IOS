@@ -61,11 +61,8 @@ struct MainTabView: View {
         .sheet(isPresented: $showUploadSheet) {
             UploadProgressSheet(manager: uploadManager)
         }
-        .fullScreenCover(item: $router.photoContext) { context in
-            PhotoViewerView(context: context)
-        }
-        .fullScreenCover(item: $router.videoFile) { file in
-            VideoPlayerView(file: file, driveId: drive.id)
+        .fullScreenCover(item: $router.mediaContext) { context in
+            MediaPagerView(context: context)
         }
         .fullScreenCover(item: $router.textFile) { file in
             TextFileViewer(file: file, driveId: drive.id)

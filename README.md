@@ -19,11 +19,12 @@ visionneuse photos avec zoom, lecteur vidéo AVPlayer quasi instantané.
 - **Profil** : compte Infomaniak, drive utilisé, version, déconnexion
 - **Cartes uniformes** : zone de miniature carrée stricte — toutes les cartes
   ont exactement la même taille, quelle que soit l'orientation d'origine
-- **Visionneuse photos** : pager plein écran, pinch zoom, double-tap, fermeture au swipe vertical,
-  miniature instantanée puis haute résolution sous-échantillonnée (ImageIO)
-- **Lecteur vidéo** : interface personnalisée, barres hors de la zone de lecture —
-  titre et fermer en haut, play/pause, barre de progression, muet, AirPlay,
-  favori et choix d'un tag en bas — lecture via URL temporaire (pré-résolue en amont)
+- **Visionneuse de médias** : pager plein écran unique pour les images **et** les vidéos —
+  le swipe horizontal passe au média suivant/précédent dans l'ordre du tri et des filtres
+  de l'onglet d'origine, avec continuation de la pagination. Images : pinch zoom, double-tap,
+  fermeture au swipe vertical, miniature instantanée puis haute résolution sous-échantillonnée (ImageIO).
+  Vidéos : interface personnalisée (titre et fermer en haut, play/pause, progression, muet,
+  AirPlay, favori et tags), lecture via URL temporaire, seule la page courante lit
 - **Favoris & tags sur les cartes** : étoile dorée en haut à droite des favoris,
   pastilles colorées des tags à côté du poids (`with=is_favorite,categories`)
 - **Ajout** : bouton « + » dans les dossiers — créer un dossier, importer un
