@@ -138,14 +138,25 @@ final class FileGridViewModel {
     // MARK: - Favoris
 
     /// Bascule optimiste : l'étoile change immédiatement, retour arrière si l'API refuse.
+    /// Dans l'onglet Favoris, retirer l'étoile retire aussi la carte de la
+    /// grille : la liste reflète alors l'état renvoyé par l'API.
     func toggleFavorite(_ file: DriveFile) async {
         guard let index = items.firstIndex(where: { $0.id == file.id }) else { return }
         let newValue = !(file.isFavorite ?? false)
-        items[index].isFavorite = newValue
+        let shouldRemove = source == .favorites && !newValue
+        if shouldRemove {
+            items.remove(at: index)
+        } else {
+            items[index].isFavorite = newValue
+        }
         do {
             try await service.setFavorite(driveId: driveId, fileId: file.id, favorite: newValue)
         } catch {
-            items[index].isFavorite = file.isFavorite
+            if shouldRemove {
+                items.insert(file, at: min(index, items.count))
+            } else if let restoredIndex = items.firstIndex(where: { $0.id == file.id }) {
+                items[restoredIndex].isFavorite = file.isFavorite
+            }
             errorMessage = "Impossible de modifier le favori : \((error as? APIError)?.errorDescription ?? error.localizedDescription)"
         }
     }

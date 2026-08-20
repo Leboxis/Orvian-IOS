@@ -71,6 +71,9 @@ struct MainTabView: View {
         .fullScreenCover(item: $router.videoFile) { file in
             VideoPlayerView(file: file, driveId: drive.id)
         }
+        .fullScreenCover(item: $router.textFile) { file in
+            TextFileViewer(file: file, driveId: drive.id)
+        }
     }
 
     @ViewBuilder

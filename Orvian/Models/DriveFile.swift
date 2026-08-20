@@ -30,6 +30,12 @@ struct DriveFile: Codable, Identifiable, Hashable {
     var isImage: Bool { fileKind == .image }
     var isVideo: Bool { fileKind == .video }
 
+    /// Fichier texte brut (extension .txt) : seul ce format est garanti
+    /// encodé en texte simple et ouvrable dans la visionneuse de texte.
+    var isPlainText: Bool {
+        (name as NSString).pathExtension.lowercased() == "txt"
+    }
+
     var fileKind: FileKind {
         FileKind(extensionType: extensionType, mimeType: mimeType, fileName: name, isDirectory: isDirectory)
     }

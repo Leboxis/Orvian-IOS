@@ -227,6 +227,20 @@ extension Endpoint {
         Endpoint(path: "/3/drive/\(driveId)/upload/session/start")
     }
 
+    /// Remplace le contenu d'un fichier existant (nouvelle version) : avec
+    /// `file_id`, le nom, le dossier et le conflit sont déduits par l'API.
+    static func uploadContent(driveId: Int, fileId: Int, totalSize: Int, lastModifiedAt: Int) -> Endpoint {
+        Endpoint(
+            path: "/3/drive/\(driveId)/upload",
+            query: [
+                URLQueryItem(name: "file_id", value: String(fileId)),
+                URLQueryItem(name: "total_size", value: String(totalSize)),
+                URLQueryItem(name: "last_modified_at", value: String(lastModifiedAt)),
+                URLQueryItem(name: "with", value: "capabilities,conversion_capabilities,sorted_name"),
+            ]
+        )
+    }
+
     /// Ferme la session et renvoie le fichier définitivement créé.
     static func finishUploadSession(driveId: Int, token: String) -> Endpoint {
         Endpoint(

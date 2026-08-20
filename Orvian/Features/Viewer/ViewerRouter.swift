@@ -16,6 +16,7 @@ struct PhotoViewerContext: Identifiable {
 final class ViewerRouter {
     var photoContext: PhotoViewerContext?
     var videoFile: DriveFile?
+    var textFile: DriveFile?
 
     let driveId: Int
 
@@ -31,6 +32,8 @@ final class ViewerRouter {
             let images = siblings.filter { $0.isImage }
             let index = images.firstIndex(where: { $0.id == file.id }) ?? 0
             photoContext = PhotoViewerContext(driveId: driveId, files: images, startIndex: index)
+        } else if file.isPlainText {
+            textFile = file
         }
     }
 }

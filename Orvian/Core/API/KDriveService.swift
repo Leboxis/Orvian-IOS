@@ -302,6 +302,21 @@ struct KDriveService {
         )
     }
 
+    /// Remplace le contenu d'un fichier existant (nouvelle version) : utilisé
+    /// par la visionneuse de texte pour enregistrer les modifications.
+    func uploadContent(driveId: Int, fileId: Int, data: Data) async throws {
+        try await api.post(
+            .uploadContent(
+                driveId: driveId,
+                fileId: fileId,
+                totalSize: data.count,
+                lastModifiedAt: Int(Date().timeIntervalSince1970)
+            ),
+            body: data,
+            contentType: "text/plain; charset=utf-8"
+        )
+    }
+
     /// Upload d'un fichier local par streaming (sans buffer Data en mémoire) dans `directoryId`.
     func uploadFile(
         driveId: Int,
