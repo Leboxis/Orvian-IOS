@@ -94,7 +94,13 @@ struct MainTabView: View {
                 )
             }
             tabPane(.profile) {
-                ProfileView(session: session, router: router, path: $navState.profilePath, isSelected: tab == .profile)
+                ProfileView(
+                    session: session,
+                    router: router,
+                    path: $navState.profilePath,
+                    isSelected: tab == .profile,
+                    refreshRequest: navState.profileRefreshRequest
+                )
             }
         }
     }

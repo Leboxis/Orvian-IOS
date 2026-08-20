@@ -96,6 +96,25 @@ struct FileFilters: Equatable {
     var orientation: Orientation? = nil
     var media: MediaFilter = .all
 
+    /// Tris exprimables par l'API kDrive (`order_by[]`) : les appliquer côté
+    /// serveur garantit que la pagination entière respecte le tri, pas
+    /// seulement les éléments déjà chargés. `nil` pour les tris restant
+    /// locaux (durée : calculée à partir des métadonnées vidéo) ou l'ordre
+    /// serveur d'origine.
+    var serverOrderBy: [String]? {
+        switch sort {
+        case .original, .duration: return nil
+        case .modifiedDate: return ["last_modified_at"]
+        case .addedDate: return ["added_at"]
+        case .type: return ["type"]
+        case .size: return ["size"]
+        }
+    }
+
+    var serverOrder: String {
+        direction == .descending ? "desc" : "asc"
+    }
+
     /// Vrai dès qu'un tri ou un filtre diffère du comportement par défaut.
     var isActive: Bool {
         sort != .original || orientation != nil || media != .all

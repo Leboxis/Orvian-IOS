@@ -13,6 +13,9 @@ final class TabNavigationState {
     var favoritesScrollToTopRequest = 0
     var tagsPath = NavigationPath()
     var profilePath = NavigationPath()
+    /// Incrémente à chaque second appui sur l'onglet Profil afin de demander
+    /// un retour à la racine ET un rafraîchissement des sections.
+    var profileRefreshRequest = 0
     var settingsPath = NavigationPath()
 
     func reset(tab: AppTab, scrollFavoritesToTop: Bool = true) {
@@ -28,6 +31,7 @@ final class TabNavigationState {
             tagsPath = NavigationPath()
         case .profile:
             profilePath = NavigationPath()
+            profileRefreshRequest += 1
         case .settings:
             settingsPath = NavigationPath()
         }

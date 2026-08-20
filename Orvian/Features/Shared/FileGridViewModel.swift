@@ -17,6 +17,10 @@ final class FileGridViewModel {
 
     private var cursor: String?
     private var loadedOnce = false
+    /// Tri serveur en cours (`order_by[]` + sens) : conservé pour que la
+    /// pagination continue dans le même ordre que la première page.
+    private var orderBy: [String] = []
+    private var order = "asc"
 
     let source: FileSource
     let driveId: Int
@@ -37,12 +41,25 @@ final class FileGridViewModel {
     }
 
     /// Rafraîchit en conservant les anciennes cartes à l'écran.
-    func reload() async {
+    func reload(sortedBy: FileFilters? = nil) async {
+        if let sortedBy {
+            // Un tri serveur (dates, type, poids) remplace l'ordre par défaut
+            // ; les tris restants (durée, médias, orientation) sont locaux et
+            // n'exigent aucune relecture ordonnée.
+            orderBy = sortedBy.serverOrderBy ?? []
+            order = sortedBy.serverOrder
+        }
         isInitialLoading = items.isEmpty
         errorMessage = nil
         do {
             async let categoriesTask: Void = CategoryLibrary.shared.ensureLoaded(for: driveId)
-            let page = try await service.page(source, driveId: driveId, cursor: nil)
+            let page = try await service.page(
+                source,
+                driveId: driveId,
+                cursor: nil,
+                orderBy: orderBy.isEmpty ? nil : orderBy,
+                order: order
+            )
             await categoriesTask
             guard !Task.isCancelled else { return }
             categoriesById = CategoryLibrary.shared.categories(for: driveId)
@@ -63,7 +80,13 @@ final class FileGridViewModel {
         isLoadingMore = true
         defer { isLoadingMore = false }
         do {
-            let page = try await service.page(source, driveId: driveId, cursor: cursor)
+            let page = try await service.page(
+                source,
+                driveId: driveId,
+                cursor: cursor,
+                orderBy: orderBy.isEmpty ? nil : orderBy,
+                order: order
+            )
             guard !Task.isCancelled else { return }
             let existing = Set(items.map(\.id))
             let filtered = filterItemsIfNeeded(page.data ?? [])

@@ -6,6 +6,9 @@ struct ProfileView: View {
     let router: ViewerRouter
     @Binding var path: NavigationPath
     var isSelected: Bool = false
+    /// Incrémenté à chaque second appui sur l'onglet Profil (retour à la
+    /// racine + rafraîchissement des sections).
+    var refreshRequest: Int = 0
 
     @State private var recentUploads: [DriveFile] = []
     @State private var frequentFavorites: [DriveFile] = []
@@ -17,7 +20,6 @@ struct ProfileView: View {
     var body: some View {
         NavigationStack(path: $path) {
             List {
-                headerSection
                 recentUploadsSection
                 frequentFavoritesSection
                 trashSection
@@ -39,34 +41,10 @@ struct ProfileView: View {
                 }
             }
         }
-    }
-
-    // MARK: - Sections
-
-    private var headerSection: some View {
-        Section {
-            VStack(spacing: 10) {
-                ZStack {
-                    Circle()
-                        .fill(
-                            LinearGradient(
-                                colors: [Color(red: 0.26, green: 0.52, blue: 0.96), Color(red: 0.56, green: 0.38, blue: 0.94)],
-                                startPoint: .topLeading,
-                                endPoint: .bottomTrailing
-                            )
-                        )
-                    Image(systemName: "person.crop.circle.fill")
-                        .font(.system(size: 17))
-                        .foregroundStyle(.white)
-                }
-                .frame(width: 30, height: 30)
-
-                Text("Profil")
-                    .font(.headline)
+        .onChange(of: refreshRequest) { _, _ in
+            Task {
+                await loadPreviews()
             }
-            .frame(maxWidth: .infinity)
-            .padding(.vertical, 8)
-            .listRowBackground(Color.clear)
         }
     }
 

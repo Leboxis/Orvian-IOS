@@ -74,6 +74,15 @@ struct FileGridView: View {
             .task(id: viewModel.source) {
                 await viewModel.loadIfNeeded()
             }
+            // Un changement de tri (dates, type, poids) relit le serveur avec
+            // l'ordre demandé : la pagination entière respecte alors le tri,
+            // et pas seulement les éléments déjà chargés.
+            .onChange(of: filters.sort) { _, _ in
+                Task { await viewModel.reload(sortedBy: filters) }
+            }
+            .onChange(of: filters.direction) { _, _ in
+                Task { await viewModel.reload(sortedBy: filters) }
+            }
             .task(id: filterTaskKey) {
                 guard needsVideoMetadata else { return }
                 await mediaMetadata.resolveAll(driveId: viewModel.driveId, items: viewModel.items)

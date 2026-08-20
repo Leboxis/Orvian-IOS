@@ -9,6 +9,17 @@ struct Endpoint {
     static func array(_ name: String, _ values: [String]) -> [URLQueryItem] {
         values.map { URLQueryItem(name: "\(name)[]", value: $0) }
     }
+
+    /// Remplace le tri par défaut par `order_by[]=…&order=asc|desc`.
+    /// Sans tri demandé, conserve l'ordre serveur d'origine.
+    func ordering(_ orderBy: [String], order: String) -> Endpoint {
+        guard !orderBy.isEmpty else { return self }
+        var copy = self
+        copy.query.removeAll { $0.name == "order_by[]" || $0.name == "order" }
+        copy.query.append(contentsOf: orderBy.map { URLQueryItem(name: "order_by[]", value: $0) })
+        copy.query.append(URLQueryItem(name: "order", value: order))
+        return copy
+    }
 }
 
 // MARK: - Endpoints kDrive utilisés par l'app

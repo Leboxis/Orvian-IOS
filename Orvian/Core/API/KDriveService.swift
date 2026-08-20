@@ -73,17 +73,30 @@ struct KDriveService {
 
     // MARK: - Listes paginées
 
-    func page(_ source: FileSource, driveId: Int, cursor: String?) async throws -> CursorPage<DriveFile> {
+    func page(
+        _ source: FileSource,
+        driveId: Int,
+        cursor: String?,
+        orderBy: [String]? = nil,
+        order: String = "asc"
+    ) async throws -> CursorPage<DriveFile> {
+        // Le tri demandé remplace l'ordre serveur par défaut sur toutes les
+        // pages, pour que la pagination entière respecte le tri choisi.
+        let ordering: (Endpoint) -> Endpoint = { $0.ordering(orderBy ?? [], order: order) }
+
         let endpoint: Endpoint
         switch source {
         case let .directory(directoryId):
-            endpoint = .directoryContent(driveId: driveId, directoryId: directoryId, cursor: cursor)
+            endpoint = ordering(.directoryContent(driveId: driveId, directoryId: directoryId, cursor: cursor))
         case let .favorites(limit):
-            endpoint = .favorites(driveId: driveId, cursor: cursor, limit: limit)
+            endpoint = ordering(.favorites(driveId: driveId, cursor: cursor, limit: limit))
         case let .recents(limit):
             // 1) Priorité /files/last_modified (fichiers modifiés/uploadés récemment sur le drive)
             do {
-                let res = try await api.get(CursorPage<DriveFile>.self, .lastModified(driveId: driveId, cursor: cursor, limit: limit))
+                let res = try await api.get(
+                    CursorPage<DriveFile>.self,
+                    ordering(.lastModified(driveId: driveId, cursor: cursor, limit: limit))
+                )
                 if let data = res.data, !data.isEmpty {
                     return res
                 }
@@ -91,7 +104,10 @@ struct KDriveService {
 
             // 2) Fallback /files/recents
             do {
-                let res = try await api.get(CursorPage<DriveFile>.self, .recents(driveId: driveId, cursor: cursor, limit: limit))
+                let res = try await api.get(
+                    CursorPage<DriveFile>.self,
+                    ordering(.recents(driveId: driveId, cursor: cursor, limit: limit))
+                )
                 if let data = res.data, !data.isEmpty {
                     return res
                 }
@@ -99,23 +115,26 @@ struct KDriveService {
 
             // 3) Fallback /files/activities
             do {
-                let res = try await api.get(CursorPage<DriveFile>.self, .activities(driveId: driveId, cursor: cursor, limit: limit))
+                let res = try await api.get(
+                    CursorPage<DriveFile>.self,
+                    ordering(.activities(driveId: driveId, cursor: cursor, limit: limit))
+                )
                 if let data = res.data, !data.isEmpty {
                     return res
                 }
             } catch { }
 
             // 4) Dernier recours : recherche globale
-            endpoint = .search(driveId: driveId, query: "", directoryId: nil, cursor: cursor, limit: limit)
+            endpoint = ordering(.search(driveId: driveId, query: "", directoryId: nil, cursor: cursor, limit: limit))
         case let .mostViewed(limit):
             let files = MediaUsageStore.mostViewedFiles(driveId: driveId, limit: limit)
             return CursorPage<DriveFile>(data: files, cursor: nil, hasMore: false)
         case let .category(categoryId):
-            endpoint = .categoryFiles(driveId: driveId, categoryId: categoryId, cursor: cursor)
+            endpoint = ordering(.categoryFiles(driveId: driveId, categoryId: categoryId, cursor: cursor))
         case .trash:
-            endpoint = .trashContent(driveId: driveId, cursor: cursor)
+            endpoint = ordering(.trashContent(driveId: driveId, cursor: cursor))
         case let .search(query, directoryId):
-            endpoint = .search(driveId: driveId, query: query, directoryId: directoryId, cursor: cursor)
+            endpoint = ordering(.search(driveId: driveId, query: query, directoryId: directoryId, cursor: cursor))
         }
         return try await api.get(CursorPage<DriveFile>.self, endpoint)
     }
