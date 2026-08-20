@@ -56,10 +56,10 @@ struct ProfileView: View {
                             )
                         )
                     Image(systemName: "person.crop.circle.fill")
-                        .font(.system(size: 42))
+                        .font(.system(size: 17))
                         .foregroundStyle(.white)
                 }
-                .frame(width: 76, height: 76)
+                .frame(width: 30, height: 30)
 
                 Text("Profil")
                     .font(.headline)
@@ -97,23 +97,26 @@ struct ProfileView: View {
                 }
             }
         } header: {
-            HStack {
-                Text("Uploads récents")
-                Spacer()
-                if let drive = session.selectedDrive {
-                    NavigationLink {
-                        RecentFilesView(
-                            driveId: drive.id,
-                            title: "Uploads récents",
-                            source: .recents(limit: 12),
-                            router: router
-                        )
-                    } label: {
+            if let drive = session.selectedDrive {
+                NavigationLink {
+                    RecentFilesView(
+                        driveId: drive.id,
+                        title: "Uploads récents",
+                        source: .recents(limit: 12),
+                        router: router
+                    )
+                } label: {
+                    HStack {
+                        Text("Uploads récents")
+                            .foregroundStyle(.primary)
+                        Spacer()
                         Image(systemName: "chevron.right")
                             .font(.caption.weight(.bold))
                             .foregroundStyle(.secondary)
                     }
                 }
+            } else {
+                Text("Uploads récents")
             }
         }
     }
@@ -145,23 +148,26 @@ struct ProfileView: View {
                 }
             }
         } header: {
-            HStack {
-                Text("Médias les plus consultés")
-                Spacer()
-                if let drive = session.selectedDrive {
-                    NavigationLink {
-                        RecentFilesView(
-                            driveId: drive.id,
-                            title: "Médias les plus consultés",
-                            source: .mostViewed(limit: 12),
-                            router: router
-                        )
-                    } label: {
+            if let drive = session.selectedDrive {
+                NavigationLink {
+                    RecentFilesView(
+                        driveId: drive.id,
+                        title: "Médias les plus consultés",
+                        source: .mostViewed(limit: 12),
+                        router: router
+                    )
+                } label: {
+                    HStack {
+                        Text("Médias les plus consultés")
+                            .foregroundStyle(.primary)
+                        Spacer()
                         Image(systemName: "chevron.right")
                             .font(.caption.weight(.bold))
                             .foregroundStyle(.secondary)
                     }
                 }
+            } else {
+                Text("Médias les plus consultés")
             }
         }
     }

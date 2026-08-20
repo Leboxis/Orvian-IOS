@@ -353,6 +353,8 @@ struct FileDetailSheet: View {
     /// Tags réellement appliqués au fichier (source : fiche individuelle).
     @State private var appliedCategories: [Category] = []
     @State private var isFavorite: Bool
+    /// Chemin complet depuis la racine du drive, tel que renvoyé par l'API.
+    @State private var filePath: String?
     @State private var showDeleteConfirm = false
     @State private var showRenameAlert = false
     @State private var renameText = ""
@@ -463,11 +465,29 @@ struct FileDetailSheet: View {
             if let size = file.size, !file.isDirectory {
                 labeledRow("Taille", ByteFormatter.string(fromBytes: size))
             }
+            if let filePath, !filePath.isEmpty {
+                locationRow(filePath)
+            }
             labeledRow("Ajouté", dateText(file.addedAt))
             labeledRow("Modifié", dateText(file.lastModifiedAt))
             if !file.isDirectory, !isTrashed {
                 favoriteRow
             }
+        }
+    }
+
+    /// Emplacement du fichier depuis la racine du drive.
+    private func locationRow(_ path: String) -> some View {
+        HStack(alignment: .top, spacing: 12) {
+            Text("Emplacement")
+                .foregroundStyle(.secondary)
+            Spacer()
+            Text(path)
+                .font(.footnote)
+                .foregroundStyle(.primary)
+                .multilineTextAlignment(.trailing)
+                .lineLimit(3)
+                .truncationMode(.middle)
         }
     }
 
@@ -583,12 +603,20 @@ struct FileDetailSheet: View {
     }
 
     private func loadFileInfo() async {
-        guard !isTrashed else { return }
+        guard !isTrashed else {
+            // Sans réseau inutile : la liste fournit déjà le chemin quand l'API le renvoie.
+            filePath = file.path
+            return
+        }
+        filePath = file.path
         await CategoryLibrary.shared.ensureLoaded(for: driveId)
         let byId = CategoryLibrary.shared.categories(for: driveId)
         if let info = try? await service.fileInfo(driveId: driveId, fileId: file.id) {
             appliedCategories = (info.categories ?? []).compactMap { byId[$0.categoryId] }
             isFavorite = info.isFavorite == true
+            if let infoPath = info.path, !infoPath.isEmpty {
+                filePath = infoPath
+            }
         } else {
             // Repli : les catégories éventuellement fournies par la liste.
             appliedCategories = (file.categories ?? []).compactMap { byId[$0.categoryId] }

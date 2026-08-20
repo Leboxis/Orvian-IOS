@@ -23,8 +23,8 @@ struct DriveFile: Codable, Identifiable, Hashable {
     /// Catégories (tags) du fichier — renvoyées uniquement avec `with=categories`.
     var categories: [FileCategory]?
     /// Timestamps Unix (secondes)
-    let addedAt: Double?
-    let lastModifiedAt: Double?
+    var addedAt: Double?
+    var lastModifiedAt: Double?
 
     var isDirectory: Bool { type == "dir" }
     var isImage: Bool { fileKind == .image }

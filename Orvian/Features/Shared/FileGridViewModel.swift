@@ -90,9 +90,20 @@ final class FileGridViewModel {
     /// sans déclencher plusieurs rechargements réseau successifs.
     func mergeUploaded(_ uploadedFiles: [DriveFile]) {
         guard !uploadedFiles.isEmpty else { return }
-        let uploadedIDs = Set(uploadedFiles.map(\.id))
+        let now = Date().timeIntervalSince1970
+        // La réponse d'upload n'annonce pas toujours les dates ; les compléter
+        // avec l'instant de l'import garantit qu'un tri « Date d'importation »
+        // ou « Date de modification » place le fichier fraîchement uploadé
+        // tout en haut au lieu de le reléguer hors de la première page.
+        let merged = uploadedFiles.map { file -> DriveFile in
+            var file = file
+            if file.addedAt == nil { file.addedAt = now }
+            if file.lastModifiedAt == nil { file.lastModifiedAt = now }
+            return file
+        }
+        let uploadedIDs = Set(merged.map(\.id))
         items.removeAll { uploadedIDs.contains($0.id) }
-        items.append(contentsOf: uploadedFiles)
+        items.append(contentsOf: merged)
         items.sort { lhs, rhs in
             if lhs.isDirectory != rhs.isDirectory {
                 return lhs.isDirectory
