@@ -59,7 +59,7 @@ final class MediaMetadataStore: ObservableObject {
     func unresolvedVideoIDs(in items: [DriveFile]) -> Set<Int> {
         Set(
             items.lazy
-                .filter { $0.isVideo && cache[$0.id] == nil && !inFlight.contains($0.id) }
+                .filter { [self] in $0.isVideo && cache[$0.id] == nil && !inFlight.contains($0.id) }
                 .map(\.id)
         )
     }
