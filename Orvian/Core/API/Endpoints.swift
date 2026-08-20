@@ -36,13 +36,14 @@ extension Endpoint {
     }
 
     /// Contenu d'un dossier (dossiers en premier, puis fichiers, par nom).
-    /// `with=is_favorite,categories` : ces champs ne sont renvoyés que sur
-    /// demande explicite (cf. app kDrive officielle).
+    /// `with=is_favorite,categories,path` : ces champs ne sont renvoyés que sur
+    /// demande explicite (cf. app kDrive officielle). `path` fournit le chemin
+    /// complet depuis la racine du drive, affiché dans la fiche « Détails ».
     static func directoryContent(driveId: Int, directoryId: Int, cursor: String?, limit: Int = 60) -> Endpoint {
         Endpoint(
             path: "/3/drive/\(driveId)/files/\(directoryId)/files",
             query: [
-                URLQueryItem(name: "with", value: "is_favorite,categories"),
+                URLQueryItem(name: "with", value: "is_favorite,categories,path"),
                 URLQueryItem(name: "limit", value: String(limit)),
                 URLQueryItem(name: "order_by[]", value: "type"),
                 URLQueryItem(name: "order_by[]", value: "name"),
@@ -56,7 +57,7 @@ extension Endpoint {
         Endpoint(
             path: "/3/drive/\(driveId)/files/last_modified",
             query: [
-                URLQueryItem(name: "with", value: "is_favorite,categories"),
+                URLQueryItem(name: "with", value: "is_favorite,categories,path"),
                 URLQueryItem(name: "limit", value: String(limit)),
             ] + (cursor.map { [URLQueryItem(name: "cursor", value: $0)] } ?? [])
         )
@@ -67,7 +68,7 @@ extension Endpoint {
         Endpoint(
             path: "/3/drive/\(driveId)/files/recents",
             query: [
-                URLQueryItem(name: "with", value: "is_favorite,categories"),
+                URLQueryItem(name: "with", value: "is_favorite,categories,path"),
                 URLQueryItem(name: "limit", value: String(limit)),
             ] + (cursor.map { [URLQueryItem(name: "cursor", value: $0)] } ?? [])
         )
@@ -78,7 +79,7 @@ extension Endpoint {
         Endpoint(
             path: "/3/drive/\(driveId)/files/activities",
             query: [
-                URLQueryItem(name: "with", value: "is_favorite,categories"),
+                URLQueryItem(name: "with", value: "is_favorite,categories,path"),
                 URLQueryItem(name: "limit", value: String(limit)),
             ] + (cursor.map { [URLQueryItem(name: "cursor", value: $0)] } ?? [])
         )
@@ -89,7 +90,7 @@ extension Endpoint {
         Endpoint(
             path: "/3/drive/\(driveId)/files/favorites",
             query: [
-                URLQueryItem(name: "with", value: "is_favorite,categories"),
+                URLQueryItem(name: "with", value: "is_favorite,categories,path"),
                 URLQueryItem(name: "limit", value: String(limit)),
             ] + (cursor.map { [URLQueryItem(name: "cursor", value: $0)] } ?? [])
         )
@@ -101,7 +102,7 @@ extension Endpoint {
         Endpoint(
             path: "/3/drive/\(driveId)/files/search",
             query: [
-                URLQueryItem(name: "with", value: "is_favorite,categories"),
+                URLQueryItem(name: "with", value: "is_favorite,categories,path"),
                 URLQueryItem(name: "limit", value: String(limit)),
                 URLQueryItem(name: "category", value: String(categoryId)),
                 URLQueryItem(name: "depth", value: "unlimited"),
@@ -112,7 +113,7 @@ extension Endpoint {
     /// Recherche récursive de fichiers dans un dossier (ou tout le drive) et ses sous-dossiers.
     static func search(driveId: Int, query: String, directoryId: Int?, cursor: String?, limit: Int = 60) -> Endpoint {
         var queryItems: [URLQueryItem] = [
-            URLQueryItem(name: "with", value: "is_favorite,categories"),
+            URLQueryItem(name: "with", value: "is_favorite,categories,path"),
             URLQueryItem(name: "limit", value: String(limit)),
             URLQueryItem(name: "depth", value: "unlimited"),
         ]
@@ -131,10 +132,11 @@ extension Endpoint {
 
     /// Fiche complète d'un fichier (v3). Contrairement aux listes (dont la
     /// recherche par tag), elle renvoie toujours les catégories et le favori.
+    /// `with=path` fournit aussi le chemin complet (Emplacement de la fiche).
     static func fileInfo(driveId: Int, fileId: Int) -> Endpoint {
         Endpoint(
             path: "/3/drive/\(driveId)/files/\(fileId)",
-            query: [URLQueryItem(name: "with", value: "is_favorite,categories")]
+            query: [URLQueryItem(name: "with", value: "is_favorite,categories,path")]
         )
     }
 
@@ -143,7 +145,7 @@ extension Endpoint {
         Endpoint(
             path: "/3/drive/\(driveId)/trash",
             query: [
-                URLQueryItem(name: "with", value: "is_favorite,categories"),
+                URLQueryItem(name: "with", value: "is_favorite,categories,path"),
                 URLQueryItem(name: "limit", value: String(limit)),
             ] + (cursor.map { [URLQueryItem(name: "cursor", value: $0)] } ?? [])
         )

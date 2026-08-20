@@ -1,12 +1,14 @@
 import SwiftUI
+import SafariServices
 
 /// Visionneuse de fichiers texte (.txt).
 ///
 /// Mode lecture par défaut : les liens sont surlignés et cliquables
-/// (ouverture dans le navigateur Safari). Un bouton crayon dans la barre
-/// d'outils passe en mode modification ; « Terminé » remplace le contenu du
-/// fichier côté kDrive (nouvelle version via `file_id`). Une marge en bas
-/// permet de faire défiler le texte au-dessus du clavier pendant l'édition.
+/// (ouverture dans un navigateur Safari intégré à l'app). Un bouton crayon
+/// dans la barre d'outils passe en mode modification ; « Terminé » remplace
+/// le contenu du fichier côté kDrive (nouvelle version via `file_id`). Une
+/// marge en bas permet de faire défiler le texte au-dessus du clavier pendant
+/// l'édition.
 struct TextFileViewer: View {
     let file: DriveFile
     let driveId: Int
@@ -20,6 +22,9 @@ struct TextFileViewer: View {
     @State private var isSaving = false
     @State private var loadError: String?
     @State private var saveError: String?
+    /// URL ouverte par un tap sur un lien du texte : affichée dans un
+    /// `SFSafariViewController` intégré, sans quitter l'app.
+    @State private var safariURL: SafariItem?
 
     private let service = KDriveService()
 
@@ -84,6 +89,10 @@ struct TextFileViewer: View {
         .task {
             await load()
         }
+        .fullScreenCover(item: $safariURL) { item in
+            SafariViewController(url: item.url)
+                .ignoresSafeArea()
+        }
         .alert("Enregistrement impossible", isPresented: saveErrorBinding) {
             Button("OK", role: .cancel) {}
         } message: {
@@ -102,6 +111,15 @@ struct TextFileViewer: View {
                 .padding(.top, 12)
                 .textSelection(.enabled)
         }
+        // Un tap sur un lien HTTP(S) ouvre la fenêtre Safari intégrée au lieu
+        // de quitter l'app ; les autres liens (mailto:…) suivent le système.
+        .environment(\.openURL, OpenURLAction { url in
+            guard let scheme = url.scheme?.lowercased(), ["http", "https"].contains(scheme) else {
+                return .systemAction
+            }
+            safariURL = SafariItem(url: url)
+            return .handled
+        })
         // Marge de défilement : la dernière ligne reste atteignable au-dessus
         // du clavier et de la barre flottante de l'app.
         .safeAreaInset(edge: .bottom) {
@@ -110,7 +128,7 @@ struct TextFileViewer: View {
     }
 
     /// Contenu avec liens détectés (URL, e-mails…) en surbrillance et
-    /// cliquables : un tap ouvre le navigateur par défaut.
+    /// cliquables : un tap ouvre la fenêtre Safari intégrée à l'app.
     private var attributedContent: AttributedString {
         var result = AttributedString()
         let nsContent = content as NSString
@@ -205,4 +223,22 @@ struct TextFileViewer: View {
             set: { if !$0 { saveError = nil } }
         )
     }
+}
+
+/// Cible de présentation d'une URL dans la fenêtre Safari intégrée.
+private struct SafariItem: Identifiable {
+    let id = UUID()
+    let url: URL
+}
+
+/// Fenêtre Safari intégrée à l'app (barre d'outils Safari, bouton Terminé,
+/// partage…). Les liens restent ainsi dans l'app au lieu d'ouvrir Safari.
+private struct SafariViewController: UIViewControllerRepresentable {
+    let url: URL
+
+    func makeUIViewController(context: Context) -> SFSafariViewController {
+        SFSafariViewController(url: url)
+    }
+
+    func updateUIViewController(_ uiViewController: SFSafariViewController, context: Context) {}
 }
