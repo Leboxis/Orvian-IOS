@@ -825,33 +825,58 @@ private struct ApplyTagsSheet: View {
         defer { busy = false }
         let toAdd = addIDs
         let toRemove = removeIDs
-        var firstError: Error?
-        var addedCount = 0
-        var removedCount = 0
+        let concurrency = 4
 
+        // Petits lots de 4 requêtes simultanées : appliquer des tags sur une
+        // grande sélection ne défile plus les appels API un par un.
+        var work: [(file: DriveFile, categoryId: Int, isAdd: Bool)] = []
         for file in files {
             for categoryId in toRemove {
-                do {
-                    try await service.removeCategory(driveId: driveId, fileId: file.id, categoryId: categoryId)
-                    removedCount += 1
-                } catch {
-                    if firstError == nil { firstError = error }
-                }
+                work.append((file, categoryId, false))
             }
         }
         for file in files {
             for categoryId in toAdd {
-                do {
-                    try await service.addCategory(driveId: driveId, fileId: file.id, categoryId: categoryId)
-                    TagUsageStore.markUsed(driveId: driveId, categoryId: categoryId)
-                    addedCount += 1
-                } catch {
-                    if firstError == nil { firstError = error }
+                work.append((file, categoryId, true))
+            }
+        }
+
+        var addedCount = 0
+        var removedCount = 0
+        var firstErrorDescription: String?
+
+        var index = 0
+        while index < work.count {
+            let chunk = Array(work[index..<min(index + concurrency, work.count)])
+            index += chunk.count
+            await withTaskGroup(of: (added: Bool, removed: Bool, error: String?).self) { group in
+                for item in chunk {
+                    group.addTask {
+                        do {
+                            if item.isAdd {
+                                try await service.addCategory(driveId: driveId, fileId: item.file.id, categoryId: item.categoryId)
+                                TagUsageStore.markUsed(driveId: driveId, categoryId: item.categoryId)
+                                return (true, false, nil)
+                            } else {
+                                try await service.removeCategory(driveId: driveId, fileId: item.file.id, categoryId: item.categoryId)
+                                return (false, true, nil)
+                            }
+                        } catch {
+                            return (false, false, (error as? APIError)?.errorDescription ?? error.localizedDescription)
+                        }
+                    }
+                }
+                for await result in group {
+                    addedCount += result.added ? 1 : 0
+                    removedCount += result.removed ? 1 : 0
+                    if firstErrorDescription == nil {
+                        firstErrorDescription = result.error
+                    }
                 }
             }
         }
 
-        if let firstError {
+        if let firstErrorDescription {
             var details: [String] = []
             if addedCount > 0 {
                 details.append("\(addedCount) tag\(addedCount > 1 ? "s" : "") appliqué\(addedCount > 1 ? "s" : "")")
@@ -860,7 +885,7 @@ private struct ApplyTagsSheet: View {
                 details.append("\(removedCount) tag\(removedCount > 1 ? "s" : "") retiré\(removedCount > 1 ? "s" : "")")
             }
             let summary = details.isEmpty ? "Aucune modification" : details.joined(separator: ", ")
-            errorMessage = "\(summary) sur \(files.count) élément\(files.count > 1 ? "s" : "") — \(((firstError as? APIError)?.errorDescription) ?? firstError.localizedDescription)"
+            errorMessage = "\(summary) sur \(files.count) élément\(files.count > 1 ? "s" : "") — \(firstErrorDescription)"
         } else {
             dismiss()
             await onDone()

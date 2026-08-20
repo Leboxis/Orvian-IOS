@@ -21,7 +21,6 @@ final class MediaMetadataStore: ObservableObject {
 
     private var cache: [Int: Info] = [:]
     private var inFlight: Set<Int> = []
-    private let service = KDriveService()
 
     private init() {}
 
@@ -53,7 +52,9 @@ final class MediaMetadataStore: ObservableObject {
 
     private func resolve(driveId: Int, fileId: Int) async {
         defer { inFlight.remove(fileId) }
-        guard let url = try? await service.temporaryURL(driveId: driveId, fileId: fileId) else { return }
+        // Réutilise l'URL temporaire déjà en cache (préchargements vidéo,
+        // visionneuse…) : pas de nouvelle requête réseau si elle existe.
+        guard let url = await MediaURLCache.shared.url(driveId: driveId, fileId: fileId) else { return }
         let asset = AVURLAsset(url: url)
         guard let duration = try? await asset.load(.duration) else { return }
         let orientation = await orientation(of: asset)

@@ -8,22 +8,35 @@ actor HiresImageStore {
     static let shared = HiresImageStore()
 
     private let memory = NSCache<NSString, UIImage>()
-    private var inFlight: [Int: Task<UIImage?, Never>] = [:]
+    /// Clé = `"\(driveId)-\(fileId)"` : comme pour les autres caches, le drive
+    /// est inclus pour ne jamais confondre deux drives qui partageraient le
+    /// même identifiant de fichier.
+    private var inFlight: [String: Task<UIImage?, Never>] = [:]
 
     init() {
         memory.countLimit = 30
         memory.totalCostLimit = 150 * 1024 * 1024
     }
 
+    private func memoryKey(driveId: Int, fileId: Int) -> NSString {
+        "\(driveId)-\(fileId)" as NSString
+    }
+
+    private func taskKey(driveId: Int, fileId: Int) -> String {
+        "\(driveId)-\(fileId)"
+    }
+
     func image(driveId: Int, fileId: Int, maxPixelSize: Int = 2560) async -> UIImage? {
-        if let cached = memory.object(forKey: "\(fileId)" as NSString) {
+        let memoryKey = memoryKey(driveId: driveId, fileId: fileId)
+        let taskKey = taskKey(driveId: driveId, fileId: fileId)
+        if let cached = memory.object(forKey: memoryKey) {
             return cached
         }
-        if let task = inFlight[fileId] {
+        if let task = inFlight[taskKey] {
             return await task.value
         }
         let task = Task<UIImage?, Never> { [self] in
-            defer { inFlight[fileId] = nil }
+            defer { inFlight[taskKey] = nil }
             guard !Task.isCancelled,
                   let url = await MediaURLCache.shared.url(driveId: driveId, fileId: fileId) else {
                 return nil
@@ -31,10 +44,10 @@ actor HiresImageStore {
             guard let image = await downloadAndDownsample(url: url, maxPixelSize: maxPixelSize) else {
                 return nil
             }
-            memory.setObject(image, forKey: "\(fileId)" as NSString, cost: Int(image.size.width * image.size.height * 4))
+            memory.setObject(image, forKey: memoryKey, cost: Int(image.size.width * image.size.height * 4))
             return image
         }
-        inFlight[fileId] = task
+        inFlight[taskKey] = task
         return await task.value
     }
 

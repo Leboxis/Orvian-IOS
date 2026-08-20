@@ -91,41 +91,35 @@ struct KDriveService {
         case let .favorites(limit):
             endpoint = ordering(.favorites(driveId: driveId, cursor: cursor, limit: limit))
         case let .recents(limit):
-            // 1) Priorité /files/last_modified (fichiers modifiés/uploadés récemment sur le drive)
+            // 1) Priorité /files/last_modified (fichiers modifiés/uploadés récemment sur le drive).
+            // Une liste vide est un résultat valide : on ne bascule vers le
+            // repli que sur une vraie erreur, pour ne pas multiplier les
+            // allers-retours réseau à chaque chargement.
             do {
-                let res = try await api.get(
+                return try await api.get(
                     CursorPage<DriveFile>.self,
                     ordering(.lastModified(driveId: driveId, cursor: cursor, limit: limit))
                 )
-                if let data = res.data, !data.isEmpty {
-                    return res
+            } catch {
+                // 2) Fallback /files/recents
+                do {
+                    return try await api.get(
+                        CursorPage<DriveFile>.self,
+                        ordering(.recents(driveId: driveId, cursor: cursor, limit: limit))
+                    )
+                } catch {
+                    // 3) Fallback /files/activities
+                    do {
+                        return try await api.get(
+                            CursorPage<DriveFile>.self,
+                            ordering(.activities(driveId: driveId, cursor: cursor, limit: limit))
+                        )
+                    } catch {
+                        // 4) Dernier recours : recherche globale
+                        endpoint = ordering(.search(driveId: driveId, query: "", directoryId: nil, cursor: cursor, limit: limit))
+                    }
                 }
-            } catch { }
-
-            // 2) Fallback /files/recents
-            do {
-                let res = try await api.get(
-                    CursorPage<DriveFile>.self,
-                    ordering(.recents(driveId: driveId, cursor: cursor, limit: limit))
-                )
-                if let data = res.data, !data.isEmpty {
-                    return res
-                }
-            } catch { }
-
-            // 3) Fallback /files/activities
-            do {
-                let res = try await api.get(
-                    CursorPage<DriveFile>.self,
-                    ordering(.activities(driveId: driveId, cursor: cursor, limit: limit))
-                )
-                if let data = res.data, !data.isEmpty {
-                    return res
-                }
-            } catch { }
-
-            // 4) Dernier recours : recherche globale
-            endpoint = ordering(.search(driveId: driveId, query: "", directoryId: nil, cursor: cursor, limit: limit))
+            }
         case let .mostViewed(limit):
             let files = MediaUsageStore.mostViewedFiles(driveId: driveId, limit: limit)
             return CursorPage<DriveFile>(data: files, cursor: nil, hasMore: false)

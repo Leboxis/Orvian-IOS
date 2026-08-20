@@ -189,33 +189,13 @@ struct FileGridView: View {
             result = result.filter { $0.matchesSearchKeywords(searchKeywords) }
         }
 
-        switch filters.sort {
-        case .original:
-            break
-        case .modifiedDate:
-            result = result.sorted {
-                let lhs = $0.lastModifiedAt ?? 0
-                let rhs = $1.lastModifiedAt ?? 0
-                return filters.direction == .descending ? lhs > rhs : lhs < rhs
-            }
-        case .addedDate:
-            result = result.sorted {
-                let lhs = $0.addedAt ?? 0
-                let rhs = $1.addedAt ?? 0
-                return filters.direction == .descending ? lhs > rhs : lhs < rhs
-            }
-        case .type:
-            result = result.sorted {
-                let comparison = $0.fileKind.label.localizedCaseInsensitiveCompare($1.fileKind.label)
-                return filters.direction == .ascending ? comparison == .orderedAscending : comparison == .orderedDescending
-            }
-        case .size:
-            result = result.sorted {
-                let lhs = $0.size ?? -1
-                let rhs = $1.size ?? -1
-                return filters.direction == .descending ? lhs > rhs : lhs < rhs
-            }
-        case .duration:
+        // Les tris dates/type/poids sont déjà appliqués par le serveur
+        // (`order_by[]` + `order`) sur toute la pagination : les re-trier ici
+        // serait un travail inutile et pourrait même contredire l'ordre des
+        // pages (fichiers sans date relégués en bas par le tri local alors
+        // que le serveur les avait placés ailleurs). Seule la durée, qui ne
+        // peut pas être exprimée par l'API, reste triée localement.
+        if filters.sort == .duration {
             result = result.sorted {
                 let lhs = mediaMetadata.info(for: $0.id)?.duration ?? -1
                 let rhs = mediaMetadata.info(for: $1.id)?.duration ?? -1
