@@ -3,14 +3,15 @@ import SwiftUI
 /// Conteneur des 5 onglets + barre flottante + visionneuses plein écran + suivi d'upload.
 ///
 /// Barre, de gauche à droite : Réglages · Tag · Accueil · Favoris · Profil.
-/// Les onglets restent montés (ZStack + opacité) pour conserver la
-/// navigation et la position de scroll quand on change d'onglet.
+/// Seul l'onglet Accueil reste monté en permanence : ses données et sa
+/// position de scroll survivent aux changements d'onglet. Les autres onglets
+/// sont recréés à chaque visite (leur pile de navigation vit dans
+/// `TabNavigationState`), ce qui limite la mémoire consommée.
 struct MainTabView: View {
     let drive: Drive
     let session: SessionStore
 
     @State private var tab: AppTab = .home
-    @State private var loadedTabs: Set<AppTab> = [.home]
     @State private var router: ViewerRouter
     @State private var navState = TabNavigationState()
     @State private var showUploadSheet = false
@@ -55,11 +56,6 @@ struct MainTabView: View {
         .transaction { transaction in
             if reduceMotion {
                 transaction.disablesAnimations = true
-            }
-        }
-        .onChange(of: tab, initial: true) { _, newTab in
-            if !loadedTabs.contains(newTab) {
-                loadedTabs.insert(newTab)
             }
         }
         .sheet(isPresented: $showUploadSheet) {
@@ -110,7 +106,10 @@ struct MainTabView: View {
 
     @ViewBuilder
     private func tabPane(_ target: AppTab, @ViewBuilder content: () -> some View) -> some View {
-        if loadedTabs.contains(target) {
+        // Seul l'Accueil reste monté en permanence (état de scroll et données
+        // conservés) ; les autres onglets ne sont montés que lorsqu'ils sont
+        // sélectionnés, ce qui libère leurs vues à chaque changement d'onglet.
+        if target == .home || target == tab {
             content()
                 .opacity(tab == target ? 1 : 0)
                 .allowsHitTesting(tab == target)

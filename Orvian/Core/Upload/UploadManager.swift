@@ -124,6 +124,10 @@ final class UploadManager {
 
     private let service = KDriveService()
     private var hidePillTask: Task<Void, Never>?
+    /// L'API kDrive traite chaque upload de manière indépendante (session
+    /// dédiée aux gros fichiers), plusieurs fichiers peuvent donc partir en
+    /// parallèle sans verrou côté serveur.
+    private static let maxConcurrentUploads = 4
 
     private init() {}
 
@@ -182,43 +186,77 @@ final class UploadManager {
 
         Task {
             var uploadedFiles: [DriveFile] = []
-            for (index, item) in items.enumerated() {
-                let taskId = newTasks[index].id
-                guard let taskIndex = tasks.firstIndex(where: { $0.id == taskId }) else { continue }
-
-                let contentType = item.supportedContentTypes.first ?? .data
-                let ext = contentType.preferredFilenameExtension ?? "jpg"
-                let realName = "Import-\(Int(Date().timeIntervalSince1970))-\(index + 1).\(ext)"
-
-                tasks[taskIndex].fileName = realName
-                tasks[taskIndex].status = .inProgress(progress: 0.15)
-
-                var payload: UploadPayload? = nil
-                if let picked = try? await item.loadTransferable(type: PickedPhotoTransferable.self) {
-                    payload = await UploadFileIO.payload(forTemporaryURL: picked.url, fileName: realName)
-                } else if let data = try? await item.loadTransferable(type: Data.self) {
-                    payload = await UploadFileIO.writeToTemporaryDirectory(data: data, fileName: realName)
+            var start = 0
+            while start < items.count {
+                let chunk = Array(items[start..<min(start + Self.maxConcurrentUploads, items.count)])
+                let chunkStart = start
+                start += chunk.count
+                let ordered = await withTaskGroup(of: (Int, DriveFile?).self) { group in
+                    for (offset, item) in chunk.enumerated() {
+                        let taskId = newTasks[chunkStart + offset].id
+                        let itemIndex = chunkStart + offset
+                        group.addTask {
+                            let uploaded = await self.prepareAndUploadPhoto(
+                                item: item,
+                                taskId: taskId,
+                                itemIndex: itemIndex,
+                                driveId: driveId,
+                                directoryId: directoryId
+                            )
+                            return (offset, uploaded)
+                        }
+                    }
+                    var results: [DriveFile?] = Array(repeating: nil, count: chunk.count)
+                    for await (offset, uploaded) in group {
+                        results[offset] = uploaded
+                    }
+                    return results
                 }
-
-                if let payload {
-                    if let curIdx = tasks.firstIndex(where: { $0.id == taskId }) {
-                        tasks[curIdx].fileName = realName
-                        tasks[curIdx].totalBytes = payload.totalBytes
-                        tasks[curIdx].status = .inProgress(progress: 0.2)
-                    }
-                    if let uploadedFile = await uploadSingleFile(taskId: taskId, driveId: driveId, directoryId: directoryId, payload: payload) {
-                        uploadedFiles.append(uploadedFile)
-                    }
-                } else {
-                    if let curIdx = tasks.firstIndex(where: { $0.id == taskId }) {
-                        tasks[curIdx].status = .failed(message: "Échec de lecture du média")
-                    }
-                }
+                uploadedFiles.append(contentsOf: ordered.compactMap { $0 })
             }
 
             onDone?(uploadedFiles)
             schedulePillAutoDismiss()
         }
+    }
+
+    /// Prépare (I/O disque) puis téléverse une photo/vidéo PhotosPicker.
+    private func prepareAndUploadPhoto(
+        item: PhotosPickerItem,
+        taskId: UUID,
+        itemIndex: Int,
+        driveId: Int,
+        directoryId: Int
+    ) async -> DriveFile? {
+        guard let taskIndex = tasks.firstIndex(where: { $0.id == taskId }) else { return nil }
+
+        let contentType = item.supportedContentTypes.first ?? .data
+        let ext = contentType.preferredFilenameExtension ?? "jpg"
+        let realName = "Import-\(Int(Date().timeIntervalSince1970))-\(itemIndex + 1).\(ext)"
+
+        tasks[taskIndex].fileName = realName
+        tasks[taskIndex].status = .inProgress(progress: 0.15)
+
+        var payload: UploadPayload? = nil
+        if let picked = try? await item.loadTransferable(type: PickedPhotoTransferable.self) {
+            payload = await UploadFileIO.payload(forTemporaryURL: picked.url, fileName: realName)
+        } else if let data = try? await item.loadTransferable(type: Data.self) {
+            payload = await UploadFileIO.writeToTemporaryDirectory(data: data, fileName: realName)
+        }
+
+        guard let payload else {
+            if let curIdx = tasks.firstIndex(where: { $0.id == taskId }) {
+                tasks[curIdx].status = .failed(message: "Échec de lecture du média")
+            }
+            return nil
+        }
+
+        if let curIdx = tasks.firstIndex(where: { $0.id == taskId }) {
+            tasks[curIdx].fileName = realName
+            tasks[curIdx].totalBytes = payload.totalBytes
+            tasks[curIdx].status = .inProgress(progress: 0.2)
+        }
+        return await uploadSingleFile(taskId: taskId, driveId: driveId, directoryId: directoryId, payload: payload)
     }
 
     /// Import immédiat et asynchrone des documents (la bulle s'affiche instantanément)
@@ -233,38 +271,64 @@ final class UploadManager {
 
         Task {
             var uploadedFiles: [DriveFile] = []
-            for (index, url) in urls.enumerated() {
-                let taskId = newTasks[index].id
-                guard let taskIndex = tasks.firstIndex(where: { $0.id == taskId }) else { continue }
-                tasks[taskIndex].status = .inProgress(progress: 0.15)
-
-                let accessing = url.startAccessingSecurityScopedResource()
-                defer {
-                    if accessing {
-                        url.stopAccessingSecurityScopedResource()
+            var start = 0
+            while start < urls.count {
+                let chunk = Array(urls[start..<min(start + Self.maxConcurrentUploads, urls.count)])
+                let chunkStart = start
+                start += chunk.count
+                let ordered = await withTaskGroup(of: (Int, DriveFile?).self) { group in
+                    for (offset, url) in chunk.enumerated() {
+                        let taskId = newTasks[chunkStart + offset].id
+                        group.addTask {
+                            let uploaded = await self.prepareAndUploadDocument(
+                                url: url,
+                                taskId: taskId,
+                                driveId: driveId,
+                                directoryId: directoryId
+                            )
+                            return (offset, uploaded)
+                        }
                     }
+                    var results: [DriveFile?] = Array(repeating: nil, count: chunk.count)
+                    for await (offset, uploaded) in group {
+                        results[offset] = uploaded
+                    }
+                    return results
                 }
-
-                let payload = await UploadFileIO.copyToTemporaryDirectory(sourceURL: url, fileName: url.lastPathComponent)
-
-                if let payload {
-                    if let curIdx = tasks.firstIndex(where: { $0.id == taskId }) {
-                        tasks[curIdx].totalBytes = payload.totalBytes
-                        tasks[curIdx].status = .inProgress(progress: 0.2)
-                    }
-                    if let uploadedFile = await uploadSingleFile(taskId: taskId, driveId: driveId, directoryId: directoryId, payload: payload) {
-                        uploadedFiles.append(uploadedFile)
-                    }
-                } else {
-                    if let curIdx = tasks.firstIndex(where: { $0.id == taskId }) {
-                        tasks[curIdx].status = .failed(message: "Échec de copie du fichier")
-                    }
-                }
+                uploadedFiles.append(contentsOf: ordered.compactMap { $0 })
             }
 
             onDone?(uploadedFiles)
             schedulePillAutoDismiss()
         }
+    }
+
+    /// Prépare (copie temporaire) puis téléverse un document.
+    private func prepareAndUploadDocument(url: URL, taskId: UUID, driveId: Int, directoryId: Int) async -> DriveFile? {
+        guard let taskIndex = tasks.firstIndex(where: { $0.id == taskId }) else { return nil }
+        tasks[taskIndex].status = .inProgress(progress: 0.15)
+
+        let accessing = url.startAccessingSecurityScopedResource()
+        defer {
+            if accessing {
+                url.stopAccessingSecurityScopedResource()
+            }
+        }
+
+        let payload = await UploadFileIO.copyToTemporaryDirectory(sourceURL: url, fileName: url.lastPathComponent)
+
+        guard let payload else {
+            if let curIdx = tasks.firstIndex(where: { $0.id == taskId }) {
+                tasks[curIdx].status = .failed(message: "Échec de copie du fichier")
+            }
+            return nil
+        }
+
+        if let curIdx = tasks.firstIndex(where: { $0.id == taskId }) {
+            tasks[curIdx].totalBytes = payload.totalBytes
+            tasks[curIdx].status = .inProgress(progress: 0.2)
+        }
+        return await uploadSingleFile(taskId: taskId, driveId: driveId, directoryId: directoryId, payload: payload)
     }
 
     /// Enfile et exécute une liste de fichiers à uploader par streaming direct depuis le disque.
@@ -278,16 +342,31 @@ final class UploadManager {
 
         Task {
             var uploadedFiles: [DriveFile] = []
-            for (index, file) in files.enumerated() {
-                let taskId = newTasks[index].id
-                if let uploadedFile = await uploadSingleFile(
-                    taskId: taskId,
-                    driveId: driveId,
-                    directoryId: directoryId,
-                    payload: file
-                ) {
-                    uploadedFiles.append(uploadedFile)
+            var start = 0
+            while start < files.count {
+                let chunk = Array(files[start..<min(start + Self.maxConcurrentUploads, files.count)])
+                let chunkStart = start
+                start += chunk.count
+                let ordered = await withTaskGroup(of: (Int, DriveFile?).self) { group in
+                    for (offset, file) in chunk.enumerated() {
+                        let taskId = newTasks[chunkStart + offset].id
+                        group.addTask {
+                            let uploaded = await self.uploadSingleFile(
+                                taskId: taskId,
+                                driveId: driveId,
+                                directoryId: directoryId,
+                                payload: file
+                            )
+                            return (offset, uploaded)
+                        }
+                    }
+                    var results: [DriveFile?] = Array(repeating: nil, count: chunk.count)
+                    for await (offset, uploaded) in group {
+                        results[offset] = uploaded
+                    }
+                    return results
                 }
+                uploadedFiles.append(contentsOf: ordered.compactMap { $0 })
             }
 
             onDone?(uploadedFiles)
