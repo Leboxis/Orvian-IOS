@@ -276,6 +276,42 @@ final class FileGridViewModel {
         }
     }
 
+    /// Restaure une sélection entière de la corbeille ; les échecs partiels
+    /// sont signalés dans `errorMessage` sans bloquer les autres restaurations.
+    @discardableResult
+    func restore(ids: Set<Int>) async -> Set<Int> {
+        errorMessage = nil
+        var restoredIDs: Set<Int> = []
+        var firstError: Error?
+
+        for id in ids {
+            let destination = items.first(where: { $0.id == id })?.parentId ?? 1
+            do {
+                do {
+                    try await service.restore(driveId: driveId, fileId: id, destinationDirectoryId: destination)
+                } catch {
+                    guard destination != 1 else { throw error }
+                    try await service.restore(driveId: driveId, fileId: id, destinationDirectoryId: 1)
+                }
+                restoredIDs.insert(id)
+            } catch {
+                if firstError == nil { firstError = error }
+            }
+        }
+
+        items.removeAll { restoredIDs.contains($0.id) }
+
+        if let firstError {
+            let failedCount = ids.count - restoredIDs.count
+            let detail = (firstError as? APIError)?.errorDescription ?? firstError.localizedDescription
+            errorMessage = failedCount == 1
+                ? "Un élément n’a pas pu être restauré : \(detail)"
+                : "\(failedCount) éléments n’ont pas pu être restaurés : \(detail)"
+        }
+
+        return restoredIDs
+    }
+
     // MARK: - Groupes (Actualité par jour, Média par mois)
 
     struct Group: Identifiable {

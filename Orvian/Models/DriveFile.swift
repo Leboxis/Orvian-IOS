@@ -45,13 +45,74 @@ struct DriveFile: Codable, Identifiable, Hashable {
     enum CodingKeys: String, CodingKey {
         case id, name, type, size, path
         case mimeType
+        case mimeTypeSnake = "mime_type"
         case extensionType
+        case extensionTypeSnake = "extension_type"
         case isFavorite
+        case isFavoriteSnake = "is_favorite"
         case parentId
+        case parentIdSnake = "parent_id"
         case color
         case categories
         case addedAt
+        case addedAtSnake = "added_at"
         case lastModifiedAt
+        case lastModifiedAtSnake = "last_modified_at"
+    }
+}
+
+extension DriveFile {
+    /// Le décodage accepte indifféremment camelCase (v3) et snake_case (v2) :
+    /// les listes de fichiers kDrive renvoient encore des clés snake_case
+    /// (`mime_type`, `extension_type`, `parent_id`, `added_at`…), certains
+    /// endpoints récents les renvoient en camelCase. Sans cette tolérance,
+    /// ces champs restaient nuls et tous les tris/filtres basés dessus
+    /// (dates, type, médias, favoris) cessaient de fonctionner.
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(Int.self, forKey: .id)
+        name = try c.decode(String.self, forKey: .name)
+        type = try c.decode(String.self, forKey: .type)
+        size = try c.decodeIfPresent(Int.self, forKey: .size)
+        path = try c.decodeIfPresent(String.self, forKey: .path)
+        mimeType = Self.decode(c, camel: .mimeType, snake: .mimeTypeSnake)
+        extensionType = Self.decode(c, camel: .extensionType, snake: .extensionTypeSnake)
+        isFavorite = Self.decode(c, camel: .isFavorite, snake: .isFavoriteSnake)
+        parentId = Self.decode(c, camel: .parentId, snake: .parentIdSnake)
+        color = try c.decodeIfPresent(String.self, forKey: .color)
+        categories = try c.decodeIfPresent([FileCategory].self, forKey: .categories)
+        addedAt = Self.decode(c, camel: .addedAt, snake: .addedAtSnake)
+        lastModifiedAt = Self.decode(c, camel: .lastModifiedAt, snake: .lastModifiedAtSnake)
+    }
+
+    /// Décode une valeur en essayant d'abord la clé camelCase, puis la clé
+    /// snake_case. Retourne nil si les deux sont absentes ou nulles.
+    private static func decode<T: Decodable>(
+        _ c: KeyedDecodingContainer<CodingKeys>,
+        camel: CodingKeys,
+        snake: CodingKeys
+    ) -> T? {
+        if let value = try? c.decode(T.self, forKey: camel) {
+            return value
+        }
+        return try? c.decode(T.self, forKey: snake)
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(id, forKey: .id)
+        try c.encode(name, forKey: .name)
+        try c.encode(type, forKey: .type)
+        try c.encodeIfPresent(size, forKey: .size)
+        try c.encodeIfPresent(path, forKey: .path)
+        try c.encodeIfPresent(mimeType, forKey: .mimeTypeSnake)
+        try c.encodeIfPresent(extensionType, forKey: .extensionTypeSnake)
+        try c.encodeIfPresent(isFavorite, forKey: .isFavoriteSnake)
+        try c.encodeIfPresent(parentId, forKey: .parentIdSnake)
+        try c.encodeIfPresent(color, forKey: .color)
+        try c.encodeIfPresent(categories, forKey: .categories)
+        try c.encodeIfPresent(addedAt, forKey: .addedAtSnake)
+        try c.encodeIfPresent(lastModifiedAt, forKey: .lastModifiedAtSnake)
     }
 }
 

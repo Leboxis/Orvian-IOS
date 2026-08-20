@@ -40,27 +40,54 @@ struct TrashView: View {
             if selectionMode {
                 ToolbarItem(placement: .topBarLeading) {
                     Button {
-                        selectionMode = false
-                        selectedIDs = []
+                        endSelection()
                     } label: {
                         Image(systemName: "xmark")
                             .font(.system(size: 16, weight: .medium))
                     }
                     .accessibilityLabel("Annuler la sélection")
                 }
+
+                ToolbarItem(placement: .principal) {
+                    Text(selectionTitle)
+                        .font(.headline)
+                        .lineLimit(1)
+                }
+
+                ToolbarItemGroup(placement: .topBarTrailing) {
+                    Button {
+                        toggleAll()
+                    } label: {
+                        Image(systemName: allSelected ? "checkmark.circle.fill" : "checkmark.circle")
+                    }
+                    .accessibilityLabel(allSelected ? "Tout désélectionner" : "Tout sélectionner")
+
+                    Button {
+                        Task { await restoreSelected() }
+                    } label: {
+                        Image(systemName: "arrow.uturn.backward")
+                    }
+                    .disabled(selectedIDs.isEmpty)
+                    .accessibilityLabel("Restaurer")
+
+                    Button(role: .destructive) {
+                        showDeleteConfirm = true
+                    } label: {
+                        Image(systemName: "trash")
+                    }
+                    .disabled(selectedIDs.isEmpty)
+                    .accessibilityLabel("Supprimer définitivement")
+                }
             } else {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button {
                         selectionMode = true
                     } label: {
-                        Label("Sélectionner", systemImage: "checkmark.circle")
+                        Image(systemName: "checkmark.circle")
                     }
+                    .disabled(viewModel.items.isEmpty)
+                    .accessibilityLabel("Sélectionner")
                 }
-            }
-        }
-        .safeAreaInset(edge: .bottom) {
-            if selectionMode && !viewModel.items.isEmpty {
-                selectionBar
             }
         }
         .confirmationDialog("Supprimer définitivement ?", isPresented: $showDeleteConfirm, titleVisibility: .visible) {
@@ -95,6 +122,20 @@ struct TrashView: View {
         !viewModel.items.isEmpty && selectedIDs.isSuperset(of: Set(viewModel.items.map(\.id)))
     }
 
+    private var selectionTitle: String {
+        guard !selectedIDs.isEmpty else { return "Sélection" }
+        return "\(selectedIDs.count) sélectionné\(selectedIDs.count > 1 ? "s" : "")"
+    }
+
+    private func startSelection() {
+        selectionMode = true
+    }
+
+    private func endSelection() {
+        selectionMode = false
+        selectedIDs.removeAll()
+    }
+
     private func toggle(_ file: DriveFile) {
         if selectedIDs.contains(file.id) {
             selectedIDs.remove(file.id)
@@ -125,44 +166,19 @@ struct TrashView: View {
         }
     }
 
+    private func restoreSelected() async {
+        let ids = selectedIDs
+        guard !ids.isEmpty else { return }
+        let restored = await viewModel.restore(ids: ids)
+        selectedIDs.subtract(restored)
+        if selectedIDs.isEmpty {
+            selectionMode = false
+        }
+    }
+
     private func deleteSelected() async {
         await viewModel.permanentlyDelete(ids: selectedIDs)
         selectedIDs = []
         selectionMode = false
-    }
-
-    /// Barre d'action collée en bas pendant la sélection : sélectionner tout
-    /// d'un coup + suppression définitive. La barre de navigation ne garde
-    /// qu'« Annuler » pour que le titre reste lisible.
-    private var selectionBar: some View {
-        HStack(spacing: 10) {
-            Button {
-                toggleAll()
-            } label: {
-                Label(
-                    allSelected ? "Tout désélectionner" : "Tout sélectionner",
-                    systemImage: allSelected ? "checkmark.circle.fill" : "checkmark.circle"
-                )
-                .font(.footnote.weight(.semibold))
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 12)
-                .background(.ultraThinMaterial, in: Capsule())
-            }
-            .buttonStyle(.plain)
-            if !selectedIDs.isEmpty {
-                Button(role: .destructive) {
-                    showDeleteConfirm = true
-                } label: {
-                    Label("Supprimer (\(selectedIDs.count))", systemImage: "trash")
-                        .font(.footnote.weight(.semibold))
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 12)
-                        .background(.ultraThinMaterial, in: Capsule())
-                }
-                .buttonStyle(.plain)
-            }
-        }
-        .padding(.horizontal, 16)
-        .padding(.bottom, 8)
     }
 }
