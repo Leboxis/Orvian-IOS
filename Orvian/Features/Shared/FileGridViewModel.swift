@@ -76,8 +76,12 @@ final class FileGridViewModel {
 
     /// Pagination infinie : déclenché par l'apparition des dernières cartes.
     func loadMoreIfNeeded() async {
-        guard hasMore, !isLoadingMore, !isInitialLoading, errorMessage == nil else { return }
+        guard hasMore, !isLoadingMore, !isInitialLoading else { return }
         isLoadingMore = true
+        // Une nouvelle demande est une tentative explicite : elle efface
+        // l'erreur précédente afin que le pager et le bouton « Réessayer »
+        // puissent réellement relancer la même page.
+        errorMessage = nil
         defer { isLoadingMore = false }
         do {
             let page = try await service.page(
