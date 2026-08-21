@@ -146,7 +146,7 @@ struct TagsView: View {
         let title = Text("Tag")
         guard hasLoadedCategories else { return title }
         return title + Text(" (\(categories.count))")
-            .font(.caption.weight(.medium))
+            .font(.system(size: 10, weight: .medium))
     }
 
     /// Catégories triées de la plus récemment utilisée à la plus ancienne ;
@@ -174,7 +174,7 @@ struct TagsView: View {
                     Button {
                         open(category)
                     } label: {
-                        CategoryGridCell(category: category)
+                        TagGridCard(category: category)
                     }
                     .buttonStyle(.plain)
                     .contextMenu {
@@ -337,8 +337,10 @@ private struct CategoryRow: View {
     }
 }
 
-/// Carte de catégorie pour le mode grille.
-private struct CategoryGridCell: View {
+/// Carte de catégorie pour les grilles de tags.
+/// Employée aussi dans l'éditeur de tags afin de conserver une présentation
+/// parfaitement cohérente entre l'onglet dédié et le menu d'un fichier.
+struct TagGridCard: View {
     let category: Category
 
     private var tint: Color {
