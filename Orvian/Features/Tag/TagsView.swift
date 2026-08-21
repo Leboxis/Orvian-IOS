@@ -12,9 +12,8 @@ struct TagsView: View {
 
     @State private var categories: [Category] = []
     @State private var isLoading = false
-    /// Compteur partagé avec la barre d'onglets. -1 signifie qu'il n'est pas
-    /// encore connu, afin de ne pas afficher un faux zéro au premier lancement.
-    @AppStorage("tagCount") private var tagCount = -1
+    /// Évite d'afficher provisoirement « (0) » avant la première réponse API.
+    @State private var hasLoadedCategories = false
     @State private var errorMessage: String?
     @State private var trail: [String] = []
     /// Affichage des catégories : grille (défaut) ou liste.
@@ -137,8 +136,17 @@ struct TagsView: View {
                 list
             }
         }
-        .navigationTitle("Tag")
+        .navigationTitle(tagNavigationTitle)
         .navigationBarTitleDisplayMode(.large)
+    }
+
+    /// Conserve le titre « Tag » et ajoute le nombre avec une hiérarchie plus
+    /// discrète, directement dans le même texte du titre de navigation.
+    private var tagNavigationTitle: Text {
+        let title = Text("Tag")
+        guard hasLoadedCategories else { return title }
+        return title + Text(" (\(categories.count))")
+            .font(.caption.weight(.medium))
     }
 
     /// Catégories triées de la plus récemment utilisée à la plus ancienne ;
@@ -283,7 +291,7 @@ struct TagsView: View {
         }
         do {
             categories = try await service.categories(driveId: driveId)
-            tagCount = categories.count
+            hasLoadedCategories = true
             errorMessage = nil
         } catch {
             errorMessage = (error as? APIError)?.errorDescription ?? error.localizedDescription

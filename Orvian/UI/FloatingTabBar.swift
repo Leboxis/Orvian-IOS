@@ -42,7 +42,6 @@ private struct TabButton: View {
     let tab: AppTab
     let isSelected: Bool
     let action: () -> Void
-    @AppStorage("tagCount") private var tagCount = -1
 
     var body: some View {
         Button {
@@ -52,14 +51,8 @@ private struct TabButton: View {
                 Image(systemName: isSelected ? tab.symbolFilled : tab.symbol)
                     .font(.system(size: 19, weight: .medium))
                     .symbolEffect(.bounce, value: isSelected)
-                HStack(alignment: .firstTextBaseline, spacing: 2) {
-                    Text(tab.title)
-                        .font(.caption2.weight(isSelected ? .semibold : .regular))
-                    if tab == .tag, tagCount >= 0 {
-                        Text("(\(tagCount))")
-                            .font(.system(size: 8, weight: .medium, design: .rounded))
-                    }
-                }
+                Text(tab.title)
+                    .font(.caption2.weight(isSelected ? .semibold : .regular))
             }
             .foregroundStyle(isSelected ? Color.accentColor : .secondary)
             .frame(maxWidth: .infinity)
@@ -73,11 +66,7 @@ private struct TabButton: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .accessibilityLabel(
-            tab == .tag && tagCount >= 0
-                ? "Tag, \(tagCount) tag\(tagCount > 1 ? "s" : "")"
-                : tab.title
-        )
+        .accessibilityLabel(tab.title)
         .accessibilityAddTraits(isSelected ? .isSelected : [])
     }
 }
