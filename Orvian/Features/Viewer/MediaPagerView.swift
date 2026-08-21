@@ -45,18 +45,27 @@ struct MediaPagerView: View {
         }
         .statusBarHidden(false)
         .persistentSystemOverlays(.hidden)
+        .task {
+            // `onChange` ne s'exécute pas à l'ouverture. Sans ce chargement,
+            // ouvrir directement le dernier média rendait le swipe suivant
+            // impossible alors que le serveur possédait encore des pages.
+            await loadMoreMediaIfNeeded(around: selectedFileID)
+        }
         .onChange(of: selectedFileID) { _, newID in
             guard let index = files.firstIndex(where: { $0.id == newID }) else { return }
             // Consigne la consultation pour les « médias les plus consultés ».
             MediaUsageStore.recordView(driveId: context.driveId, file: files[index])
             // Proche de la fin de la liste : demande la page suivante à la
             // vue-modèle de la grille, qui reprend là où elle s'était arrêtée.
-            if let viewModel = context.viewModel, index >= files.count - 2 {
-                Task { await viewModel.loadMoreIfNeeded() }
+            if index >= files.count - 2 {
+                Task { await loadMoreMediaIfNeeded(around: newID) }
             }
         }
         .onChange(of: context.viewModel?.items) { _, _ in
             refreshFiles()
+            // Si la page reçue ne contenait aucun média visible, continuer
+            // depuis le même élément au lieu de laisser le pager en impasse.
+            Task { await loadMoreMediaIfNeeded(around: selectedFileID) }
         }
     }
 
@@ -74,6 +83,28 @@ struct MediaPagerView: View {
         files = media
         if !files.contains(where: { $0.id == selectedFileID }) {
             selectedFileID = files.first?.id ?? 0
+        }
+    }
+
+    /// Charge autant de pages que nécessaire pour obtenir un média suivant.
+    /// Une page peut ne contenir que des dossiers ou des fichiers masqués par
+    /// les filtres : dans ce cas, on poursuit tant que la pagination progresse.
+    private func loadMoreMediaIfNeeded(around fileID: Int) async {
+        guard let viewModel = context.viewModel else { return }
+
+        while !Task.isCancelled,
+              let index = files.firstIndex(where: { $0.id == fileID }),
+              index >= files.count - 2,
+              viewModel.hasMore {
+            let previousItemCount = viewModel.items.count
+            await viewModel.loadMoreIfNeeded()
+            guard !Task.isCancelled, viewModel.errorMessage == nil else { return }
+
+            refreshFiles()
+
+            // Protection contre une API qui renverrait la même page sans
+            // avancer : évite une boucle réseau infinie dans la visionneuse.
+            guard viewModel.items.count > previousItemCount else { return }
         }
     }
 
@@ -120,6 +151,21 @@ struct MediaPagerView: View {
                 .padding(.top, 6)
             }
             Spacer()
+
+            if let errorMessage = context.viewModel?.errorMessage {
+                Button {
+                    Task { await loadMoreMediaIfNeeded(around: selectedFileID) }
+                } label: {
+                    Label("Réessayer le chargement", systemImage: "arrow.clockwise")
+                        .font(.footnote.weight(.semibold))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 10)
+                        .background(.ultraThinMaterial, in: Capsule())
+                }
+                .accessibilityHint(Text(errorMessage))
+                .padding(.bottom, currentFile?.isVideo == true ? 64 : 24)
+            }
         }
     }
 }
@@ -177,24 +223,7 @@ private struct ZoomablePhotoPage: View {
     var body: some View {
         GeometryReader { proxy in
             ZStack {
-                image
-                    .frame(width: proxy.size.width, height: proxy.size.height)
-                    .scaleEffect(scale)
-                    .offset(panOffset)
-                    .opacity(1 - dismissProgress)
-                    .onTapGesture(count: 2) {
-                        withAnimation(.snappy(duration: 0.3)) {
-                            if isZoomed {
-                                scale = 1
-                                offset = .zero
-                                lastScale = 1
-                            } else {
-                                scale = 2.5
-                                lastScale = 2.5
-                            }
-                        }
-                    }
-                    .simultaneousGesture(dragGesture(in: proxy.size))
+                interactiveImage(in: proxy.size)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .contentShape(Rectangle())
@@ -221,6 +250,41 @@ private struct ZoomablePhotoPage: View {
     }
 
     private var display: UIImage? { hires ?? thumbnail }
+
+    /// Au zoom normal, le drag vertical coexiste avec le pager horizontal.
+    /// Une fois zoomée, l'image prend la priorité afin qu'un panoramique ne
+    /// change pas accidentellement de page.
+    @ViewBuilder
+    private func interactiveImage(in screenSize: CGSize) -> some View {
+        if isZoomed {
+            displayedImage(in: screenSize)
+                .highPriorityGesture(dragGesture(in: screenSize))
+        } else {
+            displayedImage(in: screenSize)
+                .simultaneousGesture(dragGesture(in: screenSize))
+        }
+    }
+
+    private func displayedImage(in screenSize: CGSize) -> some View {
+        image
+            .frame(width: screenSize.width, height: screenSize.height)
+            .scaleEffect(scale)
+            .offset(panOffset)
+            .opacity(1 - dismissProgress)
+            .onTapGesture(count: 2) {
+                withAnimation(.snappy(duration: 0.3)) {
+                    if isZoomed {
+                        scale = 1
+                        offset = .zero
+                        dragOffset = .zero
+                        lastScale = 1
+                    } else {
+                        scale = 2.5
+                        lastScale = 2.5
+                    }
+                }
+            }
+    }
 
     private var panOffset: CGSize {
         CGSize(
@@ -302,7 +366,8 @@ private struct ZoomablePhotoPage: View {
                         offset = clamped
                         dragOffset = .zero
                     }
-                } else if abs(value.translation.height) > 130 {
+                } else if abs(value.translation.height) > abs(value.translation.width),
+                          abs(value.translation.height) > 130 {
                     onClose()
                 } else {
                     withAnimation(.snappy(duration: 0.25)) {
