@@ -652,9 +652,9 @@ struct FileDetailSheet: View {
     }
 }
 
-/// Éditeur de tags d'un seul élément (menu contextuel → « Tags ») :
-/// grille compacte de tous les tags — coche sur ceux déjà appliqués,
-/// un tap ajoute ou retire.
+/// Éditeur de tags d'un seul élément (menu contextuel → « Tags »).
+/// Reprend exactement les cartes de la grille de l'onglet Tag ; seule une
+/// coche distingue les tags déjà appliqués au fichier.
 private struct TagsEditorSheet: View {
     let driveId: Int
     let file: DriveFile
@@ -667,7 +667,7 @@ private struct TagsEditorSheet: View {
     @State private var errorMessage: String?
 
     private let service = KDriveService()
-    private let columns = [GridItem(.adaptive(minimum: 110), spacing: 8)]
+    private let columns = Array(repeating: GridItem(.flexible(), spacing: DS.gridSpacing), count: 2)
 
     init(driveId: Int, file: DriveFile, onChanged: ((Category, Bool) -> Void)?) {
         self.driveId = driveId
@@ -690,13 +690,13 @@ private struct TagsEditorSheet: View {
                     }
                 } else {
                     ScrollView {
-                        LazyVGrid(columns: columns, spacing: 8) {
-                            ForEach(categories) { category in
+                        LazyVGrid(columns: columns, spacing: DS.gridSpacing) {
+                            ForEach(orderedCategories) { category in
                                 tagCell(category)
                             }
                         }
-                        .padding(.horizontal, 16)
-                        .padding(.vertical, 12)
+                        .padding(.horizontal, DS.gridMargin)
+                        .padding(.top, 6)
                         if let errorMessage {
                             Text(errorMessage)
                                 .font(.footnote)
@@ -705,7 +705,9 @@ private struct TagsEditorSheet: View {
                                 .padding(.horizontal, 16)
                                 .padding(.bottom, 12)
                         }
+                        Color.clear.frame(height: 100)
                     }
+                    .background(Color(uiColor: .systemGroupedBackground))
                 }
             }
             .navigationTitle("Tags")
@@ -725,44 +727,49 @@ private struct TagsEditorSheet: View {
         .task { await load() }
     }
 
-    /// Cellule uniforme de la grille : pastille de couleur toujours en haut à
-    /// gauche, coche en haut à droite quand le tag est appliqué, nom dessous.
+    /// Même carte que la grille dédiée, enrichie d'une coche de sélection.
     private func tagCell(_ category: Category) -> some View {
         let isApplied = appliedCategoryIds.contains(category.id)
         return Button {
             Task { await toggle(category) }
         } label: {
-            VStack(alignment: .leading, spacing: 6) {
-                HStack {
-                    Circle()
-                        .fill(Color(hex: category.color) ?? .gray)
-                        .frame(width: 10, height: 10)
-                    Spacer()
+            TagGridCard(category: category)
+                .overlay(alignment: .topTrailing) {
                     if isApplied {
                         Image(systemName: "checkmark")
                             .font(.system(size: 11, weight: .bold))
-                            .foregroundStyle(Color.accentColor)
+                            .foregroundStyle(.white)
+                            .padding(7)
+                            .background(Color.accentColor, in: Circle())
+                            .padding(8)
                     }
                 }
-                Text(category.name)
-                    .font(.footnote)
-                    .lineLimit(1)
-                    .truncationMode(.tail)
-                    .foregroundStyle(.primary)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-            }
-            .padding(10)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(
-                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .fill(isApplied ? Color.accentColor.opacity(0.15) : Color(uiColor: .tertiarySystemFill))
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .strokeBorder(isApplied ? Color.accentColor.opacity(0.45) : .clear, lineWidth: 1)
-            )
+                .overlay {
+                    if isApplied {
+                        RoundedRectangle(cornerRadius: 16, style: .continuous)
+                            .strokeBorder(Color.accentColor, lineWidth: 2)
+                    }
+                }
         }
         .buttonStyle(.plain)
+    }
+
+    /// Même ordre que l'onglet Tag : les catégories récemment utilisées sont
+    /// placées en premier, puis les autres par ordre alphabétique.
+    private var orderedCategories: [Category] {
+        categories.sorted { lhs, rhs in
+            switch (TagUsageStore.lastUsed(driveId: driveId, categoryId: lhs.id),
+                    TagUsageStore.lastUsed(driveId: driveId, categoryId: rhs.id)) {
+            case let (lhsDate?, rhsDate?):
+                return lhsDate > rhsDate
+            case (nil, _?):
+                return false
+            case (_?, nil):
+                return true
+            case (nil, nil):
+                return lhs.name.localizedCaseInsensitiveCompare(rhs.name) == .orderedAscending
+            }
+        }
     }
 
     private func load() async {
