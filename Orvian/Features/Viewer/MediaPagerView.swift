@@ -14,6 +14,12 @@ struct MediaPagerView: View {
     /// Médias affichés : instantané de la grille, complété par les pages
     /// suivantes chargées depuis la vue-modèle d'origine.
     @State private var files: [DriveFile]
+    /// Déplacement vertical du pager lors d'un geste de fermeture sur une image.
+    @State private var dismissOffset: CGFloat = 0
+    /// Les pages conservent leur zoom quand elles restent en mémoire. Cet
+    /// ensemble permet au pager de ne jamais interpréter leur pan comme une
+    /// demande de fermeture.
+    @State private var zoomedImageIDs: Set<Int> = []
 
     init(context: MediaViewerContext) {
         self.context = context
@@ -34,12 +40,19 @@ struct MediaPagerView: View {
                         file: file,
                         driveId: context.driveId,
                         isActive: selectedFileID == file.id,
-                        onClose: { dismiss() }
+                        onImageZoomChanged: { isZoomed in
+                            setImageZoomed(isZoomed, fileID: file.id)
+                        }
                     )
                     .tag(file.id)
                 }
             }
             .tabViewStyle(.page(indexDisplayMode: .never))
+            .offset(y: dismissOffset * 0.55)
+            .opacity(1 - min(0.55, abs(dismissOffset) / 700))
+            // Le geste vit sur le TabView lui-même : il peut ainsi reconnaître
+            // le vertical sans priver son pager interne du swipe horizontal.
+            .simultaneousGesture(imageDismissGesture)
 
             overlay
         }
@@ -52,6 +65,7 @@ struct MediaPagerView: View {
             await loadMoreMediaIfNeeded(around: selectedFileID)
         }
         .onChange(of: selectedFileID) { _, newID in
+            dismissOffset = 0
             guard let index = files.firstIndex(where: { $0.id == newID }) else { return }
             // Consigne la consultation pour les « médias les plus consultés ».
             MediaUsageStore.recordView(driveId: context.driveId, file: files[index])
@@ -110,6 +124,41 @@ struct MediaPagerView: View {
 
     private var currentFile: DriveFile? {
         files.first { $0.id == selectedFileID }
+    }
+
+    private var canDismissCurrentImage: Bool {
+        currentFile?.isImage == true && !zoomedImageIDs.contains(selectedFileID)
+    }
+
+    private var imageDismissGesture: some Gesture {
+        DragGesture(minimumDistance: 12)
+            .onChanged { value in
+                guard canDismissCurrentImage,
+                      abs(value.translation.height) > abs(value.translation.width)
+                else {
+                    dismissOffset = 0
+                    return
+                }
+                dismissOffset = value.translation.height
+            }
+            .onEnded { value in
+                let isVertical = abs(value.translation.height) > abs(value.translation.width)
+                if canDismissCurrentImage, isVertical, abs(value.translation.height) > 130 {
+                    dismiss()
+                } else {
+                    withAnimation(.snappy(duration: 0.25)) {
+                        dismissOffset = 0
+                    }
+                }
+            }
+    }
+
+    private func setImageZoomed(_ isZoomed: Bool, fileID: Int) {
+        if isZoomed {
+            zoomedImageIDs.insert(fileID)
+        } else {
+            zoomedImageIDs.remove(fileID)
+        }
     }
 
     @ViewBuilder
@@ -177,12 +226,16 @@ private struct MediaPagerPage: View {
     let file: DriveFile
     let driveId: Int
     let isActive: Bool
-    let onClose: () -> Void
+    let onImageZoomChanged: (Bool) -> Void
 
     var body: some View {
         Group {
             if file.isImage {
-                ZoomablePhotoPage(file: file, driveId: driveId, onClose: onClose)
+                ZoomablePhotoPage(
+                    file: file,
+                    driveId: driveId,
+                    onZoomChanged: onImageZoomChanged
+                )
             } else if file.isVideo {
                 VideoPlayerView(file: file, driveId: driveId, isActive: isActive)
             } else {
@@ -209,7 +262,7 @@ private struct MediaPagerPage: View {
 private struct ZoomablePhotoPage: View {
     let file: DriveFile
     let driveId: Int
-    let onClose: () -> Void
+    let onZoomChanged: (Bool) -> Void
 
     @State private var hires: UIImage?
     @State private var thumbnail: UIImage?
@@ -232,6 +285,15 @@ private struct ZoomablePhotoPage: View {
         .task(id: file.id) {
             await loadImages()
         }
+        .onAppear {
+            onZoomChanged(isZoomed)
+        }
+        .onChange(of: isZoomed) { _, newValue in
+            onZoomChanged(newValue)
+        }
+        .onDisappear {
+            onZoomChanged(false)
+        }
     }
 
     // MARK: - Image
@@ -251,17 +313,16 @@ private struct ZoomablePhotoPage: View {
 
     private var display: UIImage? { hires ?? thumbnail }
 
-    /// Au zoom normal, le drag vertical coexiste avec le pager horizontal.
-    /// Une fois zoomée, l'image prend la priorité afin qu'un panoramique ne
-    /// change pas accidentellement de page.
+    /// À l'échelle normale, aucun drag n'est attaché à l'image : le pager
+    /// horizontal reçoit donc toute sa surface. Une fois zoomée, l'image prend
+    /// la priorité afin qu'un panoramique ne change pas de page.
     @ViewBuilder
     private func interactiveImage(in screenSize: CGSize) -> some View {
         if isZoomed {
             displayedImage(in: screenSize)
-                .highPriorityGesture(dragGesture(in: screenSize))
+                .highPriorityGesture(zoomedPanGesture(in: screenSize))
         } else {
             displayedImage(in: screenSize)
-                .simultaneousGesture(dragGesture(in: screenSize))
         }
     }
 
@@ -270,7 +331,6 @@ private struct ZoomablePhotoPage: View {
             .frame(width: screenSize.width, height: screenSize.height)
             .scaleEffect(scale)
             .offset(panOffset)
-            .opacity(1 - dismissProgress)
             .onTapGesture(count: 2) {
                 withAnimation(.snappy(duration: 0.3)) {
                     if isZoomed {
@@ -289,13 +349,8 @@ private struct ZoomablePhotoPage: View {
     private var panOffset: CGSize {
         CGSize(
             width: offset.width + dragOffset.width,
-            height: offset.height + (isZoomed ? dragOffset.height : dragOffset.height * 0.55)
+            height: offset.height + dragOffset.height
         )
-    }
-
-    private var dismissProgress: CGFloat {
-        guard !isZoomed else { return 0 }
-        return min(0.55, abs(dragOffset.height) / 700)
     }
 
     private func clampOffset(_ raw: CGSize, screenSize: CGSize, currentScale: CGFloat) -> CGSize {
@@ -345,34 +400,20 @@ private struct ZoomablePhotoPage: View {
             }
     }
 
-    private func dragGesture(in screenSize: CGSize) -> some Gesture {
+    private func zoomedPanGesture(in screenSize: CGSize) -> some Gesture {
         DragGesture(minimumDistance: 12)
             .onChanged { value in
-                if isZoomed {
-                    dragOffset = value.translation
-                } else if abs(value.translation.height) > abs(value.translation.width) {
-                    // swipe vertical uniquement : le pager garde l'horizontal
-                    dragOffset = CGSize(width: 0, height: value.translation.height)
-                }
+                dragOffset = value.translation
             }
             .onEnded { value in
-                if isZoomed {
-                    let newRaw = CGSize(
-                        width: offset.width + value.translation.width,
-                        height: offset.height + value.translation.height
-                    )
-                    let clamped = clampOffset(newRaw, screenSize: screenSize, currentScale: scale)
-                    withAnimation(.snappy(duration: 0.2)) {
-                        offset = clamped
-                        dragOffset = .zero
-                    }
-                } else if abs(value.translation.height) > abs(value.translation.width),
-                          abs(value.translation.height) > 130 {
-                    onClose()
-                } else {
-                    withAnimation(.snappy(duration: 0.25)) {
-                        dragOffset = .zero
-                    }
+                let newRaw = CGSize(
+                    width: offset.width + value.translation.width,
+                    height: offset.height + value.translation.height
+                )
+                let clamped = clampOffset(newRaw, screenSize: screenSize, currentScale: scale)
+                withAnimation(.snappy(duration: 0.2)) {
+                    offset = clamped
+                    dragOffset = .zero
                 }
             }
     }
