@@ -1,8 +1,6 @@
 import SwiftUI
 
 /// Bouton et panneau de filtres partagés par toutes les grilles de fichiers.
-/// Le panneau reste ouvert après chaque choix afin de faciliter la combinaison
-/// d'un tri et de plusieurs filtres.
 struct FilterMenu: View {
     @Binding var filters: FileFilters
     @State private var isPresented = false
@@ -22,13 +20,14 @@ struct FilterMenu: View {
     }
 }
 
-/// Panneau de filtre compact : les sélecteurs d'orientation et de type de
-/// média sont alignés horizontalement et n'affichent que leurs icônes.
+/// Panneau de filtre compact, aligné sur les cartes de l'application.
+/// Le choix du tri est déporté dans un sous-menu afin que le panneau principal
+/// reste court, tandis que les filtres visuels restent accessibles d'un tap.
 private struct FilterPanel: View {
     @Binding var filters: FileFilters
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 18) {
+        VStack(alignment: .leading, spacing: 12) {
             sortSection
 
             if filters.sort != .original {
@@ -51,51 +50,74 @@ private struct FilterPanel: View {
                 action: { filters.media = $0 }
             )
 
-            Button(role: .destructive) {
-                filters = FileFilters()
-            } label: {
-                Label("Réinitialiser", systemImage: "arrow.counterclockwise")
-                    .frame(maxWidth: .infinity)
+            if filters.isActive {
+                Button(role: .destructive) {
+                    filters = FileFilters()
+                } label: {
+                    Label("Réinitialiser", systemImage: "arrow.counterclockwise")
+                        .font(.footnote.weight(.medium))
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 34)
+                }
+                .buttonStyle(.plain)
+                .background(.quaternary.opacity(0.55), in: RoundedRectangle(cornerRadius: 11, style: .continuous))
             }
-            .buttonStyle(.bordered)
-            .disabled(!filters.isActive)
         }
-        .padding(18)
-        .frame(width: 330)
+        .padding(14)
+        .frame(width: 280)
     }
 
     private var sortSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("Trier par")
-                .font(.subheadline.weight(.semibold))
-
-            ForEach(FileFilters.SortMode.allCases) { mode in
-                Button {
-                    filters.sort = mode
-                } label: {
-                    rowLabel(title: mode.title, symbol: mode.symbol, selected: filters.sort == mode)
+        Menu {
+            Picker("Trier par", selection: $filters.sort) {
+                ForEach(FileFilters.SortMode.allCases) { mode in
+                    Label(mode.title, systemImage: mode.symbol)
+                        .tag(mode)
                 }
-                .buttonStyle(.plain)
             }
+        } label: {
+            HStack(spacing: 9) {
+                Image(systemName: "arrow.up.arrow.down")
+                    .foregroundStyle(.secondary)
+                Text("Trier par")
+                    .font(.subheadline.weight(.medium))
+                Spacer()
+                Text(filters.sort.title)
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                Image(systemName: "chevron.up.chevron.down")
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(.tertiary)
+            }
+            .padding(.horizontal, 11)
+            .frame(height: 40)
+            .background(Color(uiColor: .secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
         }
     }
 
     private var directionSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("Sens du tri")
-                .font(.subheadline.weight(.semibold))
+        HStack(spacing: 9) {
+            Text("Ordre")
+                .font(.subheadline.weight(.medium))
+                .foregroundStyle(.secondary)
+            Spacer()
 
-            HStack(spacing: 8) {
+            HStack(spacing: 7) {
                 ForEach(FileFilters.Direction.allCases) { direction in
-                    Button {
+                    iconButton(
+                        symbol: direction.symbol,
+                        accessibilityLabel: direction.title,
+                        selected: filters.direction == direction
+                    ) {
                         filters.direction = direction
-                    } label: {
-                        rowLabel(title: direction.title, symbol: direction.symbol, selected: filters.direction == direction)
                     }
-                    .buttonStyle(.plain)
                 }
             }
         }
+        .padding(.horizontal, 11)
+        .frame(height: 40)
+        .background(Color(uiColor: .secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
     }
 
     private func iconSection<Value: Identifiable>(
@@ -105,11 +127,12 @@ private struct FilterPanel: View {
         isSelected: @escaping (Value) -> Bool,
         action: @escaping (Value) -> Void
     ) -> some View where Value.ID: Hashable {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 7) {
             Text(title)
-                .font(.subheadline.weight(.semibold))
+                .font(.footnote.weight(.medium))
+                .foregroundStyle(.secondary)
 
-            HStack(spacing: 10) {
+            HStack(spacing: 8) {
                 ForEach(values) { value in
                     iconButton(
                         symbol: value[keyPath: symbol],
@@ -132,12 +155,18 @@ private struct FilterPanel: View {
         Button(action: action) {
             Image(systemName: symbol)
                 .font(.system(size: 17, weight: .semibold))
-                .frame(width: 44, height: 38)
+                .frame(width: 40, height: 36)
                 .foregroundStyle(selected ? .white : .primary)
                 .background(
                     selected ? Color.accentColor : Color(uiColor: .secondarySystemGroupedBackground),
                     in: RoundedRectangle(cornerRadius: 10, style: .continuous)
                 )
+                .overlay {
+                    if !selected {
+                        RoundedRectangle(cornerRadius: 10, style: .continuous)
+                            .strokeBorder(.quaternary, lineWidth: 0.5)
+                    }
+                }
         }
         .buttonStyle(.plain)
         .accessibilityLabel(accessibilityLabel)
@@ -161,12 +190,5 @@ private struct FilterPanel: View {
         default:
             return "Filtre"
         }
-    }
-
-    @ViewBuilder
-    private func rowLabel(title: String, symbol: String, selected: Bool) -> some View {
-        Label(title, systemImage: selected ? "checkmark" : symbol)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.vertical, 3)
     }
 }
