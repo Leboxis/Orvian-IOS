@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// Carte de fichier : miniature, étoile favori, nom, taille.
+/// Carte de fichier : miniature, étoile favori, nom et informations secondaires.
 /// Tap → ouverture du fichier/dossier. Appui long → menu contextuel
 /// (détails, couleur pour les dossiers, télécharger, tags, favori,
 /// renommer, déplacer, supprimer).
@@ -33,6 +33,8 @@ struct FileCardView: View {
     var onTagChanged: ((Category, Bool) -> Void)?
     var action: () -> Void
 
+    /// Préférence globale : conserve le type comme repère lorsque le poids est masqué.
+    @AppStorage("showFileSizes") private var showFileSizes = true
     @State private var thumbnail: UIImage?
     @State private var thumbnailLoaded = false
     @State private var showDetail = false
@@ -249,7 +251,7 @@ struct FileCardView: View {
 
     private var subtitle: String {
         if file.isDirectory { return "Dossier" }
-        return ByteFormatter.string(fromBytes: file.size)
+        return showFileSizes ? ByteFormatter.string(fromBytes: file.size) : kind.label
     }
 
     /// Petits cercles de la couleur de chaque catégorie (tag) du fichier,
