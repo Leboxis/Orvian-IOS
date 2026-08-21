@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// Onglet « Réglages » : drive et stockage local.
+/// Espace de préférences organisé par usages, avec des réglages faciles à parcourir.
 struct SettingsView: View {
     let session: SessionStore
     @Binding var path: NavigationPath
@@ -8,6 +8,7 @@ struct SettingsView: View {
     @State private var cacheSize: Int = 0
     @State private var showDrivePicker = false
     @State private var showSignOutConfirm = false
+    @AppStorage("showFileSizes") private var showFileSizes = true
     @AppStorage("fileGridColumns") private var fileGridColumns = 3
     @AppStorage("alwaysShowSearch") private var alwaysShowSearch = false
     @AppStorage("favoritesReselectScrollToTop") private var favoritesReselectScrollToTop = true
@@ -20,18 +21,157 @@ struct SettingsView: View {
 
     var body: some View {
         NavigationStack(path: $path) {
-            List {
-                driveSection
-                displaySection
-                navigationSection
-                mediaSection
-                cacheSection
-                comfortSection
-                sessionSection
+            ScrollView {
+                VStack(alignment: .leading, spacing: 26) {
+                    if let drive = session.selectedDrive {
+                        driveSummary(drive)
+                    }
+
+                    settingsCard(
+                        title: "Affichage",
+                        message: "Personnalisez les informations visibles dans vos fichiers."
+                    ) {
+                        settingsToggle(
+                            "Afficher le poids des fichiers",
+                            detail: "La taille apparaît sous chaque fichier.",
+                            icon: "scalemass",
+                            tint: .indigo,
+                            isOn: $showFileSizes
+                        )
+                        settingsDivider
+                        settingsChoice(
+                            "Cartes par ligne",
+                            icon: "square.grid.2x2",
+                            tint: .blue,
+                            selection: $fileGridColumns
+                        ) {
+                            Text("2 cartes").tag(2)
+                            Text("3 cartes").tag(3)
+                            Text("4 cartes").tag(4)
+                            Text("5 cartes").tag(5)
+                            Text("6 cartes").tag(6)
+                            Text("7 cartes").tag(7)
+                        }
+                        settingsDivider
+                        settingsToggle(
+                            "Recherche toujours visible",
+                            detail: "Évite de devoir faire glisser la liste pour l’afficher.",
+                            icon: "magnifyingglass",
+                            tint: .teal,
+                            isOn: $alwaysShowSearch
+                        )
+                    }
+
+                    settingsCard(
+                        title: "Navigation",
+                        message: "Choisissez le comportement de l’onglet Favoris."
+                    ) {
+                        settingsToggle(
+                            "Revenir en haut dans les favoris",
+                            detail: "Un second appui sur l’onglet replace la liste au début.",
+                            icon: "arrow.up.to.line",
+                            tint: .orange,
+                            isOn: $favoritesReselectScrollToTop
+                        )
+                    }
+
+                    settingsCard(
+                        title: "Médias",
+                        message: "Le préchargement rend les miniatures et vidéos plus immédiates."
+                    ) {
+                        settingsToggle(
+                            "Précharger les miniatures",
+                            icon: "photo.stack",
+                            tint: .pink,
+                            isOn: $prefetchThumbnails
+                        )
+                        settingsDivider
+                        settingsToggle(
+                            "Précharger les vidéos",
+                            icon: "play.rectangle.fill",
+                            tint: .purple,
+                            isOn: $prefetchVideoURLs
+                        )
+                        settingsDivider
+                        settingsToggle(
+                            "Précharger seulement en Wi-Fi",
+                            detail: "Réduit l’utilisation des données mobiles.",
+                            icon: "wifi",
+                            tint: .cyan,
+                            isOn: $prefetchOnWiFiOnly,
+                            isEnabled: prefetchThumbnails || prefetchVideoURLs
+                        )
+                    }
+
+                    settingsCard(
+                        title: "Stockage local",
+                        message: "Les miniatures sont conservées temporairement pour accélérer l’affichage."
+                    ) {
+                        HStack(spacing: 12) {
+                            settingIcon("internaldrive.fill", tint: .mint)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("Miniatures enregistrées")
+                                    .font(.body.weight(.medium))
+                                Text(ByteFormatter.string(fromBytes: cacheSize))
+                                    .font(.subheadline)
+                                    .foregroundStyle(.secondary)
+                            }
+                            Spacer()
+                        }
+                        .padding(.vertical, 2)
+
+                        settingsDivider
+                        settingsChoice(
+                            "Limite automatique",
+                            icon: "gauge.with.dots.needle.50percent",
+                            tint: .green,
+                            selection: $thumbnailCacheLimitMB
+                        ) {
+                            Text("250 Mo").tag(250)
+                            Text("500 Mo").tag(500)
+                            Text("1 Go").tag(1_024)
+                            Text("Sans limite").tag(0)
+                        }
+                        settingsDivider
+                        Button {
+                            Task {
+                                await ThumbnailProvider.shared.purgeDiskCache()
+                                cacheSize = await ThumbnailProvider.shared.diskCacheSize()
+                            }
+                        } label: {
+                            Label("Vider le cache", systemImage: "trash")
+                                .font(.body.weight(.medium))
+                                .foregroundStyle(.red)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .padding(.vertical, 4)
+                        }
+                    }
+
+                    settingsCard(title: "Confort") {
+                        settingsToggle(
+                            "Retours haptiques",
+                            detail: "Une légère vibration accompagne les changements d’onglet.",
+                            icon: "hand.tap.fill",
+                            tint: .blue,
+                            isOn: $hapticFeedbackEnabled
+                        )
+                        settingsDivider
+                        settingsToggle(
+                            "Réduire les animations",
+                            detail: "Privilégie des transitions plus sobres.",
+                            icon: "wind",
+                            tint: .gray,
+                            isOn: $reduceMotion
+                        )
+                    }
+
+                    accountSection
+                }
+                .padding(.horizontal, 20)
+                .padding(.top, 12)
+                .padding(.bottom, 120)
             }
-            .safeAreaInset(edge: .bottom) {
-                Color.clear.frame(height: 90)
-            }
+            .background(Color(uiColor: .systemGroupedBackground))
             .navigationTitle("Réglages")
             .navigationBarTitleDisplayMode(.large)
         }
@@ -71,127 +211,143 @@ struct SettingsView: View {
         }
     }
 
-    // MARK: - Sections
+    // MARK: - Groupes
 
-    private var driveSection: some View {
-        Section {
-            if let drive = session.selectedDrive {
-                VStack(alignment: .leading, spacing: 8) {
-                    HStack {
-                        Image(systemName: "externaldrive.fill")
-                            .foregroundStyle(.blue)
-                        Text(drive.name).font(.headline)
-                        Spacer()
-                        if session.drives.count > 1 {
-                            Button("Changer") { showDrivePicker = true }
-                                .font(.footnote)
-                        }
-                    }
-                    ProgressView(value: Double(drive.usedSize ?? 0), total: Double(max(drive.size ?? 1, 1)))
-                        .tint(.blue)
-                        .accessibilityLabel("Stockage du drive")
-                    Text(ByteFormatter.usage(used: drive.usedSize, total: drive.size))
-                        .font(.caption)
+    private func driveSummary(_ drive: Drive) -> some View {
+        VStack(alignment: .leading, spacing: 16) {
+            HStack(alignment: .center, spacing: 12) {
+                settingIcon("externaldrive.fill", tint: .blue, size: 44)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("Drive actuel")
+                        .font(.caption.weight(.semibold))
                         .foregroundStyle(.secondary)
+                    Text(drive.name)
+                        .font(.title3.weight(.semibold))
+                        .lineLimit(1)
                 }
-                .padding(.vertical, 4)
-            }
-        } header: {
-            Text("Drive")
-        }
-    }
-
-    private var displaySection: some View {
-        Section {
-            Picker("Cartes par ligne", selection: $fileGridColumns) {
-                Text("2 cartes").tag(2)
-                Text("3 cartes").tag(3)
-                Text("4 cartes").tag(4)
-                Text("5 cartes").tag(5)
-                Text("6 cartes").tag(6)
-                Text("7 cartes").tag(7)
+                Spacer(minLength: 8)
+                if session.drives.count > 1 {
+                    Button("Changer") { showDrivePicker = true }
+                        .font(.subheadline.weight(.semibold))
+                }
             }
 
-            Toggle("Recherche toujours visible", isOn: $alwaysShowSearch)
-        } header: {
-            Text("Affichage")
-        } footer: {
-            Text("La recherche reste affichée dans les dossiers de l'Accueil au lieu d'apparaître après un court geste vers le bas. Un nombre élevé de cartes réduit leur taille.")
-        }
-    }
-
-    private var navigationSection: some View {
-        Section {
-            Toggle("Favoris : retour en haut au second appui", isOn: $favoritesReselectScrollToTop)
-        } header: {
-            Text("Navigation")
-        } footer: {
-            Text("Un nouvel appui sur l'onglet Favoris revient à la racine ; activez cette option pour remonter aussi la liste en haut.")
-        }
-    }
-
-    private var mediaSection: some View {
-        Section {
-            Toggle("Précharger les miniatures", isOn: $prefetchThumbnails)
-            Toggle("Précharger les vidéos", isOn: $prefetchVideoURLs)
-            Toggle("Précharger seulement en Wi-Fi", isOn: $prefetchOnWiFiOnly)
-                .disabled(!prefetchThumbnails && !prefetchVideoURLs)
-        } header: {
-            Text("Médias")
-        } footer: {
-            Text("Le préchargement prépare les éléments juste après la zone visible. Le désactiver économise les données, mais l'affichage ou le démarrage d'une vidéo peut être moins immédiat.")
-        }
-    }
-
-    private var cacheSection: some View {
-        Section {
-            HStack {
-                Label("Miniatures", systemImage: "photo.stack")
-                Spacer()
-                Text(ByteFormatter.string(fromBytes: cacheSize))
+            VStack(alignment: .leading, spacing: 7) {
+                ProgressView(value: Double(drive.usedSize ?? 0), total: Double(max(drive.size ?? 1, 1)))
+                    .tint(.blue)
+                Text(ByteFormatter.usage(used: drive.usedSize, total: drive.size))
+                    .font(.subheadline)
                     .foregroundStyle(.secondary)
             }
-            Picker("Limite automatique", selection: $thumbnailCacheLimitMB) {
-                Text("250 Mo").tag(250)
-                Text("500 Mo").tag(500)
-                Text("1 Go").tag(1_024)
-                Text("Sans limite").tag(0)
-            }
-            Button(role: .destructive) {
-                Task {
-                    await ThumbnailProvider.shared.purgeDiskCache()
-                    cacheSize = await ThumbnailProvider.shared.diskCacheSize()
+        }
+        .padding(18)
+        .background(.blue.opacity(0.10), in: RoundedRectangle(cornerRadius: 24, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 24, style: .continuous)
+                .strokeBorder(.blue.opacity(0.14), lineWidth: 1)
+        }
+    }
+
+    private func settingsCard<Content: View>(
+        title: String,
+        message: String? = nil,
+        @ViewBuilder content: () -> Content
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 14) {
+            VStack(alignment: .leading, spacing: 3) {
+                Text(title)
+                    .font(.headline)
+                if let message {
+                    Text(message)
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
                 }
-            } label: {
-                Label("Vider le cache", systemImage: "trash")
             }
-        } header: {
-            Text("Stockage local")
-        } footer: {
-            Text("Au-delà de la limite choisie, les miniatures les plus anciennes sont supprimées automatiquement. Elles sont re-téléchargées à la demande après une purge.")
+            content()
+        }
+        .padding(18)
+        .background(.background, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 22, style: .continuous)
+                .strokeBorder(.primary.opacity(0.06), lineWidth: 1)
         }
     }
 
-    private var comfortSection: some View {
-        Section {
-            Toggle("Retours haptiques", isOn: $hapticFeedbackEnabled)
-            Toggle("Réduire les animations", isOn: $reduceMotion)
-        } header: {
-            Text("Confort")
-        } footer: {
-            Text("Les retours haptiques accompagnent les changements d'onglet. La réduction des animations privilégie des transitions plus sobres.")
+    private func settingsToggle(
+        _ title: String,
+        detail: String? = nil,
+        icon: String,
+        tint: Color,
+        isOn: Binding<Bool>,
+        isEnabled: Bool = true
+    ) -> some View {
+        Toggle(isOn: isOn) {
+            HStack(spacing: 12) {
+                settingIcon(icon, tint: tint)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(title)
+                        .font(.body.weight(.medium))
+                    if let detail {
+                        Text(detail)
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+            }
         }
+        .tint(.accentColor)
+        .disabled(!isEnabled)
+        .padding(.vertical, 2)
     }
 
-    private var sessionSection: some View {
-        Section {
+    private func settingsChoice<Content: View>(
+        _ title: String,
+        icon: String,
+        tint: Color,
+        selection: Binding<Int>,
+        @ViewBuilder options: () -> Content
+    ) -> some View {
+        HStack(spacing: 12) {
+            settingIcon(icon, tint: tint)
+            Text(title)
+                .font(.body.weight(.medium))
+            Spacer(minLength: 8)
+            Picker(title, selection: selection) {
+                options()
+            }
+                .labelsHidden()
+                .pickerStyle(.menu)
+        }
+        .padding(.vertical, 2)
+    }
+
+    private func settingIcon(_ name: String, tint: Color, size: CGFloat = 34) -> some View {
+        Image(systemName: name)
+            .font(.system(size: size == 34 ? 15 : 20, weight: .semibold))
+            .foregroundStyle(tint)
+            .frame(width: size, height: size)
+            .background(tint.opacity(0.12), in: RoundedRectangle(cornerRadius: size * 0.30, style: .continuous))
+    }
+
+    private var settingsDivider: some View {
+        Divider()
+            .padding(.leading, 46)
+    }
+
+    private var accountSection: some View {
+        settingsCard(
+            title: "Compte",
+            message: "Le token et le drive choisi sont enregistrés uniquement sur cet appareil."
+        ) {
             Button(role: .destructive) {
                 showSignOutConfirm = true
             } label: {
                 Label("Changer de token / se déconnecter", systemImage: "rectangle.portrait.and.arrow.right")
+                    .font(.body.weight(.medium))
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.vertical, 4)
             }
-        } header: {
-            Text("Compte")
         }
     }
 }

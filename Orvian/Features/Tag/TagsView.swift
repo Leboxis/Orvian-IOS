@@ -12,6 +12,8 @@ struct TagsView: View {
 
     @State private var categories: [Category] = []
     @State private var isLoading = false
+    /// Évite d'afficher provisoirement « (0) » avant la première réponse API.
+    @State private var hasLoadedCategories = false
     @State private var errorMessage: String?
     @State private var trail: [String] = []
     /// Affichage des catégories : grille (défaut) ou liste.
@@ -31,6 +33,11 @@ struct TagsView: View {
         NavigationStack(path: $path) {
             root
                 .toolbar {
+                    if path.count == 0 {
+                        ToolbarItem(placement: .principal) {
+                            tagsTitle
+                        }
+                    }
                     ToolbarItemGroup(placement: .topBarTrailing) {
                         Button {
                             withAnimation(.snappy(duration: 0.25)) {
@@ -134,8 +141,27 @@ struct TagsView: View {
                 list
             }
         }
-        .navigationTitle("Tag")
-        .navigationBarTitleDisplayMode(.large)
+        .navigationBarTitleDisplayMode(.inline)
+    }
+
+    /// Le compteur n'apparaît qu'après le premier chargement afin de toujours
+    /// refléter le nombre réel de tags disponibles dans le drive.
+    private var tagsTitle: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 5) {
+            Text("Tags")
+                .font(.headline.weight(.semibold))
+            if hasLoadedCategories {
+                Text("(\(categories.count))")
+                    .font(.caption.weight(.medium))
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(
+            hasLoadedCategories
+                ? "Tags, \(categories.count) tag\(categories.count > 1 ? "s" : "")"
+                : "Tags"
+        )
     }
 
     /// Catégories triées de la plus récemment utilisée à la plus ancienne ;
@@ -280,6 +306,7 @@ struct TagsView: View {
         }
         do {
             categories = try await service.categories(driveId: driveId)
+            hasLoadedCategories = true
             errorMessage = nil
         } catch {
             errorMessage = (error as? APIError)?.errorDescription ?? error.localizedDescription
