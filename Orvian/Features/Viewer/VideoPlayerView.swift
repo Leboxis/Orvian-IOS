@@ -414,7 +414,7 @@ struct VideoPlayerView: View {
         let tolerance: CMTime = precise ? .zero : .indefinite
         // Un seek antérieur peut encore être en cours après deux relâchements
         // rapides. On le remplace explicitement par la dernière intention.
-        player.cancelPendingSeeks()
+        player.currentItem?.cancelPendingSeeks()
         player.seek(to: CMTime(seconds: seconds, preferredTimescale: 600), toleranceBefore: tolerance, toleranceAfter: tolerance)
         currentTime = seconds
     }
