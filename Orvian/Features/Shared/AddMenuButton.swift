@@ -61,6 +61,8 @@ struct AddMenuButton: View {
             Image(systemName: "plus")
                 .font(.headline.weight(.semibold))
                 .foregroundStyle(Color.accentColor)
+                .frame(width: 52, height: 52)
+                .contentShape(Circle())
         }
         .disabled(isBusy)
         .alert("Nouveau dossier", isPresented: $showFolderAlert) {
