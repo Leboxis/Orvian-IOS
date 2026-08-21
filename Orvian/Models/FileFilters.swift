@@ -168,6 +168,7 @@ struct FileFilters: Equatable, Hashable {
         return result
     }
 
+    @MainActor
     private func sorted(
         _ files: [DriveFile],
         mediaMetadata: MediaMetadataStore
