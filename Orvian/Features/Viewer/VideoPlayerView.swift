@@ -23,7 +23,14 @@ struct VideoPlayerView: View {
     @State private var currentTime: Double = 0
     @State private var duration: Double = 0
     @State private var isScrubbing = false
+    /// Une recherche AVPlayer est asynchrone : tant qu'elle n'est pas terminée,
+    /// le curseur doit rester sur la position demandée, pas sur l'ancienne
+    /// position remontée par l'observateur périodique.
+    @State private var isSeeking = false
     @State private var scrubValue: Double = 0
+    /// Identifie l'intention de seek la plus récente. Un callback retardé d'un
+    /// seek annulé ne peut ainsi jamais écraser une position plus récente.
+    @State private var seekRequestID = 0
     @State private var playbackRate: Float = 1
 
     // Son
@@ -133,7 +140,7 @@ struct VideoPlayerView: View {
         hideControlsTask = Task {
             try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
             guard !Task.isCancelled else { return }
-            if !isScrubbing {
+            if !isScrubbing, !isSeeking {
                 withAnimation(.easeInOut(duration: 0.25)) {
                     showControls = false
                 }
@@ -234,7 +241,7 @@ struct VideoPlayerView: View {
         HStack(spacing: 6) {
             playButton
 
-            Text(timeText(currentTime))
+            Text(timeText(displayedTime))
                 .font(.caption2.monospacedDigit())
                 .foregroundStyle(.white.opacity(0.8))
 
@@ -244,12 +251,12 @@ struct VideoPlayerView: View {
                     // Le curseur doit rester sous le doigt pendant le geste.
                     // Rechercher dans AVPlayer à chaque micro-déplacement crée
                     // une file de seeks asynchrones, source de saccades.
-                    scrubValue = currentTime
+                    cancelPendingSeek()
+                    scrubValue = playerTime ?? currentTime
                     isScrubbing = true
                 } else {
-                    seek(to: scrubValue, precise: true)
                     isScrubbing = false
-                    scheduleControlsAutoHide(delay: 2.5)
+                    seek(to: scrubValue, precise: true)
                 }
             }
             .tint(.white)
@@ -388,9 +395,19 @@ struct VideoPlayerView: View {
 
     private var scrubBinding: Binding<Double> {
         Binding(
-            get: { isScrubbing ? scrubValue : currentTime },
+            get: { isScrubbing || isSeeking ? scrubValue : currentTime },
             set: { scrubValue = $0 }
         )
+    }
+
+    private var displayedTime: Double {
+        isScrubbing || isSeeking ? scrubValue : currentTime
+    }
+
+    private var playerTime: Double? {
+        guard let player else { return nil }
+        let time = player.currentTime().seconds
+        return time.isFinite ? time : nil
     }
 
     private func togglePlay() {
@@ -412,11 +429,50 @@ struct VideoPlayerView: View {
     private func seek(to seconds: Double, precise: Bool = false) {
         guard let player else { return }
         let tolerance: CMTime = precise ? .zero : .indefinite
+        let target: Double
+        if duration.isFinite, duration > 0 {
+            target = min(max(seconds, 0), duration)
+        } else {
+            target = max(seconds, 0)
+        }
+        seekRequestID &+= 1
+        let requestID = seekRequestID
+        isSeeking = true
         // Un seek antérieur peut encore être en cours après deux relâchements
         // rapides. On le remplace explicitement par la dernière intention.
         player.currentItem?.cancelPendingSeeks()
-        player.seek(to: CMTime(seconds: seconds, preferredTimescale: 600), toleranceBefore: tolerance, toleranceAfter: tolerance)
-        currentTime = seconds
+        player.seek(
+            to: CMTime(seconds: target, preferredTimescale: 600),
+            toleranceBefore: tolerance,
+            toleranceAfter: tolerance
+        ) { [weak player] finished in
+            Task { @MainActor in
+                guard let player,
+                      requestID == seekRequestID,
+                      self.player === player,
+                      !isDisappeared
+                else { return }
+
+                let resolvedTime = player.currentTime().seconds
+                if resolvedTime.isFinite {
+                    currentTime = resolvedTime
+                    scrubValue = resolvedTime
+                } else if finished {
+                    currentTime = target
+                    scrubValue = target
+                }
+                isSeeking = false
+                scheduleControlsAutoHide(delay: 2.5)
+            }
+        }
+    }
+
+    /// Annule une recherche lancée au relâchement précédent et invalide son
+    /// callback. Cette opération est aussi exécutée au début d'un nouveau drag.
+    private func cancelPendingSeek() {
+        seekRequestID &+= 1
+        player?.currentItem?.cancelPendingSeeks()
+        isSeeking = false
     }
 
     private func setPlaybackRate(_ rate: Float) {
@@ -506,6 +562,8 @@ struct VideoPlayerView: View {
     }
 
     private func startPlayback(asset: AVURLAsset) {
+        cancelPendingSeek()
+        isScrubbing = false
         let newPlayer = AVPlayer(playerItem: AVPlayerItem(asset: asset))
         newPlayer.automaticallyWaitsToMinimizeStalling = true
         newPlayer.isMuted = isMuted
@@ -575,7 +633,7 @@ struct VideoPlayerView: View {
                abs(duration - itemDuration) > 0.01 {
                 duration = itemDuration
             }
-            if !isScrubbing, showControls, time.seconds.isFinite {
+            if !isScrubbing, !isSeeking, showControls, time.seconds.isFinite {
                 currentTime = time.seconds
             }
             let playing = player.timeControlStatus == .playing
@@ -597,6 +655,8 @@ struct VideoPlayerView: View {
     }
 
     private func teardown() {
+        cancelPendingSeek()
+        isScrubbing = false
         itemStatusObserver?.invalidate()
         itemStatusObserver = nil
         if let timeObserver, let player {
