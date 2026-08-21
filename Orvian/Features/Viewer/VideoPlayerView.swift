@@ -239,19 +239,21 @@ struct VideoPlayerView: View {
                 .foregroundStyle(.white.opacity(0.8))
 
             Slider(value: scrubBinding, in: 0...max(duration, 1)) { editing in
-                isScrubbing = editing
                 if editing {
                     hideControlsTask?.cancel()
+                    // Le curseur doit rester sous le doigt pendant le geste.
+                    // Rechercher dans AVPlayer à chaque micro-déplacement crée
+                    // une file de seeks asynchrones, source de saccades.
+                    scrubValue = currentTime
+                    isScrubbing = true
                 } else {
                     seek(to: scrubValue, precise: true)
+                    isScrubbing = false
                     scheduleControlsAutoHide(delay: 2.5)
                 }
             }
             .tint(.white)
             .controlSize(.large)
-            .onChange(of: scrubValue) { _, newValue in
-                if isScrubbing { seek(to: newValue) }
-            }
 
             Text(timeText(duration))
                 .font(.caption2.monospacedDigit())
@@ -410,6 +412,9 @@ struct VideoPlayerView: View {
     private func seek(to seconds: Double, precise: Bool = false) {
         guard let player else { return }
         let tolerance: CMTime = precise ? .zero : .indefinite
+        // Un seek antérieur peut encore être en cours après deux relâchements
+        // rapides. On le remplace explicitement par la dernière intention.
+        player.cancelPendingSeeks()
         player.seek(to: CMTime(seconds: seconds, preferredTimescale: 600), toleranceBefore: tolerance, toleranceAfter: tolerance)
         currentTime = seconds
     }
@@ -559,18 +564,28 @@ struct VideoPlayerView: View {
 
     private func addObservers(to player: AVPlayer) {
         timeObserver = player.addPeriodicTimeObserver(
-            forInterval: CMTime(seconds: 0.25, preferredTimescale: 600),
+            // Suffisamment fréquent pour une progression visuellement fluide.
+            // Les mises à jour du curseur sont toutefois suspendues quand les
+            // contrôles sont invisibles afin d'éviter des rendus inutiles.
+            forInterval: CMTime(value: 1, timescale: 30),
             queue: .main
         ) { time in
             let itemDuration = player.currentItem?.duration.seconds ?? 0
-            if itemDuration.isFinite, itemDuration > 0 {
+            if itemDuration.isFinite, itemDuration > 0,
+               abs(duration - itemDuration) > 0.01 {
                 duration = itemDuration
             }
-            if !isScrubbing {
+            if !isScrubbing, showControls, time.seconds.isFinite {
                 currentTime = time.seconds
             }
-            isPlaying = player.timeControlStatus == .playing
-            isExternalPlaybackActive = player.isExternalPlaybackActive
+            let playing = player.timeControlStatus == .playing
+            if isPlaying != playing {
+                isPlaying = playing
+            }
+            let externalPlaybackActive = player.isExternalPlaybackActive
+            if isExternalPlaybackActive != externalPlaybackActive {
+                isExternalPlaybackActive = externalPlaybackActive
+            }
         }
         endObserver = NotificationCenter.default.addObserver(
             forName: .AVPlayerItemDidPlayToEndTime,
