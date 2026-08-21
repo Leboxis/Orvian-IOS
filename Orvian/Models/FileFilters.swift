@@ -89,6 +89,16 @@ struct FileFilters: Equatable, Hashable {
             case .other: return "Autres"
             }
         }
+
+        /// Icône affichée dans le sélecteur compact du menu de filtres.
+        var symbol: String {
+            switch self {
+            case .all: return "square.grid.2x2"
+            case .videos: return "video"
+            case .images: return "photo"
+            case .other: return "doc"
+            }
+        }
     }
 
     var sort: SortMode = .original
@@ -124,10 +134,9 @@ struct FileFilters: Equatable, Hashable {
     /// local (durée) sur une liste brute. Partagé entre la grille et la
     /// visionneuse pour garantir exactement le même ordre des éléments.
     ///
-    /// Les tris dates/type/poids sont déjà appliqués par le serveur
-    /// (`order_by[]` + `order`) sur toute la pagination : les re-trier ici
-    /// serait inutile et pourrait contredire l'ordre des pages. Seule la durée,
-    /// qui ne peut pas être exprimée par l'API, est triée localement.
+    /// Les tris pris en charge par l'API sont également appliqués localement.
+    /// Cela garde le tri opérationnel sur les sources qui ne prennent pas
+    /// `order_by[]` en charge (notamment les tags et les médias consultés).
     @MainActor
     func visible(_ items: [DriveFile], searchText: String, mediaMetadata: MediaMetadataStore) -> [DriveFile] {
         var result = items
@@ -154,14 +163,50 @@ struct FileFilters: Equatable, Hashable {
             result = result.filter { $0.matchesSearchKeywords(keywords) }
         }
 
-        if sort == .duration {
-            result = result.sorted {
-                let lhs = mediaMetadata.info(for: $0.id)?.duration ?? -1
-                let rhs = mediaMetadata.info(for: $1.id)?.duration ?? -1
-                return direction == .descending ? lhs > rhs : lhs < rhs
-            }
-        }
+        result = sorted(result, mediaMetadata: mediaMetadata)
 
         return result
+    }
+
+    private func sorted(
+        _ files: [DriveFile],
+        mediaMetadata: MediaMetadataStore
+    ) -> [DriveFile] {
+        guard sort != .original else { return files }
+
+        return files.sorted { lhs, rhs in
+            switch sort {
+            case .original:
+                return false
+            case .modifiedDate:
+                return ordered(lhs.lastModifiedAt ?? -.infinity, rhs.lastModifiedAt ?? -.infinity, lhs: lhs, rhs: rhs)
+            case .addedDate:
+                return ordered(lhs.addedAt ?? -.infinity, rhs.addedAt ?? -.infinity, lhs: lhs, rhs: rhs)
+            case .type:
+                return ordered(lhs.fileKind.rawValue, rhs.fileKind.rawValue, lhs: lhs, rhs: rhs)
+            case .size:
+                return ordered(lhs.size ?? -1, rhs.size ?? -1, lhs: lhs, rhs: rhs)
+            case .duration:
+                let lhsDuration = mediaMetadata.info(for: lhs.id)?.duration ?? -1
+                let rhsDuration = mediaMetadata.info(for: rhs.id)?.duration ?? -1
+                return ordered(lhsDuration, rhsDuration, lhs: lhs, rhs: rhs)
+            }
+        }
+    }
+
+    private func ordered<Value: Comparable>(
+        _ lhsValue: Value,
+        _ rhsValue: Value,
+        lhs: DriveFile,
+        rhs: DriveFile
+    ) -> Bool {
+        if lhsValue == rhsValue {
+            let nameOrder = lhs.name.localizedStandardCompare(rhs.name)
+            if nameOrder == .orderedSame {
+                return lhs.id < rhs.id
+            }
+            return nameOrder == .orderedAscending
+        }
+        return direction == .descending ? lhsValue > rhsValue : lhsValue < rhsValue
     }
 }
