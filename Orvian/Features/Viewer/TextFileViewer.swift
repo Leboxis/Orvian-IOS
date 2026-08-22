@@ -22,6 +22,7 @@ struct TextFileViewer: View {
     @State private var isSaving = false
     @State private var loadError: String?
     @State private var saveError: String?
+    @State private var showCloseConfirmation = false
     /// URL ouverte par un tap sur un lien du texte : affichée dans un
     /// `SFSafariViewController` intégré, sans quitter l'app.
     @State private var safariURL: SafariItem?
@@ -57,7 +58,7 @@ struct TextFileViewer: View {
                             }
                             .disabled(isSaving)
                             Button {
-                                Task { await save() }
+                                Task { _ = await save() }
                             } label: {
                                 if isSaving {
                                     ProgressView()
@@ -77,11 +78,12 @@ struct TextFileViewer: View {
                         }
                     }
                     Button {
-                        dismiss()
+                        requestDismiss()
                     } label: {
                         Image(systemName: "xmark.circle.fill")
                             .font(.system(size: 20))
                     }
+                    .disabled(isSaving)
                     .accessibilityLabel("Fermer")
                 }
             }
@@ -89,6 +91,7 @@ struct TextFileViewer: View {
         .task {
             await load()
         }
+        .interactiveDismissDisabled(hasUnsavedChanges)
         .fullScreenCover(item: $safariURL) { item in
             SafariViewController(url: item.url)
                 .ignoresSafeArea()
@@ -97,6 +100,25 @@ struct TextFileViewer: View {
             Button("OK", role: .cancel) {}
         } message: {
             Text(saveError ?? "")
+        }
+        .confirmationDialog(
+            "Enregistrer les modifications ?",
+            isPresented: $showCloseConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button("Enregistrer et fermer") {
+                Task {
+                    if await save() {
+                        dismiss()
+                    }
+                }
+            }
+            Button("Abandonner les modifications", role: .destructive) {
+                dismiss()
+            }
+            Button("Continuer la modification", role: .cancel) {}
+        } message: {
+            Text("Le brouillon n’a pas encore été enregistré dans kDrive.")
         }
     }
 
@@ -177,44 +199,96 @@ struct TextFileViewer: View {
 
     // MARK: - Données
 
+    /// `TextEditor` et la détection des liens du lecteur travaillent sur une
+    /// chaîne complète en mémoire. Au-delà de cette limite, ouvrir le fichier
+    /// ferait courir un risque de forte pression mémoire, notamment dans
+    /// LiveContainer.
+    private static let maximumEditableBytes = 5 * 1_024 * 1_024
+
     private func load() async {
         isLoading = true
         defer { isLoading = false }
         do {
-            guard let url = await MediaURLCache.shared.url(driveId: driveId, fileId: file.id) else {
-                throw NSError(
-                    domain: "TextFileViewer",
-                    code: 404,
-                    userInfo: [NSLocalizedDescriptionKey: "Impossible d'obtenir le lien du fichier."]
-                )
+            if let size = file.size, size > Self.maximumEditableBytes {
+                throw TextFileViewerError.tooLarge(maximumBytes: Self.maximumEditableBytes)
             }
-            let (data, _) = try await URLSession.shared.data(from: url)
-            content = Self.decode(data) ?? ""
-            draft = content
+            guard let url = await MediaURLCache.shared.url(driveId: driveId, fileId: file.id) else {
+                throw TextFileViewerError.missingTemporaryURL
+            }
+            let (bytes, response) = try await URLSession.shared.bytes(from: url)
+            guard let http = response as? HTTPURLResponse else {
+                throw TextFileViewerError.invalidResponse
+            }
+            guard (200..<300).contains(http.statusCode) else {
+                throw TextFileViewerError.http(status: http.statusCode)
+            }
+            if http.expectedContentLength > Int64(Self.maximumEditableBytes) {
+                throw TextFileViewerError.tooLarge(maximumBytes: Self.maximumEditableBytes)
+            }
+
+            var data = Data()
+            if http.expectedContentLength > 0 {
+                data.reserveCapacity(min(Int(http.expectedContentLength), Self.maximumEditableBytes))
+            }
+            for try await byte in bytes {
+                guard data.count < Self.maximumEditableBytes else {
+                    throw TextFileViewerError.tooLarge(maximumBytes: Self.maximumEditableBytes)
+                }
+                data.append(byte)
+            }
+            guard let decoded = Self.decode(data) else {
+                throw TextFileViewerError.unsupportedEncoding
+            }
+            content = decoded
+            draft = decoded
         } catch {
             loadError = (error as? APIError)?.errorDescription ?? error.localizedDescription
         }
     }
 
-    private func save() async {
+    @discardableResult
+    private func save() async -> Bool {
+        guard !isSaving else { return false }
         isSaving = true
         defer { isSaving = false }
         do {
             let data = Data(draft.utf8)
+            guard data.count <= Self.maximumEditableBytes else {
+                throw TextFileViewerError.tooLarge(maximumBytes: Self.maximumEditableBytes)
+            }
             try await service.uploadContent(driveId: driveId, fileId: file.id, data: data)
+            await MediaURLCache.shared.invalidate(driveId: driveId, fileId: file.id)
             content = draft
             isEditing = false
+            return true
         } catch {
             saveError = (error as? APIError)?.errorDescription ?? error.localizedDescription
+            return false
         }
     }
 
     /// UTF-8 d'abord, puis Windows-1252 (accentués courants), Latin-1 en
     /// dernier recours : les .txt existants ne sont pas tous en UTF-8.
     private static func decode(_ data: Data) -> String? {
+        if data.starts(with: [0xFF, 0xFE]) || data.starts(with: [0xFE, 0xFF]),
+           let text = String(data: data, encoding: .utf16) {
+            return text
+        }
         if let text = String(data: data, encoding: .utf8) { return text }
         if let text = String(data: data, encoding: .windowsCP1252) { return text }
         return String(data: data, encoding: .isoLatin1)
+    }
+
+    private var hasUnsavedChanges: Bool {
+        isEditing && draft != content
+    }
+
+    private func requestDismiss() {
+        if hasUnsavedChanges {
+            showCloseConfirmation = true
+        } else {
+            dismiss()
+        }
     }
 
     private var saveErrorBinding: Binding<Bool> {
@@ -222,6 +296,29 @@ struct TextFileViewer: View {
             get: { saveError != nil },
             set: { if !$0 { saveError = nil } }
         )
+    }
+}
+
+private enum TextFileViewerError: LocalizedError {
+    case missingTemporaryURL
+    case invalidResponse
+    case http(status: Int)
+    case tooLarge(maximumBytes: Int)
+    case unsupportedEncoding
+
+    var errorDescription: String? {
+        switch self {
+        case .missingTemporaryURL:
+            return "Impossible d’obtenir le lien du fichier."
+        case .invalidResponse:
+            return "Le serveur a renvoyé une réponse invalide."
+        case let .http(status):
+            return "Le fichier n’a pas été téléchargé (HTTP \(status))."
+        case let .tooLarge(maximumBytes):
+            return "Ce fichier est trop volumineux pour l’éditeur. La limite est de \(ByteFormatter.format(maximumBytes))."
+        case .unsupportedEncoding:
+            return "L’encodage de ce fichier texte n’est pas pris en charge."
+        }
     }
 }
 

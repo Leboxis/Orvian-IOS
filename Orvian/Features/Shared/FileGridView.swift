@@ -13,6 +13,10 @@ struct FileGridView: View {
     /// Ouverture d'une visionneuse (image/vidéo) avec ses voisins pour le pager.
     var onOpenFile: ((DriveFile, [DriveFile]) -> Void)?
 
+    /// Informe l'écran parent de la liste exacte après filtres et recherche.
+    /// Les actions de masse utilisent ainsi la même source que les cartes.
+    var onVisibleItemsChanged: (([DriveFile]) -> Void)?
+
     /// Filtre client des éléments affichés (barre de recherche de l'Accueil).
     var searchText: String = ""
     
@@ -52,6 +56,7 @@ struct FileGridView: View {
     @AppStorage("fileGridColumns") private var fileGridColumns = 3
     @State private var metadataRevision = 0
     @State private var prefetchTask: Task<Void, Never>?
+    @State private var sortReloadTask: Task<Void, Never>?
     /// Cache du calcul `visibleItems` : les filtres/tri/regroupement ne sont
     /// recalculés que si les données, les filtres, la recherche ou les
     /// métadonnées vidéo changent — pas à chaque rendu du body.
@@ -85,8 +90,18 @@ struct FileGridView: View {
             // temps ne lance plus deux rechargements réseau.
             .onChange(of: filters) { oldFilters, newFilters in
                 if oldFilters.sort != newFilters.sort || oldFilters.direction != newFilters.direction {
-                    Task { await viewModel.reload(sortedBy: newFilters) }
+                    sortReloadTask?.cancel()
+                    sortReloadTask = Task { await viewModel.reload(sortedBy: newFilters) }
                 }
+            }
+            .onAppear {
+                onVisibleItemsChanged?(visibleItems)
+            }
+            .onChange(of: visibleItems) { _, newItems in
+                onVisibleItemsChanged?(newItems)
+            }
+            .task(id: emptyFilteredPageTaskKey) {
+                await loadUntilFilteredResultIfNeeded()
             }
             .task(id: filterTaskKey) {
                 guard needsVideoMetadata else { return }
@@ -100,6 +115,8 @@ struct FileGridView: View {
             .onDisappear {
                 prefetchTask?.cancel()
                 prefetchTask = nil
+                sortReloadTask?.cancel()
+                sortReloadTask = nil
             }
     }
 
@@ -207,12 +224,7 @@ struct FileGridView: View {
         } else if viewModel.items.isEmpty {
             emptyState
         } else if visibleItems.isEmpty {
-            ContentUnavailableView {
-                Label("Aucun résultat", systemImage: "line.3.horizontal.decrease.circle")
-            } description: {
-                Text(noResultsMessage)
-            }
-            .padding(.top, 60)
+            filteredEmptyState
         } else if let grouping, !isSearching && !filters.isActive {
             ForEach(viewModel.groups(by: grouping.component, title: grouping.title)) { group in
                 SectionHeader(title: group.title)
@@ -223,6 +235,80 @@ struct FileGridView: View {
             grid(for: visibleItems)
             footer
         }
+    }
+
+    @ViewBuilder
+    private var filteredEmptyState: some View {
+        if viewModel.isLoadingMore {
+            VStack(spacing: 10) {
+                ProgressView()
+                Text("Recherche dans les pages suivantes…")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.top, 60)
+        } else if let message = viewModel.errorMessage, viewModel.hasMore {
+            ContentUnavailableView {
+                Label("Chargement interrompu", systemImage: "wifi.exclamationmark")
+            } description: {
+                Text(message)
+            } actions: {
+                Button("Réessayer") {
+                    Task { await viewModel.loadMoreIfNeeded() }
+                }
+                .buttonStyle(.borderedProminent)
+            }
+            .padding(.top, 60)
+        } else {
+            ContentUnavailableView {
+                Label("Aucun résultat", systemImage: "line.3.horizontal.decrease.circle")
+            } description: {
+                Text(noResultsMessage)
+            }
+            .padding(.top, 60)
+        }
+    }
+
+    /// Une page peut ne contenir que des éléments masqués par le filtre. Sans
+    /// carte visible, aucun `onAppear` ne peut déclencher la pagination. Cette
+    /// boucle avance donc jusqu'au premier résultat, avec une protection contre
+    /// une API qui renverrait la même page.
+    private func loadUntilFilteredResultIfNeeded() async {
+        guard !viewModel.isInitialLoading,
+              !viewModel.items.isEmpty,
+              visibleItems.isEmpty
+        else { return }
+
+        var previousItemCount = viewModel.items.count
+        while !Task.isCancelled,
+              visibleItems.isEmpty,
+              viewModel.hasMore,
+              viewModel.errorMessage == nil {
+            await viewModel.loadMoreIfNeeded()
+            guard !Task.isCancelled, viewModel.errorMessage == nil else { return }
+            let newItemCount = viewModel.items.count
+            guard newItemCount > previousItemCount else { return }
+            previousItemCount = newItemCount
+        }
+    }
+
+    private struct EmptyFilteredPageTaskKey: Hashable {
+        let itemIDs: [Int]
+        let filters: FileFilters
+        let searchText: String
+        let hasMore: Bool
+        let isReloading: Bool
+    }
+
+    private var emptyFilteredPageTaskKey: EmptyFilteredPageTaskKey {
+        EmptyFilteredPageTaskKey(
+            itemIDs: viewModel.items.map(\.id),
+            filters: filters,
+            searchText: searchText,
+            hasMore: viewModel.hasMore,
+            isReloading: viewModel.isReloading
+        )
     }
 
     private func grid(for files: [DriveFile]) -> some View {

@@ -146,6 +146,7 @@ struct DirectoryView: View {
     @State private var filters = FileFilters()
     @State private var selectionMode = false
     @State private var selectedIDs: Set<Int> = []
+    @State private var visibleSelectionItems: [DriveFile] = []
     @State private var pendingMove: MoveRequest?
     @State private var pendingTags: TagRequest?
     @State private var moveBusy = false
@@ -212,6 +213,7 @@ struct DirectoryView: View {
                     viewModel: activeViewModel
                 )
             },
+            onVisibleItemsChanged: updateVisibleSelectionItems,
             searchText: searchText,
             filters: filters,
             onScrolledPastTop: showsSearchBar ? { scrolledPastTop = $0 } : nil,
@@ -274,7 +276,7 @@ struct DirectoryView: View {
                     } label: {
                         Image(systemName: "tag")
                     }
-                    .disabled(selectedIDs.isEmpty)
+                    .disabled(actionableSelectedIDs.isEmpty)
                     .accessibilityLabel("Mettre des tags")
 
                     Button {
@@ -282,7 +284,7 @@ struct DirectoryView: View {
                     } label: {
                         Image(systemName: "folder")
                     }
-                    .disabled(selectedIDs.isEmpty || moveBusy)
+                    .disabled(actionableSelectedIDs.isEmpty || moveBusy)
                     .accessibilityLabel("Déplacer")
 
                     Button(role: .destructive) {
@@ -290,7 +292,7 @@ struct DirectoryView: View {
                     } label: {
                         Image(systemName: "trash")
                     }
-                    .disabled(selectedIDs.isEmpty || deleteBusy)
+                    .disabled(actionableSelectedIDs.isEmpty || deleteBusy)
                     .accessibilityLabel("Supprimer")
                 }
             } else {
@@ -313,7 +315,7 @@ struct DirectoryView: View {
                     } label: {
                         Label("Sélectionner", systemImage: "checkmark.circle")
                     }
-                    .disabled(activeViewModel.items.isEmpty || moveBusy || addBusy)
+                    .disabled(visibleSelectionItems.isEmpty || moveBusy || addBusy)
                 }
             }
         }
@@ -354,7 +356,7 @@ struct DirectoryView: View {
             )
         }
         .confirmationDialog(
-            "Supprimer \(selectedIDs.count) élément\(selectedIDs.count > 1 ? "s" : "") ?",
+            "Supprimer \(actionableSelectedIDs.count) élément\(actionableSelectedIDs.count > 1 ? "s" : "") ?",
             isPresented: $showDeleteConfirm,
             titleVisibility: .visible
         ) {
@@ -455,8 +457,15 @@ struct DirectoryView: View {
     }
 
     private var allSelected: Bool {
-        let loadedIDs = Set(activeViewModel.items.map(\.id))
-        return !loadedIDs.isEmpty && selectedIDs.isSuperset(of: loadedIDs)
+        !visibleSelectionIDs.isEmpty && selectedIDs.isSuperset(of: visibleSelectionIDs)
+    }
+
+    private var visibleSelectionIDs: Set<Int> {
+        Set(visibleSelectionItems.map(\.id))
+    }
+
+    private var actionableSelectedIDs: Set<Int> {
+        selectedIDs.intersection(visibleSelectionIDs)
     }
 
     private func toggleSelection(_ file: DriveFile) {
@@ -468,7 +477,8 @@ struct DirectoryView: View {
     }
 
     private func toggleAll() {
-        let loadedIDs = Set(activeViewModel.items.map(\.id))
+        let loadedIDs = visibleSelectionIDs
+        guard !loadedIDs.isEmpty else { return }
         if allSelected {
             selectedIDs.subtract(loadedIDs)
         } else {
@@ -477,8 +487,9 @@ struct DirectoryView: View {
     }
 
     private var selectionTitle: String {
-        guard !selectedIDs.isEmpty else { return "Sélection" }
-        return "\(selectedIDs.count) sélectionné\(selectedIDs.count > 1 ? "s" : "")"
+        let count = actionableSelectedIDs.count
+        guard count > 0 else { return "Sélection" }
+        return "\(count) sélectionné\(count > 1 ? "s" : "")"
     }
 
     private func startSelection() {
@@ -497,18 +508,18 @@ struct DirectoryView: View {
     }
 
     private func prepareSelectedMove() {
-        let files = activeViewModel.items.filter { selectedIDs.contains($0.id) }
+        let files = visibleSelectionItems.filter { selectedIDs.contains($0.id) }
         prepareMove(files: files)
     }
 
     private func prepareTagSheet() {
-        let files = activeViewModel.items.filter { selectedIDs.contains($0.id) }
+        let files = visibleSelectionItems.filter { selectedIDs.contains($0.id) }
         guard !files.isEmpty else { return }
         pendingTags = TagRequest(files: files)
     }
 
     private func deleteSelected() async {
-        let ids = selectedIDs
+        let ids = actionableSelectedIDs
         guard !ids.isEmpty else { return }
 
         deleteBusy = true
@@ -522,6 +533,7 @@ struct DirectoryView: View {
         }
 
         selectedIDs.subtract(deletedIDs)
+        selectedIDs.formIntersection(visibleSelectionIDs)
         deleteBusy = false
 
         if deletedIDs.count < ids.count {
@@ -529,6 +541,13 @@ struct DirectoryView: View {
         }
         if selectedIDs.isEmpty {
             selectionMode = false
+        }
+    }
+
+    private func updateVisibleSelectionItems(_ items: [DriveFile]) {
+        visibleSelectionItems = items
+        if selectionMode {
+            selectedIDs.formIntersection(Set(items.map(\.id)))
         }
     }
 

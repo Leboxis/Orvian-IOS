@@ -124,6 +124,7 @@ final class UploadManager {
 
     private let service = KDriveService()
     private var hidePillTask: Task<Void, Never>?
+    private var uploadJobs: [UUID: Task<Void, Never>] = [:]
     /// L'API kDrive traite chaque upload de manière indépendante (session
     /// dédiée aux gros fichiers), plusieurs fichiers peuvent donc partir en
     /// parallèle sans verrou côté serveur.
@@ -184,10 +185,14 @@ final class UploadManager {
         }
         tasks.append(contentsOf: newTasks)
 
-        Task {
+        let jobID = UUID()
+        uploadJobs[jobID] = Task { [weak self] in
+            guard let self else { return }
+            defer { self.uploadJobs.removeValue(forKey: jobID) }
+
             var uploadedFiles: [DriveFile] = []
             var start = 0
-            while start < items.count {
+            while start < items.count, !Task.isCancelled {
                 let chunk = Array(items[start..<min(start + Self.maxConcurrentUploads, items.count)])
                 let chunkStart = start
                 start += chunk.count
@@ -196,6 +201,7 @@ final class UploadManager {
                         let taskId = newTasks[chunkStart + offset].id
                         let itemIndex = chunkStart + offset
                         group.addTask {
+                            guard !Task.isCancelled else { return (offset, nil) }
                             let uploaded = await self.prepareAndUploadPhoto(
                                 item: item,
                                 taskId: taskId,
@@ -215,8 +221,9 @@ final class UploadManager {
                 uploadedFiles.append(contentsOf: ordered.compactMap { $0 })
             }
 
+            guard !Task.isCancelled else { return }
             onDone?(uploadedFiles)
-            schedulePillAutoDismiss()
+            self.schedulePillAutoDismiss()
         }
     }
 
@@ -269,10 +276,14 @@ final class UploadManager {
         let newTasks = urls.map { UploadTaskItem(fileName: $0.lastPathComponent, totalBytes: 0, status: .inProgress(progress: 0.05)) }
         tasks.append(contentsOf: newTasks)
 
-        Task {
+        let jobID = UUID()
+        uploadJobs[jobID] = Task { [weak self] in
+            guard let self else { return }
+            defer { self.uploadJobs.removeValue(forKey: jobID) }
+
             var uploadedFiles: [DriveFile] = []
             var start = 0
-            while start < urls.count {
+            while start < urls.count, !Task.isCancelled {
                 let chunk = Array(urls[start..<min(start + Self.maxConcurrentUploads, urls.count)])
                 let chunkStart = start
                 start += chunk.count
@@ -280,6 +291,7 @@ final class UploadManager {
                     for (offset, url) in chunk.enumerated() {
                         let taskId = newTasks[chunkStart + offset].id
                         group.addTask {
+                            guard !Task.isCancelled else { return (offset, nil) }
                             let uploaded = await self.prepareAndUploadDocument(
                                 url: url,
                                 taskId: taskId,
@@ -298,8 +310,9 @@ final class UploadManager {
                 uploadedFiles.append(contentsOf: ordered.compactMap { $0 })
             }
 
+            guard !Task.isCancelled else { return }
             onDone?(uploadedFiles)
-            schedulePillAutoDismiss()
+            self.schedulePillAutoDismiss()
         }
     }
 
@@ -340,10 +353,14 @@ final class UploadManager {
         let newTasks = files.map { UploadTaskItem(fileName: $0.fileName, totalBytes: $0.totalBytes) }
         tasks.append(contentsOf: newTasks)
 
-        Task {
+        let jobID = UUID()
+        uploadJobs[jobID] = Task { [weak self] in
+            guard let self else { return }
+            defer { self.uploadJobs.removeValue(forKey: jobID) }
+
             var uploadedFiles: [DriveFile] = []
             var start = 0
-            while start < files.count {
+            while start < files.count, !Task.isCancelled {
                 let chunk = Array(files[start..<min(start + Self.maxConcurrentUploads, files.count)])
                 let chunkStart = start
                 start += chunk.count
@@ -351,6 +368,7 @@ final class UploadManager {
                     for (offset, file) in chunk.enumerated() {
                         let taskId = newTasks[chunkStart + offset].id
                         group.addTask {
+                            guard !Task.isCancelled else { return (offset, nil) }
                             let uploaded = await self.uploadSingleFile(
                                 taskId: taskId,
                                 driveId: driveId,
@@ -369,25 +387,48 @@ final class UploadManager {
                 uploadedFiles.append(contentsOf: ordered.compactMap { $0 })
             }
 
+            if Task.isCancelled {
+                for file in files where file.isTemporary {
+                    await UploadFileIO.removeTemporaryFile(file.fileURL)
+                }
+                return
+            }
             onDone?(uploadedFiles)
-            schedulePillAutoDismiss()
+            self.schedulePillAutoDismiss()
         }
     }
 
     /// Rétrocompatibilité : convertit les données en fichiers temporaires avant enfilage.
     func enqueue(driveId: Int, directoryId: Int, files: [(data: Data, name: String)], onDone: (([DriveFile]) -> Void)? = nil) {
-        Task {
+        let jobID = UUID()
+        uploadJobs[jobID] = Task { [weak self] in
+            guard let self else { return }
+            defer { self.uploadJobs.removeValue(forKey: jobID) }
+
             var payloads: [UploadPayload] = []
             for item in files {
+                guard !Task.isCancelled else { break }
                 if let payload = await UploadFileIO.writeToTemporaryDirectory(data: item.data, fileName: item.name) {
                     payloads.append(payload)
                 }
             }
-            enqueue(driveId: driveId, directoryId: directoryId, files: payloads, onDone: onDone)
+            guard !Task.isCancelled else {
+                for payload in payloads {
+                    await UploadFileIO.removeTemporaryFile(payload.fileURL)
+                }
+                return
+            }
+            self.enqueue(driveId: driveId, directoryId: directoryId, files: payloads, onDone: onDone)
         }
     }
 
     private func uploadSingleFile(taskId: UUID, driveId: Int, directoryId: Int, payload: UploadPayload) async -> DriveFile? {
+        guard !Task.isCancelled else {
+            if payload.isTemporary {
+                await UploadFileIO.removeTemporaryFile(payload.fileURL)
+            }
+            return nil
+        }
         guard let index = tasks.firstIndex(where: { $0.id == taskId }) else {
             if payload.isTemporary {
                 await UploadFileIO.removeTemporaryFile(payload.fileURL)
@@ -396,6 +437,7 @@ final class UploadManager {
         }
         tasks[index].status = .inProgress(progress: 0.15)
 
+        var result: DriveFile?
         do {
             tasks[index].status = .inProgress(progress: 0.2)
             let uploadedFile = try await service.uploadFile(
@@ -416,7 +458,12 @@ final class UploadManager {
                     }
                 }
             )
-            tasks[index].status = .completed
+            try Task.checkCancellation()
+            guard let currentIndex = tasks.firstIndex(where: { $0.id == taskId }) else {
+                throw CancellationError()
+            }
+            tasks[currentIndex].status = .completed
+            result = uploadedFile
             if uploadedFile.fileKind.supportsThumbnail {
                 let uploadedFileID = uploadedFile.id
                 Task.detached(priority: .utility) {
@@ -426,19 +473,31 @@ final class UploadManager {
                     )
                 }
             }
-            if payload.isTemporary {
-                await UploadFileIO.removeTemporaryFile(payload.fileURL)
-            }
-            return uploadedFile
         } catch {
-            let desc = (error as? APIError)?.errorDescription ?? error.localizedDescription
-            tasks[index].status = .failed(message: desc)
+            if !Task.isCancelled,
+               let currentIndex = tasks.firstIndex(where: { $0.id == taskId }) {
+                let desc = (error as? APIError)?.errorDescription ?? error.localizedDescription
+                tasks[currentIndex].status = .failed(message: desc)
+            }
         }
 
         if payload.isTemporary {
             await UploadFileIO.removeTemporaryFile(payload.fileURL)
         }
-        return nil
+        return result
+    }
+
+    /// Utilisé à la déconnexion : aucune tâche d'un ancien compte ne doit
+    /// continuer ni rester visible dans la session suivante.
+    func cancelAllAndClear() {
+        hidePillTask?.cancel()
+        hidePillTask = nil
+        for job in uploadJobs.values {
+            job.cancel()
+        }
+        uploadJobs.removeAll()
+        tasks.removeAll()
+        isPillVisible = false
     }
 
     func clearCompleted() {

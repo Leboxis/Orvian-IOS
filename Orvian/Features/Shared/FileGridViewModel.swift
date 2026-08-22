@@ -17,6 +17,10 @@ final class FileGridViewModel {
 
     private var cursor: String?
     private var loadedOnce = false
+    private(set) var isReloading = false
+    /// Invalide toute réponse appartenant à un rechargement ou une pagination
+    /// antérieur. Un ancien tri ne peut ainsi jamais remplacer le plus récent.
+    private var dataGeneration = 0
     /// Tri serveur en cours (`order_by[]` + sens) : conservé pour que la
     /// pagination continue dans le même ordre que la première page.
     private var orderBy: [String] = []
@@ -49,56 +53,75 @@ final class FileGridViewModel {
             orderBy = sortedBy.serverOrderBy ?? []
             order = sortedBy.serverOrder
         }
+        dataGeneration &+= 1
+        let requestGeneration = dataGeneration
+        let requestedOrderBy = orderBy
+        let requestedOrder = order
+        isLoadingMore = false
+        isReloading = true
         isInitialLoading = items.isEmpty
         errorMessage = nil
+        defer {
+            if dataGeneration == requestGeneration {
+                isReloading = false
+                isInitialLoading = false
+            }
+        }
         do {
             async let categoriesTask: Void = CategoryLibrary.shared.ensureLoaded(for: driveId)
             let page = try await service.page(
                 source,
                 driveId: driveId,
                 cursor: nil,
-                orderBy: orderBy.isEmpty ? nil : orderBy,
-                order: order
+                orderBy: requestedOrderBy.isEmpty ? nil : requestedOrderBy,
+                order: requestedOrder
             )
             await categoriesTask
-            guard !Task.isCancelled else { return }
+            guard !Task.isCancelled, dataGeneration == requestGeneration else { return }
             categoriesById = CategoryLibrary.shared.categories(for: driveId)
             items = filterItemsIfNeeded(page.data ?? [])
             cursor = page.cursor
             hasMore = page.hasMore ?? false
             loadedOnce = true
         } catch {
-            guard !Task.isCancelled else { return }
+            guard !Task.isCancelled, dataGeneration == requestGeneration else { return }
             errorMessage = (error as? APIError)?.errorDescription ?? error.localizedDescription
         }
-        isInitialLoading = false
     }
 
     /// Pagination infinie : déclenché par l'apparition des dernières cartes.
     func loadMoreIfNeeded() async {
-        guard hasMore, !isLoadingMore, !isInitialLoading else { return }
+        guard hasMore, !isLoadingMore, !isInitialLoading, !isReloading else { return }
+        let requestGeneration = dataGeneration
+        let requestedCursor = cursor
+        let requestedOrderBy = orderBy
+        let requestedOrder = order
         isLoadingMore = true
         // Une nouvelle demande est une tentative explicite : elle efface
         // l'erreur précédente afin que le pager et le bouton « Réessayer »
         // puissent réellement relancer la même page.
         errorMessage = nil
-        defer { isLoadingMore = false }
+        defer {
+            if dataGeneration == requestGeneration {
+                isLoadingMore = false
+            }
+        }
         do {
             let page = try await service.page(
                 source,
                 driveId: driveId,
-                cursor: cursor,
-                orderBy: orderBy.isEmpty ? nil : orderBy,
-                order: order
+                cursor: requestedCursor,
+                orderBy: requestedOrderBy.isEmpty ? nil : requestedOrderBy,
+                order: requestedOrder
             )
-            guard !Task.isCancelled else { return }
+            guard !Task.isCancelled, dataGeneration == requestGeneration else { return }
             let existing = Set(items.map(\.id))
             let filtered = filterItemsIfNeeded(page.data ?? [])
             items.append(contentsOf: filtered.filter { !existing.contains($0.id) })
             cursor = page.cursor
             hasMore = page.hasMore ?? false
         } catch {
-            guard !Task.isCancelled else { return }
+            guard !Task.isCancelled, dataGeneration == requestGeneration else { return }
             errorMessage = (error as? APIError)?.errorDescription ?? error.localizedDescription
         }
     }
@@ -231,7 +254,10 @@ final class FileGridViewModel {
         do {
             try await service.rename(driveId: driveId, fileId: file.id, name: name)
         } catch {
-            items[index].name = oldName
+            if let restoredIndex = items.firstIndex(where: { $0.id == file.id }),
+               items[restoredIndex].name == name {
+                items[restoredIndex].name = oldName
+            }
             errorMessage = "Renommage impossible : \((error as? APIError)?.errorDescription ?? error.localizedDescription)"
         }
     }
@@ -245,7 +271,10 @@ final class FileGridViewModel {
         do {
             try await service.setFolderColor(driveId: driveId, fileId: file.id, color: color)
         } catch {
-            items[index].color = oldColor
+            if let restoredIndex = items.firstIndex(where: { $0.id == file.id }),
+               items[restoredIndex].color == color {
+                items[restoredIndex].color = oldColor
+            }
             errorMessage = "Couleur impossible à modifier : \((error as? APIError)?.errorDescription ?? error.localizedDescription)"
         }
     }

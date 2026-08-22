@@ -39,6 +39,17 @@ enum FileSource: Hashable {
 struct KDriveService {
     let api: APIClient
 
+    /// Une entrée du flux `/files/activities` contient le fichier dans la clé
+    /// `file`; elle n'est pas elle-même un `DriveFile`.
+    private struct ActivityEntry: Decodable {
+        let file: DriveFile?
+    }
+
+    private static let browsableOrderingFields: Set<String> = [
+        "added_at", "last_modified_at", "mime_type", "name",
+        "revised_at", "size", "type", "updated_at",
+    ]
+
     init(api: APIClient = .shared) {
         self.api = api
     }
@@ -80,16 +91,22 @@ struct KDriveService {
         orderBy: [String]? = nil,
         order: String = "asc"
     ) async throws -> CursorPage<DriveFile> {
-        // Le tri demandé remplace l'ordre serveur par défaut sur toutes les
-        // pages, pour que la pagination entière respecte le tri choisi.
-        let ordering: (Endpoint) -> Endpoint = { $0.ordering(orderBy ?? [], order: order) }
-
         let endpoint: Endpoint
         switch source {
         case let .directory(directoryId):
-            endpoint = ordering(.directoryContent(driveId: driveId, directoryId: directoryId, cursor: cursor))
+            endpoint = safeOrdering(
+                .directoryContent(driveId: driveId, directoryId: directoryId, cursor: cursor),
+                requested: orderBy,
+                order: order,
+                allowed: Self.browsableOrderingFields
+            )
         case let .favorites(limit):
-            endpoint = ordering(.favorites(driveId: driveId, cursor: cursor, limit: limit))
+            endpoint = safeOrdering(
+                .favorites(driveId: driveId, cursor: cursor, limit: limit),
+                requested: orderBy,
+                order: order,
+                allowed: Self.browsableOrderingFields
+            )
         case let .recents(limit):
             // 1) Priorité /files/last_modified (fichiers modifiés/uploadés récemment sur le drive).
             // Une liste vide est un résultat valide : on ne bascule vers le
@@ -98,25 +115,57 @@ struct KDriveService {
             do {
                 return try await api.get(
                     CursorPage<DriveFile>.self,
-                    ordering(.lastModified(driveId: driveId, cursor: cursor, limit: limit))
+                    safeOrdering(
+                        .lastModified(driveId: driveId, cursor: cursor, limit: limit),
+                        requested: orderBy,
+                        order: order,
+                        allowed: ["last_modified_at"]
+                    )
                 )
             } catch {
                 // 2) Fallback /files/recents
                 do {
                     return try await api.get(
                         CursorPage<DriveFile>.self,
-                        ordering(.recents(driveId: driveId, cursor: cursor, limit: limit))
+                        safeOrdering(
+                            .recents(driveId: driveId, cursor: cursor, limit: limit),
+                            requested: orderBy,
+                            order: order,
+                            allowed: ["updated_at"],
+                            aliases: ["last_modified_at": "updated_at"]
+                        )
                     )
                 } catch {
                     // 3) Fallback /files/activities
                     do {
-                        return try await api.get(
-                            CursorPage<DriveFile>.self,
-                            ordering(.activities(driveId: driveId, cursor: cursor, limit: limit))
+                        let activityPage = try await api.get(
+                            CursorPage<ActivityEntry>.self,
+                            safeOrdering(
+                                .activities(driveId: driveId, cursor: cursor, limit: limit),
+                                requested: orderBy,
+                                order: order,
+                                allowed: ["created_at"],
+                                aliases: ["last_modified_at": "created_at"]
+                            )
+                        )
+                        var seen: Set<Int> = []
+                        let files = (activityPage.data ?? [])
+                            .compactMap(\.file)
+                            .filter { seen.insert($0.id).inserted }
+                        return CursorPage<DriveFile>(
+                            result: activityPage.result,
+                            data: files,
+                            cursor: activityPage.cursor,
+                            hasMore: activityPage.hasMore
                         )
                     } catch {
                         // 4) Dernier recours : recherche globale
-                        endpoint = ordering(.search(driveId: driveId, query: "", directoryId: nil, cursor: cursor, limit: limit))
+                        endpoint = safeOrdering(
+                            .search(driveId: driveId, query: "", directoryId: nil, cursor: cursor, limit: limit),
+                            requested: orderBy,
+                            order: order,
+                            allowed: ["last_modified_at"]
+                        )
                     }
                 }
             }
@@ -124,13 +173,49 @@ struct KDriveService {
             let files = await MediaUsageStore.mostViewedFiles(driveId: driveId, limit: limit)
             return CursorPage<DriveFile>(data: files, cursor: nil, hasMore: false)
         case let .category(categoryId):
-            endpoint = ordering(.categoryFiles(driveId: driveId, categoryId: categoryId, cursor: cursor))
+            endpoint = safeOrdering(
+                .categoryFiles(driveId: driveId, categoryId: categoryId, cursor: cursor),
+                requested: orderBy,
+                order: order,
+                allowed: ["last_modified_at"]
+            )
         case .trash:
-            endpoint = ordering(.trashContent(driveId: driveId, cursor: cursor))
+            endpoint = safeOrdering(
+                .trashContent(driveId: driveId, cursor: cursor),
+                requested: orderBy,
+                order: order,
+                allowed: Self.browsableOrderingFields
+            )
         case let .search(query, directoryId):
-            endpoint = ordering(.search(driveId: driveId, query: query, directoryId: directoryId, cursor: cursor))
+            endpoint = safeOrdering(
+                .search(driveId: driveId, query: query, directoryId: directoryId, cursor: cursor),
+                requested: orderBy,
+                order: order,
+                allowed: ["last_modified_at"]
+            )
         }
         return try await api.get(CursorPage<DriveFile>.self, endpoint)
+    }
+
+    /// Chaque endpoint kDrive possède sa propre liste de valeurs `order_by`.
+    /// Un tri non pris en charge reste local dans `FileFilters` au lieu de
+    /// transformer une page valide en erreur HTTP 400.
+    private func safeOrdering(
+        _ endpoint: Endpoint,
+        requested: [String]?,
+        order: String,
+        allowed: Set<String>,
+        aliases: [String: String] = [:]
+    ) -> Endpoint {
+        guard let requested, !requested.isEmpty else { return endpoint }
+        let resolved = requested.compactMap { field -> String? in
+            if let alias = aliases[field], allowed.contains(alias) {
+                return alias
+            }
+            return allowed.contains(field) ? field : nil
+        }
+        guard resolved.count == requested.count else { return endpoint }
+        return endpoint.ordering(resolved, order: order)
     }
 
     // MARK: - Fiche fichier

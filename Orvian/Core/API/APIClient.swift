@@ -1,5 +1,10 @@
 import Foundation
 
+extension Notification.Name {
+    /// Émise uniquement avec l'empreinte du token qui a reçu un HTTP 401.
+    static let apiUnauthorized = Notification.Name("com.orvian.api.unauthorized")
+}
+
 /// Client HTTP pour l'API Infomaniak (`https://api.infomaniak.com`).
 ///
 /// Actor : toutes les requêtes décodent hors du MainActor, la vue ne touche
@@ -19,8 +24,8 @@ actor APIClient {
 
     /// Requête authentifiée renvoyant les données brutes (miniatures…).
     func data(_ endpoint: Endpoint, method: String = "GET") async throws -> Data {
-        let (data, response) = try await send(endpoint, method: method)
-        try Self.check(response: response, data: data)
+        let (data, response, credentialFingerprint) = try await send(endpoint, method: method)
+        try Self.check(response: response, data: data, credentialFingerprint: credentialFingerprint)
         return data
     }
 
@@ -36,15 +41,15 @@ actor APIClient {
 
     /// Requête « vide » (POST/DELETE renvoyant `{result, data}`).
     func sendEmpty(_ endpoint: Endpoint, method: String) async throws {
-        let (data, response) = try await send(endpoint, method: method)
-        try Self.check(response: response, data: data)
+        let (data, response, credentialFingerprint) = try await send(endpoint, method: method)
+        try Self.check(response: response, data: data, credentialFingerprint: credentialFingerprint)
     }
 
     /// POST avec corps brut (JSON, octet-stream…). Lève une erreur si le
     /// statut HTTP n'est pas 2xx ; le contenu de la réponse est ignoré.
     func post(_ endpoint: Endpoint, body: Data, contentType: String) async throws {
-        let (data, response) = try await send(endpoint, method: "POST", httpBody: body, contentType: contentType)
-        try Self.check(response: response, data: data)
+        let (data, response, credentialFingerprint) = try await send(endpoint, method: "POST", httpBody: body, contentType: contentType)
+        try Self.check(response: response, data: data, credentialFingerprint: credentialFingerprint)
     }
 
     /// POST décodé, notamment pour l'ouverture et la fermeture des sessions
@@ -55,13 +60,13 @@ actor APIClient {
         body: Data? = nil,
         contentType: String = "application/json"
     ) async throws -> T {
-        let (data, response) = try await send(
+        let (data, response, credentialFingerprint) = try await send(
             endpoint,
             method: "POST",
             httpBody: body,
             contentType: body == nil ? nil : contentType
         )
-        try Self.check(response: response, data: data)
+        try Self.check(response: response, data: data, credentialFingerprint: credentialFingerprint)
         do {
             return try JSONDecoder.api.decode(T.self, from: data)
         } catch {
@@ -71,8 +76,8 @@ actor APIClient {
 
     /// PUT avec corps brut (JSON…). Lève une erreur si le statut HTTP n'est pas 2xx.
     func put(_ endpoint: Endpoint, body: Data, contentType: String = "application/json") async throws {
-        let (data, response) = try await send(endpoint, method: "PUT", httpBody: body, contentType: contentType)
-        try Self.check(response: response, data: data)
+        let (data, response, credentialFingerprint) = try await send(endpoint, method: "PUT", httpBody: body, contentType: contentType)
+        try Self.check(response: response, data: data, credentialFingerprint: credentialFingerprint)
     }
 
     /// Upload d'un fichier local par streaming (évite le chargement du fichier en RAM).
@@ -85,6 +90,7 @@ actor APIClient {
         progress: @escaping @Sendable (Double) -> Void
     ) async throws -> DriveFile {
         var request = try request(for: endpoint, method: "POST")
+        let credentialFingerprint = Self.credentialFingerprint(for: request)
         request.timeoutInterval = 300
         request.setValue(contentType, forHTTPHeaderField: "Content-Type")
 
@@ -107,7 +113,7 @@ actor APIClient {
             } onCancel: {
                 uploadSession.invalidateAndCancel()
             }
-            try Self.check(response: response, data: data)
+            try Self.check(response: response, data: data, credentialFingerprint: credentialFingerprint)
             do {
                 let envelope = try JSONDecoder.api.decode(DataResponse<DriveFile>.self, from: data)
                 guard envelope.result == nil
@@ -165,6 +171,7 @@ actor APIClient {
     ) async throws -> Data {
         request.timeoutInterval = 300
         request.setValue(contentType, forHTTPHeaderField: "Content-Type")
+        let credentialFingerprint = Self.credentialFingerprint(for: request)
 
         do {
             let delegate = UploadProgressDelegate(progress: progress)
@@ -185,7 +192,7 @@ actor APIClient {
             } onCancel: {
                 uploadSession.invalidateAndCancel()
             }
-            try Self.check(response: response, data: responseData)
+            try Self.check(response: response, data: responseData, credentialFingerprint: credentialFingerprint)
             return responseData
         } catch {
             if error is APIError { throw error }
@@ -200,15 +207,17 @@ actor APIClient {
         method: String,
         httpBody: Data? = nil,
         contentType: String? = nil
-    ) async throws -> (Data, URLResponse) {
+    ) async throws -> (Data, URLResponse, String?) {
         var request = try request(for: endpoint, method: method)
         if let httpBody {
             request.httpBody = httpBody
             request.setValue(contentType, forHTTPHeaderField: "Content-Type")
         }
 
+        let credentialFingerprint = Self.credentialFingerprint(for: request)
         do {
-            return try await session.data(for: request)
+            let (data, response) = try await session.data(for: request)
+            return (data, response, credentialFingerprint)
         } catch {
             throw APIError.network(error)
         }
@@ -269,12 +278,24 @@ actor APIClient {
         !endpoint.path.hasPrefix("/1/")
     }
 
-    private static func check(response: URLResponse, data: Data) throws {
+    private static func check(response: URLResponse, data: Data, credentialFingerprint: String?) throws {
         guard let http = response as? HTTPURLResponse else { throw APIError.invalidResponse }
         guard (200..<300).contains(http.statusCode) else {
+            if http.statusCode == 401, let credentialFingerprint {
+                Task { @MainActor in
+                    NotificationCenter.default.post(name: .apiUnauthorized, object: credentialFingerprint)
+                }
+            }
             let apiError = decodeError(data: data)
             throw APIError.http(status: http.statusCode, code: apiError?.code, description: apiError?.description)
         }
+    }
+
+    private static func credentialFingerprint(for request: URLRequest) -> String? {
+        guard let authorization = request.value(forHTTPHeaderField: "Authorization"),
+              authorization.hasPrefix("Bearer ")
+        else { return nil }
+        return TokenStore.fingerprint(of: String(authorization.dropFirst("Bearer ".count)))
     }
 
     private static func decodeError(data: Data) -> (code: String?, description: String?)? {
