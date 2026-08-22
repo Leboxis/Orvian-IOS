@@ -69,24 +69,26 @@ struct FileGridView: View {
 
     var body: some View {
         scrollContent
-            .onScrollGeometryChange(for: SearchScrollMetrics.self, of: {
-                // Normalise l'inset supérieur puis réduit les mises à jour à
-                // une étape tous les 8 points pour éviter de recalculer la vue
-                // à chaque pixel parcouru.
+            .onScrollGeometryChange(for: SearchScrollRegion.self, of: {
+                // Au repos, iOS applique déjà l'inset supérieur au décalage.
+                // Seul un dépassement réel de cette position doit afficher la recherche.
                 let offset = $0.contentOffset.y + $0.contentInsets.top
-                return SearchScrollMetrics(offset: offset)
-            }) { oldMetrics, newMetrics in
-                searchScrollRegion = newMetrics.region
-
-                // Dans un dossier long, la recherche apparaît dès que
-                // l'utilisateur remonte dans la liste. Elle se masque quand
-                // il repart vers le contenu, mais reste accessible après un
-                // tirage au sommet afin de pouvoir être touchée.
-                if newMetrics.bucket < oldMetrics.bucket {
-                    onScrolledPastTop?(true)
-                } else if newMetrics.bucket > oldMetrics.bucket,
-                          newMetrics.region == .content {
+                if offset < -8 {
+                    return .pulledPastTop
+                }
+                if offset > 24 {
+                    return .content
+                }
+                return .nearTop
+            }) { _, newRegion in
+                searchScrollRegion = newRegion
+                switch newRegion {
+                case .content:
                     onScrolledPastTop?(false)
+                case .pulledPastTop:
+                    onScrolledPastTop?(true)
+                case .nearTop:
+                    break
                 }
             }
             .background(Color(uiColor: .systemGroupedBackground))
@@ -518,22 +520,6 @@ private enum SearchScrollRegion: Equatable {
     case pulledPastTop
     case nearTop
     case content
-}
-
-private struct SearchScrollMetrics: Equatable {
-    let bucket: Int
-    let region: SearchScrollRegion
-
-    init(offset: CGFloat) {
-        bucket = Int((offset / 8).rounded(.down))
-        if offset < -8 {
-            region = .pulledPastTop
-        } else if offset > 24 {
-            region = .content
-        } else {
-            region = .nearTop
-        }
-    }
 }
 
 /// Mémoïse le résultat des filtres/tri de la grille : tant que les données

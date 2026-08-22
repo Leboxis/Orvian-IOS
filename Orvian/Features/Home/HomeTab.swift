@@ -148,7 +148,6 @@ struct DirectoryView: View {
     @State private var busyMessage = ""
     @State private var addError: String?
     @State private var searchText = ""
-    @State private var searchesCurrentTree = true
     @State private var scrolledPastTop = false
     @State private var filters = FileFilters()
     @State private var selectionMode = false
@@ -179,14 +178,6 @@ struct DirectoryView: View {
         let files: [DriveFile]
     }
 
-    /// Identifie une recherche récursive, y compris lorsqu'elle est lancée
-    /// sans texte pour appliquer un filtre ou un tri à toute l'arborescence.
-    private struct SearchRequestKey: Hashable {
-        let query: String
-        let directoryId: Int?
-        let enabled: Bool
-    }
-
     init(
         directory: DriveFile,
         driveId: Int,
@@ -210,24 +201,8 @@ struct DirectoryView: View {
         !searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
-    private var usesRecursiveResults: Bool {
-        isSearching || filters.isActive
-    }
-
-    private var searchDirectoryId: Int? {
-        searchesCurrentTree ? directory.id : nil
-    }
-
-    private var searchRequestKey: SearchRequestKey {
-        SearchRequestKey(
-            query: searchText.trimmingCharacters(in: .whitespacesAndNewlines),
-            directoryId: searchDirectoryId,
-            enabled: usesRecursiveResults
-        )
-    }
-
     private var activeViewModel: FileGridViewModel {
-        if usesRecursiveResults, let searchViewModel {
+        if isSearching, let searchViewModel {
             return searchViewModel
         }
         return viewModel
@@ -408,34 +383,30 @@ struct DirectoryView: View {
                 searchFocused = false
             }
         }
-        .task(id: searchRequestKey) {
-            let request = searchRequestKey
-            guard request.enabled else {
+        .task(id: searchText) {
+            let trimmed = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty else {
                 searchViewModel = nil
                 return
             }
-
-            // Le changement de filtre ou de périmètre est immédiat. Seule la
-            // saisie est temporisée pour éviter les requêtes superflues.
-            if !request.query.isEmpty {
-                do {
-                    try await Task.sleep(for: .milliseconds(300))
-                } catch {
-                    return
-                }
+            // Debounce de 300 ms pour éviter les requêtes superflues pendant la saisie
+            do {
+                try await Task.sleep(for: .milliseconds(300))
+            } catch {
+                return
             }
             let searchVM = FileGridViewModel(
-                source: .search(query: request.query, directoryId: request.directoryId),
+                source: .search(query: trimmed, directoryId: directory.id),
                 driveId: driveId
             )
             searchViewModel = searchVM
-            await searchVM.reload(sortedBy: filters)
+            await searchVM.reload()
         }
     }
 
     /// La barre apparaît lors d'un défilé vers le haut ou lorsque la recherche est active.
     private var searchBarVisible: Bool {
-        alwaysShowSearch || searchFocused || isSearching || filters.isActive || scrolledPastTop
+        alwaysShowSearch || searchFocused || isSearching || scrolledPastTop
     }
 
     /// Applique les effets de disposition uniquement aux écrans qui possèdent
@@ -446,19 +417,11 @@ struct DirectoryView: View {
 
     /// Pastille de recherche centrée et compacte.
     private var searchBar: some View {
-        HStack(spacing: 8) {
-            searchField
-            searchScopeButton
-        }
-        .frame(maxWidth: 310)
-    }
-
-    private var searchField: some View {
         HStack(spacing: 6) {
             Image(systemName: "magnifyingglass")
                 .font(.system(size: 13, weight: .medium))
                 .foregroundStyle(.secondary)
-            TextField(searchPlaceholder, text: $searchText)
+            TextField("Rechercher dans ce dossier…", text: $searchText)
                 .focused($searchFocused)
                 .autocorrectionDisabled()
                 .submitLabel(.search)
@@ -480,45 +443,6 @@ struct DirectoryView: View {
         }
         .shadow(color: .black.opacity(0.08), radius: 6, x: 0, y: 2)
         .frame(maxWidth: 260)
-    }
-
-    private var searchPlaceholder: String {
-        searchesCurrentTree
-            ? "Rechercher ici et en dessous…"
-            : "Rechercher dans tout le drive…"
-    }
-
-    private var searchScopeButton: some View {
-        Button {
-            searchesCurrentTree.toggle()
-        } label: {
-            Image(systemName: searchesCurrentTree ? "folder.fill" : "globe")
-                .font(.system(size: 14, weight: .semibold))
-                .foregroundStyle(searchesCurrentTree ? Color.accentColor : Color.secondary)
-                .frame(width: 34, height: 34)
-                .background(.bar, in: Circle())
-                .overlay {
-                    Circle().strokeBorder(
-                        searchesCurrentTree
-                            ? Color.accentColor.opacity(0.55)
-                            : Color.secondary.opacity(0.2),
-                        lineWidth: 0.75
-                    )
-                }
-                .shadow(color: .black.opacity(0.08), radius: 6, x: 0, y: 2)
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel(
-            searchesCurrentTree
-                ? "Étendre la recherche à tout le drive"
-                : "Limiter la recherche à ce dossier et ses sous-dossiers"
-        )
-        .accessibilityValue(
-            searchesCurrentTree
-                ? "Dossier actuel et sous-dossiers"
-                : "Tout le drive"
-        )
-        .accessibilityAddTraits(searchesCurrentTree ? .isSelected : [])
     }
 
     /// Bouton dé : ouvre au hasard un fichier parmi les éléments du dossier actuel.
@@ -623,7 +547,7 @@ struct DirectoryView: View {
 
         // La recherche possède sa propre vue-modèle ; rafraîchir également le
         // dossier courant évite d'y conserver une carte devenue obsolète.
-        if usesRecursiveResults {
+        if isSearching {
             await viewModel.reload()
         }
 
@@ -650,7 +574,7 @@ struct DirectoryView: View {
     /// pastilles de couleur, dans le dossier courant et dans la recherche.
     private func refreshAfterTags() async {
         await viewModel.reload()
-        if usesRecursiveResults {
+        if isSearching {
             await searchViewModel?.reload()
         }
     }
@@ -674,7 +598,7 @@ struct DirectoryView: View {
 
         // La recherche possède sa propre vue-modèle ; rafraîchir également le
         // dossier courant évite d'y conserver une carte devenue obsolète.
-        if usesRecursiveResults {
+        if isSearching {
             await viewModel.reload()
         }
 
@@ -742,7 +666,7 @@ struct DirectoryView: View {
     private func refreshAfterImport(_ uploadedFiles: [DriveFile]) async {
         await viewModel.reload()
         viewModel.mergeUploaded(uploadedFiles)
-        if usesRecursiveResults {
+        if isSearching {
             await searchViewModel?.reload()
         }
     }
