@@ -58,6 +58,11 @@ struct FileGridView: View {
     @State private var prefetchTask: Task<Void, Never>?
     @State private var sortReloadTask: Task<Void, Never>?
     @State private var searchScrollRegion: SearchScrollRegion = .nearTop
+    /// Vrai quand le contenu dépasse la hauteur visible : dans ce cas le
+    /// ScrollView gère seul le geste de révélation et le secours gestuel
+    /// (dossiers très courts) doit rester inerte pour ne pas faire clignoter
+    /// la barre pendant un défilement rapide vers le bas.
+    @State private var isContentScrollable = false
     /// Cache du calcul `visibleItems` : les filtres/tri/regroupement ne sont
     /// recalculés que si les données, les filtres, la recherche ou les
     /// métadonnées vidéo changent — pas à chaque rendu du body.
@@ -90,6 +95,13 @@ struct FileGridView: View {
                 case .nearTop:
                     break
                 }
+            }
+            .onScrollGeometryChange(for: Bool.self, of: { geometry in
+                // Le contenu déborde-t-il de la zone visible (marges comprises) ?
+                let visibleHeight = geometry.containerSize.height - geometry.contentInsets.top - geometry.contentInsets.bottom
+                return geometry.contentSize.height > visibleHeight + 8
+            }) { _, newValue in
+                isContentScrollable = newValue
             }
             .background(Color(uiColor: .systemGroupedBackground))
             .task(id: viewModel.source) {
@@ -178,10 +190,13 @@ struct FileGridView: View {
             .simultaneousGesture(
                 DragGesture(minimumDistance: 8)
                     .onChanged { value in
-                        // Secours pour les dossiers très courts : même si le
-                        // ScrollView ne bouge pas visuellement, le geste révèle
-                        // tout de même la recherche.
-                        if searchScrollRegion != .content,
+                        // Secours réservé aux dossiers trop courts pour défiler :
+                        // le ScrollView ne bouge pas visuellement, mais le geste
+                        // doit tout de même révéler la recherche. Sur un contenu
+                        // défilable ce secours resterait actif pendant un fling
+                        // rapide vers le bas et ferait clignoter la barre.
+                        if !isContentScrollable,
+                           searchScrollRegion != .content,
                            value.translation.height > 12,
                            value.translation.height > abs(value.translation.width) {
                             onScrolledPastTop?(true)
@@ -210,12 +225,20 @@ struct FileGridView: View {
         !searchKeywords.isEmpty
     }
 
+    /// Source déjà filtrée par le serveur : relancer les mots-clés en local
+    /// masquerait des résultats trouvés par l'API selon des règles plus larges
+    /// que `localizedStandardContains` sur le nom.
+    private var effectiveSearchText: String {
+        if case .search = viewModel.source { return "" }
+        return searchText
+    }
+
     /// Éléments après filtres (type, orientation, recherche) et tri.
     private var visibleItems: [DriveFile] {
         visibleItemsCache.visibleItems(
             items: viewModel.items,
             filters: filters,
-            searchText: searchText,
+            searchText: effectiveSearchText,
             metadataRevision: metadataRevision,
             mediaMetadata: mediaMetadata
         )
@@ -319,7 +342,7 @@ struct FileGridView: View {
         EmptyFilteredPageTaskKey(
             itemIDs: viewModel.items.map(\.id),
             filters: filters,
-            searchText: searchText,
+            searchText: effectiveSearchText,
             hasMore: viewModel.hasMore,
             isReloading: viewModel.isReloading
         )
