@@ -15,6 +15,7 @@ struct MainTabView: View {
     @State private var router: ViewerRouter
     @State private var navState = TabNavigationState()
     @State private var showUploadSheet = false
+    @StateObject private var downloadService = FileDownloadService.shared
     @AppStorage("favoritesReselectScrollToTop") private var favoritesReselectScrollToTop = true
     @AppStorage("reduceMotion") private var reduceMotion = false
 
@@ -67,6 +68,11 @@ struct MainTabView: View {
         .fullScreenCover(item: $router.textFile) { file in
             TextFileViewer(file: file, driveId: drive.id)
         }
+        .alert("Téléchargement impossible", isPresented: downloadErrorBinding) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(downloadService.errorMessage ?? "")
+        }
     }
 
     @ViewBuilder
@@ -116,5 +122,12 @@ struct MainTabView: View {
                 .allowsHitTesting(false)
                 .accessibilityHidden(true)
         }
+    }
+
+    private var downloadErrorBinding: Binding<Bool> {
+        Binding(
+            get: { downloadService.errorMessage != nil },
+            set: { if !$0 { downloadService.errorMessage = nil } }
+        )
     }
 }

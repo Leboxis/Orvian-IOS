@@ -5,24 +5,29 @@ struct RootView: View {
     let session: SessionStore
 
     var body: some View {
-        switch session.phase {
-        case .signedOut:
-            TokenSetupView(session: session)
-        case .bootstrapping:
-            BootSplash()
-        case let .error(message):
-            BootstrapError(message: message) {
-                Task { await session.bootstrap() }
-            } onSignOut: {
-                session.signOut()
-            }
-        case .signedIn:
-            if let drive = session.selectedDrive {
-                MainTabView(drive: drive, session: session)
-                    .id(drive.id) // changer de drive reconstruit les onglets
-            } else {
+        Group {
+            switch session.phase {
+            case .signedOut:
+                TokenSetupView(session: session)
+            case .bootstrapping:
                 BootSplash()
+            case let .error(message):
+                BootstrapError(message: message) {
+                    Task { await session.bootstrap() }
+                } onSignOut: {
+                    session.signOut()
+                }
+            case .signedIn:
+                if let drive = session.selectedDrive {
+                    MainTabView(drive: drive, session: session)
+                        .id(drive.id) // changer de drive reconstruit les onglets
+                } else {
+                    BootSplash()
+                }
             }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .apiUnauthorized)) { notification in
+            session.handleUnauthorized(credentialFingerprint: notification.object as? String)
         }
     }
 }

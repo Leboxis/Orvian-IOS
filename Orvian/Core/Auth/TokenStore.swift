@@ -1,5 +1,6 @@
 import Foundation
 import Security
+import CryptoKit
 
 /// Stockage du token API.
 ///
@@ -39,6 +40,20 @@ enum TokenStore {
         cached = nil
         deleteKeychain()
         UserDefaults.standard.removeObject(forKey: defaultsKey)
+    }
+
+    /// Empreinte non réversible utilisée pour rattacher une réponse 401 au
+    /// token qui a réellement signé la requête. Une réponse tardive d'une
+    /// ancienne session ne peut ainsi pas déconnecter un nouveau compte.
+    static func credentialFingerprint() -> String? {
+        guard let token = current() else { return nil }
+        return fingerprint(of: token)
+    }
+
+    static func fingerprint(of token: String) -> String {
+        SHA256.hash(data: Data(token.utf8))
+            .map { String(format: "%02x", $0) }
+            .joined()
     }
 
     // MARK: - Keychain

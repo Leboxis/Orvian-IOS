@@ -63,6 +63,14 @@ struct TokenSetupView: View {
                         .padding(.horizontal)
                 }
 
+                if let signedOutMessage = session.signedOutMessage {
+                    Label(signedOutMessage, systemImage: "key.slash.fill")
+                        .font(.footnote)
+                        .foregroundStyle(.orange)
+                        .multilineTextAlignment(.center)
+                        .padding(.horizontal)
+                }
+
                 Button("Où trouver mon token ?") {
                     showHelp = true
                 }

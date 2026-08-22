@@ -47,7 +47,7 @@ private struct FilterPanel: View {
                 values: FileFilters.MediaFilter.allCases,
                 symbol: \.symbol,
                 isSelected: { filters.media == $0 },
-                action: { filters.media = $0 }
+                action: selectMedia
             )
 
             if filters.isActive {
@@ -178,6 +178,16 @@ private struct FilterPanel: View {
             filters.orientation = nil
         } else {
             filters.orientation = orientation
+            if filters.media == .images || filters.media == .other {
+                filters.media = .videos
+            }
+        }
+    }
+
+    private func selectMedia(_ media: FileFilters.MediaFilter) {
+        filters.media = media
+        if media == .images || media == .other {
+            filters.orientation = nil
         }
     }
 

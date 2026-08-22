@@ -16,8 +16,7 @@ final class SessionStore {
     private(set) var drives: [Drive] = []
     private(set) var accountId: Int?
     private(set) var selectedDrive: Drive?
-
-    var onUnauthorized: (() -> Void)?
+    private(set) var signedOutMessage: String?
 
     private let service: KDriveService
     private let defaults = UserDefaults.standard
@@ -26,6 +25,9 @@ final class SessionStore {
         static let accountId = "orvian.account-id"
         static let driveId = "orvian.drive-id"
     }
+
+    private static let expiredSessionMessage =
+        "Votre token a expiré ou a été révoqué. Connectez-vous avec un token valide."
 
     init(service: KDriveService = KDriveService()) {
         self.service = service
@@ -41,14 +43,14 @@ final class SessionStore {
             phase = .signedOut
             return
         }
+        signedOutMessage = nil
         phase = .bootstrapping
         do {
             try await loadDrives(preferredDriveId: defaults.object(forKey: Keys.driveId) as? Int)
             phase = .signedIn
         } catch {
             if error is APIError, (error as? APIError)?.isUnauthorized == true {
-                TokenStore.clear()
-                phase = .signedOut
+                clearSession(message: Self.expiredSessionMessage)
             } else {
                 phase = .error((error as? APIError)?.errorDescription ?? error.localizedDescription)
             }
@@ -57,6 +59,7 @@ final class SessionStore {
 
     /// Connexion avec un token collé par l'utilisateur.
     func signIn(token: String) async throws {
+        signedOutMessage = nil
         TokenStore.save(token)
         phase = .bootstrapping
         do {
@@ -66,19 +69,35 @@ final class SessionStore {
             }
             phase = .signedIn
         } catch {
-            TokenStore.clear()
-            phase = .signedOut
+            clearSession(message: nil)
             throw error
         }
     }
 
     func signOut() {
+        clearSession(message: nil)
+    }
+
+    /// Ignore un 401 tardif provenant d'un ancien token, puis ferme
+    /// immédiatement la session réellement expirée.
+    func handleUnauthorized(credentialFingerprint: String?) {
+        guard let credentialFingerprint,
+              credentialFingerprint == TokenStore.credentialFingerprint()
+        else { return }
+        clearSession(message: Self.expiredSessionMessage)
+    }
+
+    private func clearSession(message: String?) {
+        // Annuler avant d'effacer le token afin que les URLSession actives
+        // cessent d'envoyer des octets avec les anciennes autorisations.
+        UploadManager.shared.cancelAllAndClear()
         TokenStore.clear()
         defaults.removeObject(forKey: Keys.accountId)
         defaults.removeObject(forKey: Keys.driveId)
         drives = []
         selectedDrive = nil
         accountId = nil
+        signedOutMessage = message
         phase = .signedOut
     }
 
