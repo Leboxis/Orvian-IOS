@@ -85,7 +85,12 @@ struct MainTabView: View {
                 TagsView(driveId: drive.id, router: router, path: $navState.tagsPath)
             }
             tabPane(.home) {
-                HomeTab(driveId: drive.id, router: router, path: $navState.homePath)
+                HomeTab(
+                    driveId: drive.id,
+                    router: router,
+                    isSelected: tab == .home,
+                    path: $navState.homePath
+                )
             }
             tabPane(.favorites) {
                 FavoritesView(

@@ -57,6 +57,7 @@ struct FileGridView: View {
     @State private var metadataRevision = 0
     @State private var prefetchTask: Task<Void, Never>?
     @State private var sortReloadTask: Task<Void, Never>?
+    @State private var searchScrollRegion: SearchScrollRegion = .nearTop
     /// Cache du calcul `visibleItems` : les filtres/tri/regroupement ne sont
     /// recalculés que si les données, les filtres, la recherche ou les
     /// métadonnées vidéo changent — pas à chaque rendu du body.
@@ -68,15 +69,26 @@ struct FileGridView: View {
 
     var body: some View {
         scrollContent
-            .onScrollGeometryChange(for: CGFloat.self, of: {
+            .onScrollGeometryChange(for: SearchScrollRegion.self, of: {
                 // Au repos, iOS applique déjà l'inset supérieur au décalage.
                 // Seul un dépassement réel de cette position doit afficher la recherche.
-                $0.contentOffset.y + $0.contentInsets.top
-            }) { oldValue, newValue in
-                if newValue > 24 {
+                let offset = $0.contentOffset.y + $0.contentInsets.top
+                if offset < -8 {
+                    return .pulledPastTop
+                }
+                if offset > 24 {
+                    return .content
+                }
+                return .nearTop
+            }) { _, newRegion in
+                searchScrollRegion = newRegion
+                switch newRegion {
+                case .content:
                     onScrolledPastTop?(false)
-                } else if newValue < -8 {
+                case .pulledPastTop:
                     onScrolledPastTop?(true)
+                case .nearTop:
+                    break
                 }
             }
             .background(Color(uiColor: .systemGroupedBackground))
@@ -169,7 +181,9 @@ struct FileGridView: View {
                         // Secours pour les dossiers très courts : même si le
                         // ScrollView ne bouge pas visuellement, le geste révèle
                         // tout de même la recherche.
-                        if value.translation.height > 12 {
+                        if searchScrollRegion != .content,
+                           value.translation.height > 12,
+                           value.translation.height > abs(value.translation.width) {
                             onScrolledPastTop?(true)
                         }
                     }
@@ -498,6 +512,14 @@ struct FileGridView: View {
         case .search: return "Aucun résultat"
         }
     }
+}
+
+/// Zones stables utilisées pour révéler la recherche sans publier un nouvel
+/// état SwiftUI à chaque point parcouru pendant le défilement.
+private enum SearchScrollRegion: Equatable {
+    case pulledPastTop
+    case nearTop
+    case content
 }
 
 /// Mémoïse le résultat des filtres/tri de la grille : tant que les données

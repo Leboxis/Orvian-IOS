@@ -4,6 +4,7 @@ import SwiftUI
 struct HomeTab: View {
     let driveId: Int
     let router: ViewerRouter
+    let isSelected: Bool
     @Binding var path: [DriveFile]
 
     /// Premier dossier du drive. Il devient la racine de navigation : la
@@ -15,9 +16,10 @@ struct HomeTab: View {
     private var cacheKey: String { "home_start_dir_locked_\(driveId)" }
     private var previousCacheKey: String { "home_start_dir_\(driveId)" }
 
-    init(driveId: Int, router: ViewerRouter, path: Binding<[DriveFile]>) {
+    init(driveId: Int, router: ViewerRouter, isSelected: Bool, path: Binding<[DriveFile]>) {
         self.driveId = driveId
         self.router = router
+        self.isSelected = isSelected
         self._path = path
 
         if let data = UserDefaults.standard.data(forKey: "home_start_dir_locked_\(driveId)"),
@@ -46,6 +48,7 @@ struct HomeTab: View {
                 driveId: driveId,
                 crumbs: [root.name],
                 router: router,
+                isActive: isSelected,
                 showsSearchBar: true,
                 onOpenFolder: { folder in
                     path.append(folder)
@@ -59,6 +62,7 @@ struct HomeTab: View {
                     driveId: driveId,
                     crumbs: crumbs,
                     router: router,
+                    isActive: isSelected,
                     showsSearchBar: true,
                     onOpenFolder: { folder in
                         path.append(folder)
@@ -135,6 +139,8 @@ struct DirectoryView: View {
     let crumbs: [String]
     /// Affiche la barre de recherche (onglet Accueil uniquement).
     let showsSearchBar: Bool
+    /// Retire le focus du champ quand son onglet n'est plus affiché.
+    let isActive: Bool
 
     @State private var viewModel: FileGridViewModel
     @State private var searchViewModel: FileGridViewModel?
@@ -177,6 +183,7 @@ struct DirectoryView: View {
         driveId: Int,
         crumbs: [String],
         router: ViewerRouter,
+        isActive: Bool = true,
         showsSearchBar: Bool = false,
         onOpenFolder: @escaping (DriveFile) -> Void
     ) {
@@ -184,6 +191,7 @@ struct DirectoryView: View {
         self.driveId = driveId
         self.crumbs = crumbs
         self.router = router
+        self.isActive = isActive
         self.showsSearchBar = showsSearchBar
         self.onOpenFolder = onOpenFolder
         _viewModel = State(initialValue: FileGridViewModel(source: .directory(directory.id), driveId: driveId))
@@ -231,7 +239,7 @@ struct DirectoryView: View {
                     breadcrumb
                         .frame(maxWidth: .infinity)
 
-                    if showsSearchBar && searchBarVisible {
+                    if searchBarPresented {
                         VStack(spacing: 0) {
                             searchBar
                             itemCountLabel
@@ -241,8 +249,8 @@ struct DirectoryView: View {
                     }
                 }
                 .padding(.top, 2)
-                .padding(.bottom, searchBarVisible ? 0 : 4)
-                .animation(.snappy(duration: 0.25), value: searchBarVisible)
+                .padding(.bottom, searchBarPresented ? 0 : 4)
+                .animation(.snappy(duration: 0.25), value: searchBarPresented)
             }
         }
         .toolbar {
@@ -370,6 +378,11 @@ struct DirectoryView: View {
         .onChange(of: searchText) { _, _ in
             if selectionMode { endSelection() }
         }
+        .onChange(of: isActive) { _, active in
+            if !active {
+                searchFocused = false
+            }
+        }
         .task(id: searchText) {
             let trimmed = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !trimmed.isEmpty else {
@@ -393,7 +406,13 @@ struct DirectoryView: View {
 
     /// La barre apparaît lors d'un défilé vers le haut ou lorsque la recherche est active.
     private var searchBarVisible: Bool {
-        alwaysShowSearch || searchFocused || !searchText.isEmpty || scrolledPastTop
+        alwaysShowSearch || searchFocused || isSearching || scrolledPastTop
+    }
+
+    /// Applique les effets de disposition uniquement aux écrans qui possèdent
+    /// réellement une barre de recherche.
+    private var searchBarPresented: Bool {
+        showsSearchBar && searchBarVisible
     }
 
     /// Pastille de recherche centrée et compacte.
