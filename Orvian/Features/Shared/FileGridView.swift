@@ -58,11 +58,6 @@ struct FileGridView: View {
     @State private var prefetchTask: Task<Void, Never>?
     @State private var sortReloadTask: Task<Void, Never>?
     @State private var searchScrollRegion: SearchScrollRegion = .nearTop
-    /// Vrai quand le contenu dépasse la hauteur visible : dans ce cas le
-    /// ScrollView gère seul le geste de révélation et le secours gestuel
-    /// (dossiers très courts) doit rester inerte pour ne pas faire clignoter
-    /// la barre pendant un défilement rapide vers le bas.
-    @State private var isContentScrollable = false
     /// Cache du calcul `visibleItems` : les filtres/tri/regroupement ne sont
     /// recalculés que si les données, les filtres, la recherche ou les
     /// métadonnées vidéo changent — pas à chaque rendu du body.
@@ -96,13 +91,19 @@ struct FileGridView: View {
                     break
                 }
             }
-            .onScrollGeometryChange(for: Bool.self, of: { geometry in
-                // Le contenu déborde-t-il de la zone visible (marges comprises) ?
-                let visibleHeight = geometry.containerSize.height - geometry.contentInsets.top - geometry.contentInsets.bottom
-                return geometry.contentSize.height > visibleHeight + 8
-            }) { _, newValue in
-                isContentScrollable = newValue
-            }
+            .onScrollGeometryChange(for: CGFloat.self, of: { geometry in
+                // Décalage quantifié par paliers de 32 pt : l'action ne se
+                // déclenche qu'au franchissement d'un palier, jamais à chaque
+                // frame — aucun coût ajouté pendant le défilement.
+                ((geometry.contentOffset.y + geometry.contentInsets.top) / 32).rounded(.down)
+            }, action: { oldStep, newStep in
+                // Révélation par direction : remonter dans la liste réaffiche
+                // la recherche même sans rebond au sommet (un défilement lent
+                // s'y arrête souvent sans dépasser le seuil d'overscroll).
+                if newStep < oldStep {
+                    onScrolledPastTop?(true)
+                }
+            })
             .background(Color(uiColor: .systemGroupedBackground))
             .task(id: viewModel.source) {
                 await viewModel.loadIfNeeded()
@@ -184,25 +185,9 @@ struct FileGridView: View {
                 .padding(.bottom, 110) // barre flottante
             }
             // Même un dossier trop court pour défiler peut être tiré vers le
-            // bas : ce geste révèle la recherche sur l'Accueil.
+            // bas : ce rebond déclenche l'overscroll qui révèle la recherche.
             .scrollBounceBehavior(.always, axes: .vertical)
             .scrollIndicators(.hidden)
-            .simultaneousGesture(
-                DragGesture(minimumDistance: 8)
-                    .onChanged { value in
-                        // Secours réservé aux dossiers trop courts pour défiler :
-                        // le ScrollView ne bouge pas visuellement, mais le geste
-                        // doit tout de même révéler la recherche. Sur un contenu
-                        // défilable ce secours resterait actif pendant un fling
-                        // rapide vers le bas et ferait clignoter la barre.
-                        if !isContentScrollable,
-                           searchScrollRegion != .content,
-                           value.translation.height > 12,
-                           value.translation.height > abs(value.translation.width) {
-                            onScrolledPastTop?(true)
-                        }
-                    }
-            )
             .onChange(of: scrollToTopRequest) { oldValue, newValue in
                 guard oldValue != newValue else { return }
                 withAnimation(.snappy(duration: 0.3)) {
@@ -331,7 +316,13 @@ struct FileGridView: View {
     }
 
     private struct EmptyFilteredPageTaskKey: Hashable {
-        let itemIDs: [Int]
+        // Compteurs compars au lieu du tableau complet des identifiants :
+        // construire puis hacher `items.map(\.id)` à chaque rendu coûtait
+        // O(n) sur les grands dossiers et participait aux saccades. La liste
+        // n'évoluant que par ajout, compteur + dernier id suffisent ; un
+        // rechargement complet bascule de toute façon `isReloading`.
+        let itemCount: Int
+        let lastItemID: Int?
         let filters: FileFilters
         let searchText: String
         let hasMore: Bool
@@ -340,7 +331,8 @@ struct FileGridView: View {
 
     private var emptyFilteredPageTaskKey: EmptyFilteredPageTaskKey {
         EmptyFilteredPageTaskKey(
-            itemIDs: viewModel.items.map(\.id),
+            itemCount: viewModel.items.count,
+            lastItemID: viewModel.items.last?.id,
             filters: filters,
             searchText: effectiveSearchText,
             hasMore: viewModel.hasMore,
