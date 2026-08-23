@@ -10,7 +10,6 @@ struct SettingsView: View {
     @State private var showSignOutConfirm = false
     @AppStorage("showFileSizes") private var showFileSizes = true
     @AppStorage("fileGridColumns") private var fileGridColumns = 3
-    @AppStorage("alwaysShowSearch") private var alwaysShowSearch = false
     @AppStorage("favoritesReselectScrollToTop") private var favoritesReselectScrollToTop = true
     @AppStorage("prefetchThumbnails") private var prefetchThumbnails = true
     @AppStorage("prefetchVideoURLs") private var prefetchVideoURLs = true
@@ -52,14 +51,6 @@ struct SettingsView: View {
                             Text("6 cartes").tag(6)
                             Text("7 cartes").tag(7)
                         }
-                        settingsDivider
-                        settingsToggle(
-                            "Recherche toujours visible",
-                            detail: "Évite de devoir faire glisser la liste pour l’afficher.",
-                            icon: "magnifyingglass",
-                            tint: .teal,
-                            isOn: $alwaysShowSearch
-                        )
                     }
 
                     settingsCard(

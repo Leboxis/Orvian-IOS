@@ -23,9 +23,6 @@ struct FileGridView: View {
     /// Options de tri et de filtrage (bouton filtre de l'Accueil).
     var filters: FileFilters = .init()
 
-    /// Remonte true après un court geste vers le bas depuis le haut de la liste.
-    var onScrolledPastTop: ((Bool) -> Void)?
-
     /// Décalage ajouté en haut du contenu (barre de recherche flottante) pour
     /// que la première rangée ne soit jamais masquée.
     var contentTopInset: CGFloat = 0
@@ -57,10 +54,6 @@ struct FileGridView: View {
     @State private var metadataRevision = 0
     @State private var prefetchTask: Task<Void, Never>?
     @State private var sortReloadTask: Task<Void, Never>?
-    @State private var searchScrollRegion: SearchScrollRegion = .nearTop
-    /// Mémoire de position du défilement (type référence) : mutée à chaque
-    /// frame par le transform de géométrie sans jamais invalider la vue.
-    @State private var scrollTracker = ScrollDirectionTracker()
     /// Cache du calcul `visibleItems` : les filtres/tri/regroupement ne sont
     /// recalculés que si les données, les filtres, la recherche ou les
     /// métadonnées vidéo changent — pas à chaque rendu du body.
@@ -72,63 +65,6 @@ struct FileGridView: View {
 
     var body: some View {
         scrollContent
-            .onScrollGeometryChange(for: SearchScrollRegion.self, of: {
-                // Au repos, iOS applique déjà l'inset supérieur au décalage.
-                // Seul un dépassement réel de cette position doit afficher la recherche.
-                let offset = $0.contentOffset.y + $0.contentInsets.top
-                if offset < -8 {
-                    return .pulledPastTop
-                }
-                if offset > 24 {
-                    return .content
-                }
-                return .nearTop
-            }) { _, newRegion in
-                searchScrollRegion = newRegion
-                switch newRegion {
-                case .content:
-                    onScrolledPastTop?(false)
-                case .pulledPastTop:
-                    onScrolledPastTop?(true)
-                case .nearTop:
-                    break
-                }
-            }
-            .onScrollGeometryChange(for: ScrollBarAction.self, of: { geometry in
-                // Décision calculée dans le transform : il lit et met à jour
-                // une mémoire de position détenue par une CLASSE (aucune
-                // écriture @State par frame, donc aucune invalidation de vue,
-                // donc aucun risque de boucle révèle→inset→recalcule→révèle
-                // qui gelait le défilement).
-                let y = geometry.contentOffset.y + geometry.contentInsets.top
-                let delta = y - scrollTracker.lastY
-                scrollTracker.lastY = y
-                // Bande morte : filtre le bruit de compensation d'insets qui
-                // accompagne l'apparition/disparition de la barre.
-                guard abs(delta) > 4 else { return .none }
-                if delta < 0 {
-                    // Glissement du doigt vers le bas : afficher la barre,
-                    // où que l'on soit dans la liste.
-                    return .reveal
-                }
-                if y > 24 {
-                    // Glissement vers le haut : masquer, mais seulement loin
-                    // du sommet — sinon la fin de bande élastique (qui
-                    // remonte vers 0) refermerait aussitôt la barre ouverte
-                    // par le tirage vers le bas.
-                    return .conceal
-                }
-                return .none
-            }, action: { _, action in
-                switch action {
-                case .reveal:
-                    onScrolledPastTop?(true)
-                case .conceal:
-                    onScrolledPastTop?(false)
-                case .none:
-                    break
-                }
-            })
             .background(Color(uiColor: .systemGroupedBackground))
             .task(id: viewModel.source) {
                 await viewModel.loadIfNeeded()
@@ -552,29 +488,6 @@ struct FileGridView: View {
         case .search: return "Aucun résultat"
         }
     }
-}
-
-/// Zones stables utilisées pour révéler la recherche sans publier un nouvel
-/// état SwiftUI à chaque point parcouru pendant le défilement.
-private enum SearchScrollRegion: Equatable {
-    case pulledPastTop
-    case nearTop
-    case content
-}
-
-/// Décision de barre calculée par frame dans le transform de géométrie.
-/// `.none` (valeur la plus fréquente) ne provoque aucune écriture d'état.
-private enum ScrollBarAction: Equatable {
-    case none
-    case reveal
-    case conceal
-}
-
-/// Mémoire muette du dernier décalage : classe volontairement, pour que sa
-/// mutation n'invalide aucune vue SwiftUI (une propriété @State scalaire
-/// écrite à chaque frame suffirait à faire chuter les performances).
-private final class ScrollDirectionTracker {
-    var lastY: CGFloat = 0
 }
 
 /// Mémoïse le résultat des filtres/tri de la grille : tant que les données

@@ -28,7 +28,6 @@ struct TrashView: View {
             onOpenFile: { file, _ in tap(file) },
             searchText: "",
             filters: .init(),
-            onScrolledPastTop: nil,
             allowsPullToRefresh: true,
             selectionMode: selectionMode,
             selectedIDs: selectedIDs,
