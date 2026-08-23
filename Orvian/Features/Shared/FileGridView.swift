@@ -102,6 +102,14 @@ struct FileGridView: View {
                 // s'y arrête souvent sans dépasser le seuil d'overscroll).
                 if newStep < oldStep {
                     onScrolledPastTop?(true)
+                } else if newStep > oldStep, newStep > 0 {
+                    // Réciproque indispensable : révélée au cœur du contenu,
+                    // la région reste `.content` en redescendant et ne renvoie
+                    // donc plus de `false` elle-même. Le garde `newStep > 0`
+                    // épargne la révélation par tirage vers le bas au sommet :
+                    // le retour de bande élastique repasse par les paliers
+                    // négatifs vers 0 sans devoir masquer.
+                    onScrolledPastTop?(false)
                 }
             })
             .background(Color(uiColor: .systemGroupedBackground))
