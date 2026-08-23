@@ -164,6 +164,9 @@ struct DirectoryView: View {
     /// Recherche (et tris appliqués à ses résultats) limitée au dossier courant
     /// et à tous ses sous-dossiers ; désactivée, elle couvre tout le drive.
     @AppStorage("searchRestrictedToFolder") private var searchRestrictedToFolder = false
+    /// Champ de recherche ouvert via le bouton loupe flottant.
+    @State private var showSearchField = false
+    @FocusState private var searchFocused: Bool
 
     private let router: ViewerRouter
     private let onOpenFolder: (DriveFile) -> Void
@@ -221,6 +224,10 @@ struct DirectoryView: View {
                     VStack(spacing: 8) {
                         breadcrumb
                             .frame(maxWidth: .infinity)
+
+                        if showsSearchBar, showSearchField {
+                            searchField
+                        }
 
                         if showsSearchBar {
                             itemCountLabel
@@ -316,7 +323,17 @@ struct DirectoryView: View {
         }
         .overlay(alignment: .bottomTrailing) {
             if !selectionMode {
-                floatingAddButton
+                VStack(spacing: 12) {
+                    if showsSearchBar, !showSearchField {
+                        searchToggleButton
+                    }
+                    floatingAddButton
+                }
+            }
+        }
+        .onChange(of: isActive) { _, active in
+            if !active {
+                closeSearchField()
             }
         }
         .alert("Impossible", isPresented: addErrorBinding) {
@@ -395,62 +412,36 @@ struct DirectoryView: View {
         let restricted: Bool
     }
 
-    /// Grille de fichiers. Sur l'Accueil, la recherche utilise l'API native
-    /// `.searchable` (champ dans la barre de navigation, géré intégralement
-    /// par le système : aucune logique de scroll maison, donc fluide).
-    @ViewBuilder
+    /// Grille de fichiers. La recherche est ouverte par le bouton loupe
+    /// flottant : aucun mécanisme lié au défilement, aucune barre permanente.
     private var grid: some View {
-        if showsSearchBar {
-            FileGridView(
-                viewModel: activeViewModel,
-                onOpenDirectory: { onOpenFolder($0) },
-                onOpenFile: { file, siblings in
-                    router.open(
-                        file,
-                        siblings: siblings,
-                        filters: filters,
-                        searchText: searchText,
-                        viewModel: activeViewModel
-                    )
-                },
-                onVisibleItemsChanged: updateVisibleSelectionItems,
-                searchText: searchText,
-                filters: filters,
-                allowsPullToRefresh: false,
-                selectionMode: selectionMode,
-                selectedIDs: selectedIDs,
-                onToggleSelection: { toggleSelection($0) },
-                onMove: { prepareMove(files: [$0]) }
-            )
-            .searchable(
-                text: $searchText,
-                placement: .navigationBarDrawer(displayMode: .always),
-                prompt: searchRestrictedToFolder
-                    ? "Rechercher dans ce dossier…"
-                    : "Rechercher dans tout le drive…"
-            )
-        } else {
-            FileGridView(
-                viewModel: activeViewModel,
-                onOpenDirectory: { onOpenFolder($0) },
-                onOpenFile: { file, siblings in
-                    router.open(
-                        file,
-                        siblings: siblings,
-                        filters: filters,
-                        searchText: searchText,
-                        viewModel: activeViewModel
-                    )
-                },
-                onVisibleItemsChanged: updateVisibleSelectionItems,
-                searchText: searchText,
-                filters: filters,
-                selectionMode: selectionMode,
-                selectedIDs: selectedIDs,
-                onToggleSelection: { toggleSelection($0) },
-                onMove: { prepareMove(files: [$0]) }
-            )
-        }
+        FileGridView(
+            viewModel: activeViewModel,
+            onOpenDirectory: { folder in
+                // La vue reste montée dans le NavigationStack : sans ce
+                // retrait explicite, le clavier suit jusqu'à l'écran poussé.
+                searchFocused = false
+                onOpenFolder(folder)
+            },
+            onOpenFile: { file, siblings in
+                searchFocused = false
+                router.open(
+                    file,
+                    siblings: siblings,
+                    filters: filters,
+                    searchText: searchText,
+                    viewModel: activeViewModel
+                )
+            },
+            onVisibleItemsChanged: updateVisibleSelectionItems,
+            searchText: searchText,
+            filters: filters,
+            allowsPullToRefresh: !showsSearchBar,
+            selectionMode: selectionMode,
+            selectedIDs: selectedIDs,
+            onToggleSelection: { toggleSelection($0) },
+            onMove: { prepareMove(files: [$0]) }
+        )
     }
 
     /// Bascule la portée : dossier courant + sous-dossiers infinis, ou tout
@@ -468,6 +459,87 @@ struct DirectoryView: View {
             : "Recherche sur tout le drive")
         .accessibilityHint("Limite la recherche et les tris au dossier actuel et à tous ses sous-dossiers.")
         .accessibilityAddTraits(searchRestrictedToFolder ? [.isSelected] : [])
+    }
+
+    /// Bouton loupe flottant, au-dessus du bouton d'import : ouvre le champ
+    /// de recherche et place directement le focus dans celui-ci.
+    private var searchToggleButton: some View {
+        Button {
+            withAnimation(.snappy(duration: 0.2)) {
+                showSearchField = true
+            }
+            searchFocused = true
+        } label: {
+            Image(systemName: "magnifyingglass")
+                .font(.system(size: 20, weight: .medium))
+                .foregroundStyle(Color.accentColor)
+                .frame(width: 44, height: 44)
+                .background(.ultraThinMaterial, in: Circle())
+                .overlay {
+                    Circle().strokeBorder(.quaternary, lineWidth: 0.5)
+                }
+                .shadow(color: .black.opacity(0.12), radius: 8, x: 0, y: 3)
+        }
+        .accessibilityLabel("Rechercher")
+    }
+
+    /// Champ de recherche ouvert par le bouton loupe ; la croix referme le
+    /// champ et efface la requête en cours.
+    private var searchField: some View {
+        HStack(spacing: 8) {
+            HStack(spacing: 6) {
+                Image(systemName: "magnifyingglass")
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(.secondary)
+                TextField(
+                    searchRestrictedToFolder ? "Rechercher dans ce dossier…" : "Rechercher dans tout le drive…",
+                    text: $searchText
+                )
+                .focused($searchFocused)
+                .autocorrectionDisabled()
+                .submitLabel(.search)
+
+                if !searchText.isEmpty {
+                    Button {
+                        searchText = ""
+                        searchFocused = true
+                    } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .foregroundStyle(.secondary)
+                    }
+                    .accessibilityLabel("Effacer la recherche")
+                }
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 7)
+            .background(.bar, in: Capsule())
+            .overlay {
+                Capsule().strokeBorder(.quaternary, lineWidth: 0.5)
+            }
+            .shadow(color: .black.opacity(0.08), radius: 6, x: 0, y: 2)
+
+            Button {
+                closeSearchField()
+            } label: {
+                Text("Annuler")
+                    .font(.footnote.weight(.medium))
+                    .foregroundStyle(Color.accentColor)
+            }
+            .accessibilityLabel("Fermer la recherche")
+        }
+        .padding(.horizontal, 4)
+        .transition(.move(edge: .top).combined(with: .opacity))
+        .onAppear { searchFocused = true }
+    }
+
+    /// Referme le champ : retire le clavier, vide la requête et redonne sa
+    /// place au bouton loupe.
+    private func closeSearchField() {
+        searchFocused = false
+        searchText = ""
+        withAnimation(.snappy(duration: 0.2)) {
+            showSearchField = false
+        }
     }
 
     /// Bouton dé : ouvre au hasard un fichier parmi les éléments du dossier actuel.
@@ -491,6 +563,7 @@ struct DirectoryView: View {
 
     private func openRandomFile() {
         guard let random = playableFiles.randomElement() else { return }
+        searchFocused = false
         router.open(
             random,
             siblings: playableFiles,
@@ -537,6 +610,7 @@ struct DirectoryView: View {
     }
 
     private func startSelection() {
+        if showSearchField { closeSearchField() }
         selectionMode = true
     }
 
