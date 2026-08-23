@@ -23,6 +23,9 @@ struct TextFileViewer: View {
     @State private var loadError: String?
     @State private var saveError: String?
     @State private var showCloseConfirmation = false
+    /// Contenu avec liens déjà détectés : construit une seule fois par
+    /// changement de contenu au lieu d'être recalculé à chaque rendu.
+    @State private var attributedContent = AttributedString("")
     /// URL ouverte par un tap sur un lien du texte : affichée dans un
     /// `SFSafariViewController` intégré, sans quitter l'app.
     @State private var safariURL: SafariItem?
@@ -149,37 +152,43 @@ struct TextFileViewer: View {
         }
     }
 
-    /// Contenu avec liens détectés (URL, e-mails…) en surbrillance et
-    /// cliquables : un tap ouvre la fenêtre Safari intégrée à l'app.
-    private var attributedContent: AttributedString {
-        var result = AttributedString()
-        let nsContent = content as NSString
-        guard let detector = try? NSDataDetector(types: NSTextCheckingResult.CheckingType.link.rawValue) else {
-            return AttributedString(content)
-        }
-        let matches = detector.matches(
-            in: content,
-            options: [],
-            range: NSRange(location: 0, length: nsContent.length)
-        )
-        var last = 0
-        for match in matches {
-            let range = match.range
-            if range.location > last {
-                result += AttributedString(nsContent.substring(with: NSRange(location: last, length: range.location - last)))
+    /// Liens (URL, e-mails…) surlignés et cliquables : un tap ouvre la
+    /// fenêtre Safari intégrée à l'app. La détection est faite une fois par
+    /// contenu, hors thread principal — la version précédente relançait
+    /// `NSDataDetector` sur tout le fichier à chaque rendu de la vue.
+    private static func attributedText(for content: String) async -> AttributedString {
+        await Task.detached(priority: .userInitiated) { () -> AttributedString in
+            guard let detector = try? NSDataDetector(
+                types: NSTextCheckingResult.CheckingType.link.rawValue
+            ) else {
+                return AttributedString(content)
             }
-            if let url = match.url {
-                var link = AttributedString(nsContent.substring(with: range))
-                link.link = url
-                link.underlineStyle = .single
-                result += link
+            var result = AttributedString()
+            let nsContent = content as NSString
+            let matches = detector.matches(
+                in: content,
+                options: [],
+                range: NSRange(location: 0, length: nsContent.length)
+            )
+            var last = 0
+            for match in matches {
+                let range = match.range
+                if range.location > last {
+                    result += AttributedString(nsContent.substring(with: NSRange(location: last, length: range.location - last)))
+                }
+                if let url = match.url {
+                    var link = AttributedString(nsContent.substring(with: range))
+                    link.link = url
+                    link.underlineStyle = .single
+                    result += link
+                }
+                last = range.location + range.length
             }
-            last = range.location + range.length
-        }
-        if last < nsContent.length {
-            result += AttributedString(nsContent.substring(with: NSRange(location: last, length: nsContent.length - last)))
-        }
-        return result
+            if last < nsContent.length {
+                result += AttributedString(nsContent.substring(with: NSRange(location: last, length: nsContent.length - last)))
+            }
+            return result
+        }.value
     }
 
     // MARK: - Modification
@@ -239,8 +248,10 @@ struct TextFileViewer: View {
             guard let decoded = Self.decode(data) else {
                 throw TextFileViewerError.unsupportedEncoding
             }
+            let attributed = await Self.attributedText(for: decoded)
             content = decoded
             draft = decoded
+            attributedContent = attributed
         } catch {
             loadError = (error as? APIError)?.errorDescription ?? error.localizedDescription
         }
@@ -258,7 +269,9 @@ struct TextFileViewer: View {
             }
             try await service.uploadContent(driveId: driveId, fileId: file.id, data: data)
             await MediaURLCache.shared.invalidate(driveId: driveId, fileId: file.id)
+            let attributed = await Self.attributedText(for: draft)
             content = draft
+            attributedContent = attributed
             isEditing = false
             return true
         } catch {

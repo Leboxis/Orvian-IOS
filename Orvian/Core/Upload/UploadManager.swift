@@ -31,6 +31,28 @@ enum UploadStatus: Equatable {
     case failed(message: String)
 }
 
+/// Filtre thread-safe des rappels de progression : coalesce les ticks (un
+/// upload chunked peut en produire des milliers) et garantit une progression
+/// monotone. Sans lui, chaque tick engendrait une `Task` indépendante et deux
+/// ticks pouvaient s'appliquer dans le désordre (barre qui recule).
+private final class UploadProgressFilter: @unchecked Sendable {
+    private let lock = NSLock()
+    private var lastReported = 0.0
+    /// Pas minimal entre deux mises à jour d'interface (~1 % de la barre).
+    private let step = 0.01
+
+    /// Retourne true si ce tick doit être poussé vers l'interface.
+    func shouldReport(_ fraction: Double) -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        guard fraction > lastReported + step || fraction >= 1 else { return false }
+        if fraction > lastReported {
+            lastReported = fraction
+        }
+        return true
+    }
+}
+
 /// Tâche d'upload individuelle.
 struct UploadTaskItem: Identifiable, Equatable {
     let id: UUID
@@ -440,6 +462,7 @@ final class UploadManager {
         var result: DriveFile?
         do {
             tasks[index].status = .inProgress(progress: 0.2)
+            let progressFilter = UploadProgressFilter()
             let uploadedFile = try await service.uploadFile(
                 driveId: driveId,
                 directoryId: directoryId,
@@ -447,6 +470,7 @@ final class UploadManager {
                 fileName: payload.fileName,
                 totalSize: payload.totalBytes,
                 progress: { [weak self] fraction in
+                    guard progressFilter.shouldReport(fraction) else { return }
                     Task { @MainActor in
                         guard let self,
                               let currentIndex = self.tasks.firstIndex(where: { $0.id == taskId })

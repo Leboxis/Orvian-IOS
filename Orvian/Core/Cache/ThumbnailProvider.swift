@@ -18,23 +18,25 @@ private final class AsyncThrottler: @unchecked Sendable {
     }
 
     private func acquire() async {
-        let shouldWait: Bool = {
+        // Décision et inscription sous une seule section critique : sinon un
+        // release() survenant entre le test du compteur et l'inscription dans
+        // la file voyait une file vide et décrémentait le compteur au lieu de
+        // transférer le permis — le waiter dormait alors sans raison.
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
             lock.lock()
-            defer { lock.unlock() }
-            if activeCount < maxConcurrent {
+            if activeCount < maxConcurrent && continuations.isEmpty {
                 activeCount += 1
-                return false
-            }
-            return true
-        }()
-
-        if shouldWait {
-            await withCheckedContinuation { continuation in
-                lock.lock()
-                continuations.append(continuation)
                 lock.unlock()
+                continuation.resume()
+                return
             }
+            continuations.append(continuation)
+            lock.unlock()
         }
+        // Un waiter réveillé alors que sa tâche a été annulée entre
+        // immédiatement dans l'opération, dont la garde `Task.isCancelled`
+        // rend le permis sans délai via le `defer` de `withPermit` : aucun
+        // permis n'est consommé par un waiter obsolète.
     }
 
     private func release() {
@@ -114,15 +116,6 @@ actor ThumbnailProvider {
         if let cached = Self.memory.object(forKey: key.nsString) {
             return cached
         }
-        if disk.hasEntry(driveId: driveId, fileId: fileId, pixels: pixels) {
-            if let image = disk.loadImage(driveId: driveId, fileId: fileId, pixels: pixels) {
-                Self.memory.setObject(image, forKey: key.nsString, cost: image.estimatedByteSize)
-                return image
-            }
-            // Une ancienne réponse non image ne doit pas empêcher une
-            // nouvelle tentative réseau (cas des posters encore générés).
-            disk.removeEntry(driveId: driveId, fileId: fileId, pixels: pixels)
-        }
 
         if let existing = inFlight[key] {
             return await existing.value
@@ -130,6 +123,12 @@ actor ThumbnailProvider {
 
         let task = Task<UIImage?, Never> { [self] in
             defer { inFlight[key] = nil }
+            // La lecture disque et le décodage s'exécutent hors de l'actor :
+            // sur l'executor sérialisé, chaque décodage JPEG bloquait tous
+            // les autres chargements (scroll rapide, préchargement…).
+            if let image = await loadFromDisk(key) {
+                return image
+            }
             return await fetch(key: key, isTrashed: isTrashed)
         }
         inFlight[key] = task
@@ -138,6 +137,22 @@ actor ThumbnailProvider {
             Self.memory.setObject(image, forKey: key.nsString, cost: image.estimatedByteSize)
         }
         return image
+    }
+
+    /// Lecture disque + décodage hors de l'executor de l'actor (`nonisolated`
+    /// async = global concurrent executor) : les chargements tournent en
+    /// parallèle au lieu de se sérialiser derrière chaque décodage.
+    private nonisolated func loadFromDisk(_ key: Key) async -> UIImage? {
+        guard disk.hasEntry(driveId: key.driveId, fileId: key.fileId, pixels: key.pixels) else {
+            return nil
+        }
+        if let image = disk.loadImage(driveId: key.driveId, fileId: key.fileId, pixels: key.pixels) {
+            return image
+        }
+        // Une ancienne réponse non image ne doit pas empêcher une
+        // nouvelle tentative réseau (cas des posters encore générés).
+        disk.removeEntry(driveId: key.driveId, fileId: key.fileId, pixels: key.pixels)
+        return nil
     }
 
     /// Attend la disponibilité d'une miniature récemment créée. Le travail est

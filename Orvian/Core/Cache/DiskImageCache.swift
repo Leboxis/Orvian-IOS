@@ -11,6 +11,10 @@ final class DiskImageCache: @unchecked Sendable {
     private var estimatedDiskSize: Int = 0
     private var isSizeInitialized = false
     private var isEvicting = false
+    /// Une seule mesure disque à la fois ; jamais pendant que le verrou est détenu.
+    private var isScanning = false
+    /// Invalide le résultat d'une mesure lancée avant un `purge()`.
+    private var purgeGeneration = 0
     private var writeCountSinceScan = 0
     private let scanIntervalWrites = 150
 
@@ -98,28 +102,56 @@ final class DiskImageCache: @unchecked Sendable {
         estimatedDiskSize = 0
         isSizeInitialized = true
         writeCountSinceScan = 0
+        purgeGeneration &+= 1
         try? FileManager.default.removeItem(at: root)
         try? FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
     }
 
     func totalSize() -> Int {
-        lock.lock()
-        defer { lock.unlock() }
+        // L'énumération récursive peut être lente : elle ne doit pas bloquer
+        // les écritures/évictions concurrentes sous verrou.
         let size = computeDiskSize()
+        lock.lock()
         estimatedDiskSize = size
         isSizeInitialized = true
+        lock.unlock()
         return size
     }
 
     /// Applique immédiatement une nouvelle limite, notamment après sa
     /// modification dans les réglages.
     func enforceSizeLimit() {
+        refreshEstimatedSize()
+    }
+
+    // MARK: - Gestion de la taille et éviction
+
+    private func onFileWritten(deltaSize: Int) {
+        var shouldScan = false
         var shouldEvict = false
 
         lock.lock()
-        estimatedDiskSize = computeDiskSize()
-        isSizeInitialized = true
-        if estimatedDiskSize > highWaterMark, !isEvicting {
+        if isSizeInitialized {
+            estimatedDiskSize = max(0, estimatedDiskSize + deltaSize)
+        } else {
+            // Première écriture : la taille réelle sera mesurée hors verrou.
+            shouldScan = true
+        }
+
+        writeCountSinceScan += 1
+        if writeCountSinceScan >= scanIntervalWrites {
+            writeCountSinceScan = 0
+            shouldScan = true
+        }
+        lock.unlock()
+
+        if shouldScan {
+            refreshEstimatedSize()
+            return
+        }
+
+        lock.lock()
+        if estimatedDiskSize > highWaterMark && !isEvicting {
             isEvicting = true
             shouldEvict = true
         }
@@ -132,25 +164,33 @@ final class DiskImageCache: @unchecked Sendable {
         }
     }
 
-    // MARK: - Gestion de la taille et éviction
-
-    private func onFileWritten(deltaSize: Int) {
-        var shouldEvict = false
-
+    /// Recalcule la taille du cache hors verrou. Le balayage récursif de
+    /// milliers de fichiers gelait auparavant toutes les opérations du cache
+    /// pendant qu'il tenait le `NSLock` sur le thread appelant.
+    private func refreshEstimatedSize() {
         lock.lock()
-        if !isSizeInitialized {
-            estimatedDiskSize = computeDiskSize()
+        if isScanning {
+            lock.unlock()
+            return
+        }
+        isScanning = true
+        let generation = purgeGeneration
+        lock.unlock()
+        defer {
+            lock.lock()
+            isScanning = false
+            lock.unlock()
+        }
+
+        let size = computeDiskSize()
+
+        var shouldEvict = false
+        lock.lock()
+        // Une purge survenue pendant la mesure invalide son résultat.
+        if purgeGeneration == generation {
+            estimatedDiskSize = size
             isSizeInitialized = true
-        } else {
-            estimatedDiskSize = max(0, estimatedDiskSize + deltaSize)
         }
-
-        writeCountSinceScan += 1
-        if writeCountSinceScan >= scanIntervalWrites {
-            writeCountSinceScan = 0
-            estimatedDiskSize = computeDiskSize()
-        }
-
         if estimatedDiskSize > highWaterMark && !isEvicting {
             isEvicting = true
             shouldEvict = true
