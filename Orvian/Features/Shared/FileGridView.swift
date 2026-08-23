@@ -23,6 +23,9 @@ struct FileGridView: View {
     /// Options de tri et de filtrage (bouton filtre de l'Accueil).
     var filters: FileFilters = .init()
 
+    /// Remonte true après un court geste vers le bas depuis le haut de la liste.
+    var onScrolledPastTop: ((Bool) -> Void)?
+
     /// Décalage ajouté en haut du contenu (barre de recherche flottante) pour
     /// que la première rangée ne soit jamais masquée.
     var contentTopInset: CGFloat = 0
@@ -54,6 +57,7 @@ struct FileGridView: View {
     @State private var metadataRevision = 0
     @State private var prefetchTask: Task<Void, Never>?
     @State private var sortReloadTask: Task<Void, Never>?
+    @State private var searchScrollRegion: SearchScrollRegion = .nearTop
     /// Cache du calcul `visibleItems` : les filtres/tri/regroupement ne sont
     /// recalculés que si les données, les filtres, la recherche ou les
     /// métadonnées vidéo changent — pas à chaque rendu du body.
@@ -65,6 +69,28 @@ struct FileGridView: View {
 
     var body: some View {
         scrollContent
+            .onScrollGeometryChange(for: SearchScrollRegion.self, of: {
+                // Au repos, iOS applique déjà l'inset supérieur au décalage.
+                // Seul un dépassement réel de cette position doit afficher la recherche.
+                let offset = $0.contentOffset.y + $0.contentInsets.top
+                if offset < -8 {
+                    return .pulledPastTop
+                }
+                if offset > 24 {
+                    return .content
+                }
+                return .nearTop
+            }) { _, newRegion in
+                searchScrollRegion = newRegion
+                switch newRegion {
+                case .content:
+                    onScrolledPastTop?(false)
+                case .pulledPastTop:
+                    onScrolledPastTop?(true)
+                case .nearTop:
+                    break
+                }
+            }
             .background(Color(uiColor: .systemGroupedBackground))
             .task(id: viewModel.source) {
                 await viewModel.loadIfNeeded()
@@ -146,9 +172,22 @@ struct FileGridView: View {
                 .padding(.bottom, 110) // barre flottante
             }
             // Même un dossier trop court pour défiler peut être tiré vers le
-            // bas : ce rebond déclenche l'overscroll qui révèle la recherche.
+            // bas : ce geste révèle la recherche sur l'Accueil.
             .scrollBounceBehavior(.always, axes: .vertical)
             .scrollIndicators(.hidden)
+            .simultaneousGesture(
+                DragGesture(minimumDistance: 8)
+                    .onChanged { value in
+                        // Secours pour les dossiers très courts : même si le
+                        // ScrollView ne bouge pas visuellement, le geste révèle
+                        // tout de même la recherche.
+                        if searchScrollRegion != .content,
+                           value.translation.height > 12,
+                           value.translation.height > abs(value.translation.width) {
+                            onScrolledPastTop?(true)
+                        }
+                    }
+            )
             .onChange(of: scrollToTopRequest) { oldValue, newValue in
                 guard oldValue != newValue else { return }
                 withAnimation(.snappy(duration: 0.3)) {
@@ -171,20 +210,12 @@ struct FileGridView: View {
         !searchKeywords.isEmpty
     }
 
-    /// Source déjà filtrée par le serveur : relancer les mots-clés en local
-    /// masquerait des résultats trouvés par l'API selon des règles plus larges
-    /// que `localizedStandardContains` sur le nom.
-    private var effectiveSearchText: String {
-        if case .search = viewModel.source { return "" }
-        return searchText
-    }
-
     /// Éléments après filtres (type, orientation, recherche) et tri.
     private var visibleItems: [DriveFile] {
         visibleItemsCache.visibleItems(
             items: viewModel.items,
             filters: filters,
-            searchText: effectiveSearchText,
+            searchText: searchText,
             metadataRevision: metadataRevision,
             mediaMetadata: mediaMetadata
         )
@@ -277,13 +308,7 @@ struct FileGridView: View {
     }
 
     private struct EmptyFilteredPageTaskKey: Hashable {
-        // Compteurs compars au lieu du tableau complet des identifiants :
-        // construire puis hacher `items.map(\.id)` à chaque rendu coûtait
-        // O(n) sur les grands dossiers et participait aux saccades. La liste
-        // n'évoluant que par ajout, compteur + dernier id suffisent ; un
-        // rechargement complet bascule de toute façon `isReloading`.
-        let itemCount: Int
-        let lastItemID: Int?
+        let itemIDs: [Int]
         let filters: FileFilters
         let searchText: String
         let hasMore: Bool
@@ -292,10 +317,9 @@ struct FileGridView: View {
 
     private var emptyFilteredPageTaskKey: EmptyFilteredPageTaskKey {
         EmptyFilteredPageTaskKey(
-            itemCount: viewModel.items.count,
-            lastItemID: viewModel.items.last?.id,
+            itemIDs: viewModel.items.map(\.id),
             filters: filters,
-            searchText: effectiveSearchText,
+            searchText: searchText,
             hasMore: viewModel.hasMore,
             isReloading: viewModel.isReloading
         )
@@ -488,6 +512,14 @@ struct FileGridView: View {
         case .search: return "Aucun résultat"
         }
     }
+}
+
+/// Zones stables utilisées pour révéler la recherche sans publier un nouvel
+/// état SwiftUI à chaque point parcouru pendant le défilement.
+private enum SearchScrollRegion: Equatable {
+    case pulledPastTop
+    case nearTop
+    case content
 }
 
 /// Mémoïse le résultat des filtres/tri de la grille : tant que les données

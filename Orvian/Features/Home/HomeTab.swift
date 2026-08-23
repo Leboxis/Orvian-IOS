@@ -148,10 +148,7 @@ struct DirectoryView: View {
     @State private var busyMessage = ""
     @State private var addError: String?
     @State private var searchText = ""
-    /// Requête possédée actuellement par `searchViewModel` : évite d'afficher
-    /// les résultats d'une recherche précédente pendant le debounce ou le
-    /// chargement d'une requête plus récente.
-    @State private var searchQuery = ""
+    @State private var scrolledPastTop = false
     @State private var filters = FileFilters()
     @State private var selectionMode = false
     @State private var selectedIDs: Set<Int> = []
@@ -161,11 +158,7 @@ struct DirectoryView: View {
     @State private var moveBusy = false
     @State private var deleteBusy = false
     @State private var showDeleteConfirm = false
-    /// Recherche (et tris appliqués à ses résultats) limitée au dossier courant
-    /// et à tous ses sous-dossiers ; désactivée, elle couvre tout le drive.
-    @AppStorage("searchRestrictedToFolder") private var searchRestrictedToFolder = false
-    /// Champ de recherche ouvert via le bouton loupe flottant.
-    @State private var showSearchField = false
+    @AppStorage("alwaysShowSearch") private var alwaysShowSearch = false
     @FocusState private var searchFocused: Bool
 
     private let router: ViewerRouter
@@ -209,36 +202,58 @@ struct DirectoryView: View {
     }
 
     private var activeViewModel: FileGridViewModel {
-        if let searchViewModel, searchQuery == searchText.trimmingCharacters(in: .whitespacesAndNewlines) {
+        if isSearching, let searchViewModel {
             return searchViewModel
         }
         return viewModel
     }
 
     var body: some View {
-        grid
-            .navigationTitle("")
-            .navigationBarTitleDisplayMode(.inline)
-            .safeAreaInset(edge: .top, spacing: 0) {
-                if !selectionMode {
-                    VStack(spacing: 8) {
-                        breadcrumb
-                            .frame(maxWidth: .infinity)
+        FileGridView(
+            viewModel: activeViewModel,
+            onOpenDirectory: onOpenFolder,
+            onOpenFile: { file, siblings in
+                router.open(
+                    file,
+                    siblings: siblings,
+                    filters: filters,
+                    searchText: searchText,
+                    viewModel: activeViewModel
+                )
+            },
+            onVisibleItemsChanged: updateVisibleSelectionItems,
+            searchText: searchText,
+            filters: filters,
+            onScrolledPastTop: showsSearchBar ? { scrolledPastTop = $0 } : nil,
+            allowsPullToRefresh: !showsSearchBar,
+            selectionMode: selectionMode,
+            selectedIDs: selectedIDs,
+            onToggleSelection: { toggleSelection($0) },
+            onMove: { prepareMove(files: [$0]) }
+        )
+        .navigationTitle("")
+        .navigationBarTitleDisplayMode(.inline)
+        .safeAreaInset(edge: .top, spacing: 0) {
+            if !selectionMode {
+                VStack(spacing: 8) {
+                    breadcrumb
+                        .frame(maxWidth: .infinity)
 
-                        if showsSearchBar, showSearchField {
-                            searchField
-                        }
-
-                        if showsSearchBar {
+                    if searchBarPresented {
+                        VStack(spacing: 0) {
+                            searchBar
                             itemCountLabel
                                 .padding(.vertical, 10)
                         }
+                        .transition(.move(edge: .top).combined(with: .opacity))
                     }
-                    .padding(.top, 2)
-                    .padding(.bottom, 4)
                 }
+                .padding(.top, 2)
+                .padding(.bottom, searchBarPresented ? 0 : 4)
+                .animation(.snappy(duration: 0.25), value: searchBarPresented)
             }
-            .toolbar {
+        }
+        .toolbar {
             if selectionMode {
                 ToolbarItem(placement: .topBarLeading) {
                     Button {
@@ -301,10 +316,6 @@ struct DirectoryView: View {
                 }
 
                 ToolbarItemGroup(placement: .topBarTrailing) {
-                    if showsSearchBar {
-                        searchScopeToolbarButton()
-                    }
-
                     randomFileButton
 
                     Button {
@@ -323,17 +334,7 @@ struct DirectoryView: View {
         }
         .overlay(alignment: .bottomTrailing) {
             if !selectionMode {
-                VStack(spacing: 12) {
-                    if showsSearchBar, !showSearchField {
-                        searchToggleButton
-                    }
-                    floatingAddButton
-                }
-            }
-        }
-        .onChange(of: isActive) { _, active in
-            if !active {
-                closeSearchField()
+                floatingAddButton
             }
         }
         .alert("Impossible", isPresented: addErrorBinding) {
@@ -377,11 +378,15 @@ struct DirectoryView: View {
         .onChange(of: searchText) { _, _ in
             if selectionMode { endSelection() }
         }
-        .task(id: SearchTaskKey(query: searchText, restricted: searchRestrictedToFolder)) {
+        .onChange(of: isActive) { _, active in
+            if !active {
+                searchFocused = false
+            }
+        }
+        .task(id: searchText) {
             let trimmed = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !trimmed.isEmpty else {
                 searchViewModel = nil
-                searchQuery = ""
                 return
             }
             // Debounce de 300 ms pour éviter les requêtes superflues pendant la saisie
@@ -391,155 +396,53 @@ struct DirectoryView: View {
                 return
             }
             let searchVM = FileGridViewModel(
-                source: .search(
-                    query: trimmed,
-                    // Restreint au dossier courant et à toute sa descendance ;
-                    // sinon la recherche porte sur tout le drive.
-                    directoryId: searchRestrictedToFolder ? directory.id : nil
-                ),
+                source: .search(query: trimmed, directoryId: directory.id),
                 driveId: driveId
             )
-            searchQuery = trimmed
             searchViewModel = searchVM
             await searchVM.reload()
         }
     }
 
-    /// Clé du task de recherche : le texte ET la portée. Basculer la
-    /// restriction relance donc la requête en cours sans attendre une saisie.
-    private struct SearchTaskKey: Hashable {
-        let query: String
-        let restricted: Bool
+    /// La barre apparaît lors d'un défilé vers le haut ou lorsque la recherche est active.
+    private var searchBarVisible: Bool {
+        alwaysShowSearch || searchFocused || isSearching || scrolledPastTop
     }
 
-    /// Grille de fichiers. La recherche est ouverte par le bouton loupe
-    /// flottant : aucun mécanisme lié au défilement, aucune barre permanente.
-    private var grid: some View {
-        FileGridView(
-            viewModel: activeViewModel,
-            onOpenDirectory: { folder in
-                // La vue reste montée dans le NavigationStack : sans ce
-                // retrait explicite, le clavier suit jusqu'à l'écran poussé.
-                searchFocused = false
-                onOpenFolder(folder)
-            },
-            onOpenFile: { file, siblings in
-                searchFocused = false
-                router.open(
-                    file,
-                    siblings: siblings,
-                    filters: filters,
-                    searchText: searchText,
-                    viewModel: activeViewModel
-                )
-            },
-            onVisibleItemsChanged: updateVisibleSelectionItems,
-            searchText: searchText,
-            filters: filters,
-            allowsPullToRefresh: !showsSearchBar,
-            selectionMode: selectionMode,
-            selectedIDs: selectedIDs,
-            onToggleSelection: { toggleSelection($0) },
-            onMove: { prepareMove(files: [$0]) }
-        )
+    /// Applique les effets de disposition uniquement aux écrans qui possèdent
+    /// réellement une barre de recherche.
+    private var searchBarPresented: Bool {
+        showsSearchBar && searchBarVisible
     }
 
-    /// Bascule la portée : dossier courant + sous-dossiers infinis, ou tout
-    /// le drive. Les tris suivent automatiquement puisque appliqués aux
-    /// résultats renvoyés par la recherche.
-    private func searchScopeToolbarButton() -> some View {
-        Button {
-            searchRestrictedToFolder.toggle()
-        } label: {
-            Image(systemName: searchRestrictedToFolder ? "smallcircle.fill.circle.fill" : "smallcircle.filled.circle")
-                .foregroundStyle(searchRestrictedToFolder ? Color.accentColor : .secondary)
-        }
-        .accessibilityLabel(searchRestrictedToFolder
-            ? "Recherche limitée au dossier et ses sous-dossiers"
-            : "Recherche sur tout le drive")
-        .accessibilityHint("Limite la recherche et les tris au dossier actuel et à tous ses sous-dossiers.")
-        .accessibilityAddTraits(searchRestrictedToFolder ? [.isSelected] : [])
-    }
-
-    /// Bouton loupe flottant, au-dessus du bouton d'import : ouvre le champ
-    /// de recherche et place directement le focus dans celui-ci.
-    private var searchToggleButton: some View {
-        Button {
-            withAnimation(.snappy(duration: 0.2)) {
-                showSearchField = true
-            }
-            searchFocused = true
-        } label: {
+    /// Pastille de recherche centrée et compacte.
+    private var searchBar: some View {
+        HStack(spacing: 6) {
             Image(systemName: "magnifyingglass")
-                .font(.system(size: 20, weight: .medium))
-                .foregroundStyle(Color.accentColor)
-                .frame(width: 44, height: 44)
-                .background(.ultraThinMaterial, in: Circle())
-                .overlay {
-                    Circle().strokeBorder(.quaternary, lineWidth: 0.5)
-                }
-                .shadow(color: .black.opacity(0.12), radius: 8, x: 0, y: 3)
-        }
-        .accessibilityLabel("Rechercher")
-    }
-
-    /// Champ de recherche ouvert par le bouton loupe ; la croix referme le
-    /// champ et efface la requête en cours.
-    private var searchField: some View {
-        HStack(spacing: 8) {
-            HStack(spacing: 6) {
-                Image(systemName: "magnifyingglass")
-                    .font(.system(size: 13, weight: .medium))
-                    .foregroundStyle(.secondary)
-                TextField(
-                    searchRestrictedToFolder ? "Rechercher dans ce dossier…" : "Rechercher dans tout le drive…",
-                    text: $searchText
-                )
+                .font(.system(size: 13, weight: .medium))
+                .foregroundStyle(.secondary)
+            TextField("Rechercher dans ce dossier…", text: $searchText)
                 .focused($searchFocused)
                 .autocorrectionDisabled()
                 .submitLabel(.search)
-
-                if !searchText.isEmpty {
-                    Button {
-                        searchText = ""
-                        searchFocused = true
-                    } label: {
-                        Image(systemName: "xmark.circle.fill")
-                            .foregroundStyle(.secondary)
-                    }
-                    .accessibilityLabel("Effacer la recherche")
+            if !searchText.isEmpty {
+                Button {
+                    searchText = ""
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .foregroundStyle(.secondary)
                 }
+                .accessibilityLabel("Effacer la recherche")
             }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 7)
-            .background(.bar, in: Capsule())
-            .overlay {
-                Capsule().strokeBorder(.quaternary, lineWidth: 0.5)
-            }
-            .shadow(color: .black.opacity(0.08), radius: 6, x: 0, y: 2)
-
-            Button {
-                closeSearchField()
-            } label: {
-                Text("Annuler")
-                    .font(.footnote.weight(.medium))
-                    .foregroundStyle(Color.accentColor)
-            }
-            .accessibilityLabel("Fermer la recherche")
         }
-        .padding(.horizontal, 4)
-        .transition(.move(edge: .top).combined(with: .opacity))
-        .onAppear { searchFocused = true }
-    }
-
-    /// Referme le champ : retire le clavier, vide la requête et redonne sa
-    /// place au bouton loupe.
-    private func closeSearchField() {
-        searchFocused = false
-        searchText = ""
-        withAnimation(.snappy(duration: 0.2)) {
-            showSearchField = false
+        .padding(.horizontal, 14)
+        .padding(.vertical, 7)
+        .background(.bar, in: Capsule())
+        .overlay {
+            Capsule().strokeBorder(.quaternary, lineWidth: 0.5)
         }
+        .shadow(color: .black.opacity(0.08), radius: 6, x: 0, y: 2)
+        .frame(maxWidth: 260)
     }
 
     /// Bouton dé : ouvre au hasard un fichier parmi les éléments du dossier actuel.
@@ -563,7 +466,6 @@ struct DirectoryView: View {
 
     private func openRandomFile() {
         guard let random = playableFiles.randomElement() else { return }
-        searchFocused = false
         router.open(
             random,
             siblings: playableFiles,
@@ -610,7 +512,7 @@ struct DirectoryView: View {
     }
 
     private func startSelection() {
-        if showSearchField { closeSearchField() }
+        searchFocused = false
         selectionMode = true
     }
 
@@ -791,12 +693,9 @@ struct DirectoryView: View {
     }
 
     /// Le nombre d'éléments est volontairement séparé du fil d'Ariane et
-    /// placé entre la recherche et le début de la grille. Il reflète la liste
-    /// réellement affichée (après filtres/tri), pas les données brutes.
+    /// placé entre la recherche et le début de la grille.
     private var itemCountLabel: some View {
-        let count = visibleSelectionItems.isEmpty
-            ? activeViewModel.items.count
-            : visibleSelectionItems.count
+        let count = activeViewModel.items.count
         return Text("\(count) élément\(count > 1 ? "s" : "")")
             .font(.caption.weight(.medium))
             .foregroundStyle(.secondary)
