@@ -237,7 +237,9 @@ struct DragCellTransform: ViewModifier {
 
         // Les suiveurs convergent eux aussi vers le dossier, avec un léger
         // décalage pour garder l'effet de pile pendant la chute.
-        guard let index = session.draggedIDs.firstIndex(of: id) else { return nil }
+        guard let index = session.draggedIDs.firstIndex(of: id),
+              let geometry
+        else { return nil }
         let followerCount = max(session.draggedIDs.count - 1, 1)
         let slot = index - 1
         let angle = Double(slot) / Double(followerCount) * .pi * 1.5 - .pi * 0.75
