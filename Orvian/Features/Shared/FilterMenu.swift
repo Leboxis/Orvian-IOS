@@ -42,6 +42,8 @@ private struct FilterPanel: View {
                 action: toggle
             )
 
+            videoQualitySection
+
             iconSection(
                 title: "Afficher",
                 values: FileFilters.MediaFilter.allCases,
@@ -120,6 +122,40 @@ private struct FilterPanel: View {
         .background(Color(uiColor: .secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
     }
 
+    private var videoQualitySection: some View {
+        VStack(alignment: .leading, spacing: 7) {
+            Text("Qualité vidéo")
+                .font(.footnote.weight(.medium))
+                .foregroundStyle(.secondary)
+
+            Button {
+                filters.highResolutionVideosOnly.toggle()
+                if filters.highResolutionVideosOnly {
+                    filters.media = .videos
+                }
+            } label: {
+                Text("4K+")
+                    .font(.subheadline.weight(.semibold))
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 36)
+                    .foregroundStyle(filters.highResolutionVideosOnly ? .white : .primary)
+                    .background(
+                        filters.highResolutionVideosOnly ? Color.accentColor : Color(uiColor: .secondarySystemGroupedBackground),
+                        in: RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    )
+                    .overlay {
+                        if !filters.highResolutionVideosOnly {
+                            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                .strokeBorder(.quaternary, lineWidth: 0.5)
+                        }
+                    }
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Vidéos 4K et plus")
+            .accessibilityAddTraits(filters.highResolutionVideosOnly ? .isSelected : [])
+        }
+    }
+
     private func iconSection<Value: Identifiable>(
         title: String,
         values: [Value],
@@ -188,6 +224,7 @@ private struct FilterPanel: View {
         filters.media = media
         if media == .images || media == .other {
             filters.orientation = nil
+            filters.highResolutionVideosOnly = false
         }
     }
 

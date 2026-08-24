@@ -104,6 +104,8 @@ struct FileFilters: Equatable, Hashable {
     var sort: SortMode = .original
     var direction: Direction = .descending
     var orientation: Orientation? = nil
+    /// Limite l'affichage aux vidéos dont le plus grand côté atteint 3 840 px.
+    var highResolutionVideosOnly = false
     var media: MediaFilter = .all
 
     /// Tris exprimables par l'API kDrive (`order_by[]`) : les appliquer côté
@@ -127,12 +129,12 @@ struct FileFilters: Equatable, Hashable {
 
     /// Vrai dès qu'un tri ou un filtre diffère du comportement par défaut.
     var isActive: Bool {
-        sort != .original || orientation != nil || media != .all
+        sort != .original || orientation != nil || highResolutionVideosOnly || media != .all
     }
 
-    /// Applique les filtres (média, orientation vidéo, recherche) et le tri
-    /// local (durée) sur une liste brute. Partagé entre la grille et la
-    /// visionneuse pour garantir exactement le même ordre des éléments.
+    /// Applique les filtres (média, orientation et définition vidéo, recherche)
+    /// et le tri local (durée) sur une liste brute. Partagé entre la grille et
+    /// la visionneuse pour garantir exactement le même ordre des éléments.
     ///
     /// Les tris pris en charge par l'API sont également appliqués localement.
     /// Cela garde le tri opérationnel sur les sources qui ne prennent pas
@@ -152,6 +154,13 @@ struct FileFilters: Equatable, Hashable {
             result = result.filter { file in
                 guard file.isVideo, let info = mediaMetadata.info(for: file.id) else { return false }
                 return info.orientation == orientation
+            }
+        }
+
+        if highResolutionVideosOnly {
+            result = result.filter { file in
+                guard file.isVideo, let info = mediaMetadata.info(for: file.id) else { return false }
+                return info.is4KOrAbove
             }
         }
 

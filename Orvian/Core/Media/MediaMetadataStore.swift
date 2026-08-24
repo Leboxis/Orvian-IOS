@@ -2,7 +2,7 @@ import AVFoundation
 import Combine
 import Foundation
 
-/// Résout à la volée (et met en cache) la durée et l'orientation des vidéos.
+/// Résout à la volée (et met en cache) la durée, l'orientation et la définition des vidéos.
 ///
 /// L'API kDrive ne renvoyant pas ces informations dans la liste des fichiers,
 /// on les lit dans le fichier lui-même via les URL temporaires déjà en cache.
@@ -13,6 +13,10 @@ final class MediaMetadataStore: ObservableObject {
     struct Info {
         let duration: Double
         let orientation: FileFilters.Orientation
+        let maximumDimension: CGFloat
+
+        /// UHD (3 840 × 2 160), DCI 4K et les vidéos portrait équivalentes.
+        var is4KOrAbove: Bool { maximumDimension >= 3_840 }
     }
 
     /// Incrémenté à chaque résolution : les vues observent cette propriété
@@ -71,21 +75,32 @@ final class MediaMetadataStore: ObservableObject {
         // double sondage réseau pour la même vidéo.
         guard let asset = await VideoAssetCache.shared.asset(driveId: driveId, fileId: fileId) else { return }
         guard let duration = try? await asset.load(.duration) else { return }
-        let orientation = await orientation(of: asset)
-        cache[fileId] = Info(duration: duration.seconds, orientation: orientation)
+        let properties = await videoProperties(of: asset)
+        cache[fileId] = Info(
+            duration: duration.seconds,
+            orientation: properties.orientation,
+            maximumDimension: properties.maximumDimension
+        )
     }
 
-    private func orientation(of asset: AVURLAsset) async -> FileFilters.Orientation {
+    private func videoProperties(
+        of asset: AVURLAsset
+    ) async -> (orientation: FileFilters.Orientation, maximumDimension: CGFloat) {
         guard let track = try? await asset.loadTracks(withMediaType: .video).first,
               let size = try? await track.load(.naturalSize),
               let transform = try? await track.load(.preferredTransform) else {
-            return .landscape
+            return (.landscape, 0)
         }
         let transformed = size.applying(transform)
         let width = abs(transformed.width)
         let height = abs(transformed.height)
         let ratio = max(width, height) / max(min(width, height), 1)
-        if ratio < 1.15 { return .square }
-        return width > height ? .landscape : .portrait
+        let orientation: FileFilters.Orientation
+        if ratio < 1.15 {
+            orientation = .square
+        } else {
+            orientation = width > height ? .landscape : .portrait
+        }
+        return (orientation, max(width, height))
     }
 }
