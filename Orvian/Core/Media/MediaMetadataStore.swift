@@ -128,8 +128,8 @@ final class MediaMetadataStore: ObservableObject {
         let options = [kCGImageSourceShouldCache: false] as CFDictionary
         guard let source = CGImageSourceCreateWithURL(url as CFURL, options),
               let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, options) as? [CFString: Any],
-              let widthValue = properties[kCGImageSourcePixelWidth],
-              let heightValue = properties[kCGImageSourcePixelHeight] else {
+              let widthValue = properties[kCGImagePropertyPixelWidth],
+              let heightValue = properties[kCGImagePropertyPixelHeight] else {
             return nil
         }
         // Les valeurs peuvent arriver en CFNumber non convertibles directement
