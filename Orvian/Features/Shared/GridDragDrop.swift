@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 /// Espace de coordonnées partagé entre les cartes de la grille et la session
 /// de glisser-déposer : toutes les positions (doigt, cadres) y sont exprimées.
@@ -257,6 +258,69 @@ struct DragCellTransform: ViewModifier {
             opacity: 0,
             zIndex: 90 - Double(index)
         )
+    }
+}
+
+// MARK: - Verrou du défilement pendant le transport
+
+/// Verrouille directement `isScrollEnabled` du `UIScrollView` englobant.
+///
+/// Passer par `.scrollDisabled()` ne marche pas ici : basculer le modificateur
+/// en plein geste invalide la configuration de gestes du ScrollView, ce qui
+/// annule le recognizeur actif (et peut laisser la session de glisser sans
+/// événement final — scroll mort). Toucher la propriété UIKit ne dérange pas
+/// le geste SwiftUI simultané déjà en cours.
+@MainActor
+final class ScrollLocker {
+    private weak var scrollView: UIScrollView?
+
+    /// Résout le scrollView ancêtre une fois, depuis un repose dans le contenu.
+    func resolve(from view: UIView) {
+        guard scrollView == nil else { return }
+        var current: UIView? = view
+        while let node = current {
+            if let scrollView = node as? UIScrollView {
+                self.scrollView = scrollView
+                return
+            }
+            current = node.superview
+        }
+    }
+
+    func setLocked(_ locked: Bool) {
+        guard let scrollView else { return }
+        if locked {
+            // Un rafraîchissement amorcé au doigt doit s'arrêter avec le scroll.
+            scrollView.refreshControl?.endRefreshing()
+        }
+        scrollView.isScrollEnabled = !locked
+    }
+}
+
+/// Repose invisible placé dans le contenu du ScrollView : sert uniquement de
+/// point d'entrée pour retrouver l'ancêtre `UIScrollView`.
+struct ScrollLockerMarker: View {
+    let locker: ScrollLocker
+
+    var body: some View {
+        Color.clear
+            .frame(width: 0, height: 0)
+            .background(Resolver(locker: locker))
+    }
+
+    private struct Resolver: UIViewRepresentable {
+        let locker: ScrollLocker
+
+        func makeUIView(context: Context) -> UIView {
+            let view = UIView()
+            DispatchQueue.main.async { [weak view] in
+                guard let view else { return }
+                locker.resolve(from: view)
+            }
+            return view
+        }
+
+        func updateUIView(_ uiView: UIView, context: Context) {}
     }
 }
 

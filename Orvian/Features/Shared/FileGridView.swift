@@ -75,6 +75,8 @@ struct FileGridView: View {
     /// Cadres des cartes visibles dans l'espace de la grille, pour le suivi
     /// du doigt et la détection du dossier survolé.
     @State private var cellFrames: [Int: CellGeometry] = [:]
+    /// Verrou du défilement pendant qu'un élément est transporté.
+    @State private var scrollLocker = ScrollLocker()
 
     private var needsVideoMetadata: Bool {
         filters.sort == .duration || filters.orientation != nil || filters.highResolutionVideosOnly
@@ -170,6 +172,25 @@ struct FileGridView: View {
                 guard dragSession.phase == .dropping else { return }
                 withAnimation(.easeOut(duration: 0.25)) { dragSession.reset() }
             }
+            // Le scroll est réactivé dès que la session se referme, quelle
+            // que soit la raison (dépôt, annulation, erreur, minuteur).
+            .onChange(of: dragSession.isActive) { _, active in
+                if !active { scrollLocker.setLocked(false) }
+            }
+            // Un geste interrompu par le système (appel, centre de contrôle…)
+            // ne déclenche pas toujours `.onEnded` : sans ce minuteur, la
+            // session resterait active et le scroll verrouillé pour toujours.
+            .task(id: dragSession.anchorID) {
+                guard dragSession.anchorID != nil else { return }
+                try? await Task.sleep(for: .seconds(45))
+                guard dragSession.phase == .lifting, dragSession.isActive else { return }
+                withAnimation(.spring(response: 0.42, dampingFraction: 0.7)) {
+                    dragSession.reset()
+                }
+            }
+            .onDisappear {
+                scrollLocker.setLocked(false)
+            }
     }
 
     /// Relance la résolution des métadonnées vidéo uniquement quand il y a de
@@ -204,6 +225,8 @@ struct FileGridView: View {
                     .frame(height: 0)
                     .id("file-grid-top")
 
+                ScrollLockerMarker(locker: scrollLocker)
+
                 LazyVStack(alignment: .leading, spacing: 18, pinnedViews: []) {
                     content
                 }
@@ -218,9 +241,6 @@ struct FileGridView: View {
             // Référentiel commun des cadres de cartes et du doigt.
             .coordinateSpace(name: GridDragSpaceName)
             .onPreferenceChange(CellFramesKey.self) { cellFrames = $0 }
-            // Le défilement est suspendu pendant qu'un élément est soulevé :
-            // les cadres restent stables pour le survol des dossiers.
-            .scrollDisabled(dragSession.isActive)
             .sensoryFeedback(.impact(weight: .medium), trigger: dragSession.anchorID)
             .sensoryFeedback(.selection, trigger: dragSession.hoveredFolderID)
             .sensoryFeedback(.success, trigger: dragSession.dropStartedAt)
@@ -484,7 +504,7 @@ struct FileGridView: View {
     /// continue d'ouvrir le menu contextuel — le mouvement l'annule côté
     /// système, le glisser prend le relais.
     private func dragDropGesture(for file: DriveFile) -> some Gesture {
-        LongPressGesture(minimumDuration: 0.35)
+        LongPressGesture(minimumDuration: 0.45)
             .sequenced(before: DragGesture(minimumDistance: 10, coordinateSpace: .named(GridDragSpaceName)))
             .onChanged { value in
                 guard dragDropEnabled,
@@ -514,6 +534,10 @@ struct FileGridView: View {
         }
         if !ids.contains(anchor.id) { ids.append(anchor.id) }
         guard !ids.isEmpty else { return }
+
+        // Le défilement est coupé au niveau UIKit : les cadres restent stables
+        // pour le survol des dossiers, sans invalider les gestes SwiftUI.
+        scrollLocker.setLocked(true)
 
         withAnimation(.spring(response: 0.38, dampingFraction: 0.78)) {
             dragSession.begin(ids: ids, anchorID: anchor.id, at: point)
