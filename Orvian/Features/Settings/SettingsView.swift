@@ -18,6 +18,7 @@ struct SettingsView: View {
     @AppStorage("thumbnailCacheLimitMB") private var thumbnailCacheLimitMB = 250
     @AppStorage("hapticFeedbackEnabled") private var hapticFeedbackEnabled = true
     @AppStorage("reduceMotion") private var reduceMotion = false
+    @AppStorage("defaultFolderColor") private var defaultFolderColor = "#4285F5"
 
     var body: some View {
         NavigationStack(path: $path) {
@@ -59,6 +60,13 @@ struct SettingsView: View {
                             icon: "magnifyingglass",
                             tint: .teal,
                             isOn: $alwaysShowSearch
+                        )
+                        settingsDivider
+                        settingsColorPicker(
+                            "Couleur par défaut des dossiers",
+                            detail: "S’applique aux dossiers sans couleur personnalisée.",
+                            icon: "folder.fill",
+                            color: defaultFolderColorBinding
                         )
                     }
 
@@ -320,6 +328,35 @@ struct SettingsView: View {
                 .pickerStyle(.menu)
         }
         .padding(.vertical, 2)
+    }
+
+    private func settingsColorPicker(
+        _ title: String,
+        detail: String,
+        icon: String,
+        color: Binding<Color>
+    ) -> some View {
+        HStack(spacing: 12) {
+            settingIcon(icon, tint: color.wrappedValue)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .font(.body.weight(.medium))
+                Text(detail)
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
+            Spacer(minLength: 8)
+            ColorPicker(title, selection: color, supportsOpacity: false)
+                .labelsHidden()
+        }
+        .padding(.vertical, 2)
+    }
+
+    private var defaultFolderColorBinding: Binding<Color> {
+        Binding(
+            get: { Color(hex: defaultFolderColor) ?? FileKind.folder.tint },
+            set: { defaultFolderColor = $0.toHex() ?? "#4285F5" }
+        )
     }
 
     private func settingIcon(_ name: String, tint: Color, size: CGFloat = 34) -> some View {

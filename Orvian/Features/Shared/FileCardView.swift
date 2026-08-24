@@ -35,6 +35,7 @@ struct FileCardView: View {
 
     /// Préférence globale : conserve le type comme repère lorsque le poids est masqué.
     @AppStorage("showFileSizes") private var showFileSizes = true
+    @AppStorage("defaultFolderColor") private var defaultFolderColor = "#4285F5"
     @State private var thumbnail: UIImage?
     @State private var thumbnailLoaded = false
     @State private var showDetail = false
@@ -49,7 +50,9 @@ struct FileCardView: View {
     /// Teinte de la carte : couleur du dossier fournie par l'API si présente,
     /// sinon la teinte par type.
     private var tint: Color {
-        file.color.flatMap { Color(hex: $0) } ?? kind.tint
+        file.color.flatMap { Color(hex: $0) } ?? (file.isDirectory
+            ? Color(hex: defaultFolderColor) ?? kind.tint
+            : kind.tint)
     }
 
     var body: some View {
@@ -369,6 +372,7 @@ struct FileDetailSheet: View {
     let onMove: (() -> Void)?
 
     @Environment(\.dismiss) private var dismiss
+    @AppStorage("defaultFolderColor") private var defaultFolderColor = "#4285F5"
     /// Tags réellement appliqués au fichier (source : fiche individuelle).
     @State private var appliedCategories: [Category] = []
     @State private var isFavorite: Bool
@@ -593,16 +597,22 @@ struct FileDetailSheet: View {
         let shape = RoundedRectangle(cornerRadius: 12, style: .continuous)
         if file.isDirectory {
             ZStack {
-                Rectangle().fill((file.color.flatMap { Color(hex: $0) } ?? file.fileKind.tint).opacity(0.12))
+                Rectangle().fill(folderTint.opacity(0.12))
                 Image(systemName: "folder.fill")
                     .font(.system(size: 36, weight: .light))
-                    .foregroundStyle(file.color.flatMap { Color(hex: $0) } ?? file.fileKind.tint)
+                    .foregroundStyle(folderTint)
             }
             .clipShape(shape)
             .overlay { shape.strokeBorder(.black.opacity(0.05), lineWidth: 0.5) }
         } else {
             AsyncThumbnail(driveId: driveId, fileId: file.id, isTrashed: isTrashed, shape: shape)
         }
+    }
+
+    private var folderTint: Color {
+        file.color.flatMap { Color(hex: $0) }
+            ?? Color(hex: defaultFolderColor)
+            ?? file.fileKind.tint
     }
 
     private func labeledRow(_ label: String, _ value: String) -> some View {

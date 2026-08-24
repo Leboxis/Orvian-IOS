@@ -57,6 +57,7 @@ private struct DestinationFolderLevel: View {
     let onSelect: (DriveFile) -> Void
 
     @State private var viewModel: FileGridViewModel
+    @AppStorage("defaultFolderColor") private var defaultFolderColor = "#4285F5"
 
     init(
         directory: DriveFile,
@@ -136,7 +137,7 @@ private struct DestinationFolderLevel: View {
                         } label: {
                             HStack {
                                 Image(systemName: "folder.fill")
-                                    .foregroundStyle(folder.color.flatMap { Color(hex: $0) } ?? .accentColor)
+                                    .foregroundStyle(folder.color.flatMap { Color(hex: $0) } ?? Color(hex: defaultFolderColor) ?? .accentColor)
                                 Text(folder.name)
                                     .foregroundStyle(.primary)
                                 Spacer()
