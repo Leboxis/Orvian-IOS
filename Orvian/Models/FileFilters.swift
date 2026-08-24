@@ -103,7 +103,8 @@ struct FileFilters: Equatable, Hashable {
 
     /// Palier de résolution minimal des médias affichés (images et vidéos).
     /// Le seuil s'applique au grand côté : gère indifféremment le portrait
-    /// et le paysage (une vidéo 2160×3840 compte comme 4K).
+    /// et le paysage (une vidéo 2160×3840 compte comme 4K), et inclut
+    /// toutes les résolutions supérieures (5K, 6K, 8K…).
     enum ResolutionTier: String, CaseIterable, Identifiable {
         case hd, fourK
 
@@ -112,7 +113,7 @@ struct FileFilters: Equatable, Hashable {
         var title: String {
             switch self {
             case .hd: return "HD"
-            case .fourK: return "4K"
+            case .fourK: return "4K+"
             }
         }
 

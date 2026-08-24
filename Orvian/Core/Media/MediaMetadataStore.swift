@@ -21,7 +21,7 @@ final class MediaMetadataStore: ObservableObject {
         let pixelHeight: Int
 
         /// Vrai si le grand côté atteint le seuil du palier demandé
-        /// (HD ≥ 1280 px, 4K ≥ 3840 px), portrait et paysage confondus.
+        /// (HD ≥ 1280 px, 4K+ ≥ 3840 px), portrait et paysage confondus.
         func meets(_ tier: FileFilters.ResolutionTier) -> Bool {
             max(pixelWidth, pixelHeight) >= tier.minimumLongEdge
         }
