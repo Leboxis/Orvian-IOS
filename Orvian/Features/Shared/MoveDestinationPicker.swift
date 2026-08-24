@@ -8,6 +8,7 @@ struct MoveDestinationPicker: View {
     let itemCount: Int
     let excludedDirectoryIDs: Set<Int>
     let unavailableDestinationIDs: Set<Int>
+    let parentDirectory: DriveFile?
     let onSelect: (DriveFile) -> Void
 
     @Environment(\.dismiss) private var dismiss
@@ -31,6 +32,7 @@ struct MoveDestinationPicker: View {
             itemCount: itemCount,
             excludedDirectoryIDs: excludedDirectoryIDs,
             isCurrentDestinationUnavailable: unavailableDestinationIDs.contains(directory.id),
+            parentDirectory: directory.id == root.id ? parentDirectory : nil,
             onOpen: { path.append($0) },
             onSelect: onSelect
         )
@@ -50,6 +52,7 @@ private struct DestinationFolderLevel: View {
     let itemCount: Int
     let excludedDirectoryIDs: Set<Int>
     let isCurrentDestinationUnavailable: Bool
+    let parentDirectory: DriveFile?
     let onOpen: (DriveFile) -> Void
     let onSelect: (DriveFile) -> Void
 
@@ -61,6 +64,7 @@ private struct DestinationFolderLevel: View {
         itemCount: Int,
         excludedDirectoryIDs: Set<Int>,
         isCurrentDestinationUnavailable: Bool,
+        parentDirectory: DriveFile?,
         onOpen: @escaping (DriveFile) -> Void,
         onSelect: @escaping (DriveFile) -> Void
     ) {
@@ -69,6 +73,7 @@ private struct DestinationFolderLevel: View {
         self.itemCount = itemCount
         self.excludedDirectoryIDs = excludedDirectoryIDs
         self.isCurrentDestinationUnavailable = isCurrentDestinationUnavailable
+        self.parentDirectory = parentDirectory
         self.onOpen = onOpen
         self.onSelect = onSelect
         _viewModel = State(initialValue: FileGridViewModel(source: .directory(directory.id), driveId: driveId))
@@ -94,6 +99,16 @@ private struct DestinationFolderLevel: View {
                     .fontWeight(.semibold)
                 }
                 .disabled(isCurrentDestinationUnavailable)
+            }
+
+            if let parentDirectory {
+                Section {
+                    Button {
+                        onOpen(parentDirectory)
+                    } label: {
+                        Label("Accéder au dossier parent", systemImage: "arrow.up.folder")
+                    }
+                }
             }
 
             Section("Sous-dossiers") {

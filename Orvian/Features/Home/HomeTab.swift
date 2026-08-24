@@ -348,6 +348,7 @@ struct DirectoryView: View {
                 itemCount: request.files.count,
                 excludedDirectoryIDs: Set(request.files.filter(\.isDirectory).map(\.id)),
                 unavailableDestinationIDs: unavailableDestinationIDs(for: request.files),
+                parentDirectory: directory.parentId == nil ? nil : directory,
                 onSelect: { destination in
                     pendingMove = nil
                     Task { await move(request.files, to: destination) }

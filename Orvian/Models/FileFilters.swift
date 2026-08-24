@@ -14,7 +14,7 @@ struct FileFilters: Equatable, Hashable {
             case .modifiedDate: return "Date de modification"
             case .addedDate: return "Date d'importation"
             case .type: return "Type"
-            case .size: return "Poids"
+            case .size: return "Taille"
             case .duration: return "Durée"
             }
         }
