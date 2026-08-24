@@ -4,7 +4,7 @@ import Foundation
 struct FileFilters: Equatable, Hashable {
     /// Ordre de tri.
     enum SortMode: String, CaseIterable, Identifiable {
-        case original, modifiedDate, addedDate, type, size, duration
+        case original, modifiedDate, addedDate, type, size, duration, resolution
 
         var id: String { rawValue }
 
@@ -16,6 +16,7 @@ struct FileFilters: Equatable, Hashable {
             case .type: return "Type"
             case .size: return "Poids"
             case .duration: return "Durée"
+            case .resolution: return "Résolution"
             }
         }
 
@@ -27,6 +28,7 @@ struct FileFilters: Equatable, Hashable {
             case .type: return "doc.text"
             case .size: return "externaldrive"
             case .duration: return "clock"
+            case .resolution: return "4k.tv"
             }
         }
     }
@@ -109,11 +111,11 @@ struct FileFilters: Equatable, Hashable {
     /// Tris exprimables par l'API kDrive (`order_by[]`) : les appliquer côté
     /// serveur garantit que la pagination entière respecte le tri, pas
     /// seulement les éléments déjà chargés. `nil` pour les tris restant
-    /// locaux (durée : calculée à partir des métadonnées vidéo) ou l'ordre
-    /// serveur d'origine.
+    /// locaux (durée et résolution : calculées à partir des métadonnées des
+    /// médias) ou l'ordre serveur d'origine.
     var serverOrderBy: [String]? {
         switch sort {
-        case .original, .duration: return nil
+        case .original, .duration, .resolution: return nil
         case .modifiedDate: return ["last_modified_at"]
         case .addedDate: return ["added_at"]
         case .type: return ["type"]
@@ -131,8 +133,8 @@ struct FileFilters: Equatable, Hashable {
     }
 
     /// Applique les filtres (média, orientation vidéo, recherche) et le tri
-    /// local (durée) sur une liste brute. Partagé entre la grille et la
-    /// visionneuse pour garantir exactement le même ordre des éléments.
+    /// local (durée, résolution) sur une liste brute. Partagé entre la grille
+    /// et la visionneuse pour garantir exactement le même ordre des éléments.
     ///
     /// Les tris pris en charge par l'API sont également appliqués localement.
     /// Cela garde le tri opérationnel sur les sources qui ne prennent pas
@@ -191,6 +193,10 @@ struct FileFilters: Equatable, Hashable {
                 let lhsDuration = mediaMetadata.info(for: lhs.id)?.duration ?? -1
                 let rhsDuration = mediaMetadata.info(for: rhs.id)?.duration ?? -1
                 return ordered(lhsDuration, rhsDuration, lhs: lhs, rhs: rhs)
+            case .resolution:
+                let lhsPixels = mediaMetadata.info(for: lhs.id)?.pixelCount ?? -1
+                let rhsPixels = mediaMetadata.info(for: rhs.id)?.pixelCount ?? -1
+                return ordered(lhsPixels, rhsPixels, lhs: lhs, rhs: rhs)
             }
         }
     }

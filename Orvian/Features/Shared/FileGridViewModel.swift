@@ -48,8 +48,8 @@ final class FileGridViewModel {
     func reload(sortedBy: FileFilters? = nil) async {
         if let sortedBy {
             // Un tri serveur (dates, type, poids) remplace l'ordre par défaut
-            // ; les tris restants (durée, médias, orientation) sont locaux et
-            // n'exigent aucune relecture ordonnée.
+            // ; les tris restants (durée, résolution, médias, orientation)
+            // sont locaux et n'exigent aucune relecture ordonnée.
             orderBy = sortedBy.serverOrderBy ?? []
             order = sortedBy.serverOrder
         }

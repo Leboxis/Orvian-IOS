@@ -60,11 +60,11 @@ struct FileGridView: View {
     @State private var searchScrollRegion: SearchScrollRegion = .nearTop
     /// Cache du calcul `visibleItems` : les filtres/tri/regroupement ne sont
     /// recalculés que si les données, les filtres, la recherche ou les
-    /// métadonnées vidéo changent — pas à chaque rendu du body.
+    /// métadonnées des médias changent — pas à chaque rendu du body.
     @State private var visibleItemsCache = VisibleItemsCache()
 
-    private var needsVideoMetadata: Bool {
-        filters.sort == .duration || filters.orientation != nil
+    private var needsMediaMetadata: Bool {
+        filters.sort == .duration || filters.sort == .resolution || filters.orientation != nil
     }
 
     var body: some View {
@@ -116,11 +116,11 @@ struct FileGridView: View {
                 await loadUntilFilteredResultIfNeeded()
             }
             .task(id: filterTaskKey) {
-                guard needsVideoMetadata else { return }
+                guard needsMediaMetadata else { return }
                 await mediaMetadata.resolveAll(driveId: viewModel.driveId, items: viewModel.items)
             }
             .onReceive(mediaMetadata.$revision) { newRev in
-                if needsVideoMetadata {
+                if needsMediaMetadata {
                     metadataRevision = newRev
                 }
             }
@@ -132,13 +132,14 @@ struct FileGridView: View {
             }
     }
 
-    /// Relance la résolution des métadonnées vidéo uniquement quand il y a de
-    /// nouvelles vidéos à résoudre : la clé repose sur l'ensemble des
-    /// identifiants encore non résolus, pas sur le compteur d'éléments (qui
-    /// change à chaque page chargée et relançait inutilement le travail).
+    /// Relance la résolution des métadonnées des médias (durée, dimensions)
+    /// uniquement quand il y a de nouveaux médias à résoudre : la clé repose
+    /// sur l'ensemble des identifiants encore non résolus, pas sur le
+    /// compteur d'éléments (qui change à chaque page chargée et relançait
+    /// inutilement le travail).
     private var filterTaskKey: String {
-        guard needsVideoMetadata else { return "none" }
-        let pending = mediaMetadata.unresolvedVideoIDs(in: viewModel.items)
+        guard needsMediaMetadata else { return "none" }
+        let pending = mediaMetadata.unresolvedMediaIDs(in: viewModel.items)
         if pending.isEmpty {
             return "resolved-\(viewModel.driveId)"
         }
