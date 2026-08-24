@@ -229,12 +229,7 @@ struct DirectoryView: View {
             selectionMode: selectionMode,
             selectedIDs: selectedIDs,
             onToggleSelection: { toggleSelection($0) },
-            onMove: { prepareMove(files: [$0]) },
-            dragDropEnabled: true,
-            onDropMove: { ids, target in
-                let files = activeViewModel.items.filter { ids.contains($0.id) }
-                Task { await move(files, to: target) }
-            }
+            onMove: { prepareMove(files: [$0]) }
         )
         .navigationTitle("")
         .navigationBarTitleDisplayMode(.inline)

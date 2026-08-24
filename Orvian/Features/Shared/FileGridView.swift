@@ -45,14 +45,6 @@ struct FileGridView: View {
     /// Demande de déplacement individuel depuis une carte.
     var onMove: ((DriveFile) -> Void)?
 
-    /// Active le glisser-déposer par appui long vers les dossiers
-    /// (grilles naviguant dans l'arborescence uniquement).
-    var dragDropEnabled = false
-
-    /// Dépôt réussi sur un dossier : identifiants des éléments soulevés
-    /// et dossier cible. L'écran parent orchestre le déplacement réseau.
-    var onDropMove: ((Set<Int>, DriveFile) -> Void)?
-
     /// Jeton incrémenté par l'écran parent pour ramener la grille au début.
     /// Il ne modifie ni les filtres ni les données déjà chargées.
     var scrollToTopRequest = 0
@@ -70,13 +62,6 @@ struct FileGridView: View {
     /// recalculés que si les données, les filtres, la recherche ou les
     /// métadonnées vidéo changent — pas à chaque rendu du body.
     @State private var visibleItemsCache = VisibleItemsCache()
-    /// Session de glisser-déposer en cours (nil tant qu'aucun appui long).
-    @State private var dragSession = GridDragSession()
-    /// Cadres des cartes visibles dans l'espace de la grille, pour le suivi
-    /// du doigt et la détection du dossier survolé.
-    @State private var cellFrames: [Int: CellGeometry] = [:]
-    /// Verrou du défilement pendant qu'un élément est transporté.
-    @State private var scrollLocker = ScrollLocker()
 
     private var needsVideoMetadata: Bool {
         filters.sort == .duration || filters.orientation != nil || filters.highResolutionVideosOnly
@@ -145,52 +130,6 @@ struct FileGridView: View {
                 sortReloadTask?.cancel()
                 sortReloadTask = nil
             }
-            // Fin de dépôt : dès que les éléments déplacés quittent la grille
-            // (réponse du serveur), on referme la session sans animation pour
-            // ne pas voir les cartes réapparaître un instant.
-            .onChange(of: viewModel.items) { _, items in
-                guard dragSession.phase == .dropping else { return }
-                let remainingIDs = Set(items.map(\.id))
-                guard dragSession.draggedIDs.allSatisfy({ !remainingIDs.contains($0) }) else { return }
-                var transaction = Transaction()
-                transaction.disablesAnimations = true
-                withTransaction(transaction) { dragSession.reset() }
-            }
-            // Déplacement refusé par l'API : les cartes soulevées réapparaissent
-            // immédiatement au lieu d'attendre le minuteur de sécurité.
-            .onChange(of: viewModel.errorMessage) { _, errorMessage in
-                guard errorMessage != nil, dragSession.phase == .dropping else { return }
-                withAnimation(.spring(response: 0.42, dampingFraction: 0.7)) {
-                    dragSession.reset()
-                }
-            }
-            // Filet de sécurité : si le déplacement n'aboutit pas (erreur
-            // réseau…), les cartes soulevées réapparaissent à leur place.
-            .task(id: dragSession.dropStartedAt) {
-                guard dragSession.dropStartedAt != nil else { return }
-                try? await Task.sleep(for: .seconds(10))
-                guard dragSession.phase == .dropping else { return }
-                withAnimation(.easeOut(duration: 0.25)) { dragSession.reset() }
-            }
-            // Le scroll est réactivé dès que la session se referme, quelle
-            // que soit la raison (dépôt, annulation, erreur, minuteur).
-            .onChange(of: dragSession.isActive) { _, active in
-                if !active { scrollLocker.setLocked(false) }
-            }
-            // Un geste interrompu par le système (appel, centre de contrôle…)
-            // ne déclenche pas toujours `.onEnded` : sans ce minuteur, la
-            // session resterait active et le scroll verrouillé pour toujours.
-            .task(id: dragSession.anchorID) {
-                guard dragSession.anchorID != nil else { return }
-                try? await Task.sleep(for: .seconds(45))
-                guard dragSession.phase == .lifting, dragSession.isActive else { return }
-                withAnimation(.spring(response: 0.42, dampingFraction: 0.7)) {
-                    dragSession.reset()
-                }
-            }
-            .onDisappear {
-                scrollLocker.setLocked(false)
-            }
     }
 
     /// Relance la résolution des métadonnées vidéo uniquement quand il y a de
@@ -225,8 +164,6 @@ struct FileGridView: View {
                     .frame(height: 0)
                     .id("file-grid-top")
 
-                ScrollLockerMarker(locker: scrollLocker)
-
                 LazyVStack(alignment: .leading, spacing: 18, pinnedViews: []) {
                     content
                 }
@@ -238,12 +175,6 @@ struct FileGridView: View {
             // bas : ce geste révèle la recherche sur l'Accueil.
             .scrollBounceBehavior(.always, axes: .vertical)
             .scrollIndicators(.hidden)
-            // Référentiel commun des cadres de cartes et du doigt.
-            .coordinateSpace(name: GridDragSpaceName)
-            .onPreferenceChange(CellFramesKey.self) { cellFrames = $0 }
-            .sensoryFeedback(.impact(weight: .medium), trigger: dragSession.anchorID)
-            .sensoryFeedback(.selection, trigger: dragSession.hoveredFolderID)
-            .sensoryFeedback(.success, trigger: dragSession.dropStartedAt)
             .simultaneousGesture(
                 DragGesture(minimumDistance: 8)
                     .onChanged { value in
@@ -398,21 +329,6 @@ struct FileGridView: View {
         LazyVGrid(columns: columns, spacing: DS.gridSpacing) {
             ForEach(Array(files.enumerated()), id: \.element.id) { index, file in
                 cell(file, index: index, siblings: files)
-                    .modifier(DragCellTransform(
-                        session: dragSession,
-                        id: file.id,
-                        geometry: cellFrames[file.id],
-                        frames: cellFrames
-                    ))
-                    .modifier(FolderDropHighlight(
-                        isTargeted: dragSession.phase == .lifting && dragSession.hoveredFolderID == file.id
-                    ))
-                    .background {
-                        if dragDropEnabled {
-                            CellFrameReader(file: file)
-                        }
-                    }
-                    .simultaneousGesture(dragDropGesture(for: file))
             }
         }
     }
@@ -495,93 +411,6 @@ struct FileGridView: View {
         .onAppear {
             appeared(file: file, index: index, in: siblings)
         }
-    }
-
-    // MARK: - Glisser-déposer vers un dossier
-
-    /// Appui long puis mouvement : soulève la carte (et toute la sélection
-    /// courante si la carte soulevée en fait partie). Un appui long immobile
-    /// continue d'ouvrir le menu contextuel — le mouvement l'annule côté
-    /// système, le glisser prend le relais.
-    private func dragDropGesture(for file: DriveFile) -> some Gesture {
-        LongPressGesture(minimumDuration: 0.45)
-            .sequenced(before: DragGesture(minimumDistance: 10, coordinateSpace: .named(GridDragSpaceName)))
-            .onChanged { value in
-                guard dragDropEnabled,
-                      viewModel.source != .trash,
-                      case .second(_, .some(let drag)) = value
-                else { return }
-                if !dragSession.isActive {
-                    startDrag(anchor: file, at: drag.startLocation)
-                }
-                dragSession.location = drag.location
-                dragSession.updateHover(frames: cellFrames)
-            }
-            .onEnded { value in
-                guard case .second = value else { return }
-                endDrag()
-            }
-    }
-
-    /// Éléments soulevés : la sélection entière si la carte en fait partie,
-    /// sinon la seule carte touchée.
-    private func startDrag(anchor: DriveFile, at point: CGPoint) {
-        var ids: [Int]
-        if selectionMode, selectedIDs.contains(anchor.id) {
-            ids = visibleItems.filter { selectedIDs.contains($0.id) }.map(\.id)
-        } else {
-            ids = [anchor.id]
-        }
-        if !ids.contains(anchor.id) { ids.append(anchor.id) }
-        guard !ids.isEmpty else { return }
-
-        // Le défilement est coupé au niveau UIKit : les cadres restent stables
-        // pour le survol des dossiers, sans invalider les gestes SwiftUI.
-        scrollLocker.setLocked(true)
-
-        withAnimation(.spring(response: 0.38, dampingFraction: 0.78)) {
-            dragSession.begin(ids: ids, anchorID: anchor.id, at: point)
-        }
-    }
-
-    /// Relâchement : dépôt dans le dossier survolé s'il est valide,
-    /// sinon retour animé de chaque carte à sa place.
-    private func endDrag() {
-        guard dragSession.phase == .lifting, dragSession.isActive else { return }
-
-        if let target = validatedDropTarget() {
-            let ids = Set(dragSession.draggedIDs)
-            withAnimation(.spring(response: 0.34, dampingFraction: 0.82)) {
-                dragSession.beginDrop(into: target.id)
-            }
-            // Laisse la gerbe plonger dans le dossier avant le déplacement
-            // réseau ; la grille refermera la session quand les cartes
-            // disparaîtront de la liste (voir `.onChange(of: viewModel.items)`).
-            let callback = onDropMove
-            Task { @MainActor in
-                try? await Task.sleep(for: .milliseconds(280))
-                callback?(ids, target)
-            }
-        } else {
-            withAnimation(.spring(response: 0.42, dampingFraction: 0.7)) {
-                dragSession.reset()
-            }
-        }
-    }
-
-    /// Dossier survolé réellement déplaçable : pas un élément soulevé, pas
-    /// le dossier courant (déplacement sans effet).
-    private func validatedDropTarget() -> DriveFile? {
-        guard let folderID = dragSession.hoveredFolderID,
-              cellFrames[folderID]?.isDirectory == true,
-              !dragSession.draggedIDs.contains(folderID),
-              let folder = viewModel.items.first(where: { $0.id == folderID })
-        else { return nil }
-        if case .directory(let currentDirectoryID) = viewModel.source,
-           currentDirectoryID == folderID {
-            return nil
-        }
-        return folder
     }
 
     /// Apparition d'une carte : pagination immédiate, puis préchargement d'une
