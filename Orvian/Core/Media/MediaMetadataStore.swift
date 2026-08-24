@@ -141,7 +141,7 @@ final class MediaMetadataStore: ObservableObject {
         }
         return Info(
             duration: nil,
-            orientation: orientation(width: width, height: height),
+            orientation: orientation(width: CGFloat(width), height: CGFloat(height)),
             pixelWidth: width,
             pixelHeight: height
         )
