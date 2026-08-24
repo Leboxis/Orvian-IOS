@@ -36,7 +36,7 @@ final class MediaMetadataStore: ObservableObject {
     /// par petits lots pour ne pas saturer le réseau.
     func resolveAll(driveId: Int, items: [DriveFile]) async {
         let pending = items.filter { $0.isVideo && cache[$0.id] == nil && !inFlight.contains($0.id) }
-        let batch = 4
+        let batch = 8
         var index = 0
         while index < pending.count {
             let chunk = Array(pending[index..<min(index + batch, pending.count)])
