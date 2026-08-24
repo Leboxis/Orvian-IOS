@@ -43,6 +43,14 @@ private struct FilterPanel: View {
             )
 
             iconSection(
+                title: "Résolution",
+                values: FileFilters.ResolutionTier.allCases,
+                symbol: \.symbol,
+                isSelected: { filters.resolution == $0 },
+                action: toggle
+            )
+
+            iconSection(
                 title: "Afficher",
                 values: FileFilters.MediaFilter.allCases,
                 symbol: \.symbol,
@@ -184,6 +192,19 @@ private struct FilterPanel: View {
         }
     }
 
+    private func toggle(_ tier: FileFilters.ResolutionTier) {
+        if filters.resolution == tier {
+            filters.resolution = nil
+        } else {
+            filters.resolution = tier
+            // Documents et archives n'ont pas de dimensions : repasser sur
+            // « Tout » pour que le filtre garde un résultat visible.
+            if filters.media == .other {
+                filters.media = .all
+            }
+        }
+    }
+
     private func selectMedia(_ media: FileFilters.MediaFilter) {
         filters.media = media
         if media == .images || media == .other {
@@ -195,6 +216,8 @@ private struct FilterPanel: View {
         switch value {
         case let orientation as FileFilters.Orientation:
             return orientation.title
+        case let tier as FileFilters.ResolutionTier:
+            return "Résolution \(tier.title)"
         case let media as FileFilters.MediaFilter:
             return media.title
         default:

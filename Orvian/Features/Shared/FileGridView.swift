@@ -64,7 +64,7 @@ struct FileGridView: View {
     @State private var visibleItemsCache = VisibleItemsCache()
 
     private var needsMediaMetadata: Bool {
-        filters.sort == .duration || filters.sort == .resolution || filters.orientation != nil
+        filters.sort == .duration || filters.orientation != nil || filters.resolution != nil
     }
 
     var body: some View {

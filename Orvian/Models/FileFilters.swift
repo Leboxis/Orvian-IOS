@@ -4,7 +4,7 @@ import Foundation
 struct FileFilters: Equatable, Hashable {
     /// Ordre de tri.
     enum SortMode: String, CaseIterable, Identifiable {
-        case original, modifiedDate, addedDate, type, size, duration, resolution
+        case original, modifiedDate, addedDate, type, size, duration
 
         var id: String { rawValue }
 
@@ -16,7 +16,6 @@ struct FileFilters: Equatable, Hashable {
             case .type: return "Type"
             case .size: return "Poids"
             case .duration: return "Durée"
-            case .resolution: return "Résolution"
             }
         }
 
@@ -28,7 +27,6 @@ struct FileFilters: Equatable, Hashable {
             case .type: return "doc.text"
             case .size: return "externaldrive"
             case .duration: return "clock"
-            case .resolution: return "4k.tv"
             }
         }
     }
@@ -103,19 +101,51 @@ struct FileFilters: Equatable, Hashable {
         }
     }
 
+    /// Palier de résolution minimal des médias affichés (images et vidéos).
+    /// Le seuil s'applique au grand côté : gère indifféremment le portrait
+    /// et le paysage (une vidéo 2160×3840 compte comme 4K).
+    enum ResolutionTier: String, CaseIterable, Identifiable {
+        case hd, fourK
+
+        var id: String { rawValue }
+
+        var title: String {
+            switch self {
+            case .hd: return "HD"
+            case .fourK: return "4K"
+            }
+        }
+
+        var symbol: String {
+            switch self {
+            case .hd: return "aspectratio"
+            case .fourK: return "4k.tv"
+            }
+        }
+
+        /// Seuil minimal sur le grand côté, en pixels.
+        var minimumLongEdge: Int {
+            switch self {
+            case .hd: return 1280
+            case .fourK: return 3840
+            }
+        }
+    }
+
     var sort: SortMode = .original
     var direction: Direction = .descending
     var orientation: Orientation? = nil
+    var resolution: ResolutionTier? = nil
     var media: MediaFilter = .all
 
     /// Tris exprimables par l'API kDrive (`order_by[]`) : les appliquer côté
     /// serveur garantit que la pagination entière respecte le tri, pas
     /// seulement les éléments déjà chargés. `nil` pour les tris restant
-    /// locaux (durée et résolution : calculées à partir des métadonnées des
-    /// médias) ou l'ordre serveur d'origine.
+    /// locaux (durée : calculée à partir des métadonnées vidéo) ou l'ordre
+    /// serveur d'origine.
     var serverOrderBy: [String]? {
         switch sort {
-        case .original, .duration, .resolution: return nil
+        case .original, .duration: return nil
         case .modifiedDate: return ["last_modified_at"]
         case .addedDate: return ["added_at"]
         case .type: return ["type"]
@@ -129,11 +159,11 @@ struct FileFilters: Equatable, Hashable {
 
     /// Vrai dès qu'un tri ou un filtre diffère du comportement par défaut.
     var isActive: Bool {
-        sort != .original || orientation != nil || media != .all
+        sort != .original || orientation != nil || resolution != nil || media != .all
     }
 
-    /// Applique les filtres (média, orientation vidéo, recherche) et le tri
-    /// local (durée, résolution) sur une liste brute. Partagé entre la grille
+    /// Applique les filtres (média, orientation vidéo, résolution, recherche)
+    /// et le tri local (durée) sur une liste brute. Partagé entre la grille
     /// et la visionneuse pour garantir exactement le même ordre des éléments.
     ///
     /// Les tris pris en charge par l'API sont également appliqués localement.
@@ -154,6 +184,15 @@ struct FileFilters: Equatable, Hashable {
             result = result.filter { file in
                 guard file.isVideo, let info = mediaMetadata.info(for: file.id) else { return false }
                 return info.orientation == orientation
+            }
+        }
+
+        if let resolution {
+            // Sans métadonnées résolues (sonde en cours), le média reste
+            // masqué : il apparaîtra dès que ses dimensions seront connues.
+            result = result.filter { file in
+                guard let info = mediaMetadata.info(for: file.id) else { return false }
+                return info.meets(resolution)
             }
         }
 
@@ -193,10 +232,6 @@ struct FileFilters: Equatable, Hashable {
                 let lhsDuration = mediaMetadata.info(for: lhs.id)?.duration ?? -1
                 let rhsDuration = mediaMetadata.info(for: rhs.id)?.duration ?? -1
                 return ordered(lhsDuration, rhsDuration, lhs: lhs, rhs: rhs)
-            case .resolution:
-                let lhsPixels = mediaMetadata.info(for: lhs.id)?.pixelCount ?? -1
-                let rhsPixels = mediaMetadata.info(for: rhs.id)?.pixelCount ?? -1
-                return ordered(lhsPixels, rhsPixels, lhs: lhs, rhs: rhs)
             }
         }
     }

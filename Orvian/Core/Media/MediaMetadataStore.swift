@@ -20,9 +20,11 @@ final class MediaMetadataStore: ObservableObject {
         let pixelWidth: Int
         let pixelHeight: Int
 
-        /// Surface en pixels : clé de tri du mode « Résolution »
-        /// (une 4K 3840×2160 passe devant une 1080p, quel que soit le ratio).
-        var pixelCount: Int { pixelWidth * pixelHeight }
+        /// Vrai si le grand côté atteint le seuil du palier demandé
+        /// (HD ≥ 1280 px, 4K ≥ 3840 px), portrait et paysage confondus.
+        func meets(_ tier: FileFilters.ResolutionTier) -> Bool {
+            max(pixelWidth, pixelHeight) >= tier.minimumLongEdge
+        }
     }
 
     /// Incrémenté à chaque résolution : les vues observent cette propriété
