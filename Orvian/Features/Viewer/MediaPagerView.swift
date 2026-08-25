@@ -48,6 +48,10 @@ struct MediaPagerView: View {
                 }
             }
             .tabViewStyle(.page(indexDisplayMode: .never))
+            // Le pager doit réellement couvrir la zone de l'indicateur Home :
+            // le lecteur choisit ensuite seul entre bandes de contrôle et
+            // recadrage, sans laisser une bande système inutilisée.
+            .ignoresSafeArea()
             .offset(y: dismissOffset * 0.55)
             .opacity(1 - min(0.55, abs(dismissOffset) / 700))
             // Le geste vit sur le TabView lui-même : il peut ainsi reconnaître
