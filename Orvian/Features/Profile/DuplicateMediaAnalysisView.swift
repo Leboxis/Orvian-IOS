@@ -13,7 +13,7 @@ struct DuplicateMediaAnalysisView: View {
 
     var body: some View {
         List {
-            Section("Dossier à analyser") {
+            Section {
                 Button {
                     showsFolderPicker = true
                 } label: {
@@ -31,6 +31,8 @@ struct DuplicateMediaAnalysisView: View {
                     }
                     .disabled(analysis.isAnalyzing)
                 }
+            } header: {
+                Text("Dossier à analyser")
             } footer: {
                 Text("L’analyse inclut les sous-dossiers et ne modifie aucun fichier.")
             }
