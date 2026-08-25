@@ -24,7 +24,9 @@ final class MediaMetadataStore: ObservableObject {
     @Published private(set) var revision = 0
 
     private var cache: [Int: Info] = [:]
-    private var inFlight: Set<Int> = []
+    /// Les resolutions en cours sont partagees : une grille qui attend les
+    /// metadonnees ne doit pas paginer parce qu'une autre tache les a deja lancees.
+    private var inFlight: [Int: Task<Void, Never>] = [:]
 
     private init() {}
 
@@ -35,24 +37,27 @@ final class MediaMetadataStore: ObservableObject {
     /// Résout en arrière-plan les métadonnées des vidéos d'une liste,
     /// par petits lots pour ne pas saturer le réseau.
     func resolveAll(driveId: Int, items: [DriveFile]) async {
-        let pending = items.filter { $0.isVideo && cache[$0.id] == nil && !inFlight.contains($0.id) }
+        let pending = items.filter { $0.isVideo && cache[$0.id] == nil }
         let batch = 8
         var index = 0
         while index < pending.count {
             let chunk = Array(pending[index..<min(index + batch, pending.count)])
-            for file in chunk {
-                inFlight.insert(file.id)
-            }
-            await withTaskGroup(of: Void.self) { group in
+            var resolvedAny = false
+            await withTaskGroup(of: Bool.self) { group in
                 for file in chunk {
                     group.addTask {
                         await self.resolve(driveId: driveId, fileId: file.id)
                     }
                 }
+                for await resolved in group {
+                    resolvedAny = resolvedAny || resolved
+                }
             }
-            // Un seul signal de rafraîchissement par lot terminé : la grille
-            // se re-trie une fois par lot au lieu d'une fois par vidéo.
-            revision += 1
+            // Un seul signal de rafraichissement par lot termine : la grille
+            // se re-trie une fois par lot au lieu d'une fois par video.
+            if resolvedAny {
+                revision += 1
+            }
             index += batch
         }
     }
@@ -63,24 +68,35 @@ final class MediaMetadataStore: ObservableObject {
     func unresolvedVideoIDs(in items: [DriveFile]) -> Set<Int> {
         Set(
             items.lazy
-                .filter { [self] in $0.isVideo && cache[$0.id] == nil && !inFlight.contains($0.id) }
+                .filter { [self] in $0.isVideo && cache[$0.id] == nil && inFlight[$0.id] == nil }
                 .map(\.id)
         )
     }
 
-    private func resolve(driveId: Int, fileId: Int) async {
-        defer { inFlight.remove(fileId) }
+    private func resolve(driveId: Int, fileId: Int) async -> Bool {
+        guard cache[fileId] == nil else { return false }
+        if let task = inFlight[fileId] {
+            _ = await task.value
+            return false
+        }
+
         // Réutilise l'asset déjà préparé par VideoAssetCache (URL temporaire en
         // cache, option de durée précise) : pas de second AVURLAsset ni de
         // double sondage réseau pour la même vidéo.
-        guard let asset = await VideoAssetCache.shared.asset(driveId: driveId, fileId: fileId) else { return }
-        guard let duration = try? await asset.load(.duration) else { return }
-        let properties = await videoProperties(of: asset)
-        cache[fileId] = Info(
-            duration: duration.seconds,
-            orientation: properties.orientation,
-            maximumDimension: properties.maximumDimension
-        )
+        let task = Task<Void, Never> { [self] in
+            defer { inFlight.removeValue(forKey: fileId) }
+            guard let asset = await VideoAssetCache.shared.asset(driveId: driveId, fileId: fileId) else { return }
+            guard let duration = try? await asset.load(.duration) else { return }
+            let properties = await videoProperties(of: asset)
+            cache[fileId] = Info(
+                duration: duration.seconds,
+                orientation: properties.orientation,
+                maximumDimension: properties.maximumDimension
+            )
+        }
+        inFlight[fileId] = task
+        await task.value
+        return cache[fileId] != nil
     }
 
     private func videoProperties(

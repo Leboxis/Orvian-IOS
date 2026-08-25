@@ -5,7 +5,6 @@ struct FloatingTabBar: View {
     @Binding var selection: AppTab
     var onReselect: ((AppTab) -> Void)? = nil
     @AppStorage("hapticFeedbackEnabled") private var hapticFeedbackEnabled = true
-    @AppStorage("reduceMotion") private var reduceMotion = false
 
     var body: some View {
         HStack(spacing: 4) {
@@ -13,8 +12,6 @@ struct FloatingTabBar: View {
                 TabButton(tab: tab, isSelected: selection == tab) {
                     if selection == tab {
                         onReselect?(tab)
-                    } else if reduceMotion {
-                        selection = tab
                     } else {
                         withAnimation(.snappy(duration: 0.25)) {
                             selection = tab

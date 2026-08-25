@@ -17,7 +17,6 @@ struct MainTabView: View {
     @State private var showUploadSheet = false
     @StateObject private var downloadService = FileDownloadService.shared
     @AppStorage("favoritesReselectScrollToTop") private var favoritesReselectScrollToTop = true
-    @AppStorage("reduceMotion") private var reduceMotion = false
 
     private let uploadManager = UploadManager.shared
 
@@ -54,11 +53,6 @@ struct MainTabView: View {
         }
         .ignoresSafeArea(.keyboard, edges: .bottom)
         .tint(.accentColor)
-        .transaction { transaction in
-            if reduceMotion {
-                transaction.disablesAnimations = true
-            }
-        }
         .sheet(isPresented: $showUploadSheet) {
             UploadProgressSheet(manager: uploadManager)
         }

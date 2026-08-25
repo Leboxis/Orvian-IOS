@@ -58,6 +58,7 @@ struct FileGridView: View {
     @State private var prefetchTask: Task<Void, Never>?
     @State private var sortReloadTask: Task<Void, Never>?
     @State private var searchScrollRegion: SearchScrollRegion = .nearTop
+    @State private var videoMetadataResolutionCount = 0
     /// Cache du calcul `visibleItems` : les filtres/tri/regroupement ne sont
     /// recalculés que si les données, les filtres, la recherche ou les
     /// métadonnées vidéo changent — pas à chaque rendu du body.
@@ -116,8 +117,11 @@ struct FileGridView: View {
                 await loadUntilFilteredResultIfNeeded()
             }
             .task(id: filterTaskKey) {
-                guard needsVideoMetadata else { return }
-                await mediaMetadata.resolveAll(driveId: viewModel.driveId, items: viewModel.items)
+                await resolveVideoMetadata(for: viewModel.items)
+            }
+            .onReceive(FileGridMutationCenter.shared.mutations) { mutation in
+                guard mutation.driveId == viewModel.driveId else { return }
+                viewModel.apply(mutation)
             }
             .onReceive(mediaMetadata.$revision) { newRev in
                 if needsVideoMetadata {
@@ -253,7 +257,16 @@ struct FileGridView: View {
 
     @ViewBuilder
     private var filteredEmptyState: some View {
-        if viewModel.isLoadingMore {
+        if videoMetadataResolutionCount > 0 {
+            VStack(spacing: 10) {
+                ProgressView()
+                Text("Analyse des vidéos…")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.top, 60)
+        } else if viewModel.isLoadingMore {
             VStack(spacing: 10) {
                 ProgressView()
                 Text("Recherche dans les pages suivantes…")
@@ -269,7 +282,7 @@ struct FileGridView: View {
                 Text(message)
             } actions: {
                 Button("Réessayer") {
-                    Task { await viewModel.loadMoreIfNeeded() }
+                    Task { await loadMoreAfterMetadataResolution() }
                 }
                 .buttonStyle(.borderedProminent)
             }
@@ -294,17 +307,42 @@ struct FileGridView: View {
               visibleItems.isEmpty
         else { return }
 
+        // Les filtres dependant des metadonnees doivent d'abord analyser la
+        // page presente. Sans cette attente, chaque video encore inconnue etait
+        // consideree comme masquee et declenchait une pagination prematuree.
+        await resolveVideoMetadata(for: viewModel.items)
+        guard !Task.isCancelled,
+              visibleItems.isEmpty
+        else { return }
+
         var previousItemCount = viewModel.items.count
         while !Task.isCancelled,
               visibleItems.isEmpty,
               viewModel.hasMore,
               viewModel.errorMessage == nil {
-            await viewModel.loadMoreIfNeeded()
+            await loadMoreAfterMetadataResolution()
             guard !Task.isCancelled, viewModel.errorMessage == nil else { return }
             let newItemCount = viewModel.items.count
             guard newItemCount > previousItemCount else { return }
+            if needsVideoMetadata {
+                await resolveVideoMetadata(for: Array(viewModel.items.dropFirst(previousItemCount)))
+                guard !Task.isCancelled else { return }
+            }
             previousItemCount = newItemCount
         }
+    }
+
+    private func resolveVideoMetadata(for items: [DriveFile]) async {
+        guard needsVideoMetadata, !items.isEmpty else { return }
+        videoMetadataResolutionCount += 1
+        defer { videoMetadataResolutionCount -= 1 }
+        await mediaMetadata.resolveAll(driveId: viewModel.driveId, items: items)
+    }
+
+    private func loadMoreAfterMetadataResolution() async {
+        await resolveVideoMetadata(for: viewModel.items)
+        guard !Task.isCancelled else { return }
+        await viewModel.loadMoreIfNeeded()
     }
 
     private struct EmptyFilteredPageTaskKey: Hashable {
@@ -358,7 +396,7 @@ struct FileGridView: View {
 
     private var retryRow: some View {
         Button {
-            Task { await viewModel.loadMoreIfNeeded() }
+            Task { await loadMoreAfterMetadataResolution() }
         } label: {
             Label("Réessayer", systemImage: "arrow.clockwise")
                 .font(.footnote)
@@ -418,7 +456,7 @@ struct FileGridView: View {
     /// travail prévu pour les cartes déjà dépassées.
     private func appeared(file: DriveFile, index: Int, in siblings: [DriveFile]) {
         if index >= siblings.count - 6 {
-            Task { await viewModel.loadMoreIfNeeded() }
+            Task { await loadMoreAfterMetadataResolution() }
         }
 
         let ahead = siblings.dropFirst(index + 1).prefix(3)

@@ -11,6 +11,7 @@ final class CategoryLibrary {
     static let shared = CategoryLibrary()
 
     private var categoriesByDrive: [Int: [Int: Category]] = [:]
+    private var refreshGenerationByDrive: [Int: Int] = [:]
 
     private init() {}
 
@@ -22,8 +23,31 @@ final class CategoryLibrary {
     /// Charge les catégories d'un drive (une seule fois par session).
     func ensureLoaded(for driveId: Int) async {
         guard categoriesByDrive[driveId] == nil else { return }
-        if let cats = try? await KDriveService().categories(driveId: driveId) {
-            categoriesByDrive[driveId] = Dictionary(uniqueKeysWithValues: cats.map { ($0.id, $0) })
+        _ = try? await refresh(for: driveId)
+    }
+
+    /// Revalide le cache apres une creation, un renommage ou une suppression.
+    @discardableResult
+    func refresh(for driveId: Int) async throws -> [Category] {
+        let generation = (refreshGenerationByDrive[driveId] ?? 0) + 1
+        refreshGenerationByDrive[driveId] = generation
+        let categories = try await KDriveService().categories(driveId: driveId)
+        guard refreshGenerationByDrive[driveId] == generation else {
+            return categoriesByDrive[driveId].map { Array($0.values) } ?? categories
         }
+        categoriesByDrive[driveId] = Dictionary(uniqueKeysWithValues: categories.map { ($0.id, $0) })
+        return categories
+    }
+
+    func upsert(_ category: Category, for driveId: Int) {
+        guard var categories = categoriesByDrive[driveId] else { return }
+        categories[category.id] = category
+        categoriesByDrive[driveId] = categories
+    }
+
+    func remove(categoryId: Int, for driveId: Int) {
+        guard var categories = categoriesByDrive[driveId] else { return }
+        categories.removeValue(forKey: categoryId)
+        categoriesByDrive[driveId] = categories
     }
 }

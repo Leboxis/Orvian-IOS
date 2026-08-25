@@ -15,6 +15,7 @@ struct TagsView: View {
     /// Évite d'afficher provisoirement « (0) » avant la première réponse API.
     @State private var hasLoadedCategories = false
     @State private var errorMessage: String?
+    @State private var operationErrorMessage: String?
     @State private var trail: [String] = []
     /// Affichage des catégories : grille (défaut) ou liste.
     @AppStorage("tagsLayout") private var layout = CategoryLayout.grid
@@ -83,7 +84,7 @@ struct TagsView: View {
         }
         .sheet(isPresented: $showCreateSheet) {
             CreateTagSheet(driveId: driveId) {
-                Task { await load(force: true) }
+                Task { await refreshAfterMutation("Le tag a été créé") }
             }
         }
         .alert("Renommer le tag", isPresented: $showRenameAlert) {
@@ -91,10 +92,7 @@ struct TagsView: View {
             Button("Enregistrer") {
                 let trimmed = renameText.trimmingCharacters(in: .whitespacesAndNewlines)
                 if let tag = tagToRename, !trimmed.isEmpty {
-                    Task {
-                        try? await service.updateCategory(driveId: driveId, categoryId: tag.id, name: trimmed, color: tag.color)
-                        await load(force: true)
-                    }
+                    Task { await rename(tag, to: trimmed) }
                 }
             }
             Button("Annuler", role: .cancel) { }
@@ -106,14 +104,16 @@ struct TagsView: View {
         ) {
             Button("Supprimer", role: .destructive) {
                 if let tag = tagToDelete {
-                    Task {
-                        try? await service.deleteCategory(driveId: driveId, categoryId: tag.id)
-                        await load(force: true)
-                    }
+                    Task { await delete(tag) }
                 }
             }
         } message: {
             Text("Le tag sera retiré de tous les fichiers associés.")
+        }
+        .alert("Action impossible", isPresented: operationErrorBinding) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(operationErrorMessage ?? "")
         }
     }
 
@@ -290,13 +290,68 @@ struct TagsView: View {
             isLoading = categories.isEmpty
         }
         do {
-            categories = try await service.categories(driveId: driveId)
-            hasLoadedCategories = true
-            errorMessage = nil
+            try await refreshCategories()
         } catch {
             errorMessage = (error as? APIError)?.errorDescription ?? error.localizedDescription
         }
         isLoading = false
+    }
+
+    private func refreshCategories() async throws {
+        categories = try await CategoryLibrary.shared.refresh(for: driveId)
+        hasLoadedCategories = true
+        errorMessage = nil
+    }
+
+    private func rename(_ tag: Category, to name: String) async {
+        do {
+            try await service.updateCategory(driveId: driveId, categoryId: tag.id, name: name, color: tag.color)
+        } catch {
+            operationErrorMessage = "Renommage impossible : \((error as? APIError)?.errorDescription ?? error.localizedDescription)"
+            return
+        }
+        let renamed = Category(
+            id: tag.id,
+            name: name,
+            color: tag.color,
+            isPredefined: tag.isPredefined,
+            userUses: tag.userUses
+        )
+        CategoryLibrary.shared.upsert(renamed, for: driveId)
+        replaceLocalCategory(renamed)
+        await refreshAfterMutation("Le tag a été renommé")
+    }
+
+    private func delete(_ tag: Category) async {
+        do {
+            try await service.deleteCategory(driveId: driveId, categoryId: tag.id)
+        } catch {
+            operationErrorMessage = "Suppression impossible : \((error as? APIError)?.errorDescription ?? error.localizedDescription)"
+            return
+        }
+        CategoryLibrary.shared.remove(categoryId: tag.id, for: driveId)
+        categories.removeAll { $0.id == tag.id }
+        await refreshAfterMutation("Le tag a été supprimé")
+    }
+
+    private func refreshAfterMutation(_ successMessage: String) async {
+        do {
+            try await refreshCategories()
+        } catch {
+            operationErrorMessage = "\(successMessage), mais l’actualisation est impossible : \((error as? APIError)?.errorDescription ?? error.localizedDescription)"
+        }
+    }
+
+    private func replaceLocalCategory(_ category: Category) {
+        guard let index = categories.firstIndex(where: { $0.id == category.id }) else { return }
+        categories[index] = category
+    }
+
+    private var operationErrorBinding: Binding<Bool> {
+        Binding(
+            get: { operationErrorMessage != nil },
+            set: { if !$0 { operationErrorMessage = nil } }
+        )
     }
 }
 

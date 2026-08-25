@@ -11,9 +11,12 @@ final class FileGridViewModel {
     private(set) var isLoadingMore = false
     private(set) var hasMore = false
     private(set) var errorMessage: String?
-    /// Index id → catégorie pour afficher les pastilles de tags des cartes
-    /// (les listes ne renvoient que des `categoryId`).
-    private(set) var categoriesById: [Int: Category] = [:]
+    /// Index id → catégorie pour afficher les pastilles de tags des cartes.
+    /// Il reste lié au cache partagé afin que les renommages et suppressions
+    /// confirmés soient reflétés sans recharger tous les fichiers.
+    var categoriesById: [Int: Category] {
+        CategoryLibrary.shared.categories(for: driveId)
+    }
 
     private var cursor: String?
     private var loadedOnce = false
@@ -78,7 +81,6 @@ final class FileGridViewModel {
             )
             await categoriesTask
             guard !Task.isCancelled, dataGeneration == requestGeneration else { return }
-            categoriesById = CategoryLibrary.shared.categories(for: driveId)
             items = filterItemsIfNeeded(page.data ?? [])
             cursor = page.cursor
             hasMore = page.hasMore ?? false
@@ -194,7 +196,31 @@ final class FileGridViewModel {
     /// confirmation de l'API, pour que les pastilles des cartes suivent
     /// immédiatement (éditeur de tags et fiche détail).
     func updateCategories(for file: DriveFile, category: Category, applied: Bool) {
-        guard let index = items.firstIndex(where: { $0.id == file.id }) else { return }
+        applyCategoryChange(fileId: file.id, category: category, applied: applied)
+    }
+
+    /// Applique une mutation deja confirmee par une autre interface, telle que
+    /// la visionneuse, sans repeter l'appel API.
+    func apply(_ mutation: FileGridMutation) {
+        switch mutation {
+        case let .favorite(_, fileId, isFavorite):
+            applyFavoriteChange(fileId: fileId, isFavorite: isFavorite)
+        case let .category(_, fileId, category, applied):
+            applyCategoryChange(fileId: fileId, category: category, applied: applied)
+        }
+    }
+
+    private func applyFavoriteChange(fileId: Int, isFavorite: Bool) {
+        guard let index = items.firstIndex(where: { $0.id == fileId }) else { return }
+        if source == .favorites && !isFavorite {
+            items.remove(at: index)
+        } else {
+            items[index].isFavorite = isFavorite
+        }
+    }
+
+    private func applyCategoryChange(fileId: Int, category: Category, applied: Bool) {
+        guard let index = items.firstIndex(where: { $0.id == fileId }) else { return }
         var current = items[index].categories ?? []
         if applied {
             if !current.contains(where: { $0.categoryId == category.id }) {
@@ -204,6 +230,12 @@ final class FileGridViewModel {
             current.removeAll { $0.categoryId == category.id }
         }
         items[index].categories = current
+
+        if case let .category(categoryId) = source,
+           categoryId == category.id,
+           !applied {
+            items.remove(at: index)
+        }
     }
 
     // MARK: - Suppression, renommage & déplacement

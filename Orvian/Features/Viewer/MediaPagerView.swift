@@ -107,19 +107,34 @@ struct MediaPagerView: View {
         guard let viewModel = context.viewModel else { return }
 
         while !Task.isCancelled,
-              let index = files.firstIndex(where: { $0.id == fileID }),
-              index >= files.count - 2,
               viewModel.hasMore {
+            await resolveVideoMetadataIfNeeded(for: viewModel)
+            guard !Task.isCancelled,
+                  let index = files.firstIndex(where: { $0.id == fileID }),
+                  index >= files.count - 2
+            else { return }
+
             let previousItemCount = viewModel.items.count
             await viewModel.loadMoreIfNeeded()
             guard !Task.isCancelled, viewModel.errorMessage == nil else { return }
 
-            refreshFiles()
+            await resolveVideoMetadataIfNeeded(for: viewModel)
 
             // Protection contre une API qui renverrait la même page sans
             // avancer : évite une boucle réseau infinie dans la visionneuse.
             guard viewModel.items.count > previousItemCount else { return }
         }
+    }
+
+    private func resolveVideoMetadataIfNeeded(for viewModel: FileGridViewModel) async {
+        guard context.filters.sort == .duration
+                || context.filters.orientation != nil
+                || context.filters.highResolutionVideosOnly
+        else {
+            return
+        }
+        await MediaMetadataStore.shared.resolveAll(driveId: context.driveId, items: viewModel.items)
+        refreshFiles()
     }
 
     private var currentFile: DriveFile? {

@@ -38,10 +38,12 @@ struct VideoPlayerView: View {
 
     // Favori
     @State private var isFavorite: Bool
+    @State private var isFavoriteMutationInProgress = false
 
     // Tags
     @State private var categories: [Category] = []
     @State private var appliedCategoryIds: Set<Int>
+    @State private var mutatingCategoryIDs: Set<Int> = []
 
     @State private var errorMessage: String?
     @State private var timeObserver: Any?
@@ -298,6 +300,7 @@ struct VideoPlayerView: View {
                 .foregroundStyle(isFavorite ? .yellow : .white)
                 .frame(width: 30, height: 30)
         }
+        .disabled(isFavoriteMutationInProgress)
         .accessibilityLabel(isFavorite ? "Retirer des favoris" : "Ajouter aux favoris")
     }
 
@@ -380,6 +383,7 @@ struct VideoPlayerView: View {
                         }
                     }
                 }
+                .disabled(mutatingCategoryIDs.contains(category.id))
             }
         } label: {
             Image(systemName: "tag")
@@ -487,10 +491,16 @@ struct VideoPlayerView: View {
     // MARK: - Favori & tags
 
     private func toggleFavorite() async {
+        guard !isFavoriteMutationInProgress else { return }
+        isFavoriteMutationInProgress = true
+        defer { isFavoriteMutationInProgress = false }
         let newValue = !isFavorite
         isFavorite = newValue
         do {
             try await service.setFavorite(driveId: driveId, fileId: file.id, favorite: newValue)
+            FileGridMutationCenter.shared.publish(
+                .favorite(driveId: driveId, fileId: file.id, isFavorite: newValue)
+            )
         } catch {
             isFavorite = !newValue
             errorMessage = "Impossible de modifier le favori : \((error as? APIError)?.errorDescription ?? error.localizedDescription)"
@@ -498,6 +508,9 @@ struct VideoPlayerView: View {
     }
 
     private func toggleCategory(_ category: Category) async {
+        guard !mutatingCategoryIDs.contains(category.id) else { return }
+        mutatingCategoryIDs.insert(category.id)
+        defer { mutatingCategoryIDs.remove(category.id) }
         let isApplying = !appliedCategoryIds.contains(category.id)
         if isApplying {
             appliedCategoryIds.insert(category.id)
@@ -510,6 +523,9 @@ struct VideoPlayerView: View {
             } else {
                 try await service.removeCategory(driveId: driveId, fileId: file.id, categoryId: category.id)
             }
+            FileGridMutationCenter.shared.publish(
+                .category(driveId: driveId, fileId: file.id, category: category, applied: isApplying)
+            )
         } catch {
             if isApplying {
                 appliedCategoryIds.remove(category.id)

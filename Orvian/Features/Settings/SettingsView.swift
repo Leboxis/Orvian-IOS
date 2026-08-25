@@ -17,7 +17,6 @@ struct SettingsView: View {
     @AppStorage("prefetchOnWiFiOnly") private var prefetchOnWiFiOnly = false
     @AppStorage("thumbnailCacheLimitMB") private var thumbnailCacheLimitMB = 250
     @AppStorage("hapticFeedbackEnabled") private var hapticFeedbackEnabled = true
-    @AppStorage("reduceMotion") private var reduceMotion = false
     @AppStorage("defaultFolderColor") private var defaultFolderColor = "#4285F5"
 
     var body: some View {
@@ -162,14 +161,6 @@ struct SettingsView: View {
                             icon: "hand.tap.fill",
                             tint: .blue,
                             isOn: $hapticFeedbackEnabled
-                        )
-                        settingsDivider
-                        settingsToggle(
-                            "Réduire les animations",
-                            detail: "Privilégie des transitions plus sobres.",
-                            icon: "wind",
-                            tint: .gray,
-                            isOn: $reduceMotion
                         )
                     }
 
