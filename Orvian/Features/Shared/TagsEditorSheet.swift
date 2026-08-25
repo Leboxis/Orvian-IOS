@@ -20,7 +20,8 @@ struct TagsEditorSheet: View {
     @State private var errorMessage: String?
 
     private let service = KDriveService()
-    private let columns = Array(repeating: GridItem(.flexible(), spacing: DS.gridSpacing), count: 2)
+    /// Colonnes pilotées par Réglages → Affichage → Colonnes des tags.
+    @AppStorage("tagGridColumns") private var tagGridColumns = 2
 
     init(
         driveId: Int,
@@ -49,7 +50,7 @@ struct TagsEditorSheet: View {
                     }
                 } else {
                     ScrollView {
-                        LazyVGrid(columns: columns, spacing: DS.gridSpacing) {
+                        LazyVGrid(columns: editorColumns, spacing: DS.gridSpacing) {
                             ForEach(orderedCategories) { category in
                                 tagCell(category)
                             }
@@ -86,26 +87,31 @@ struct TagsEditorSheet: View {
         .task { await load() }
     }
 
+    /// Grille resserrée : cartes compactes et colonnes du réglage partagé.
+    private var editorColumns: [GridItem] {
+        Array(repeating: GridItem(.flexible(), spacing: DS.gridSpacing), count: max(2, tagGridColumns))
+    }
+
     /// Même carte que la grille dédiée, enrichie d'une coche de sélection.
     private func tagCell(_ category: Category) -> some View {
         let isApplied = appliedCategoryIds.contains(category.id)
         return Button {
             Task { await toggle(category) }
         } label: {
-            TagGridCard(category: category)
+            TagGridCard(category: category, compact: true)
                 .overlay(alignment: .topTrailing) {
                     if isApplied {
                         Image(systemName: "checkmark")
-                            .font(.system(size: 11, weight: .bold))
+                            .font(.system(size: 9, weight: .bold))
                             .foregroundStyle(.white)
-                            .padding(7)
+                            .padding(5)
                             .background(Color.accentColor, in: Circle())
-                            .padding(8)
+                            .padding(5)
                     }
                 }
                 .overlay {
                     if isApplied {
-                        RoundedRectangle(cornerRadius: 16, style: .continuous)
+                        RoundedRectangle(cornerRadius: 12, style: .continuous)
                             .strokeBorder(Color.accentColor, lineWidth: 2)
                     }
                 }

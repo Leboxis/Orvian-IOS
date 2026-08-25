@@ -19,6 +19,8 @@ struct TagsView: View {
     @State private var trail: [String] = []
     /// Affichage des catégories : grille (défaut) ou liste.
     @AppStorage("tagsLayout") private var layout = CategoryLayout.grid
+    /// Nombre de colonnes de la grille, partagé avec l'éditeur de tags.
+    @AppStorage("tagGridColumns") private var tagGridColumns = 2
     @State private var showCreateSheet = false
 
     @State private var tagToRename: Category?
@@ -193,7 +195,7 @@ struct TagsView: View {
     }
 
     private var gridColumns: [GridItem] {
-        Array(repeating: GridItem(.flexible(), spacing: DS.gridSpacing), count: 2)
+        Array(repeating: GridItem(.flexible(), spacing: DS.gridSpacing), count: max(2, tagGridColumns))
     }
 
     private var list: some View {
@@ -397,26 +399,29 @@ private struct CategoryRow: View {
 /// parfaitement cohérente entre l'onglet dédié et le menu d'un fichier.
 struct TagGridCard: View {
     let category: Category
+    /// Variante resserrée des éditeurs de tags : icône et textes réduits,
+    /// compteur d'usage masqué, pour en afficher davantage à l'écran.
+    var compact = false
 
     private var tint: Color {
         Color(hex: category.color) ?? .accentColor
     }
 
     var body: some View {
-        VStack(spacing: 10) {
+        VStack(spacing: compact ? 6 : 10) {
             Image(systemName: "tag.fill")
-                .font(.system(size: 16, weight: .semibold))
+                .font(.system(size: compact ? 12 : 16, weight: .semibold))
                 .foregroundStyle(.white)
-                .frame(width: 36, height: 36)
-                .background(tint, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                .frame(width: compact ? 26 : 36, height: compact ? 26 : 36)
+                .background(tint, in: RoundedRectangle(cornerRadius: compact ? 8 : 10, style: .continuous))
 
             VStack(spacing: 2) {
                 Text(category.name)
-                    .font(.subheadline.weight(.semibold))
+                    .font(compact ? .caption.weight(.semibold) : .subheadline.weight(.semibold))
                     .foregroundStyle(.primary)
-                    .lineLimit(2)
+                    .lineLimit(compact ? 1 : 2)
                     .multilineTextAlignment(.center)
-                if let uses = category.userUses, uses > 0 {
+                if !compact, let uses = category.userUses, uses > 0 {
                     Text("\(uses) élément\(uses > 1 ? "s" : "")")
                         .font(.caption)
                         .foregroundStyle(.secondary)
@@ -424,10 +429,10 @@ struct TagGridCard: View {
             }
         }
         .frame(maxWidth: .infinity)
-        .padding(12)
-        .background(Color(uiColor: .secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .padding(compact ? 8 : 12)
+        .background(Color(uiColor: .secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: compact ? 12 : 16, style: .continuous))
         .overlay {
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
+            RoundedRectangle(cornerRadius: compact ? 12 : 16, style: .continuous)
                 .strokeBorder(.quaternary, lineWidth: 0.5)
         }
         .shadow(color: .black.opacity(0.05), radius: 4, x: 0, y: 2)

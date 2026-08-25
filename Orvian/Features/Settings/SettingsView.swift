@@ -10,6 +10,7 @@ struct SettingsView: View {
     @State private var showSignOutConfirm = false
     @AppStorage("showFileSizes") private var showFileSizes = true
     @AppStorage("fileGridColumns") private var fileGridColumns = 3
+    @AppStorage("tagGridColumns") private var tagGridColumns = 2
     @AppStorage("alwaysShowSearch") private var alwaysShowSearch = false
     @AppStorage("favoritesReselectScrollToTop") private var favoritesReselectScrollToTop = true
     @AppStorage("prefetchThumbnails") private var prefetchThumbnails = true
@@ -51,6 +52,16 @@ struct SettingsView: View {
                             Text("5 cartes").tag(5)
                             Text("6 cartes").tag(6)
                             Text("7 cartes").tag(7)
+                        }
+                        settingsDivider
+                        settingsChoice(
+                            "Colonnes des tags",
+                            icon: "tag.fill",
+                            tint: .brown,
+                            selection: $tagGridColumns
+                        ) {
+                            Text("2 colonnes").tag(2)
+                            Text("3 colonnes").tag(3)
                         }
                         settingsDivider
                         settingsToggle(
