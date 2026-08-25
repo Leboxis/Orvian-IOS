@@ -53,9 +53,6 @@ struct VideoPlayerView: View {
     /// Empêche deux appels concurrents à `load()` (apparition + retour de page)
     /// de créer deux lecteurs pour la même vidéo.
     @State private var isLoadingVideo = false
-    /// Taille de présentation réellement décodée. Elle pilote automatiquement
-    /// le choix entre bandes de contrôle et remplissage de l'écran.
-    @State private var presentationSize: CGSize = .zero
 
     // Masquage automatique des contrôles après 2.5 secondes
     @State private var showControls = true
@@ -75,12 +72,9 @@ struct VideoPlayerView: View {
         ZStack {
             Color.black.ignoresSafeArea()
 
-            GeometryReader { proxy in
-                videoArea(in: proxy.size)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-            }
-            .ignoresSafeArea()
-            .contentShape(Rectangle())
+            videoArea
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .contentShape(Rectangle())
                 .onTapGesture {
                     toggleControls()
                 }
@@ -93,11 +87,7 @@ struct VideoPlayerView: View {
             .opacity(showControls ? 1 : 0)
             .allowsHitTesting(showControls)
             .animation(.easeInOut(duration: 0.25), value: showControls)
-            // Les barres exploitent la zone système plutôt que de laisser une
-            // bande basse vide, tout en restant hors de l'indicateur Home.
-            .safeAreaPadding(.vertical, 8)
         }
-        .ignoresSafeArea()
         .onAppear {
             isDisappeared = false
             showControls = true
@@ -204,10 +194,10 @@ struct VideoPlayerView: View {
     // MARK: - Zone vidéo
 
     @ViewBuilder
-    private func videoArea(in containerSize: CGSize) -> some View {
+    private var videoArea: some View {
         ZStack {
             if let player {
-                PlayerLayerView(player: player, videoGravity: videoGravity(in: containerSize))
+                PlayerLayerView(player: player)
             } else if let poster {
                 Image(uiImage: poster)
                     .resizable()
@@ -228,28 +218,6 @@ struct VideoPlayerView: View {
                 preparing
             }
         }
-    }
-
-    /// Si une bande inférieure peut accueillir entièrement les commandes,
-    /// on conserve la vidéo entière et on utilise cette bande. Dans le cas
-    /// contraire, le lecteur remplit l'écran automatiquement : aucun réglage
-    /// ni espace bas inutilisé.
-    private func videoGravity(in containerSize: CGSize) -> AVLayerVideoGravity {
-        guard presentationSize.width > 0,
-              presentationSize.height > 0,
-              containerSize.width > 0,
-              containerSize.height > 0
-        else {
-            return .resizeAspect
-        }
-
-        let videoAspect = presentationSize.width / presentationSize.height
-        let fittedHeight = min(containerSize.height, containerSize.width / videoAspect)
-        let bottomLetterboxHeight = max(0, (containerSize.height - fittedHeight) / 2)
-        // Barre de transport (~40 pt), marge et indicateur Home.
-        let requiredControlBand: CGFloat = 86
-
-        return bottomLetterboxHeight >= requiredControlBand ? .resizeAspect : .resizeAspectFill
     }
 
     private var preparing: some View {
@@ -608,7 +576,6 @@ struct VideoPlayerView: View {
             return
         }
         player = newPlayer
-        presentationSize = .zero
         addObservers(to: newPlayer)
         currentTime = 0
         scrubValue = 0
@@ -662,12 +629,6 @@ struct VideoPlayerView: View {
             queue: .main
         ) { time in
             let itemDuration = player.currentItem?.duration.seconds ?? 0
-            let itemPresentationSize = player.currentItem?.presentationSize ?? .zero
-            if itemPresentationSize.width > 0,
-               itemPresentationSize.height > 0,
-               presentationSize != itemPresentationSize {
-                presentationSize = itemPresentationSize
-            }
             if itemDuration.isFinite, itemDuration > 0,
                abs(duration - itemDuration) > 0.01 {
                 duration = itemDuration
@@ -761,19 +722,15 @@ private enum SpeedOption: Float, CaseIterable, Identifiable {
 /// Couche de rendu AVPlayerLayer (sans contrôles natifs).
 private struct PlayerLayerView: UIViewRepresentable {
     let player: AVPlayer
-    let videoGravity: AVLayerVideoGravity
 
     func makeUIView(context: Context) -> PlayerLayerUIView {
         let view = PlayerLayerUIView()
         view.playerLayer.player = player
-        view.playerLayer.videoGravity = videoGravity
+        view.playerLayer.videoGravity = .resizeAspect
         return view
     }
 
-    func updateUIView(_ uiView: PlayerLayerUIView, context: Context) {
-        uiView.playerLayer.player = player
-        uiView.playerLayer.videoGravity = videoGravity
-    }
+    func updateUIView(_ uiView: PlayerLayerUIView, context: Context) {}
 
     final class PlayerLayerUIView: UIView {
         override class var layerClass: AnyClass { AVPlayerLayer.self }
