@@ -41,9 +41,11 @@ struct VideoPlayerView: View {
     @State private var isFavoriteMutationInProgress = false
 
     // Tags
-    @State private var categories: [Category] = []
     @State private var appliedCategoryIds: Set<Int>
-    @State private var mutatingCategoryIDs: Set<Int> = []
+    @State private var showTagSheet = false
+    /// La lecture reprend à la fermeture de la feuille uniquement si elle
+    /// était active à l'ouverture.
+    @State private var resumePlaybackAfterTags = false
 
     @State private var errorMessage: String?
     @State private var timeObserver: Any?
@@ -132,6 +134,30 @@ struct VideoPlayerView: View {
             Button("OK") { errorMessage = nil }
         } message: {
             Text(errorMessage ?? "")
+        }
+        .sheet(isPresented: $showTagSheet) {
+            TagsEditorSheet(
+                driveId: driveId,
+                file: file,
+                initialAppliedIds: appliedCategoryIds,
+                onChanged: { category, applied in
+                    if applied {
+                        appliedCategoryIds.insert(category.id)
+                    } else {
+                        appliedCategoryIds.remove(category.id)
+                    }
+                    FileGridMutationCenter.shared.publish(
+                        .category(driveId: driveId, fileId: file.id, category: category, applied: applied)
+                    )
+                }
+            )
+        } onDismiss: {
+            guard resumePlaybackAfterTags else { return }
+            resumePlaybackAfterTags = false
+            if let player {
+                player.playImmediately(atRate: playbackRate)
+                isPlaying = true
+            }
         }
     }
 
@@ -365,33 +391,21 @@ struct VideoPlayerView: View {
         .accessibilityLabel("Vitesse de lecture")
     }
 
-    /// Menu des catégories (tags) du drive : coche celles appliquées à la vidéo.
+    /// Éditeur de tags : feuille partagée avec la fiche fichier (cartes de
+    /// l'onglet Tag, couleurs visibles, tri par usage). Le Menu natif était
+    /// écrasé par UIKit : pastilles de couleur perdues, liste peu maniable.
     private var tagMenu: some View {
-        Menu {
-            ForEach(categories) { category in
-                Button {
-                    Task { await toggleCategory(category) }
-                } label: {
-                    HStack {
-                        Circle()
-                            .fill(Color(hex: category.color) ?? .gray)
-                            .frame(width: 10, height: 10)
-                        Text(category.name)
-                        Spacer()
-                        if appliedCategoryIds.contains(category.id) {
-                            Image(systemName: "checkmark")
-                        }
-                    }
-                }
-                .disabled(mutatingCategoryIDs.contains(category.id))
-            }
+        Button {
+            resumePlaybackAfterTags = player != nil
+                && (isPlaying || player?.timeControlStatus == .playing)
+            player?.pause()
+            showTagSheet = true
         } label: {
             Image(systemName: "tag")
                 .font(.system(size: 16, weight: .medium))
                 .foregroundStyle(.white)
                 .frame(width: 30, height: 30)
         }
-        .disabled(categories.isEmpty)
         .accessibilityLabel("Appliquer un tag")
     }
 
@@ -507,35 +521,6 @@ struct VideoPlayerView: View {
         }
     }
 
-    private func toggleCategory(_ category: Category) async {
-        guard !mutatingCategoryIDs.contains(category.id) else { return }
-        mutatingCategoryIDs.insert(category.id)
-        defer { mutatingCategoryIDs.remove(category.id) }
-        let isApplying = !appliedCategoryIds.contains(category.id)
-        if isApplying {
-            appliedCategoryIds.insert(category.id)
-        } else {
-            appliedCategoryIds.remove(category.id)
-        }
-        do {
-            if isApplying {
-                try await service.addCategory(driveId: driveId, fileId: file.id, categoryId: category.id)
-            } else {
-                try await service.removeCategory(driveId: driveId, fileId: file.id, categoryId: category.id)
-            }
-            FileGridMutationCenter.shared.publish(
-                .category(driveId: driveId, fileId: file.id, category: category, applied: isApplying)
-            )
-        } catch {
-            if isApplying {
-                appliedCategoryIds.remove(category.id)
-            } else {
-                appliedCategoryIds.insert(category.id)
-            }
-            errorMessage = "Impossible de modifier le tag : \((error as? APIError)?.errorDescription ?? error.localizedDescription)"
-        }
-    }
-
     // MARK: - Chargement
 
     private func load() async {
@@ -552,11 +537,20 @@ struct VideoPlayerView: View {
         isLoadingVideo = true
         defer { isLoadingVideo = false }
 
-        async let posterTask: UIImage? = ThumbnailProvider.shared.thumbnail(driveId: driveId, fileId: file.id, pixels: 400)
-        async let categoriesTask: [Category]? = try? service.categories(driveId: driveId)
+        // Tâche non structurée qui s'auto-assigne dès son achèvement : le
+        // poster s'affiche pendant la résolution de l'asset, sans retarder
+        // ni l'un ni l'autre. Inutile si le poster est déjà affiché (retour
+        // sur une page gardée en mémoire).
+        if poster == nil {
+            Task {
+                let image = await ThumbnailProvider.shared.thumbnail(driveId: driveId, fileId: file.id, pixels: 400)
+                guard !isDisappeared, poster == nil else { return }
+                poster = image
+            }
+        }
 
         // La ressource authentifiée peut déjà avoir été préparée juste avant
-        // le tap. Le poster et les tags ne retardent jamais le lecteur.
+        // le tap. Le poster ne retarde jamais le lecteur.
         guard let asset = await VideoAssetCache.shared.asset(driveId: driveId, fileId: file.id),
               !isDisappeared,
               !Task.isCancelled
@@ -566,22 +560,16 @@ struct VideoPlayerView: View {
         }
 
         startPlayback(asset: asset)
-
-        let (loadedPoster, loadedCategories) = await (posterTask, categoriesTask)
-        guard !isDisappeared, !Task.isCancelled else { return }
-        if let loadedPoster {
-            poster = loadedPoster
-        }
-        if let loadedCategories, !loadedCategories.isEmpty {
-            categories = loadedCategories
-        }
     }
 
     private func startPlayback(asset: AVURLAsset) {
         cancelPendingSeek()
         isScrubbing = false
         let newPlayer = AVPlayer(playerItem: AVPlayerItem(asset: asset))
-        newPlayer.automaticallyWaitsToMinimizeStalling = true
+        // Démarrage immédiat dès les premières frames disponibles : avec
+        // playImmediately, attendre le buffer « sûr » ajoute jusqu'à ~2 s
+        // avant la première image. Le poster masque une éventuelle micro-saccade.
+        newPlayer.automaticallyWaitsToMinimizeStalling = false
         newPlayer.isMuted = isMuted
         newPlayer.defaultRate = playbackRate
         newPlayer.allowsExternalPlayback = true
@@ -595,7 +583,8 @@ struct VideoPlayerView: View {
         addObservers(to: newPlayer)
         currentTime = 0
         scrubValue = 0
-        newPlayer.seek(to: .zero, toleranceBefore: .zero, toleranceAfter: .zero)
+        // Pas de seek : la lecture démarre déjà à zéro, un seek à tolérance
+        // nulle forcerait une préparation précise avant la première frame.
         newPlayer.playImmediately(atRate: playbackRate)
         isPlaying = true
 

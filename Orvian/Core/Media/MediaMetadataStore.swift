@@ -80,9 +80,9 @@ final class MediaMetadataStore: ObservableObject {
             return false
         }
 
-        // Réutilise l'asset déjà préparé par VideoAssetCache (URL temporaire en
-        // cache, option de durée précise) : pas de second AVURLAsset ni de
-        // double sondage réseau pour la même vidéo.
+        // Réutilise l'asset déjà préparé par VideoAssetCache (URL temporaire
+        // en cache) : pas de second AVURLAsset ni de double sondage réseau
+        // pour la même vidéo. La durée du moov est assez précise pour le tri.
         let task = Task<Void, Never> { [self] in
             defer { inFlight.removeValue(forKey: fileId) }
             guard let asset = await VideoAssetCache.shared.asset(driveId: driveId, fileId: fileId) else { return }

@@ -43,10 +43,10 @@ final class VideoAssetCache {
               url.host != nil
         else { return nil }
 
-        let asset = AVURLAsset(
-            url: url,
-            options: [AVURLAssetPreferPreciseDurationAndTimingKey: true]
-        )
+        // Pas d'option « durée précise » : elle force un parsing complet des
+        // tables de samples avant la première frame, uniquement pour servir le
+        // tri par durée des grilles. La durée issue du moov suffit largement.
+        let asset = AVURLAsset(url: url)
         assets[key] = asset
         insertionOrder.removeAll { $0 == key }
         insertionOrder.append(key)

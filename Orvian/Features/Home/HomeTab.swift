@@ -866,9 +866,8 @@ private struct ApplyTagsSheet: View {
     private func load() async {
         isLoading = true
         defer { isLoading = false }
-        if let cats = try? await service.categories(driveId: driveId) {
-            categories = cats
-        }
+        await CategoryLibrary.shared.ensureLoaded(for: driveId)
+        categories = Array(CategoryLibrary.shared.categories(for: driveId).values)
     }
 
     private func apply() async {
