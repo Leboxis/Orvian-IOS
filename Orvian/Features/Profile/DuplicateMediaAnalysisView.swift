@@ -317,7 +317,6 @@ private final class DuplicateMediaAnalysisModel {
     }
 
     private func rebuildSimilarityGroups() {
-        let mediaByID = Dictionary(uniqueKeysWithValues: media.map { ($0.id, $0) })
         let files = media.filter { thumbnailFingerprints[$0.id] != nil }
         var assignedIDs: Set<Int> = []
         var groups: [SimilarMediaGroup] = []
