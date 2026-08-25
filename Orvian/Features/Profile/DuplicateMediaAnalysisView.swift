@@ -371,8 +371,12 @@ private func perceptualHash(for image: UIImage) -> UInt64? {
     context.interpolationQuality = .medium
     context.draw(cgImage, in: CGRect(x: 0, y: 0, width: side, height: side))
 
-    let luminances = stride(from: 0, to: pixels.count, by: 4).map {
-        Int(pixels[$0]) * 299 + Int(pixels[$0 + 1]) * 587 + Int(pixels[$0 + 2]) * 114
+    var luminances: [Int] = []
+    for offset in stride(from: 0, to: pixels.count, by: 4) {
+        let red = Int(pixels[offset])
+        let green = Int(pixels[offset + 1])
+        let blue = Int(pixels[offset + 2])
+        luminances.append(red * 299 + green * 587 + blue * 114)
     }
     let average = luminances.reduce(0, +) / luminances.count
 
@@ -422,7 +426,7 @@ private struct DuplicateMediaGroup: Identifiable {
     }
 
     var id: String {
-        "\(displayName)-\(size)"
+        "\(displayName)-\(size ?? -1)"
     }
 
     var displayName: String {
