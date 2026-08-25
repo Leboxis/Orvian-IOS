@@ -410,9 +410,9 @@ struct TagGridCard: View {
     var body: some View {
         VStack(spacing: compact ? 6 : 10) {
             Image(systemName: "tag.fill")
-                .font(.system(size: compact ? 14 : 16, weight: .semibold))
+                .font(.system(size: compact ? 12 : 16, weight: .semibold))
                 .foregroundStyle(.white)
-                .frame(width: compact ? 30 : 36, height: compact ? 30 : 36)
+                .frame(width: compact ? 26 : 36, height: compact ? 26 : 36)
                 .background(tint, in: RoundedRectangle(cornerRadius: compact ? 8 : 10, style: .continuous))
 
             VStack(spacing: 2) {
@@ -428,8 +428,7 @@ struct TagGridCard: View {
                 }
             }
         }
-        // Puce : le fond épouse le contenu au lieu d'occuper toute la colonne.
-        .frame(maxWidth: compact ? nil : .infinity)
+        .frame(maxWidth: .infinity)
         .padding(compact ? 8 : 12)
         .background(Color(uiColor: .secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: compact ? 12 : 16, style: .continuous))
         .overlay {

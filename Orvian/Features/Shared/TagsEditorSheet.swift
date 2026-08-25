@@ -50,7 +50,7 @@ struct TagsEditorSheet: View {
                     }
                 } else {
                     ScrollView {
-                        UniformWidthGrid(columns: max(2, tagGridColumns), spacing: DS.gridSpacing) {
+                        LazyVGrid(columns: editorColumns, spacing: DS.gridSpacing) {
                             ForEach(orderedCategories) { category in
                                 tagCell(category)
                             }
@@ -85,6 +85,11 @@ struct TagsEditorSheet: View {
             }
         }
         .task { await load() }
+    }
+
+    /// Grille resserrée : cartes compactes et colonnes du réglage partagé.
+    private var editorColumns: [GridItem] {
+        Array(repeating: GridItem(.flexible(), spacing: DS.gridSpacing), count: max(2, tagGridColumns))
     }
 
     /// Même carte que la grille dédiée, enrichie d'une coche de sélection.
@@ -182,57 +187,5 @@ struct TagsEditorSheet: View {
             }
             errorMessage = "Impossible de modifier le tag : \((error as? APIError)?.errorDescription ?? error.localizedDescription)"
         }
-    }
-}
-
-/// Grille où toutes les cellules adoptent la largeur de la plus large
-/// (le nom de tag le plus long), réparties sur `columns` par ligne et
-/// centrées horizontalement quand elles occupent moins que la largeur.
-/// Si le nom le plus long ne tient pas, la place disponible est simplement
-/// répartie et le texte passe en tronqué.
-private struct UniformWidthGrid: Layout {
-    let columns: Int
-    let spacing: CGFloat
-
-    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
-        guard !subviews.isEmpty else { return .zero }
-        let sizes = idealSizes(subviews)
-        let width = itemWidth(sizes: sizes, available: proposal.width ?? 0)
-        let height = sizes.map(\.height).max() ?? 0
-        let rows = Int((CGFloat(subviews.count) / CGFloat(columns)).rounded(.up))
-        return CGSize(
-            width: width * CGFloat(columns) + spacing * CGFloat(columns - 1),
-            height: height * CGFloat(rows) + spacing * CGFloat(rows - 1)
-        )
-    }
-
-    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
-        guard !subviews.isEmpty else { return }
-        let sizes = idealSizes(subviews)
-        let width = itemWidth(sizes: sizes, available: bounds.width)
-        let height = sizes.map(\.height).max() ?? 0
-        let total = width * CGFloat(columns) + spacing * CGFloat(columns - 1)
-        let originX = bounds.minX + max(0, (bounds.width - total) / 2)
-        for (index, view) in subviews.enumerated() {
-            view.place(
-                at: CGPoint(
-                    x: originX + CGFloat(index % columns) * (width + spacing),
-                    y: bounds.minY + CGFloat(index / columns) * (height + spacing)
-                ),
-                anchor: .topLeading,
-                proposal: ProposedViewSize(width: width, height: nil)
-            )
-        }
-    }
-
-    private func idealSizes(_ subviews: Subviews) -> [CGSize] {
-        subviews.map { $0.sizeThatFits(.unspecified) }
-    }
-
-    private func itemWidth(sizes: [CGSize], available: CGFloat) -> CGFloat {
-        let widest = sizes.map(\.width).max() ?? 0
-        let natural = widest * CGFloat(columns) + spacing * CGFloat(columns - 1)
-        guard available > 0, natural > available else { return widest }
-        return max(60, (available - spacing * CGFloat(columns - 1)) / CGFloat(columns))
     }
 }
