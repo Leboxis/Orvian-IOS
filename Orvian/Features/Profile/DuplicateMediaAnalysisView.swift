@@ -9,6 +9,7 @@ struct DuplicateMediaAnalysisView: View {
     let router: ViewerRouter
 
     @State private var analysis = DuplicateMediaAnalysisModel()
+    @State private var analysisTask: Task<Void, Never>?
     @State private var showsFolderPicker = false
 
     var body: some View {
@@ -25,7 +26,7 @@ struct DuplicateMediaAnalysisView: View {
 
                 if let folder = analysis.selectedFolder {
                     Button {
-                        Task { await analysis.analyze(folder: folder, driveId: driveId) }
+                        startAnalysis(in: folder)
                     } label: {
                         Label("Relancer l’analyse", systemImage: "arrow.clockwise")
                     }
@@ -41,8 +42,17 @@ struct DuplicateMediaAnalysisView: View {
                 Section("Analyse en cours") {
                     HStack(spacing: 12) {
                         ProgressView()
-                        Text("\(analysis.scannedMediaCount) média\(analysis.scannedMediaCount > 1 ? "s" : "") parcouru\(analysis.scannedMediaCount > 1 ? "s" : "")")
+                        Text(analysis.wasStopped
+                             ? "Arrêt de l’analyse…"
+                             : "\(analysis.scannedMediaCount) média\(analysis.scannedMediaCount > 1 ? "s" : "") parcouru\(analysis.scannedMediaCount > 1 ? "s" : "")")
                     }
+
+                    Button(role: .destructive) {
+                        stopAnalysis()
+                    } label: {
+                        Label("Arrêter et afficher les résultats", systemImage: "stop.circle")
+                    }
+                    .disabled(analysis.wasStopped)
                 }
             } else if let errorMessage = analysis.errorMessage {
                 Section {
@@ -53,7 +63,7 @@ struct DuplicateMediaAnalysisView: View {
                     } actions: {
                         if let folder = analysis.selectedFolder {
                             Button("Réessayer") {
-                                Task { await analysis.analyze(folder: folder, driveId: driveId) }
+                                startAnalysis(in: folder)
                             }
                         }
                     }
@@ -74,9 +84,25 @@ struct DuplicateMediaAnalysisView: View {
         .navigationBarTitleDisplayMode(.inline)
         .sheet(isPresented: $showsFolderPicker) {
             DuplicateMediaFolderPicker(driveId: driveId) { folder in
-                Task { await analysis.analyze(folder: folder, driveId: driveId) }
+                startAnalysis(in: folder)
             }
         }
+        .onDisappear {
+            stopAnalysis()
+        }
+    }
+
+    private func startAnalysis(in folder: DriveFile) {
+        analysisTask?.cancel()
+        analysisTask = Task {
+            await analysis.analyze(folder: folder, driveId: driveId)
+        }
+    }
+
+    private func stopAnalysis() {
+        guard analysis.isAnalyzing else { return }
+        analysis.stop()
+        analysisTask?.cancel()
     }
 
     @ViewBuilder
@@ -100,9 +126,11 @@ struct DuplicateMediaAnalysisView: View {
                     systemImage: "externaldrive"
                 )
             } header: {
-                Text("Doublons probables")
+                Text(analysis.wasStopped ? "Résultats partiels" : "Doublons probables")
             } footer: {
-                Text("Les candidats sont regroupés par nom et taille identiques. Vérifiez leur contenu avant toute suppression.")
+                Text(analysis.wasStopped
+                     ? "L’analyse a été arrêtée. Seuls les médias déjà parcourus sont listés."
+                     : "Les candidats sont regroupés par nom et taille identiques. Vérifiez leur contenu avant toute suppression.")
             }
 
             ForEach(analysis.duplicateGroups) { group in
@@ -145,7 +173,11 @@ private final class DuplicateMediaAnalysisModel {
     var scannedMediaCount = 0
     var isAnalyzing = false
     var hasFinished = false
+    var wasStopped = false
     var errorMessage: String?
+
+    private var seenIDs: Set<Int> = []
+    private var media: [DriveFile] = []
 
     var reclaimableBytes: Int {
         duplicateGroups.reduce(0) { $0 + $1.reclaimableBytes }
@@ -159,49 +191,63 @@ private final class DuplicateMediaAnalysisModel {
         scannedMediaCount = 0
         errorMessage = nil
         hasFinished = false
+        wasStopped = false
+        seenIDs = []
+        media = []
         isAnalyzing = true
         defer { isAnalyzing = false }
 
         do {
             var cursor: String?
-            var seenIDs: Set<Int> = []
-            var media: [DriveFile] = []
 
-            while true {
+            while !Task.isCancelled && !wasStopped {
                 let page = try await service.page(
                     .search(query: "", directoryId: folder.id),
                     driveId: driveId,
                     cursor: cursor
                 )
 
+                guard !Task.isCancelled, !wasStopped else { break }
+
                 for file in page.data ?? [] where (file.isImage || file.isVideo) && seenIDs.insert(file.id).inserted {
                     media.append(file)
                 }
                 scannedMediaCount = media.count
+                rebuildDuplicateGroups()
 
                 guard page.hasMore == true, let nextCursor = page.cursor else { break }
                 cursor = nextCursor
             }
 
-            let grouped = Dictionary(grouping: media.filter { $0.size != nil }) {
-                DuplicateMediaKey(file: $0)
-            }
-
-            duplicateGroups = grouped
-                .values
-                .filter { $0.count > 1 }
-                .map(DuplicateMediaGroup.init(files:))
-                .sorted {
-                    if $0.reclaimableBytes != $1.reclaimableBytes {
-                        return $0.reclaimableBytes > $1.reclaimableBytes
-                    }
-                    return $0.displayName.localizedStandardCompare($1.displayName) == .orderedAscending
-                }
-
             hasFinished = true
         } catch {
-            errorMessage = (error as? APIError)?.errorDescription ?? error.localizedDescription
+            if Task.isCancelled || wasStopped {
+                hasFinished = true
+            } else {
+                errorMessage = (error as? APIError)?.errorDescription ?? error.localizedDescription
+            }
         }
+    }
+
+    func stop() {
+        wasStopped = true
+    }
+
+    private func rebuildDuplicateGroups() {
+        let grouped = Dictionary(grouping: media.filter { $0.size != nil }) {
+            DuplicateMediaKey(file: $0)
+        }
+
+        duplicateGroups = grouped
+            .values
+            .filter { $0.count > 1 }
+            .map(DuplicateMediaGroup.init(files:))
+            .sorted {
+                if $0.reclaimableBytes != $1.reclaimableBytes {
+                    return $0.reclaimableBytes > $1.reclaimableBytes
+                }
+                return $0.displayName.localizedStandardCompare($1.displayName) == .orderedAscending
+            }
     }
 }
 
