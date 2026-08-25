@@ -135,7 +135,17 @@ struct VideoPlayerView: View {
         } message: {
             Text(errorMessage ?? "")
         }
-        .sheet(isPresented: $showTagSheet) {
+        .sheet(
+            isPresented: $showTagSheet,
+            onDismiss: {
+                guard resumePlaybackAfterTags else { return }
+                resumePlaybackAfterTags = false
+                if let player {
+                    player.playImmediately(atRate: playbackRate)
+                    isPlaying = true
+                }
+            }
+        ) {
             TagsEditorSheet(
                 driveId: driveId,
                 file: file,
@@ -151,13 +161,6 @@ struct VideoPlayerView: View {
                     )
                 }
             )
-        } onDismiss: {
-            guard resumePlaybackAfterTags else { return }
-            resumePlaybackAfterTags = false
-            if let player {
-                player.playImmediately(atRate: playbackRate)
-                isPlaying = true
-            }
         }
     }
 
