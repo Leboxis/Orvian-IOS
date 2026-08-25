@@ -1,5 +1,6 @@
 import Observation
 import SwiftUI
+import UIKit
 
 /// Écran interne d'analyse des doublons de médias d'un dossier kDrive.
 /// L'analyse est volontairement non destructive : elle ne supprime rien et
@@ -9,6 +10,7 @@ struct DuplicateMediaAnalysisView: View {
     let router: ViewerRouter
 
     @State private var analysis = DuplicateMediaAnalysisModel()
+    @State private var analysisTask: Task<Void, Never>?
     @State private var showsFolderPicker = false
 
     var body: some View {
@@ -25,7 +27,7 @@ struct DuplicateMediaAnalysisView: View {
 
                 if let folder = analysis.selectedFolder {
                     Button {
-                        Task { await analysis.analyze(folder: folder, driveId: driveId) }
+                        startAnalysis(in: folder)
                     } label: {
                         Label("Relancer l’analyse", systemImage: "arrow.clockwise")
                     }
@@ -41,8 +43,19 @@ struct DuplicateMediaAnalysisView: View {
                 Section("Analyse en cours") {
                     HStack(spacing: 12) {
                         ProgressView()
-                        Text("\(analysis.scannedMediaCount) média\(analysis.scannedMediaCount > 1 ? "s" : "") parcouru\(analysis.scannedMediaCount > 1 ? "s" : "")")
+                        Text(analysis.wasStopped
+                             ? "Arrêt de l’analyse…"
+                             : analysis.isAnalyzingThumbnails
+                                ? "\(analysis.analyzedThumbnailCount)/\(analysis.scannedMediaCount) miniature\(analysis.analyzedThumbnailCount > 1 ? "s" : "") analysée\(analysis.analyzedThumbnailCount > 1 ? "s" : "")"
+                                : "\(analysis.scannedMediaCount) média\(analysis.scannedMediaCount > 1 ? "s" : "") parcouru\(analysis.scannedMediaCount > 1 ? "s" : "")")
                     }
+
+                    Button(role: .destructive) {
+                        stopAnalysis()
+                    } label: {
+                        Label("Arrêter et afficher les résultats", systemImage: "stop.circle")
+                    }
+                    .disabled(analysis.wasStopped)
                 }
             } else if let errorMessage = analysis.errorMessage {
                 Section {
@@ -53,7 +66,7 @@ struct DuplicateMediaAnalysisView: View {
                     } actions: {
                         if let folder = analysis.selectedFolder {
                             Button("Réessayer") {
-                                Task { await analysis.analyze(folder: folder, driveId: driveId) }
+                                startAnalysis(in: folder)
                             }
                         }
                     }
@@ -74,63 +87,118 @@ struct DuplicateMediaAnalysisView: View {
         .navigationBarTitleDisplayMode(.inline)
         .sheet(isPresented: $showsFolderPicker) {
             DuplicateMediaFolderPicker(driveId: driveId) { folder in
-                Task { await analysis.analyze(folder: folder, driveId: driveId) }
+                startAnalysis(in: folder)
+            }
+        }
+        .onDisappear {
+            stopAnalysis()
+        }
+    }
+
+    private func startAnalysis(in folder: DriveFile) {
+        analysisTask?.cancel()
+        analysisTask = Task {
+            await analysis.analyze(folder: folder, driveId: driveId)
+        }
+    }
+
+    private func stopAnalysis() {
+        guard analysis.isAnalyzing else { return }
+        analysis.stop()
+        analysisTask?.cancel()
+    }
+
+    @ViewBuilder
+    private var resultsSection: some View {
+        if analysis.duplicateGroups.isEmpty && analysis.similarityGroups.isEmpty {
+            Section {
+                ContentUnavailableView {
+                    Label("Aucun doublon probable", systemImage: "checkmark.circle")
+                } description: {
+                    Text("Aucun média identique ou visuellement similaire n’a été trouvé dans ce dossier.")
+                }
+            }
+        } else {
+            if !analysis.duplicateGroups.isEmpty {
+                Section {
+                    Label(
+                        "\(analysis.duplicateGroups.count) groupe\(analysis.duplicateGroups.count > 1 ? "s" : "") trouvé\(analysis.duplicateGroups.count > 1 ? "s" : "")",
+                        systemImage: "doc.on.doc"
+                    )
+                    Label(
+                        "\(ByteFormatter.string(fromBytes: analysis.reclaimableBytes)) potentiellement libérables",
+                        systemImage: "externaldrive"
+                    )
+                } header: {
+                    Text(analysis.wasStopped ? "Doublons exacts — résultats partiels" : "Doublons exacts")
+                } footer: {
+                    Text("Les candidats sont regroupés par nom et taille identiques. Vérifiez leur contenu avant toute suppression.")
+                }
+
+                ForEach(analysis.duplicateGroups) { group in
+                    mediaGroupSection(group.files, title: "\(group.displayName) · \(ByteFormatter.string(fromBytes: group.size))")
+                }
+            }
+
+            if !analysis.similarityGroups.isEmpty {
+                Section {
+                    Label(
+                        "\(analysis.similarityGroups.count) groupe\(analysis.similarityGroups.count > 1 ? "s" : "") trouvé\(analysis.similarityGroups.count > 1 ? "s" : "")",
+                        systemImage: "photo.on.rectangle.angled"
+                    )
+                } header: {
+                    Text(analysis.wasStopped ? "Miniatures similaires — résultats partiels" : "Miniatures similaires (≥ 70 %)")
+                } footer: {
+                    Text("La similarité est calculée à partir de l’empreinte visuelle des miniatures ; elle n’atteste pas que les fichiers sont identiques.")
+                }
+
+                ForEach(analysis.similarityGroups) { group in
+                    Section {
+                        ForEach(group.matches) { match in
+                            Button {
+                                router.open(match.file, siblings: group.files)
+                            } label: {
+                                VStack(alignment: .leading, spacing: 3) {
+                                    Text(match.file.name)
+                                        .foregroundStyle(.primary)
+                                    Text("\(Int((match.similarity * 100).rounded())) % similaire · \(match.file.path ?? "Emplacement indisponible")")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                        .lineLimit(1)
+                                }
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    } header: {
+                        Text("Référence : \(group.reference.name)")
+                            .font(.footnote)
+                    }
+                }
             }
         }
     }
 
     @ViewBuilder
-    private var resultsSection: some View {
-        if analysis.duplicateGroups.isEmpty {
-            Section {
-                ContentUnavailableView {
-                    Label("Aucun doublon probable", systemImage: "checkmark.circle")
-                } description: {
-                    Text("Aucun média de même nom et de même taille n’a été trouvé dans ce dossier.")
-                }
-            }
-        } else {
-            Section {
-                Label(
-                    "\(analysis.duplicateGroups.count) groupe\(analysis.duplicateGroups.count > 1 ? "s" : "") trouvé\(analysis.duplicateGroups.count > 1 ? "s" : "")",
-                    systemImage: "doc.on.doc"
-                )
-                Label(
-                    "\(ByteFormatter.string(fromBytes: analysis.reclaimableBytes)) potentiellement libérables",
-                    systemImage: "externaldrive"
-                )
-            } header: {
-                Text("Doublons probables")
-            } footer: {
-                Text("Les candidats sont regroupés par nom et taille identiques. Vérifiez leur contenu avant toute suppression.")
-            }
-
-            ForEach(analysis.duplicateGroups) { group in
-                Section {
-                    ForEach(group.files) { file in
-                        Button {
-                            router.open(file, siblings: group.files)
-                        } label: {
-                            VStack(alignment: .leading, spacing: 3) {
-                                Text(file.name)
-                                    .foregroundStyle(.primary)
-                                Text(file.path ?? "Emplacement indisponible")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                                    .lineLimit(1)
-                            }
-                        }
-                        .buttonStyle(.plain)
+    private func mediaGroupSection(_ files: [DriveFile], title: String) -> some View {
+        Section {
+            ForEach(files) { file in
+                Button {
+                    router.open(file, siblings: files)
+                } label: {
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(file.name)
+                            .foregroundStyle(.primary)
+                        Text(file.path ?? "Emplacement indisponible")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
                     }
-                } header: {
-                    HStack {
-                        Text(group.displayName)
-                        Spacer()
-                        Text("\(group.files.count) médias · \(ByteFormatter.string(fromBytes: group.size))")
-                    }
-                    .font(.footnote)
                 }
+                .buttonStyle(.plain)
             }
+        } header: {
+            Text(title)
+                .font(.footnote)
         }
     }
 }
@@ -145,7 +213,15 @@ private final class DuplicateMediaAnalysisModel {
     var scannedMediaCount = 0
     var isAnalyzing = false
     var hasFinished = false
+    var wasStopped = false
+    var isAnalyzingThumbnails = false
+    var analyzedThumbnailCount = 0
     var errorMessage: String?
+    var similarityGroups: [SimilarMediaGroup] = []
+
+    private var seenIDs: Set<Int> = []
+    private var media: [DriveFile] = []
+    private var thumbnailFingerprints: [Int: UInt64] = [:]
 
     var reclaimableBytes: Int {
         duplicateGroups.reduce(0) { $0 + $1.reclaimableBytes }
@@ -159,50 +235,173 @@ private final class DuplicateMediaAnalysisModel {
         scannedMediaCount = 0
         errorMessage = nil
         hasFinished = false
+        wasStopped = false
+        isAnalyzingThumbnails = false
+        analyzedThumbnailCount = 0
+        similarityGroups = []
+        seenIDs = []
+        media = []
+        thumbnailFingerprints = [:]
         isAnalyzing = true
         defer { isAnalyzing = false }
 
         do {
             var cursor: String?
-            var seenIDs: Set<Int> = []
-            var media: [DriveFile] = []
 
-            while true {
+            while !Task.isCancelled && !wasStopped {
                 let page = try await service.page(
                     .search(query: "", directoryId: folder.id),
                     driveId: driveId,
                     cursor: cursor
                 )
 
+                guard !Task.isCancelled, !wasStopped else { break }
+
                 for file in page.data ?? [] where (file.isImage || file.isVideo) && seenIDs.insert(file.id).inserted {
                     media.append(file)
                 }
                 scannedMediaCount = media.count
+                rebuildDuplicateGroups()
 
                 guard page.hasMore == true, let nextCursor = page.cursor else { break }
                 cursor = nextCursor
             }
 
-            let grouped = Dictionary(grouping: media.filter { $0.size != nil }) {
-                DuplicateMediaKey(file: $0)
-            }
+            if !Task.isCancelled && !wasStopped {
+                isAnalyzingThumbnails = true
+                for file in media {
+                    guard !Task.isCancelled, !wasStopped else { break }
 
-            duplicateGroups = grouped
-                .values
-                .filter { $0.count > 1 }
-                .map(DuplicateMediaGroup.init(files:))
-                .sorted {
-                    if $0.reclaimableBytes != $1.reclaimableBytes {
-                        return $0.reclaimableBytes > $1.reclaimableBytes
+                    if let image = await ThumbnailProvider.shared.thumbnail(
+                        driveId: driveId,
+                        fileId: file.id,
+                        pixels: 64
+                    ), let fingerprint = perceptualHash(for: image) {
+                        thumbnailFingerprints[file.id] = fingerprint
+                        rebuildSimilarityGroups()
                     }
-                    return $0.displayName.localizedStandardCompare($1.displayName) == .orderedAscending
+                    analyzedThumbnailCount += 1
                 }
+                isAnalyzingThumbnails = false
+            }
 
             hasFinished = true
         } catch {
-            errorMessage = (error as? APIError)?.errorDescription ?? error.localizedDescription
+            if Task.isCancelled || wasStopped {
+                hasFinished = true
+            } else {
+                errorMessage = (error as? APIError)?.errorDescription ?? error.localizedDescription
+            }
         }
     }
+
+    func stop() {
+        wasStopped = true
+    }
+
+    private func rebuildDuplicateGroups() {
+        let grouped = Dictionary(grouping: media.filter { $0.size != nil }) {
+            DuplicateMediaKey(file: $0)
+        }
+
+        duplicateGroups = grouped
+            .values
+            .filter { $0.count > 1 }
+            .map(DuplicateMediaGroup.init(files:))
+            .sorted {
+                if $0.reclaimableBytes != $1.reclaimableBytes {
+                    return $0.reclaimableBytes > $1.reclaimableBytes
+                }
+                return $0.displayName.localizedStandardCompare($1.displayName) == .orderedAscending
+            }
+    }
+
+    private func rebuildSimilarityGroups() {
+        let files = media.filter { thumbnailFingerprints[$0.id] != nil }
+        var assignedIDs: Set<Int> = []
+        var groups: [SimilarMediaGroup] = []
+
+        for reference in files where !assignedIDs.contains(reference.id) {
+            guard let referenceHash = thumbnailFingerprints[reference.id] else { continue }
+            let matches = files.compactMap { candidate -> SimilarMediaMatch? in
+                guard candidate.id != reference.id,
+                      !assignedIDs.contains(candidate.id),
+                      DuplicateMediaKey(file: candidate) != DuplicateMediaKey(file: reference),
+                      let candidateHash = thumbnailFingerprints[candidate.id] else {
+                    return nil
+                }
+
+                let similarity = thumbnailSimilarity(referenceHash, candidateHash)
+                return similarity >= 0.7
+                    ? SimilarMediaMatch(file: candidate, similarity: similarity)
+                    : nil
+            }
+
+            guard !matches.isEmpty else { continue }
+            assignedIDs.insert(reference.id)
+            assignedIDs.formUnion(matches.map(\.file.id))
+            groups.append(SimilarMediaGroup(reference: reference, matches: matches))
+        }
+
+        similarityGroups = groups.sorted {
+            $0.reference.name.localizedStandardCompare($1.reference.name) == .orderedAscending
+        }
+    }
+}
+
+
+/// Empreinte de 64 bits d’une miniature ramenée à 8 × 8 pixels en niveaux de gris.
+/// Elle permet une comparaison légère sans télécharger le média original.
+private func perceptualHash(for image: UIImage) -> UInt64? {
+    let side = 8
+    var pixels = [UInt8](repeating: 0, count: side * side * 4)
+    guard let cgImage = image.cgImage,
+          let context = CGContext(
+            data: &pixels,
+            width: side,
+            height: side,
+            bitsPerComponent: 8,
+            bytesPerRow: side * 4,
+            space: CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+          ) else {
+        return nil
+    }
+
+    context.interpolationQuality = .medium
+    context.draw(cgImage, in: CGRect(x: 0, y: 0, width: side, height: side))
+
+    var luminances: [Int] = []
+    for offset in stride(from: 0, to: pixels.count, by: 4) {
+        let red = Int(pixels[offset])
+        let green = Int(pixels[offset + 1])
+        let blue = Int(pixels[offset + 2])
+        luminances.append(red * 299 + green * 587 + blue * 114)
+    }
+    let average = luminances.reduce(0, +) / luminances.count
+
+    return luminances.enumerated().reduce(UInt64(0)) { hash, item in
+        item.element >= average ? hash | (UInt64(1) << UInt64(item.offset)) : hash
+    }
+}
+
+private func thumbnailSimilarity(_ lhs: UInt64, _ rhs: UInt64) -> Double {
+    1 - Double((lhs ^ rhs).nonzeroBitCount) / 64
+}
+
+private struct SimilarMediaMatch: Identifiable {
+    let file: DriveFile
+    let similarity: Double
+
+    var id: Int { file.id }
+}
+
+private struct SimilarMediaGroup: Identifiable {
+    let reference: DriveFile
+    let matches: [SimilarMediaMatch]
+
+    var id: Int { reference.id }
+    var files: [DriveFile] { [reference] + matches.map(\.file) }
 }
 
 private struct DuplicateMediaKey: Hashable {
@@ -227,7 +426,7 @@ private struct DuplicateMediaGroup: Identifiable {
     }
 
     var id: String {
-        "\(displayName)-\(size)"
+        "\(displayName)-\(size ?? -1)"
     }
 
     var displayName: String {
