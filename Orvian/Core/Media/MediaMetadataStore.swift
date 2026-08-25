@@ -14,6 +14,8 @@ import Foundation
 /// modification du fichier changent (nouvelle version d'une vidéo).
 @MainActor
 final class MediaMetadataStore: ObservableObject {
+    static let shared = MediaMetadataStore()
+
     struct Info: Codable {
         let duration: Double
         let orientation: FileFilters.Orientation
@@ -59,7 +61,7 @@ final class MediaMetadataStore: ObservableObject {
 
     // MARK: - Persistance
 
-    private static func persistenceURL() -> URL {
+    nonisolated private static func persistenceURL() -> URL {
         FileManager.default
             .urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("Orvian", isDirectory: true)
