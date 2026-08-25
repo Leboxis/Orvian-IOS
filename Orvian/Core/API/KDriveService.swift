@@ -89,8 +89,15 @@ struct KDriveService {
         driveId: Int,
         cursor: String?,
         orderBy: [String]? = nil,
-        order: String = "asc"
+        order: String = "asc",
+        forceNetwork: Bool = false
     ) async throws -> CursorPage<DriveFile> {
+        // `forceNetwork` : pull-to-refresh, changement de tri et rafraîchissements
+        // post-mutation exigent l'état courant du serveur. Sinon, la réponse
+        // peut être revalidée par le cache HTTP (ETag → 304 sans re-téléchargement).
+        let cachePolicy: URLRequest.CachePolicy = forceNetwork
+            ? .reloadIgnoringLocalCacheData
+            : .useProtocolCachePolicy
         let endpoint: Endpoint
         switch source {
         case let .directory(directoryId):
@@ -120,7 +127,8 @@ struct KDriveService {
                         requested: orderBy,
                         order: order,
                         allowed: ["last_modified_at"]
-                    )
+                    ),
+                    cachePolicy: cachePolicy
                 )
             } catch {
                 // 2) Fallback /files/recents
@@ -133,7 +141,8 @@ struct KDriveService {
                             order: order,
                             allowed: ["updated_at"],
                             aliases: ["last_modified_at": "updated_at"]
-                        )
+                        ),
+                        cachePolicy: cachePolicy
                     )
                 } catch {
                     // 3) Fallback /files/activities
@@ -146,7 +155,8 @@ struct KDriveService {
                                 order: order,
                                 allowed: ["created_at"],
                                 aliases: ["last_modified_at": "created_at"]
-                            )
+                            ),
+                            cachePolicy: cachePolicy
                         )
                         var seen: Set<Int> = []
                         let files = (activityPage.data ?? [])
@@ -194,7 +204,7 @@ struct KDriveService {
                 allowed: ["last_modified_at"]
             )
         }
-        return try await api.get(CursorPage<DriveFile>.self, endpoint)
+        return try await api.get(CursorPage<DriveFile>.self, endpoint, cachePolicy: cachePolicy)
     }
 
     /// Chaque endpoint kDrive possède sa propre liste de valeurs `order_by`.
@@ -293,7 +303,9 @@ struct KDriveService {
         let endpoint: Endpoint = isTrashed
             ? .trashedThumbnail(driveId: driveId, fileId: fileId, pixels: pixels)
             : .thumbnail(driveId: driveId, fileId: fileId, pixels: pixels)
-        return try await api.data(endpoint)
+        // Les miniatures disposent de leur propre cache disque : inutile de
+        // dupliquer leurs octets dans le cache HTTP partagé.
+        return try await api.data(endpoint, cachePolicy: .reloadIgnoringLocalCacheData)
     }
 
     // MARK: - Création & upload

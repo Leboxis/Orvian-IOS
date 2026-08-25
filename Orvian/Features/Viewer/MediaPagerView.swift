@@ -40,6 +40,7 @@ struct MediaPagerView: View {
                         file: file,
                         driveId: context.driveId,
                         isActive: selectedFileID == file.id,
+                        hiresRequested: hiresPreloadIDs.contains(file.id),
                         onImageZoomChanged: { isZoomed in
                             setImageZoomed(isZoomed, fileID: file.id)
                         }
@@ -141,6 +142,21 @@ struct MediaPagerView: View {
         files.first { $0.id == selectedFileID }
     }
 
+    /// Pages dont la haute résolution doit être chargée : la page courante et
+    /// la suivante (préchargement N+1). Les autres pages ne déclenchent aucun
+    /// téléchargement : ouvrir un album de centaines de médias ne lance plus
+    /// qu'un ou deux téléchargements pleine résolution au lieu de tous.
+    private var hiresPreloadIDs: Set<Int> {
+        guard let selectedIndex = files.firstIndex(where: { $0.id == selectedFileID }) else {
+            return []
+        }
+        var ids = [files[selectedIndex].id]
+        if selectedIndex + 1 < files.count {
+            ids.append(files[selectedIndex + 1].id)
+        }
+        return Set(ids)
+    }
+
     private var canDismissCurrentImage: Bool {
         currentFile?.isImage == true && !zoomedImageIDs.contains(selectedFileID)
     }
@@ -234,13 +250,16 @@ struct MediaPagerView: View {
     }
 }
 
-/// Une page du pager : image (miniature → haute résolution, zoom, fermeture au
-/// swipe vertical) ou vidéo (lecteur personnalisé qui ne lit que lorsqu'elle
-/// est l'élément courant du pager).
+/// Une page du pager : image (miniature instantanée → haute résolution gated
+/// N+1, zoom, fermeture au swipe vertical) ou vidéo (lecteur personnalisé qui
+/// ne lit que lorsqu'elle est l'élément courant du pager).
 private struct MediaPagerPage: View {
     let file: DriveFile
     let driveId: Int
     let isActive: Bool
+    /// Vrai pour la page courante ou la suivante : seule condition de
+    /// téléchargement de l'image pleine résolution.
+    let hiresRequested: Bool
     let onImageZoomChanged: (Bool) -> Void
 
     var body: some View {
@@ -249,6 +268,7 @@ private struct MediaPagerPage: View {
                 ZoomablePhotoPage(
                     file: file,
                     driveId: driveId,
+                    hiresRequested: hiresRequested,
                     onZoomChanged: onImageZoomChanged
                 )
             } else if file.isVideo {
@@ -272,11 +292,15 @@ private struct MediaPagerPage: View {
     }
 }
 
-/// Une page photo : miniature instantanée → bascule haute résolution,
-/// pinch zoom, double-tap, pan, swipe vertical pour fermer.
+/// Une page photo : miniature instantanée → bascule haute résolution gated
+/// (page courante ou suivante uniquement), pinch zoom, double-tap, pan,
+/// swipe vertical pour fermer.
 private struct ZoomablePhotoPage: View {
     let file: DriveFile
     let driveId: Int
+    /// Vrai dès que la page est courante ou devenue la page suivante : lance
+    /// (ou relance après annulation) le téléchargement pleine résolution.
+    let hiresRequested: Bool
     let onZoomChanged: (Bool) -> Void
 
     @State private var hires: UIImage?
@@ -298,7 +322,11 @@ private struct ZoomablePhotoPage: View {
             .gesture(magnifyGesture(in: proxy.size))
         }
         .task(id: file.id) {
-            await loadImages()
+            await loadThumbnail()
+        }
+        .task(id: hiresRequested) {
+            guard hiresRequested else { return }
+            await loadHiresWithRetry()
         }
         .onAppear {
             onZoomChanged(isZoomed)
@@ -435,22 +463,39 @@ private struct ZoomablePhotoPage: View {
 
     // MARK: - Chargement
 
-    /// Miniature (placeholder instantané) et haute résolution téléchargées en
-    /// parallèle : la pleine qualité démarre dès l'ouverture, sans attendre la
-    /// miniature, et s'affiche dès qu'elle est prête.
-    private func loadImages() async {
-        async let thumbnailTask = ThumbnailProvider.shared.thumbnail(
+    /// Miniature (placeholder instantané) : cache mémoire, disque ou réseau
+    /// régulé. Toujours chargée, quel que soit l'état du préchargement HD.
+    private func loadThumbnail() async {
+        guard thumbnail == nil else { return }
+        let image = await ThumbnailProvider.shared.thumbnail(
             driveId: driveId,
             fileId: file.id,
             pixels: 400
         )
-        async let hiresTask = HiresImageStore.shared.image(driveId: driveId, fileId: file.id)
-        if let thumb = await thumbnailTask, !Task.isCancelled, hires == nil {
-            thumbnail = thumb
-        }
-        if let full = await hiresTask, !Task.isCancelled {
-            withAnimation(.easeIn(duration: 0.2)) {
-                hires = full
+        guard !Task.isCancelled, thumbnail == nil else { return }
+        thumbnail = image
+    }
+
+    /// Haute résolution originale avec quelques tentatives espacées : un
+    /// échec réseau ponctuel ne laisse plus la page bloquée sur la miniature.
+    /// La bascule s'anime même si elle survient longtemps après l'ouverture,
+    /// y compris pendant un zoom déjà en cours (`display` bascule vers la
+    /// version nette dès qu'elle arrive).
+    private func loadHiresWithRetry() async {
+        guard hires == nil else { return }
+        let retryDelays: [Duration] = [.zero, .seconds(3), .seconds(8)]
+        for delay in retryDelays {
+            if delay != .zero {
+                try? await Task.sleep(for: delay)
+                guard !Task.isCancelled else { return }
+            }
+            let image = await HiresImageStore.shared.image(driveId: driveId, fileId: file.id)
+            guard !Task.isCancelled else { return }
+            if let image {
+                withAnimation(.easeIn(duration: 0.2)) {
+                    hires = image
+                }
+                return
             }
         }
     }

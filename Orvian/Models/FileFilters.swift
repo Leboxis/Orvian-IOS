@@ -53,7 +53,9 @@ struct FileFilters: Equatable, Hashable {
     }
 
     /// Orientation des vidéos (sélection unique et exclusive).
-    enum Orientation: String, CaseIterable, Identifiable {
+    /// `Codable` : l'orientation est persistée dans le cache disque des
+    /// métadonnées vidéo pour survivre aux relances de l'app.
+    enum Orientation: String, CaseIterable, Identifiable, Codable {
         case portrait, landscape, square
 
         var id: String { rawValue }

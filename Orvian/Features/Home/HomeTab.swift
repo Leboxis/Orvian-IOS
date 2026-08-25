@@ -549,7 +549,7 @@ struct DirectoryView: View {
         // La recherche possède sa propre vue-modèle ; rafraîchir également le
         // dossier courant évite d'y conserver une carte devenue obsolète.
         if isSearching {
-            await viewModel.reload()
+            await viewModel.reload(forceNetwork: true)
         }
 
         selectedIDs.subtract(deletedIDs)
@@ -574,9 +574,9 @@ struct DirectoryView: View {
     /// Après application des tags : recharge les cartes pour afficher les
     /// pastilles de couleur, dans le dossier courant et dans la recherche.
     private func refreshAfterTags() async {
-        await viewModel.reload()
+        await viewModel.reload(forceNetwork: true)
         if isSearching {
-            await searchViewModel?.reload()
+            await searchViewModel?.reload(forceNetwork: true)
         }
     }
 
@@ -600,7 +600,7 @@ struct DirectoryView: View {
         // La recherche possède sa propre vue-modèle ; rafraîchir également le
         // dossier courant évite d'y conserver une carte devenue obsolète.
         if isSearching {
-            await viewModel.reload()
+            await viewModel.reload(forceNetwork: true)
         }
 
         selectedIDs.subtract(movedIDs)
@@ -662,13 +662,13 @@ struct DirectoryView: View {
         .accessibilityLabel("Ajouter ou importer")
     }
 
-    /// Une seule synchronisation suffit : les requêtes API ignorent désormais
-    /// le cache HTTP local et lisent donc l'état courant du dossier.
+    /// Une seule synchronisation suffit : le rechargement force la lecture
+    /// réseau et lit donc l'état courant du dossier.
     private func refreshAfterImport(_ uploadedFiles: [DriveFile]) async {
-        await viewModel.reload()
+        await viewModel.reload(forceNetwork: true)
         viewModel.mergeUploaded(uploadedFiles)
         if isSearching {
-            await searchViewModel?.reload()
+            await searchViewModel?.reload(forceNetwork: true)
         }
     }
 

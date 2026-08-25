@@ -2,10 +2,16 @@ import UIKit
 import ImageIO
 
 /// Images haute résolution pour la visionneuse : téléchargées via l'URL
-/// temporaire publique puis sous-échantillonnées avec ImageIO pour limiter
-/// la mémoire (jamais de bitmap décompressée au-delà du besoin réel :
-/// 5120 px couvre la quasi-totalité des photos, pleine qualité 12-24 MP
-/// et qualité quasi native pour les 48 MP).
+/// temporaire publique de kDrive puis décodées par ImageIO.
+///
+/// - Le fichier est téléchargé sur disque (`URLSession.download`) puis décodé
+///   directement depuis son URL : les octets compressés ne transittent jamais
+///   par la mémoire et aucune copie intermédiaire n'est conservée.
+/// - L'image originale est décodée en pleine résolution, sans réduction :
+///   le zoom de la visionneuse reste net jusqu'au niveau natif du capteur.
+/// - Un régulateur borne la concurrence (2 téléchargements simultanés) pour
+///   ne jamais saturer le réseau ni la mémoire lorsque plusieurs pages du
+///   pager demandent leur haute résolution en même temps.
 actor HiresImageStore {
     static let shared = HiresImageStore()
 
@@ -14,9 +20,15 @@ actor HiresImageStore {
     /// est inclus pour ne jamais confondre deux drives qui partageraient le
     /// même identifiant de fichier.
     private var inFlight: [String: Task<UIImage?, Never>] = [:]
+    /// Deux images pleine résolution au plus en vol : au-delà, les demandes
+    /// patientent dans une file asynchrone sans bloquer aucun thread.
+    private let throttler = AsyncThrottler(maxConcurrent: 2)
 
     init() {
-        memory.countLimit = 12
+        // Une photo pleine résolution occupe plusieurs dizaines de Mo décodée
+        // (48 MP ≈ 195 Mo). La limite de coût globale pilote l'éviction ;
+        // `countLimit` évite seulement d'empiler des dizaines d'entrées.
+        memory.countLimit = 6
         memory.totalCostLimit = 300 * 1024 * 1024
     }
 
@@ -28,7 +40,7 @@ actor HiresImageStore {
         "\(driveId)-\(fileId)"
     }
 
-    func image(driveId: Int, fileId: Int, maxPixelSize: Int = 5120) async -> UIImage? {
+    func image(driveId: Int, fileId: Int) async -> UIImage? {
         let memoryKey = memoryKey(driveId: driveId, fileId: fileId)
         let taskKey = taskKey(driveId: driveId, fileId: fileId)
         if let cached = memory.object(forKey: memoryKey) {
@@ -43,39 +55,58 @@ actor HiresImageStore {
                   let url = await MediaURLCache.shared.url(driveId: driveId, fileId: fileId) else {
                 return nil
             }
-            guard let image = await downloadAndDownsample(url: url, maxPixelSize: maxPixelSize) else {
+            guard let image = await Self.downloadDecodeOriginal(url: url, throttler: throttler) else {
                 return nil
             }
-            memory.setObject(image, forKey: memoryKey, cost: Int(image.size.width * image.size.height * 4))
+            memory.setObject(image, forKey: memoryKey, cost: Int(image.size.width * image.size.height * image.scale * 4))
             return image
         }
         inFlight[taskKey] = task
         return await task.value
     }
 
-    private func downloadAndDownsample(url: URL, maxPixelSize: Int) async -> UIImage? {
+    /// Téléchargement vers un fichier temporaire puis décodage pleine
+    /// résolution par ImageIO. Le régulateur borne les téléchargements ; le
+    /// décodage a lieu hors du permis pour ne pas retarder le téléchargement
+    /// suivant. Le fichier source est supprimé dans tous les cas ;
+    /// l'annulation de la tâche interrompt le transfert réseau.
+    nonisolated private static func downloadDecodeOriginal(
+        url: URL,
+        throttler: AsyncThrottler
+    ) async -> UIImage? {
+        struct DownloadRejected: Error {}
         do {
-            let (data, response) = try await URLSession.shared.data(from: url)
-            guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode), !data.isEmpty else {
-                return nil
+            let fileURL: URL = try await throttler.withPermit {
+                try Task.checkCancellation()
+                let (downloadedURL, response) = try await URLSession.shared.download(from: url)
+                guard let http = response as? HTTPURLResponse,
+                      (200..<300).contains(http.statusCode)
+                else {
+                    try? FileManager.default.removeItem(at: downloadedURL)
+                    throw DownloadRejected()
+                }
+                return downloadedURL
             }
-            return Self.downsample(data: data, maxPixelSize: maxPixelSize)
+            defer { try? FileManager.default.removeItem(at: fileURL) }
+            return Self.decodeOriginal(fromFile: fileURL)
         } catch {
             return nil
         }
     }
 
-    /// ImageIO : décodage direct à la taille cible, mémoire maîtrisée.
-    nonisolated static func downsample(data: Data, maxPixelSize: Int) -> UIImage? {
+    /// Décodage complet de l'image originale depuis son fichier, à la taille
+    /// native du capteur. `kCGImageSourceCreateThumbnailFromImageAlways` avec
+    /// transformation applique l'orientation EXIF ; `ShouldCacheImmediately`
+    /// force la décompression hors du thread appelant.
+    nonisolated static func decodeOriginal(fromFile fileURL: URL) -> UIImage? {
         let sourceOptions = [kCGImageSourceShouldCache: false] as CFDictionary
-        guard let source = CGImageSourceCreateWithData(data as CFData, sourceOptions) else { return nil }
-        let thumbnailOptions = [
+        guard let source = CGImageSourceCreateWithURL(fileURL as CFURL, sourceOptions) else { return nil }
+        let options = [
             kCGImageSourceCreateThumbnailFromImageAlways: true,
             kCGImageSourceCreateThumbnailWithTransform: true,
             kCGImageSourceShouldCacheImmediately: true,
-            kCGImageSourceThumbnailMaxPixelSize: maxPixelSize,
         ] as CFDictionary
-        guard let cgImage = CGImageSourceCreateThumbnailAtIndex(source, 0, thumbnailOptions) else { return nil }
+        guard let cgImage = CGImageSourceCreateThumbnailAtIndex(source, 0, options) else { return nil }
         return UIImage(cgImage: cgImage)
     }
 }

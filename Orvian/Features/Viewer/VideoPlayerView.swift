@@ -630,10 +630,11 @@ struct VideoPlayerView: View {
 
     private func addObservers(to player: AVPlayer) {
         timeObserver = player.addPeriodicTimeObserver(
-            // Suffisamment fréquent pour une progression visuellement fluide.
-            // Les mises à jour du curseur sont toutefois suspendues quand les
-            // contrôles sont invisibles afin d'éviter des rendus inutiles.
-            forInterval: CMTime(value: 1, timescale: 30),
+            // Huit mises à jour par seconde : visuellement identiques à 30
+            // pour un curseur de progression, mais avec trois fois moins de
+            // rendus SwiftUI pendant la lecture. Les mises à jour restent
+            // suspendues quand les contrôles sont invisibles.
+            forInterval: CMTime(value: 1, timescale: 8),
             queue: .main
         ) { time in
             let itemDuration = player.currentItem?.duration.seconds ?? 0

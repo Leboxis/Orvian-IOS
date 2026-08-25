@@ -104,7 +104,7 @@ struct FileGridView: View {
             .onChange(of: filters) { oldFilters, newFilters in
                 if oldFilters.sort != newFilters.sort || oldFilters.direction != newFilters.direction {
                     sortReloadTask?.cancel()
-                    sortReloadTask = Task { await viewModel.reload(sortedBy: newFilters) }
+                    sortReloadTask = Task { await viewModel.reload(sortedBy: newFilters, forceNetwork: true) }
                 }
             }
             .onAppear {
@@ -137,16 +137,19 @@ struct FileGridView: View {
     }
 
     /// Relance la résolution des métadonnées vidéo uniquement quand il y a de
-    /// nouvelles vidéos à résoudre : la clé repose sur l'ensemble des
-    /// identifiants encore non résolus, pas sur le compteur d'éléments (qui
-    /// change à chaque page chargée et relançait inutilement le travail).
+    /// nouvelles vidéos à résoudre : la clé repose sur une empreinte additive
+    /// (comptage + somme des identifiants) calculée en un seul passage sans
+    /// allocation — plus de liste triée puis sérialisée à chaque rendu.
     private var filterTaskKey: String {
         guard needsVideoMetadata else { return "none" }
-        let pending = mediaMetadata.unresolvedVideoIDs(in: viewModel.items)
-        if pending.isEmpty {
+        let fingerprint = mediaMetadata.unresolvedVideoFingerprint(
+            in: viewModel.items,
+            driveId: viewModel.driveId
+        )
+        guard fingerprint.count > 0 else {
             return "resolved-\(viewModel.driveId)"
         }
-        return "resolve-\(pending.sorted())"
+        return "resolve-\(viewModel.driveId)-\(fingerprint.count)-\(fingerprint.checksum)"
     }
 
     @ViewBuilder
@@ -154,7 +157,8 @@ struct FileGridView: View {
         if allowsPullToRefresh {
             baseScroll
                 .refreshable {
-                    await viewModel.reload()
+                    // Geste explicite de l'utilisateur : état serveur garanti.
+                    await viewModel.reload(forceNetwork: true)
                 }
         } else {
             baseScroll
@@ -346,7 +350,11 @@ struct FileGridView: View {
     }
 
     private struct EmptyFilteredPageTaskKey: Hashable {
-        let itemIDs: [Int]
+        /// Empreinte additive du contenu (comptage + somme des ids) : égalité
+        /// en O(1) au lieu d'un tableau d'identifiants reconstruit et comparé
+        /// à chaque rendu.
+        let itemCount: Int
+        let itemChecksum: Int
         let filters: FileFilters
         let searchText: String
         let hasMore: Bool
@@ -354,8 +362,13 @@ struct FileGridView: View {
     }
 
     private var emptyFilteredPageTaskKey: EmptyFilteredPageTaskKey {
-        EmptyFilteredPageTaskKey(
-            itemIDs: viewModel.items.map(\.id),
+        var checksum = 0
+        for item in viewModel.items {
+            checksum = checksum &+ item.id
+        }
+        return EmptyFilteredPageTaskKey(
+            itemCount: viewModel.items.count,
+            itemChecksum: checksum,
             filters: filters,
             searchText: searchText,
             hasMore: viewModel.hasMore,

@@ -585,7 +585,7 @@ private struct DuplicateMediaFolderLevel: View {
                 }
             }
         }
-        .refreshable { await viewModel.reload() }
+        .refreshable { await viewModel.reload(forceNetwork: true) }
         .task { await viewModel.loadIfNeeded() }
     }
 }

@@ -48,7 +48,11 @@ final class FileGridViewModel {
     }
 
     /// Rafraîchit en conservant les anciennes cartes à l'écran.
-    func reload(sortedBy: FileFilters? = nil) async {
+    ///
+    /// `forceNetwork` (pull-to-refresh, changement de tri, rafraîchissement
+    /// post-mutation) impose une lecture réseau sans cache HTTP. Sans lui,
+    /// la revalidation ETag/304 sert la liste inchangée en quelques octets.
+    func reload(sortedBy: FileFilters? = nil, forceNetwork: Bool = false) async {
         if let sortedBy {
             // Un tri serveur (dates, type, poids) remplace l'ordre par défaut
             // ; les tris restants (durée, médias, orientation) sont locaux et
@@ -77,7 +81,8 @@ final class FileGridViewModel {
                 driveId: driveId,
                 cursor: nil,
                 orderBy: requestedOrderBy.isEmpty ? nil : requestedOrderBy,
-                order: requestedOrder
+                order: requestedOrder,
+                forceNetwork: forceNetwork
             )
             await categoriesTask
             guard !Task.isCancelled, dataGeneration == requestGeneration else { return }

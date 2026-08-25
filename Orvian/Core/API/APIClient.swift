@@ -23,15 +23,29 @@ actor APIClient {
     // MARK: - Requêtes
 
     /// Requête authentifiée renvoyant les données brutes (miniatures…).
-    func data(_ endpoint: Endpoint, method: String = "GET") async throws -> Data {
-        let (data, response, credentialFingerprint) = try await send(endpoint, method: method)
+    ///
+    /// Politique de cache par défaut (`useProtocolCachePolicy`) : les listes
+    /// et fiches peuvent être revalidées par ETag/Last-Modified (le serveur
+    /// répond 304 sans re-transférer le corps quand rien n'a changé). Les
+    /// appelants qui exigent un état strictement à jour passent
+    /// `.reloadIgnoringLocalCacheData`.
+    func data(
+        _ endpoint: Endpoint,
+        method: String = "GET",
+        cachePolicy: URLRequest.CachePolicy = .useProtocolCachePolicy
+    ) async throws -> Data {
+        let (data, response, credentialFingerprint) = try await send(endpoint, method: method, cachePolicy: cachePolicy)
         try Self.check(response: response, data: data, credentialFingerprint: credentialFingerprint)
         return data
     }
 
     /// Requête authentifiée décodée en JSON.
-    func get<T: Decodable>(_ type: T.Type = T.self, _ endpoint: Endpoint) async throws -> T {
-        let data = try await self.data(endpoint)
+    func get<T: Decodable>(
+        _ type: T.Type = T.self,
+        _ endpoint: Endpoint,
+        cachePolicy: URLRequest.CachePolicy = .useProtocolCachePolicy
+    ) async throws -> T {
+        let data = try await self.data(endpoint, cachePolicy: cachePolicy)
         do {
             return try JSONDecoder.api.decode(T.self, from: data)
         } catch {
@@ -41,14 +55,24 @@ actor APIClient {
 
     /// Requête « vide » (POST/DELETE renvoyant `{result, data}`).
     func sendEmpty(_ endpoint: Endpoint, method: String) async throws {
-        let (data, response, credentialFingerprint) = try await send(endpoint, method: method)
+        let (data, response, credentialFingerprint) = try await send(
+            endpoint,
+            method: method,
+            cachePolicy: .reloadIgnoringLocalCacheData
+        )
         try Self.check(response: response, data: data, credentialFingerprint: credentialFingerprint)
     }
 
     /// POST avec corps brut (JSON, octet-stream…). Lève une erreur si le
     /// statut HTTP n'est pas 2xx ; le contenu de la réponse est ignoré.
     func post(_ endpoint: Endpoint, body: Data, contentType: String) async throws {
-        let (data, response, credentialFingerprint) = try await send(endpoint, method: "POST", httpBody: body, contentType: contentType)
+        let (data, response, credentialFingerprint) = try await send(
+            endpoint,
+            method: "POST",
+            httpBody: body,
+            contentType: contentType,
+            cachePolicy: .reloadIgnoringLocalCacheData
+        )
         try Self.check(response: response, data: data, credentialFingerprint: credentialFingerprint)
     }
 
@@ -64,7 +88,8 @@ actor APIClient {
             endpoint,
             method: "POST",
             httpBody: body,
-            contentType: body == nil ? nil : contentType
+            contentType: body == nil ? nil : contentType,
+            cachePolicy: .reloadIgnoringLocalCacheData
         )
         try Self.check(response: response, data: data, credentialFingerprint: credentialFingerprint)
         do {
@@ -76,7 +101,13 @@ actor APIClient {
 
     /// PUT avec corps brut (JSON…). Lève une erreur si le statut HTTP n'est pas 2xx.
     func put(_ endpoint: Endpoint, body: Data, contentType: String = "application/json") async throws {
-        let (data, response, credentialFingerprint) = try await send(endpoint, method: "PUT", httpBody: body, contentType: contentType)
+        let (data, response, credentialFingerprint) = try await send(
+            endpoint,
+            method: "PUT",
+            httpBody: body,
+            contentType: contentType,
+            cachePolicy: .reloadIgnoringLocalCacheData
+        )
         try Self.check(response: response, data: data, credentialFingerprint: credentialFingerprint)
     }
 
@@ -206,9 +237,10 @@ actor APIClient {
         _ endpoint: Endpoint,
         method: String,
         httpBody: Data? = nil,
-        contentType: String? = nil
+        contentType: String? = nil,
+        cachePolicy: URLRequest.CachePolicy
     ) async throws -> (Data, URLResponse, String?) {
-        var request = try request(for: endpoint, method: method)
+        var request = try request(for: endpoint, method: method, cachePolicy: cachePolicy)
         if let httpBody {
             request.httpBody = httpBody
             request.setValue(contentType, forHTTPHeaderField: "Content-Type")
@@ -223,7 +255,11 @@ actor APIClient {
         }
     }
 
-    private func request(for endpoint: Endpoint, method: String) throws -> URLRequest {
+    private func request(
+        for endpoint: Endpoint,
+        method: String,
+        cachePolicy: URLRequest.CachePolicy = .useProtocolCachePolicy
+    ) throws -> URLRequest {
         guard var components = URLComponents(url: Self.baseURL, resolvingAgainstBaseURL: false) else {
             throw APIError.invalidURL
         }
@@ -236,9 +272,9 @@ actor APIClient {
         var request = URLRequest(url: url)
         request.httpMethod = method
         request.timeoutInterval = 30
-        // Les ressources kDrive sont dynamiques. Une actualisation doit lire
-        // l'état courant du serveur, pas une ancienne liste conservée par iOS.
-        request.cachePolicy = .reloadIgnoringLocalCacheData
+        // Les GET profitent de la revalidation HTTP (ETag → 304) ; les
+        // mutations passent explicitement `.reloadIgnoringLocalCacheData`.
+        request.cachePolicy = cachePolicy
         request.setValue("application/json", forHTTPHeaderField: "Accept")
         if let token = TokenStore.current() {
             request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
