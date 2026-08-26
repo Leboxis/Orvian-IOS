@@ -34,8 +34,8 @@ struct ScrubberBar: View {
                     .frame(maxHeight: .infinity)
                     .frame(width: width, alignment: .leading)
 
-                if isScrubbing, let preview {
-                    previewBubble(preview, safeDuration: safeDuration, trackWidth: width)
+                if isScrubbing {
+                    previewBubble(image: preview, safeDuration: safeDuration, trackWidth: width)
                         .transition(.opacity.combined(with: .scale(scale: 0.92, anchor: .bottom)))
                 }
             }
@@ -75,19 +75,27 @@ struct ScrubberBar: View {
     }
 
     /// Bulle d'aperçu : frame à la position visée + temps, au-dessus du pouce.
+    /// Affichée dès le début du geste ; si la frame n'a pas encore été
+    /// générée, un cadre réservé évite tout saut de mise en page.
     @ViewBuilder
-    private func previewBubble(_ image: UIImage, safeDuration: Double, trackWidth: CGFloat) -> some View {
+    private func previewBubble(image: UIImage?, safeDuration: Double, trackWidth: CGFloat) -> some View {
         let thumbX = clampedRatio(position, duration: safeDuration) * trackWidth
         let bubbleX = min(
             max(thumbX - bubbleWidth / 2, 6),
             max(trackWidth - bubbleWidth - 6, 6)
         )
         VStack(spacing: 6) {
-            Image(uiImage: image)
-                .resizable()
-                .scaledToFill()
-                .frame(width: bubbleWidth - 16, height: bubbleImageHeight)
-                .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+            if let image {
+                Image(uiImage: image)
+                    .resizable()
+                    .scaledToFill()
+                    .frame(width: bubbleWidth - 16, height: bubbleImageHeight)
+                    .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+            } else {
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .fill(.white.opacity(0.08))
+                    .frame(width: bubbleWidth - 16, height: bubbleImageHeight)
+            }
             Text(timeFormatter(position))
                 .font(.caption2.weight(.semibold))
                 .monospacedDigit()

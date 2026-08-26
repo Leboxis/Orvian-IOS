@@ -359,6 +359,13 @@ struct VideoPlayerView: View {
         // `.waitingToPlayAtSpecifiedRate` compte comme « en lecture » : un
         // scrub pendant une mise en mémoire tampon relance bien la vidéo.
         wasPlayingBeforeScrub = player?.timeControlStatus != .paused
+        // La bulle doit être là dès la prise du geste : réutilise la dernière
+        // frame du scrub précédent (position quasi identique) ou, à défaut,
+        // le poster — la vraie frame remplace dès que le générateur répond.
+        if previewImage == nil {
+            previewImage = poster
+        }
+        requestScrubPreview(at: scrubValue)
         isScrubbing = true
         // Le son cesse pendant le geste : la prévisualisation visuelle remplace
         // la lecture (comportement natif).
@@ -402,11 +409,9 @@ struct VideoPlayerView: View {
 
     private func endScrub(to seconds: Double) {
         isScrubbing = false
-        withAnimation(.easeOut(duration: 0.15)) {
-            previewImage = nil
-        }
         lastLiveSeekAt = .distantPast
-        // Seek final précis + reprise conditionnelle (déjà gérés par `seek`).
+        // La dernière frame est conservée : le prochain scrub affichera sa
+        // bulle instantanément au lieu d'attendre une génération.
         seek(to: seconds, precise: true)
     }
 
