@@ -48,6 +48,9 @@ struct VideoPlayerView: View {
     @State private var resumePlaybackAfterTags = false
 
     @State private var errorMessage: String?
+    /// Une préparation a définitivement échoué : l'écran de préparation
+    /// propose alors une relance au lieu d'attendre indéfiniment.
+    @State private var hasFailedSetup = false
     @State private var timeObserver: Any?
     @State private var endObserver: NSObjectProtocol?
     @State private var itemStatusObserver: NSKeyValueObservation?
@@ -275,9 +278,22 @@ struct VideoPlayerView: View {
                     .tint(.white)
                     .scaleEffect(1.3)
             }
-            Text("Préparation de la lecture…")
+            Text(hasFailedSetup ? "Lecture impossible pour le moment." : "Préparation de la lecture…")
                 .font(.footnote)
                 .foregroundStyle(.white.opacity(0.8))
+            if hasFailedSetup, !isLoadingVideo {
+                Button {
+                    playbackRetryCount = 0
+                    Task { await load() }
+                } label: {
+                    Label("Réessayer", systemImage: "arrow.clockwise")
+                        .font(.footnote.weight(.semibold))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 10)
+                        .background(.white.opacity(0.15), in: Capsule())
+                }
+            }
         }
         .padding(20)
         .background(.black.opacity(0.35), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
@@ -459,18 +475,38 @@ struct VideoPlayerView: View {
             player.pause()
             isPlaying = false
         } else {
-            // Reprise après la fin : retour au début.
-            if duration > 0, abs(currentTime - duration) < 0.5 {
-                player.seek(to: .zero)
+            // Position réelle du lecteur (l'état `currentTime` peut être
+            // périmé : sa mise à jour est suspendue contrôles masqués).
+            let position = player.currentTime().seconds
+            let atEnd = duration.isFinite && duration > 0 && position >= duration - 0.5
+            if !atEnd {
+                player.playImmediately(atRate: playbackRate)
+                isPlaying = true
+                return
             }
-            player.playImmediately(atRate: playbackRate)
-            isPlaying = true
+            // Reprise après la fin : le retour à zéro doit être effectif
+            // AVANT de (re)lancer, sinon playImmediately repart de la fin.
+            currentTime = 0
+            scrubValue = 0
+            player.seek(to: .zero) { [weak player] _ in
+                Task { @MainActor in
+                    guard let player, self.player === player, !isDisappeared else { return }
+                    player.playImmediately(atRate: playbackRate)
+                    isPlaying = true
+                }
+            }
         }
     }
 
     private func seek(to seconds: Double, precise: Bool = false) {
         guard let player else { return }
-        let tolerance: CMTime = precise ? .zero : .indefinite
+        // Tolérance volontairement non nulle même en « précis » : sur un flux
+        // réseau, une tolérance zéro force le décodage de l'image exacte et
+        // prolonge le gel après chaque scrub. Une demi-seconde reste invisible
+        // à l'œil tout en rendant la reprise quasi immédiate.
+        let tolerance: CMTime = precise
+            ? CMTime(seconds: 0.4, preferredTimescale: 600)
+            : .indefinite
         let target: Double
         if duration.isFinite, duration > 0 {
             target = min(max(seconds, 0), duration)
@@ -572,6 +608,7 @@ struct VideoPlayerView: View {
         }
         guard !isLoadingVideo else { return }
         isLoadingVideo = true
+        hasFailedSetup = false
         defer { isLoadingVideo = false }
 
         // Tâche non structurée qui s'auto-assigne dès son achèvement : le
@@ -600,6 +637,7 @@ struct VideoPlayerView: View {
               !isDisappeared,
               !Task.isCancelled
         else {
+            hasFailedSetup = true
             errorMessage = "Impossible de préparer cette vidéo. Vérifiez votre connexion puis réessayez."
             return
         }
@@ -641,6 +679,16 @@ struct VideoPlayerView: View {
         isPlaying = true
 
         itemStatusObserver = newPlayer.currentItem?.observe(\.status, options: [.new]) { item, _ in
+            // Lecture prête : le quota de tentatives repart de zéro pour
+            // absorber un futur incident (ex. URL signée expirée en cours de
+            // visionnage) au lieu d'hériter des échecs déjà récupérés.
+            if item.status == .readyToPlay {
+                Task { @MainActor in
+                    guard !isDisappeared else { return }
+                    playbackRetryCount = 0
+                    hasFailedSetup = false
+                }
+            }
             guard item.status == .failed else { return }
             Task { @MainActor in
                 await self.retryPlaybackAfterProcessingDelay(
@@ -657,6 +705,7 @@ struct VideoPlayerView: View {
         guard !isDisappeared, isActive else { return }
         guard playbackRetryCount < 2 else {
             isPlaying = false
+            hasFailedSetup = true
             errorMessage = "Lecture impossible : \(lastError)"
             return
         }
@@ -771,6 +820,10 @@ struct VideoPlayerView: View {
     private func timeText(_ seconds: Double) -> String {
         guard seconds.isFinite, seconds > 0 else { return "0:00" }
         let total = Int(seconds)
+        // Au-delà d'une heure : h:mm:ss (sinon « 75:00 » pour 1 h 15).
+        if total >= 3600 {
+            return String(format: "%d:%02d:%02d", total / 3600, (total % 3600) / 60, total % 60)
+        }
         return "\(total / 60):\(String(format: "%02d", total % 60))"
     }
 
