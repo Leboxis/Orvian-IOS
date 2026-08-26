@@ -51,6 +51,16 @@ struct VideoPlayerView: View {
     @State private var timeObserver: Any?
     @State private var endObserver: NSObjectProtocol?
     @State private var itemStatusObserver: NSKeyValueObservation?
+    /// Observation du `timeControlStatus` : source unique de vérité pour
+    /// distinguer une vraie pause d'une mise en mémoire tampon (stall).
+    @State private var timeControlStatusObserver: NSKeyValueObservation?
+    /// Vrai pendant qu'AVPlayer attend des données (image figée ≠ pause) :
+    /// l'état `isPlaying` est conservé et un indicateur s'affiche.
+    @State private var isBuffering = false
+    /// État de lecture mémorisé au début d'un scrub : le seek relance la
+    /// lecture à l'issue s'il était en cours, au lieu de laisser la vidéo en
+    /// pause après le déplacement du curseur.
+    @State private var wasPlayingBeforeScrub = false
     @State private var playbackRetryCount = 0
     @State private var isDisappeared = false
     @State private var isExternalPlaybackActive = false
@@ -229,6 +239,13 @@ struct VideoPlayerView: View {
         ZStack {
             if let player {
                 PlayerLayerView(player: player)
+                // Image figée pendant que le tampon se remplit : l'indicateur
+                // distingue cette attente d'une vraie pause.
+                if isBuffering {
+                    ProgressView()
+                        .tint(.white)
+                        .scaleEffect(1.4)
+                }
             } else if let poster {
                 Image(uiImage: poster)
                     .resizable()
@@ -284,6 +301,10 @@ struct VideoPlayerView: View {
                     // une file de seeks asynchrones, source de saccades.
                     cancelPendingSeek()
                     scrubValue = playerTime ?? currentTime
+                    // `.waitingToPlayAtSpecifiedRate` compte comme « en
+                    // lecture » : un scrub pendant une mise en mémoire tampon
+                    // relance bien la vidéo au relâchement.
+                    wasPlayingBeforeScrub = player?.timeControlStatus != .paused
                     isScrubbing = true
                 } else {
                     isScrubbing = false
@@ -484,6 +505,19 @@ struct VideoPlayerView: View {
                 }
                 isSeeking = false
                 scheduleControlsAutoHide(delay: 2.5)
+
+                // Reprise après un scrub : la lecture ne repart que si elle
+                // était active avant le geste, et pas lorsque le curseur a
+                // été relâché sur les dernières frames (la fin déclenchera
+                // l'observateur de fin).
+                let wasPlaying = wasPlayingBeforeScrub
+                wasPlayingBeforeScrub = false
+                let nearEnd = duration.isFinite && duration > 0 && target >= duration - 0.5
+                if finished, wasPlaying, !nearEnd,
+                   player.timeControlStatus != .playing {
+                    player.playImmediately(atRate: playbackRate)
+                    isPlaying = true
+                }
             }
         }
     }
@@ -546,7 +580,15 @@ struct VideoPlayerView: View {
         // sur une page gardée en mémoire).
         if poster == nil {
             Task {
-                let image = await ThumbnailProvider.shared.thumbnail(driveId: driveId, fileId: file.id, pixels: 400)
+                // Même bucket que les cartes de la grille (`DS.thumbnailPixels`)
+                // : le poster réutilise la miniature déjà en cache mémoire au
+                // lieu d'une requête réseau distincte qui ferait la file
+                // derrière les autres téléchargements.
+                let image = await ThumbnailProvider.shared.thumbnail(
+                    driveId: driveId,
+                    fileId: file.id,
+                    pixels: DS.thumbnailPixels
+                )
                 guard !isDisappeared, poster == nil else { return }
                 poster = image
             }
@@ -568,10 +610,17 @@ struct VideoPlayerView: View {
     private func startPlayback(asset: AVURLAsset) {
         cancelPendingSeek()
         isScrubbing = false
-        let newPlayer = AVPlayer(playerItem: AVPlayerItem(asset: asset))
+        wasPlayingBeforeScrub = false
+        let newItem = AVPlayerItem(asset: asset)
+        // Garde ~30 s de vidéo en réserve : sans cette consigne, le tampon
+        // aval par défaut se limite à quelques secondes et toute baisse de
+        // débit provoque un gel (« 1 s puis stop ») au redémarrage suivant.
+        newItem.preferredForwardBufferDuration = 30
+        let newPlayer = AVPlayer(playerItem: newItem)
         // Démarrage immédiat dès les premières frames disponibles : avec
         // playImmediately, attendre le buffer « sûr » ajoute jusqu'à ~2 s
-        // avant la première image. Le poster masque une éventuelle micro-saccade.
+        // avant la première image. Le poster masque une éventuelle micro-saccade,
+        // et la réserve aval ci-dessus absorbe les creux de débit ensuite.
         newPlayer.automaticallyWaitsToMinimizeStalling = false
         newPlayer.isMuted = isMuted
         newPlayer.defaultRate = playbackRate
@@ -645,10 +694,11 @@ struct VideoPlayerView: View {
             if !isScrubbing, !isSeeking, showControls, time.seconds.isFinite {
                 currentTime = time.seconds
             }
-            let playing = player.timeControlStatus == .playing
-            if isPlaying != playing {
-                isPlaying = playing
-            }
+            // `isPlaying` n'est PAS déduit ici : `.waitingToPlayAtSpecifiedRate`
+            // (mise en mémoire tampon) n'est pas une pause, et traiter ce cas
+            // comme un arrêt faisait repasser le bouton en « Play » puis
+            // rejouait l'unique seconde bufferisée à chaque tap — boucle de
+            // gel. Le KVO ci-dessous fait foi.
             let externalPlaybackActive = player.isExternalPlaybackActive
             if isExternalPlaybackActive != externalPlaybackActive {
                 isExternalPlaybackActive = externalPlaybackActive
@@ -661,13 +711,38 @@ struct VideoPlayerView: View {
         ) { _ in
             isPlaying = false
         }
+        // Source unique de vérité lecture/pause/buffering : `.waiting` garde
+        // `isPlaying` tel quel et affiche l'indicateur au lieu de simuler
+        // une pause. Pas d'option `.initial` : l'état de départ est posé par
+        // `startPlayback`, et une tâche retardée ne doit jamais l'écraser.
+        timeControlStatusObserver = player.observe(\.timeControlStatus, options: [.new]) { observedPlayer, _ in
+            Task { @MainActor in
+                guard self.player === observedPlayer, !isDisappeared else { return }
+                switch observedPlayer.timeControlStatus {
+                case .playing:
+                    isBuffering = false
+                    isPlaying = true
+                case .waitingToPlayAtSpecifiedRate:
+                    isBuffering = true
+                case .paused:
+                    isBuffering = false
+                    isPlaying = false
+                @unknown default:
+                    break
+                }
+            }
+        }
     }
 
     private func teardown() {
         cancelPendingSeek()
         isScrubbing = false
+        wasPlayingBeforeScrub = false
         itemStatusObserver?.invalidate()
         itemStatusObserver = nil
+        timeControlStatusObserver?.invalidate()
+        timeControlStatusObserver = nil
+        isBuffering = false
         if let timeObserver, let player {
             player.removeTimeObserver(timeObserver)
         }
