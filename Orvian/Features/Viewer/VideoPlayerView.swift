@@ -66,8 +66,6 @@ struct VideoPlayerView: View {
     @State private var wasPlayingBeforeScrub = false
     /// Fin de la plage bufferisée (pour la zone grisée du scrubber).
     @State private var bufferedEnd: Double = 0
-    /// Frame d'aperçu au-dessus du pouce pendant le glissement.
-    @State private var previewImage: UIImage?
     /// Anti-débounce des seeks « live » pendant le drag : la vidéo suit le
     /// doigt via des seeks grossiers, au plus un toutes les 100 ms.
     @State private var lastLiveSeekAt = Date.distantPast
@@ -325,7 +323,6 @@ struct VideoPlayerView: View {
                 duration: duration,
                 bufferedEnd: bufferedEnd,
                 isScrubbing: isScrubbing,
-                preview: previewImage,
                 timeFormatter: { timeText($0) },
                 onDragStarted: beginScrub,
                 onDragChanged: updateScrub(to:),
@@ -359,23 +356,15 @@ struct VideoPlayerView: View {
         // `.waitingToPlayAtSpecifiedRate` compte comme « en lecture » : un
         // scrub pendant une mise en mémoire tampon relance bien la vidéo.
         wasPlayingBeforeScrub = player?.timeControlStatus != .paused
-        // La bulle doit être là dès la prise du geste : réutilise la dernière
-        // frame du scrub précédent (position quasi identique) ou, à défaut,
-        // le poster — la vraie frame remplace dès que le générateur répond.
-        if previewImage == nil {
-            previewImage = poster
-        }
-        requestScrubPreview(at: scrubValue)
         isScrubbing = true
-        // Le son cesse pendant le geste : la prévisualisation visuelle remplace
-        // la lecture (comportement natif).
+        // Le son cesse pendant le geste : le suivi visuel sous le doigt
+        // remplace la lecture (comportement natif).
         player?.pause()
     }
 
     private func updateScrub(to seconds: Double) {
         scrubValue = max(0, seconds)
         scheduleLiveScrubSeek(to: seconds)
-        requestScrubPreview(at: seconds)
     }
 
     /// Seek grossier throttlé : tolérance 1,5 s → AVPlayer saute au keyframe
@@ -394,24 +383,10 @@ struct VideoPlayerView: View {
         )
     }
 
-    private func requestScrubPreview(at seconds: Double) {
-        guard let asset = player?.currentItem?.asset else { return }
-        ScrubPreviewGenerator.shared.requestPreview(
-            driveId: driveId,
-            fileId: file.id,
-            asset: asset,
-            at: seconds
-        ) { image in
-            guard isScrubbing, !Task.isCancelled else { return }
-            previewImage = image
-        }
-    }
-
     private func endScrub(to seconds: Double) {
         isScrubbing = false
         lastLiveSeekAt = .distantPast
-        // La dernière frame est conservée : le prochain scrub affichera sa
-        // bulle instantanément au lieu d'attendre une génération.
+        // Seek final précis + reprise conditionnelle (déjà gérés par `seek`).
         seek(to: seconds, precise: true)
     }
 
@@ -870,9 +845,7 @@ struct VideoPlayerView: View {
         isScrubbing = false
         wasPlayingBeforeScrub = false
         bufferedEnd = 0
-        previewImage = nil
         lastLiveSeekAt = .distantPast
-        ScrubPreviewGenerator.shared.reset()
         itemStatusObserver?.invalidate()
         itemStatusObserver = nil
         timeControlStatusObserver?.invalidate()

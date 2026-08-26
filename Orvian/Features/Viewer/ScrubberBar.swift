@@ -1,12 +1,11 @@
 import SwiftUI
 
 /// Barre de progression vidéo façon système : piste épaissie pendant le
-/// geste, plage tampon grisée, pouce agrandi et aperçu miniature flottant
-/// au-dessus de la position visée.
+/// geste, plage tampon grisée et pouce agrandi.
 ///
 /// Remplace le `Slider` SwiftUI, trop rigide pour ces états : le parent
 /// reçoit trois rappels (début / déplacement / fin) et reste maître des
-/// seeks, du son et de l'aperçu.
+/// seeks et du son.
 struct ScrubberBar: View {
     /// Position affichée (temps de lecture ou position du doigt).
     let position: Double
@@ -14,7 +13,6 @@ struct ScrubberBar: View {
     /// Fin de la plage bufferisée (secondes depuis le début).
     let bufferedEnd: Double
     let isScrubbing: Bool
-    let preview: UIImage?
     let timeFormatter: (Double) -> String
     let onDragStarted: () -> Void
     let onDragChanged: (Double) -> Void
@@ -22,26 +20,15 @@ struct ScrubberBar: View {
 
     @State private var isGestureActive = false
 
-    private let bubbleWidth: CGFloat = 150
-    private let bubbleImageHeight: CGFloat = 84
-
     var body: some View {
         GeometryReader { geo in
             let width = geo.size.width
             let safeDuration = duration.isFinite && duration > 0 ? duration : 0
-            ZStack(alignment: .topLeading) {
-                track(width: width)
-                    .frame(maxHeight: .infinity)
-                    .frame(width: width, alignment: .leading)
-
-                if isScrubbing {
-                    previewBubble(image: preview, safeDuration: safeDuration, trackWidth: width)
-                        .transition(.opacity.combined(with: .scale(scale: 0.92, anchor: .bottom)))
-                }
-            }
-            .frame(width: width, height: geo.size.height, alignment: .topLeading)
-            .contentShape(Rectangle())
-            .gesture(dragGesture(width: width, duration: safeDuration))
+            track(width: width)
+                .frame(maxHeight: .infinity)
+                .frame(width: width, alignment: .leading)
+                .contentShape(Rectangle())
+                .gesture(dragGesture(width: width, duration: safeDuration))
         }
         .frame(height: 46)
         .animation(.snappy(duration: 0.18), value: isScrubbing)
@@ -72,43 +59,6 @@ struct ScrubberBar: View {
                 .offset(x: min(max(width * positionRatio - thumbSize / 2, 0), max(width - thumbSize, 0)))
         }
         .frame(width: width, alignment: .leading)
-    }
-
-    /// Bulle d'aperçu : frame à la position visée + temps, au-dessus du pouce.
-    /// Affichée dès le début du geste ; si la frame n'a pas encore été
-    /// générée, un cadre réservé évite tout saut de mise en page.
-    @ViewBuilder
-    private func previewBubble(image: UIImage?, safeDuration: Double, trackWidth: CGFloat) -> some View {
-        let thumbX = clampedRatio(position, duration: safeDuration) * trackWidth
-        let bubbleX = min(
-            max(thumbX - bubbleWidth / 2, 6),
-            max(trackWidth - bubbleWidth - 6, 6)
-        )
-        VStack(spacing: 6) {
-            if let image {
-                Image(uiImage: image)
-                    .resizable()
-                    .scaledToFill()
-                    .frame(width: bubbleWidth - 16, height: bubbleImageHeight)
-                    .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-            } else {
-                RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .fill(.white.opacity(0.08))
-                    .frame(width: bubbleWidth - 16, height: bubbleImageHeight)
-            }
-            Text(timeFormatter(position))
-                .font(.caption2.weight(.semibold))
-                .monospacedDigit()
-                .foregroundStyle(.white)
-                .padding(.horizontal, 9)
-                .padding(.vertical, 3)
-                .background(Capsule().fill(.black.opacity(0.55)))
-        }
-        .padding(7)
-        .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(.ultraThinMaterial))
-        .shadow(color: .black.opacity(0.3), radius: 6, y: 3)
-        .frame(width: bubbleWidth, alignment: .center)
-        .offset(x: bubbleX, y: -(bubbleImageHeight + 62))
     }
 
     // MARK: - Geste
