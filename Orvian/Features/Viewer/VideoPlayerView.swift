@@ -64,6 +64,13 @@ struct VideoPlayerView: View {
     /// lecture à l'issue s'il était en cours, au lieu de laisser la vidéo en
     /// pause après le déplacement du curseur.
     @State private var wasPlayingBeforeScrub = false
+    /// Fin de la plage bufferisée (pour la zone grisée du scrubber).
+    @State private var bufferedEnd: Double = 0
+    /// Frame d'aperçu au-dessus du pouce pendant le glissement.
+    @State private var previewImage: UIImage?
+    /// Anti-débounce des seeks « live » pendant le drag : la vidéo suit le
+    /// doigt via des seeks grossiers, au plus un toutes les 100 ms.
+    @State private var lastLiveSeekAt = Date.distantPast
     @State private var playbackRetryCount = 0
     @State private var isDisappeared = false
     @State private var isExternalPlaybackActive = false
@@ -302,43 +309,105 @@ struct VideoPlayerView: View {
     // MARK: - Barre du bas (transport, hors zone vidéo)
 
     private var bottomBar: some View {
-        HStack(spacing: 6) {
+        HStack(spacing: 8) {
             playButton
 
             Text(timeText(displayedTime))
-                .font(.caption2.monospacedDigit())
-                .foregroundStyle(.white.opacity(0.8))
+                .font(.caption.monospacedDigit().weight(.medium))
+                .foregroundStyle(.white.opacity(0.85))
+                .scaleEffect(isScrubbing ? 1.18 : 1, anchor: .trailing)
+                .contentTransition(.numericText())
+                .animation(.snappy(duration: 0.2), value: Int(displayedTime))
+                .frame(minWidth: 34, alignment: .trailing)
 
-            Slider(value: scrubBinding, in: 0...max(duration, 1)) { editing in
-                if editing {
-                    hideControlsTask?.cancel()
-                    // Le curseur doit rester sous le doigt pendant le geste.
-                    // Rechercher dans AVPlayer à chaque micro-déplacement crée
-                    // une file de seeks asynchrones, source de saccades.
-                    cancelPendingSeek()
-                    scrubValue = playerTime ?? currentTime
-                    // `.waitingToPlayAtSpecifiedRate` compte comme « en
-                    // lecture » : un scrub pendant une mise en mémoire tampon
-                    // relance bien la vidéo au relâchement.
-                    wasPlayingBeforeScrub = player?.timeControlStatus != .paused
-                    isScrubbing = true
-                } else {
-                    isScrubbing = false
-                    seek(to: scrubValue, precise: true)
-                }
-            }
-            .tint(.white)
-            .controlSize(.large)
+            ScrubberBar(
+                position: displayedTime,
+                duration: duration,
+                bufferedEnd: bufferedEnd,
+                isScrubbing: isScrubbing,
+                preview: previewImage,
+                timeFormatter: { timeText($0) },
+                onDragStarted: beginScrub,
+                onDragChanged: updateScrub(to:),
+                onDragEnded: endScrub(to:)
+            )
 
             Text(timeText(duration))
-                .font(.caption2.monospacedDigit())
-                .foregroundStyle(.white.opacity(0.8))
+                .font(.caption.monospacedDigit().weight(.medium))
+                .foregroundStyle(.white.opacity(0.85))
+                .scaleEffect(isScrubbing ? 1.18 : 1, anchor: .leading)
+                .contentTransition(.numericText())
+                .animation(.snappy(duration: 0.2), value: Int(duration))
+                .frame(minWidth: 34, alignment: .leading)
 
             speedMenu
         }
         .padding(.horizontal, 0)
         .padding(.top, 2)
         .padding(.bottom, -4)
+    }
+
+    // MARK: - Scrubbing (barre personnalisée)
+
+    /// Début du glissement : mémorise l'état, coupe le son de lecture et
+    /// prépare la prévisualisation. La vidéo suivra le doigt via des seeks
+    /// grossiers throttlés (`updateScrub`).
+    private func beginScrub() {
+        hideControlsTask?.cancel()
+        cancelPendingSeek()
+        scrubValue = playerTime ?? currentTime
+        // `.waitingToPlayAtSpecifiedRate` compte comme « en lecture » : un
+        // scrub pendant une mise en mémoire tampon relance bien la vidéo.
+        wasPlayingBeforeScrub = player?.timeControlStatus != .paused
+        isScrubbing = true
+        // Le son cesse pendant le geste : la prévisualisation visuelle remplace
+        // la lecture (comportement natif).
+        player?.pause()
+    }
+
+    private func updateScrub(to seconds: Double) {
+        scrubValue = max(0, seconds)
+        scheduleLiveScrubSeek(to: seconds)
+        requestScrubPreview(at: seconds)
+    }
+
+    /// Seek grossier throttlé : tolérance 1,5 s → AVPlayer saute au keyframe
+    /// le plus proche et la couche vidéo principale suit le doigt sans
+    /// attendre l'image exacte (le seek final précis intervient au relâchement).
+    private func scheduleLiveScrubSeek(to seconds: Double) {
+        guard let player else { return }
+        let now = Date()
+        guard now.timeIntervalSince(lastLiveSeekAt) >= 0.1 else { return }
+        lastLiveSeekAt = now
+        let target = CMTime(seconds: max(0, seconds), preferredTimescale: 600)
+        player.seek(
+            to: target,
+            toleranceBefore: CMTime(seconds: 1.5, preferredTimescale: 600),
+            toleranceAfter: CMTime(seconds: 1.5, preferredTimescale: 600)
+        )
+    }
+
+    private func requestScrubPreview(at seconds: Double) {
+        guard let asset = player?.currentItem?.asset else { return }
+        ScrubPreviewGenerator.shared.requestPreview(
+            driveId: driveId,
+            fileId: file.id,
+            asset: asset,
+            at: seconds
+        ) { image in
+            guard isScrubbing, !Task.isCancelled else { return }
+            previewImage = image
+        }
+    }
+
+    private func endScrub(to seconds: Double) {
+        isScrubbing = false
+        withAnimation(.easeOut(duration: 0.15)) {
+            previewImage = nil
+        }
+        lastLiveSeekAt = .distantPast
+        // Seek final précis + reprise conditionnelle (déjà gérés par `seek`).
+        seek(to: seconds, precise: true)
     }
 
     // MARK: - Boutons
@@ -450,13 +519,6 @@ struct VideoPlayerView: View {
     }
 
     // MARK: - Transport
-
-    private var scrubBinding: Binding<Double> {
-        Binding(
-            get: { isScrubbing || isSeeking ? scrubValue : currentTime },
-            set: { scrubValue = $0 }
-        )
-    }
 
     private var displayedTime: Double {
         isScrubbing || isSeeking ? scrubValue : currentTime
@@ -743,6 +805,21 @@ struct VideoPlayerView: View {
             if !isScrubbing, !isSeeking, showControls, time.seconds.isFinite {
                 currentTime = time.seconds
             }
+            // Plage bufferisée : segment contenant la position courante, sinon
+            // le premier intervalle connu. Sert au remplissage grisée du
+            // scrubber ; borné à la durée quand elle est connue.
+            let ranges = player.currentItem?.loadedTimeRanges.map(\.timeRangeValue) ?? []
+            if !ranges.isEmpty {
+                let ct = player.currentTime()
+                let containing = ranges.first { $0.start <= ct && ct <= $0.end }
+                let rawEnd = (containing ?? ranges[0]).end.seconds
+                let clampedEnd = duration.isFinite && duration > 0 ? min(rawEnd, duration) : rawEnd
+                if abs(bufferedEnd - clampedEnd) > 0.05 {
+                    bufferedEnd = max(0, clampedEnd)
+                }
+            } else if bufferedEnd != 0 {
+                bufferedEnd = 0
+            }
             // `isPlaying` n'est PAS déduit ici : `.waitingToPlayAtSpecifiedRate`
             // (mise en mémoire tampon) n'est pas une pause, et traiter ce cas
             // comme un arrêt faisait repasser le bouton en « Play » puis
@@ -787,6 +864,10 @@ struct VideoPlayerView: View {
         cancelPendingSeek()
         isScrubbing = false
         wasPlayingBeforeScrub = false
+        bufferedEnd = 0
+        previewImage = nil
+        lastLiveSeekAt = .distantPast
+        ScrubPreviewGenerator.shared.reset()
         itemStatusObserver?.invalidate()
         itemStatusObserver = nil
         timeControlStatusObserver?.invalidate()
