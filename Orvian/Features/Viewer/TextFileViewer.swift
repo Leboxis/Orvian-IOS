@@ -30,21 +30,34 @@ struct TextFileViewer: View {
     /// `SFSafariViewController` intégré, sans quitter l'app.
     @State private var safariURL: SafariItem?
 
+    // MARK: - Recherche
+
+    @State private var isSearching = false
+    @State private var searchQuery = ""
+    @State private var searchRanges: [NSRange] = []
+    @State private var currentSearchIndex: Int?
+    @FocusState private var isSearchFieldFocused: Bool
+
     private let service = KDriveService()
 
     var body: some View {
         NavigationStack {
-            Group {
-                if let loadError {
-                    ContentUnavailableView(
-                        "Impossible d'ouvrir le fichier",
-                        systemImage: "doc.text",
-                        description: Text(loadError)
-                    )
-                } else if isLoading {
-                    ProgressView("Chargement…")
-                } else {
-                    textSurface
+            VStack(spacing: 0) {
+                if isSearching {
+                    searchBar
+                }
+                Group {
+                    if let loadError {
+                        ContentUnavailableView(
+                            "Impossible d'ouvrir le fichier",
+                            systemImage: "doc.text",
+                            description: Text(loadError)
+                        )
+                    } else if isLoading {
+                        ProgressView("Chargement…")
+                    } else {
+                        textSurface
+                    }
                 }
             }
             .navigationTitle(file.name)
@@ -52,6 +65,23 @@ struct TextFileViewer: View {
             .toolbar {
                 ToolbarItemGroup(placement: .topBarTrailing) {
                     if !isLoading && loadError == nil {
+                        Button {
+                            withAnimation(.snappy(duration: 0.2)) {
+                                isSearching.toggle()
+                            }
+                            if isSearching {
+                                // Le focus doit être posé après l'animation d'apparition.
+                                DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
+                                    isSearchFieldFocused = true
+                                }
+                            } else {
+                                searchQuery = ""
+                            }
+                        } label: {
+                            Image(systemName: isSearching ? "magnifyingglass.circle.fill" : "magnifyingglass")
+                        }
+                        .accessibilityLabel(isSearching ? "Fermer la recherche" : "Rechercher dans le document")
+
                         if isEditing {
                             Button {
                                 draft = content
@@ -131,6 +161,160 @@ struct TextFileViewer: View {
         } message: {
             Text("Le brouillon n’a pas encore été enregistré dans kDrive.")
         }
+        .onChange(of: searchQuery) { _, _ in
+            updateSearchResults()
+        }
+        .onChange(of: draft) { _, _ in
+            if isSearching {
+                updateSearchResults()
+            }
+        }
+        .onChange(of: isSearching) { _, newValue in
+            if newValue {
+                updateSearchResults()
+                isSearchFieldFocused = true
+            } else {
+                searchRanges = []
+                currentSearchIndex = nil
+            }
+        }
+    }
+
+    // MARK: - Barre de recherche
+
+    private var searchBar: some View {
+        HStack(spacing: 8) {
+            HStack(spacing: 6) {
+                Image(systemName: "magnifyingglass")
+                    .foregroundStyle(.secondary)
+                    .font(.system(size: 14))
+                TextField("Rechercher", text: $searchQuery)
+                    .textFieldStyle(.plain)
+                    .autocorrectionDisabled()
+                    .textInputAutocapitalization(.never)
+                    .submitLabel(.search)
+                    .focused($isSearchFieldFocused)
+                    .onSubmit { goToNext() }
+                if !searchQuery.isEmpty {
+                    Button {
+                        searchQuery = ""
+                    } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .foregroundStyle(.secondary)
+                            .font(.system(size: 14))
+                    }
+                    .accessibilityLabel("Effacer la recherche")
+                }
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 8)
+            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 10))
+
+            if !searchQuery.isEmpty {
+                Text(searchResultLabel)
+                    .font(.caption)
+                    .foregroundStyle(searchRanges.isEmpty ? .red : .secondary)
+                    .monospacedDigit()
+                    .frame(minWidth: 56)
+                    .lineLimit(1)
+
+                Button {
+                    goToPrevious()
+                } label: {
+                    Image(systemName: "chevron.up")
+                        .font(.system(size: 13, weight: .semibold))
+                }
+                .disabled(searchRanges.isEmpty)
+                .accessibilityLabel("Occurrence précédente")
+
+                Button {
+                    goToNext()
+                } label: {
+                    Image(systemName: "chevron.down")
+                        .font(.system(size: 13, weight: .semibold))
+                }
+                .disabled(searchRanges.isEmpty)
+                .accessibilityLabel("Occurrence suivante")
+            }
+
+            Button {
+                withAnimation(.snappy(duration: 0.2)) {
+                    isSearching = false
+                    searchQuery = ""
+                }
+            } label: {
+                Text("Fermer")
+                    .font(.subheadline)
+            }
+            .accessibilityLabel("Fermer la recherche")
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background(Color(.systemBackground))
+        .overlay(alignment: .bottom) {
+            Divider()
+        }
+    }
+
+    private var searchResultLabel: String {
+        if searchQuery.isEmpty { return "" }
+        if searchRanges.isEmpty { return "0 / 0" }
+        guard let idx = currentSearchIndex else { return "\(searchRanges.count) résultats" }
+        return "\(idx + 1) / \(searchRanges.count)"
+    }
+
+    private func updateSearchResults() {
+        let query = searchQuery
+        guard !query.isEmpty else {
+            searchRanges = []
+            currentSearchIndex = nil
+            return
+        }
+        let previousIndex = currentSearchIndex
+        let previousCount = searchRanges.count
+        let nsDraft = draft as NSString
+        var ranges: [NSRange] = []
+        var searchRange = NSRange(location: 0, length: nsDraft.length)
+        let options: NSString.CompareOptions = [.caseInsensitive, .diacriticInsensitive]
+        // Limite pour éviter de figer l'UI sur un document de 5 Mo avec une
+        // requête très courte (ex. "e" → dizaines de milliers d'occurrences).
+        let maxMatches = 2000
+        while searchRange.location < nsDraft.length {
+            let found = nsDraft.range(of: query, options: options, range: searchRange)
+            if found.location == NSNotFound { break }
+            ranges.append(found)
+            if ranges.count >= maxMatches { break }
+            let nextLocation = found.location + max(found.length, 1)
+            if nextLocation >= nsDraft.length { break }
+            searchRange = NSRange(location: nextLocation, length: nsDraft.length - nextLocation)
+        }
+        searchRanges = ranges
+        if ranges.isEmpty {
+            currentSearchIndex = nil
+        } else if let idx = previousIndex, idx < ranges.count, previousCount == ranges.count || draft.count == 0 {
+            // Conserve la position si possible.
+            currentSearchIndex = idx
+        } else {
+            currentSearchIndex = 0
+        }
+    }
+
+    private func goToNext() {
+        guard !searchRanges.isEmpty else { return }
+        if let idx = currentSearchIndex {
+            currentSearchIndex = (idx + 1) % searchRanges.count
+        } else {
+            currentSearchIndex = 0
+        }
+    }
+
+    private func goToPrevious() {
+        guard !searchRanges.isEmpty else { return }
+        if let idx = currentSearchIndex {
+            currentSearchIndex = (idx - 1 + searchRanges.count) % searchRanges.count
+        } else {
+            currentSearchIndex = searchRanges.count - 1
+        }
     }
 
     // MARK: - Lecture et modification
@@ -140,10 +324,13 @@ struct TextFileViewer: View {
             text: $draft,
             isEditing: isEditing,
             pasteRequest: $pasteRequest,
-            detectedLinks: detectedLinks
-        ) { url in
-            safariURL = SafariItem(url: url)
-        }
+            detectedLinks: detectedLinks,
+            searchRanges: searchRanges,
+            currentSearchIndex: currentSearchIndex,
+            onOpenURL: { url in
+                safariURL = SafariItem(url: url)
+            }
+        )
     }
 
     // MARK: - Données
@@ -205,6 +392,9 @@ struct TextFileViewer: View {
             content = decoded
             draft = decoded
             detectedLinks = links
+            if isSearching {
+                updateSearchResults()
+            }
         } catch {
             loadError = (error as? APIError)?.errorDescription ?? error.localizedDescription
         }
@@ -286,6 +476,8 @@ private struct TextFileTextView: UIViewRepresentable {
     let isEditing: Bool
     @Binding var pasteRequest: TextPasteRequest?
     let detectedLinks: [DetectedTextLink]
+    let searchRanges: [NSRange]
+    let currentSearchIndex: Int?
     let onOpenURL: (URL) -> Void
 
     func makeCoordinator() -> Coordinator {
@@ -310,6 +502,7 @@ private struct TextFileTextView: UIViewRepresentable {
         textView.delegate = context.coordinator
         textView.text = text
         configureMode(textView)
+        applySearchHighlights(to: textView)
         return textView
     }
 
@@ -342,6 +535,15 @@ private struct TextFileTextView: UIViewRepresentable {
             }
         }
 
+        // Toujours réappliquer les surlignages de recherche (liens + occurrences).
+        // `configureMode` a déjà nettoyé/posé les liens ; on ajoute ensuite les fonds.
+        if !textChanged || textView.textStorage.length == (text as NSString).length {
+            // Si le texte vient de changer, `configureMode` a été appelé, on
+            // doit quand même poser les highlights après.
+        }
+        applySearchHighlights(to: textView)
+        scrollToCurrentSearch(in: textView)
+
         if let pasteRequest,
            context.coordinator.lastPasteRequestID != pasteRequest.id {
             context.coordinator.lastPasteRequestID = pasteRequest.id
@@ -368,6 +570,43 @@ private struct TextFileTextView: UIViewRepresentable {
             }
         }
         textView.isEditable = isEditing
+    }
+
+    private func applySearchHighlights(to textView: UITextView) {
+        let fullRange = NSRange(location: 0, length: textView.textStorage.length)
+        guard fullRange.length > 0 else { return }
+        // Nettoie les anciens surlignages.
+        textView.textStorage.removeAttribute(.backgroundColor, range: fullRange)
+
+        guard !searchRanges.isEmpty else { return }
+
+        for (index, range) in searchRanges.enumerated() where range.location != NSNotFound && NSMaxRange(range) <= fullRange.length {
+            let isCurrent = index == currentSearchIndex
+            let color: UIColor = isCurrent
+                ? UIColor.systemOrange.withAlphaComponent(0.45)
+                : UIColor.systemYellow.withAlphaComponent(0.45)
+            textView.textStorage.addAttribute(.backgroundColor, value: color, range: range)
+        }
+    }
+
+    private func scrollToCurrentSearch(in textView: UITextView) {
+        guard let idx = currentSearchIndex,
+              idx >= 0, idx < searchRanges.count else { return }
+        let range = searchRanges[idx]
+        guard range.location != NSNotFound,
+              NSMaxRange(range) <= textView.textStorage.length else { return }
+
+        // Sélection visuelle de l'occurrence courante (sans déclencher
+        // `textViewDidChange`). Utile en lecture pour bien voir la position.
+        // En édition on ne force pas la sélection pour ne pas déplacer le curseur
+        // de l'utilisateur s'il tape.
+        if !isEditing {
+            textView.selectedRange = range
+        }
+        // Le scroll doit intervenir après la mise en page.
+        DispatchQueue.main.async {
+            textView.scrollRangeToVisible(range)
+        }
     }
 
     final class Coordinator: NSObject, UITextViewDelegate {
