@@ -403,7 +403,7 @@ private struct TextFileTextView: UIViewRepresentable {
             primaryActionFor textItem: UITextItem,
             defaultAction: UIAction
         ) -> UIAction? {
-            guard let url = textItem.link,
+            guard case let .link(url) = textItem.content,
                   let scheme = url.scheme?.lowercased(),
                   ["http", "https"].contains(scheme) else {
                 return defaultAction
