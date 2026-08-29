@@ -120,6 +120,7 @@ extension DriveFile {
             size: nil,
             mimeType: nil,
             extensionType: nil,
+            fileExtension: nil,
             isFavorite: nil,
             parentId: nil,
             path: nil,

@@ -457,6 +457,7 @@ private struct DuplicateMediaFolderPicker: View {
         size: nil,
         mimeType: nil,
         extensionType: "dir",
+        fileExtension: nil,
         isFavorite: nil,
         parentId: nil,
         path: nil,
