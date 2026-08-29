@@ -32,6 +32,7 @@ targets:
       properties:
         UIBackgroundModes:
           - audio
+        NSFaceIDUsageDescription: "Face ID sert à déverrouiller l'app sans saisir votre code."
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.orvian.app
