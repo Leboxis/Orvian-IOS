@@ -20,6 +20,11 @@ struct SettingsView: View {
     @AppStorage("hapticFeedbackEnabled") private var hapticFeedbackEnabled = true
     @AppStorage("defaultFolderColor") private var defaultFolderColor = "#4285F5"
 
+    @State private var isLockCodeEnabled = AppLockStore.isConfigured
+    @State private var showActivateCode = false
+    @State private var showChangeCode = false
+    @State private var showDisableCode = false
+
     var body: some View {
         NavigationStack(path: $path) {
             ScrollView {
@@ -175,6 +180,40 @@ struct SettingsView: View {
                         )
                     }
 
+                    settingsCard(
+                        title: "Sécurité",
+                        message: "Demande un code à chaque ouverture de l’app."
+                    ) {
+                        if isLockCodeEnabled {
+                            Button {
+                                showChangeCode = true
+                            } label: {
+                                Label("Modifier le code", systemImage: "pencil")
+                                    .font(.body.weight(.medium))
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                    .padding(.vertical, 4)
+                            }
+                            settingsDivider
+                            Button(role: .destructive) {
+                                showDisableCode = true
+                            } label: {
+                                Label("Désactiver le code", systemImage: "lock.open")
+                                    .font(.body.weight(.medium))
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                    .padding(.vertical, 4)
+                            }
+                        } else {
+                            Button {
+                                showActivateCode = true
+                            } label: {
+                                Label("Activer le code de verrouillage", systemImage: "lock.fill")
+                                    .font(.body.weight(.medium))
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                    .padding(.vertical, 4)
+                            }
+                        }
+                    }
+
                     accountSection
                 }
                 .padding(.horizontal, 20)
@@ -187,6 +226,15 @@ struct SettingsView: View {
         }
         .sheet(isPresented: $showDrivePicker) {
             DrivePickerSheet(session: session)
+        }
+        .sheet(isPresented: $showActivateCode, onDismiss: refreshLockState) {
+            AppLockSetupSheet(flow: .activate)
+        }
+        .sheet(isPresented: $showChangeCode, onDismiss: refreshLockState) {
+            AppLockSetupSheet(flow: .change)
+        }
+        .sheet(isPresented: $showDisableCode, onDismiss: refreshLockState) {
+            AppLockSetupSheet(flow: .disable)
         }
         .confirmationDialog("Se déconnecter ?", isPresented: $showSignOutConfirm, titleVisibility: .visible) {
             Button("Se déconnecter", role: .destructive) {
@@ -222,6 +270,10 @@ struct SettingsView: View {
     }
 
     // MARK: - Groupes
+
+    private func refreshLockState() {
+        isLockCodeEnabled = AppLockStore.isConfigured
+    }
 
     private func driveSummary(_ drive: Drive) -> some View {
         VStack(alignment: .leading, spacing: 16) {

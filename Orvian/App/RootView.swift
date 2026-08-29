@@ -1,28 +1,45 @@
 import SwiftUI
 
-/// Point d'entrée : setup → session prête → onglets.
+/// Point d'entrée : verrouillage (si un code est configuré) → setup →
+/// session prête → onglets.
 struct RootView: View {
     let session: SessionStore
 
+    /// Déverrouillage en mémoire : repasse par le code à chaque ouverture.
+    @State private var isUnlocked = false
+
+    private var isLockRequired: Bool {
+        AppLockStore.isConfigured && !isUnlocked
+    }
+
     var body: some View {
         Group {
-            switch session.phase {
-            case .signedOut:
-                TokenSetupView(session: session)
-            case .bootstrapping:
-                BootSplash()
-            case let .error(message):
-                BootstrapError(message: message) {
-                    Task { await session.bootstrap() }
-                } onSignOut: {
-                    session.signOut()
+            if isLockRequired {
+                // Le contenu de l'app n'est pas construit avant le code.
+                AppLockView {
+                    withAnimation(.snappy(duration: 0.25)) {
+                        isUnlocked = true
+                    }
                 }
-            case .signedIn:
-                if let drive = session.selectedDrive {
-                    MainTabView(drive: drive, session: session)
-                        .id(drive.id) // changer de drive reconstruit les onglets
-                } else {
+            } else {
+                switch session.phase {
+                case .signedOut:
+                    TokenSetupView(session: session)
+                case .bootstrapping:
                     BootSplash()
+                case let .error(message):
+                    BootstrapError(message: message) {
+                        Task { await session.bootstrap() }
+                    } onSignOut: {
+                        session.signOut()
+                    }
+                case .signedIn:
+                    if let drive = session.selectedDrive {
+                        MainTabView(drive: drive, session: session)
+                            .id(drive.id) // changer de drive reconstruit les onglets
+                    } else {
+                        BootSplash()
+                    }
                 }
             }
         }
