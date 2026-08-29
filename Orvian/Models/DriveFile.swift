@@ -15,6 +15,9 @@ struct DriveFile: Codable, Identifiable, Hashable {
     /// Type fonctionnel renvoyé par l'API : image, video, audio, dir, pdf, text,
     /// spreadsheet, presentation, archive, code, font, unknown…
     let extensionType: String?
+    /// Extension réelle du fichier côté serveur (ex. "txt"), indépendante du
+    /// nom affiché qui peut masquer l'extension.
+    let fileExtension: String?
     var isFavorite: Bool?
     let parentId: Int?
     let path: String?
@@ -30,10 +33,14 @@ struct DriveFile: Codable, Identifiable, Hashable {
     var isImage: Bool { fileKind == .image }
     var isVideo: Bool { fileKind == .video }
 
-    /// Fichier texte brut (extension .txt) : seul ce format est garanti
-    /// encodé en texte simple et ouvrable dans la visionneuse de texte.
+    /// Fichier texte brut (.txt) : l'extension peut être absente du nom
+    /// (fichiers synchronisés avec extension masquée), on se fie donc aussi au
+    /// champ `extension` de l'API et au type MIME `text/plain`.
     var isPlainText: Bool {
-        (name as NSString).pathExtension.lowercased() == "txt"
+        if (name as NSString).pathExtension.lowercased() == "txt" { return true }
+        if fileExtension?.lowercased() == "txt" { return true }
+        if mimeType?.lowercased() == "text/plain" { return true }
+        return false
     }
 
     var fileKind: FileKind {
@@ -54,6 +61,7 @@ struct DriveFile: Codable, Identifiable, Hashable {
         case mimeTypeSnake = "mime_type"
         case extensionType
         case extensionTypeSnake = "extension_type"
+        case fileExtension = "extension"
         case isFavorite
         case isFavoriteSnake = "is_favorite"
         case parentId
@@ -83,6 +91,7 @@ extension DriveFile {
         path = try c.decodeIfPresent(String.self, forKey: .path)
         mimeType = Self.decode(c, camel: .mimeType, snake: .mimeTypeSnake)
         extensionType = Self.decode(c, camel: .extensionType, snake: .extensionTypeSnake)
+        fileExtension = Self.decode(c, camel: .fileExtension, snake: .fileExtension)
         isFavorite = Self.decode(c, camel: .isFavorite, snake: .isFavoriteSnake)
         parentId = Self.decode(c, camel: .parentId, snake: .parentIdSnake)
         color = try c.decodeIfPresent(String.self, forKey: .color)
@@ -113,6 +122,7 @@ extension DriveFile {
         try c.encodeIfPresent(path, forKey: .path)
         try c.encodeIfPresent(mimeType, forKey: .mimeTypeSnake)
         try c.encodeIfPresent(extensionType, forKey: .extensionTypeSnake)
+        try c.encodeIfPresent(fileExtension, forKey: .fileExtension)
         try c.encodeIfPresent(isFavorite, forKey: .isFavoriteSnake)
         try c.encodeIfPresent(parentId, forKey: .parentIdSnake)
         try c.encodeIfPresent(color, forKey: .color)
