@@ -61,12 +61,6 @@ struct AppLockView: View {
                 Spacer()
                 Spacer(minLength: 0)
 
-                if biometricsAvailable {
-                    Label("Touchez le logo pour utiliser \(biometryName)", systemImage: "faceid")
-                        .font(.caption)
-                        .foregroundStyle(.tertiary)
-                }
-
                 CodeKeypad(onDigit: handleDigit, onDelete: handleDelete)
                     .padding(.bottom, 24)
             }
