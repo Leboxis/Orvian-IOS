@@ -72,9 +72,14 @@ struct VideoPlayerView: View {
     @State private var playbackRetryCount = 0
     @State private var isDisappeared = false
     @State private var isExternalPlaybackActive = false
-    /// Empêche deux appels concurrents à `load()` (apparition + retour de page)
-    /// de créer deux lecteurs pour la même vidéo.
+    /// Vrai pendant la préparation de la vidéo (conditionne le bouton
+    /// « Réessayer »).
     @State private var isLoadingVideo = false
+    /// Génération du chargement courant : chaque `load()` l'incrémente, si
+    /// bien qu'une charge relancée par `.task(id:)` (retour sur la page)
+    /// préempte celle, annulée, encore en vol au lieu d'être avalée par un
+    /// garde-fou anti-doublon.
+    @State private var loadGeneration = 0
 
     // Masquage automatique des contrôles après 2.5 secondes
     @State private var showControls = true
@@ -648,10 +653,17 @@ struct VideoPlayerView: View {
             }
             return
         }
-        guard !isLoadingVideo else { return }
         isLoadingVideo = true
         hasFailedSetup = false
-        defer { isLoadingVideo = false }
+        loadGeneration += 1
+        let generation = loadGeneration
+        // Seule la génération la plus récente possède le drapeau : une charge
+        // annulée qui se termine tardivement ne le relâche pas à sa place.
+        defer {
+            if loadGeneration == generation {
+                isLoadingVideo = false
+            }
+        }
 
         // Tâche non structurée qui s'auto-assigne dès son achèvement : le
         // poster s'affiche pendant la résolution de l'asset, sans retarder
@@ -675,10 +687,14 @@ struct VideoPlayerView: View {
 
         // La ressource authentifiée peut déjà avoir été préparée juste avant
         // le tap. Le poster ne retarde jamais le lecteur.
-        guard let asset = await VideoAssetCache.shared.asset(driveId: driveId, fileId: file.id),
-              !isDisappeared,
-              !Task.isCancelled
-        else {
+        let asset = await VideoAssetCache.shared.asset(driveId: driveId, fileId: file.id)
+
+        // Swipe hors page ou fermeture : la tâche porteuse est annulée ou la
+        // page est disparue. Ce n'est pas un échec — on sort sans état d'erreur
+        // pour que la prochaine génération de `.task(id:)` recharge sereinement
+        // (l'ancienne tâche ne doit jamais créer de lecteur ni alerter).
+        guard !isDisappeared, !Task.isCancelled else { return }
+        guard let asset else {
             hasFailedSetup = true
             errorMessage = "Impossible de préparer cette vidéo. Vérifiez votre connexion puis réessayez."
             return
