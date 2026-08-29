@@ -26,15 +26,6 @@ struct AppLockView: View {
 
                 AppMark()
                     .font(.system(size: 40, weight: .bold))
-                    .scaleEffect(isAuthenticating ? 0.94 : 1)
-                    .animation(.snappy(duration: 0.18), value: isAuthenticating)
-                    .overlay(alignment: .bottomTrailing) {
-                        if isAuthenticating {
-                            ProgressView()
-                                .scaleEffect(0.7)
-                                .offset(x: 6, y: 6)
-                        }
-                    }
                     .onTapGesture(perform: authenticateWithBiometrics)
                     .accessibilityLabel(biometricsAvailable ? "Déverrouiller avec \(biometryName)" : "Logo Orvian")
                     .accessibilityHint(biometricsAvailable ? "Lance l'authentification biométrique" : "")
