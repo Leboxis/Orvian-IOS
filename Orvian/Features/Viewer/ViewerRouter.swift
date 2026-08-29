@@ -58,6 +58,12 @@ final class ViewerRouter {
             )
         } else if file.isPlainText {
             textFile = file
+        } else if !file.isDirectory {
+            // Repli : les .txt sans extension visible n'ont aucune métadonnée
+            // exploitable (l'API ne renvoie ni extension ni MIME fiable). La
+            // visionneuse de texte télécharge le contenu, détecte le binaire
+            // et affiche une erreur claire si le fichier n'est pas du texte.
+            textFile = file
         }
     }
 }

@@ -9,7 +9,8 @@ import SafariServices
 /// dans la barre d'outils passe en mode modification ; la validation remplace
 /// le contenu du fichier côté kDrive (nouvelle version via `file_id`). Une
 /// marge en bas permet de faire défiler le texte au-dessus du clavier pendant
-/// l'édition.
+/// l'édition. Sert aussi de repli pour les fichiers sans extension visible :
+/// un contenu binaire y est détecté et refusé proprement.
 struct TextFileViewer: View {
     let file: DriveFile
     let driveId: Int
@@ -388,6 +389,9 @@ struct TextFileViewer: View {
             guard let decoded = Self.decode(data) else {
                 throw TextFileViewerError.unsupportedEncoding
             }
+            guard !Self.isBinary(data) else {
+                throw TextFileViewerError.binaryContent
+            }
             let links = await Self.links(in: decoded)
             content = decoded
             draft = decoded
@@ -437,6 +441,24 @@ struct TextFileViewer: View {
         if let text = String(data: data, encoding: .utf8) { return text }
         if let text = String(data: data, encoding: .windowsCP1252) { return text }
         return String(data: data, encoding: .isoLatin1)
+    }
+
+    /// Détecte un contenu binaire (zip, image, PDF…) : la visionneuse est
+    /// aussi proposée en repli pour les fichiers sans extension visible, il
+    /// faut donc refuser proprement ce qui n'est pas du texte. Échantillon du
+    /// début du fichier : un octet nul ou > 5 % d'octets de contrôle (hors
+    /// tabulation, saut de ligne…) signent un binaire.
+    private static func isBinary(_ data: Data) -> Bool {
+        let sample = data.prefix(8_192)
+        guard !sample.isEmpty else { return false }
+        var controlBytes = 0
+        for byte in sample {
+            if byte == 0x00 { return true }
+            if byte < 0x09 || (byte > 0x0D && byte < 0x20) {
+                controlBytes += 1
+            }
+        }
+        return Double(controlBytes) / Double(sample.count) > 0.05
     }
 
     private var hasUnsavedChanges: Bool {
@@ -660,6 +682,7 @@ private enum TextFileViewerError: LocalizedError {
     case http(status: Int)
     case tooLarge(maximumBytes: Int)
     case unsupportedEncoding
+    case binaryContent
 
     var errorDescription: String? {
         switch self {
@@ -673,6 +696,8 @@ private enum TextFileViewerError: LocalizedError {
             return "Ce fichier est trop volumineux pour l’éditeur. La limite est de \(ByteFormatter.format(maximumBytes))."
         case .unsupportedEncoding:
             return "L’encodage de ce fichier texte n’est pas pris en charge."
+        case .binaryContent:
+            return "Ce fichier n’est pas un document texte."
         }
     }
 }
