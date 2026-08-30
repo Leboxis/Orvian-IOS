@@ -23,7 +23,9 @@ struct FileGridView: View {
     /// Options de tri et de filtrage (bouton filtre de l'Accueil).
     var filters: FileFilters = .init()
 
-    /// Remonte true après un court geste vers le bas depuis le haut de la liste.
+    /// Remonte false dès que l'utilisateur défile dans le contenu. La
+    /// révélation (true) est émise par le geste de traction, pas par la
+    /// géométrie : le rebond élastique en haut ne doit pas rouvrir la barre.
     var onScrolledPastTop: ((Bool) -> Void)?
 
     /// Décalage ajouté en haut du contenu (barre de recherche flottante) pour
@@ -95,9 +97,11 @@ struct FileGridView: View {
                 switch new.region {
                 case .content:
                     onScrolledPastTop?(false)
-                case .pulledPastTop:
-                    onScrolledPastTop?(true)
-                case .nearTop:
+                case .pulledPastTop, .nearTop:
+                    // Le retour élastique en haut après une impulsion produit
+                    // aussi `.pulledPastTop`, sans doigt posé : il ne doit pas
+                    // ré-afficher la barre. La révélation dépend uniquement du
+                    // geste de traction ci-dessous.
                     break
                 }
             }
@@ -195,9 +199,10 @@ struct FileGridView: View {
             .simultaneousGesture(
                 DragGesture(minimumDistance: 8)
                     .onChanged { value in
-                        // Secours pour les dossiers très courts : même si le
-                        // ScrollView ne bouge pas visuellement, le geste révèle
-                        // tout de même la recherche.
+                        // Seule voie de révélation : une traction doigt posé.
+                        // Fonctionne sur toutes les listes, scrollables ou non
+                        // (dossiers très courts compris), et ignore le rebond
+                        // élastique du scroll qui survient sans contact.
                         if searchScrollRegion != .content,
                            value.translation.height > 12,
                            value.translation.height > abs(value.translation.width) {
