@@ -160,6 +160,9 @@ struct DirectoryView: View {
     @State private var deleteBusy = false
     @State private var showDeleteConfirm = false
     @AppStorage("alwaysShowSearch") private var alwaysShowSearch = false
+    /// Recherche limitée au dossier courant et à tous ses sous-dossiers ;
+    /// désactivée, elle couvre tout le drive.
+    @AppStorage("searchRestrictedToFolder") private var searchRestrictedToFolder = false
     @FocusState private var searchFocused: Bool
 
     private let router: ViewerRouter
@@ -385,7 +388,7 @@ struct DirectoryView: View {
                 searchFocused = false
             }
         }
-        .task(id: searchText) {
+        .task(id: SearchTaskKey(query: searchText, restricted: searchRestrictedToFolder)) {
             let trimmed = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !trimmed.isEmpty else {
                 searchViewModel = nil
@@ -398,7 +401,12 @@ struct DirectoryView: View {
                 return
             }
             let searchVM = FileGridViewModel(
-                source: .search(query: trimmed, directoryId: directory.id),
+                source: .search(
+                    query: trimmed,
+                    // Restreint au dossier courant et à toute sa descendance ;
+                    // sinon la recherche porte sur tout le drive.
+                    directoryId: searchRestrictedToFolder ? directory.id : nil
+                ),
                 driveId: driveId
             )
             searchViewModel = searchVM
@@ -417,16 +425,26 @@ struct DirectoryView: View {
         showsSearchBar && searchBarVisible
     }
 
+    /// Clé du task de recherche : le texte ET la portée. Basculer la
+    /// restriction relance donc la requête en cours sans attendre une saisie.
+    private struct SearchTaskKey: Hashable {
+        let query: String
+        let restricted: Bool
+    }
+
     /// Pastille de recherche centrée et compacte.
     private var searchBar: some View {
         HStack(spacing: 6) {
             Image(systemName: "magnifyingglass")
                 .font(.system(size: 13, weight: .medium))
                 .foregroundStyle(.secondary)
-            TextField("Rechercher dans ce dossier…", text: $searchText)
-                .focused($searchFocused)
-                .autocorrectionDisabled()
-                .submitLabel(.search)
+            TextField(
+                searchRestrictedToFolder ? "Rechercher dans ce dossier…" : "Rechercher dans tout le drive…",
+                text: $searchText
+            )
+            .focused($searchFocused)
+            .autocorrectionDisabled()
+            .submitLabel(.search)
             if !searchText.isEmpty {
                 Button {
                     searchText = ""
@@ -436,8 +454,10 @@ struct DirectoryView: View {
                 }
                 .accessibilityLabel("Effacer la recherche")
             }
+            searchScopeButton
         }
-        .padding(.horizontal, 14)
+        .padding(.leading, 14)
+        .padding(.trailing, 8)
         .padding(.vertical, 7)
         .background(.bar, in: Capsule())
         .overlay {
@@ -445,6 +465,25 @@ struct DirectoryView: View {
         }
         .shadow(color: .black.opacity(0.08), radius: 6, x: 0, y: 2)
         .frame(maxWidth: 260)
+    }
+
+    /// Bascule la portée : dossier courant + sous-dossiers, ou tout le drive.
+    private var searchScopeButton: some View {
+        Button {
+            searchRestrictedToFolder.toggle()
+        } label: {
+            Image(systemName: searchRestrictedToFolder ? "smallcircle.fill.circle.fill" : "smallcircle.filled.circle")
+                .font(.system(size: 16, weight: .medium))
+                .foregroundStyle(searchRestrictedToFolder ? Color.accentColor : .secondary)
+                .frame(width: 30, height: 30)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(searchRestrictedToFolder
+            ? "Recherche limitée au dossier et ses sous-dossiers"
+            : "Recherche sur tout le drive")
+        .accessibilityHint("Limite la recherche au dossier actuel et à tous ses sous-dossiers.")
+        .accessibilityAddTraits(searchRestrictedToFolder ? [.isSelected] : [])
     }
 
     /// Bouton dé : ouvre au hasard un fichier parmi les éléments du dossier actuel.
