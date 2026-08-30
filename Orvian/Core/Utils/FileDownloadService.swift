@@ -7,18 +7,44 @@ final class FileDownloadService: ObservableObject {
     static let shared = FileDownloadService()
 
     @Published var isDownloading = false
+    /// Progression du téléchargement courant (0…1) ; reste à 0 tant que le
+    /// serveur n'annonce pas de taille totale (progression indéterminée).
+    @Published var progress: Double = 0
+    @Published var downloadingFileName: String?
     @Published var errorMessage: String?
 
-    /// Télécharge le fichier localement dans les fichiers temporaires puis affiche la feuille de partage native iOS.
+    private var downloadTask: Task<Void, Never>?
+
+    /// Point d'entrée conservé `async` pour les appelants existants ; le
+    /// travail est porté par une tâche interne qui reste annulable via
+    /// `cancelDownload()`.
     func downloadAndShare(driveId: Int, file: DriveFile) async {
         guard !file.isDirectory else { return }
         guard !isDownloading else {
             errorMessage = "Un autre téléchargement est déjà en cours."
             return
         }
-        errorMessage = nil
         isDownloading = true
-        defer { isDownloading = false }
+        progress = 0
+        downloadingFileName = file.name
+        errorMessage = nil
+        let task = Task { await performDownloadAndShare(driveId: driveId, file: file) }
+        downloadTask = task
+        await task.value
+    }
+
+    /// Annule le téléchargement en cours : les fichiers temporaires sont
+    /// nettoyés et aucun message d'erreur n'est présenté.
+    func cancelDownload() {
+        downloadTask?.cancel()
+    }
+
+    private func performDownloadAndShare(driveId: Int, file: DriveFile) async {
+        defer {
+            isDownloading = false
+            progress = 0
+            downloadingFileName = nil
+        }
 
         var temporaryURLToClean: URL?
         var directoryToClean: URL?
@@ -34,6 +60,7 @@ final class FileDownloadService: ObservableObject {
                 mayRefreshURL: true
             )
             temporaryURLToClean = tempURL
+
             let downloadDirectory = FileManager.default.temporaryDirectory
                 .appendingPathComponent("OrvianDownloads", isDirectory: true)
                 .appendingPathComponent(UUID().uuidString, isDirectory: true)
@@ -56,11 +83,13 @@ final class FileDownloadService: ObservableObject {
             if let directoryToClean {
                 try? FileManager.default.removeItem(at: directoryToClean)
             }
+            // Annulation explicite : ce n'est pas un échec, aucun message.
+            guard !Task.isCancelled else { return }
             errorMessage = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
         }
     }
 
-    /// Vérifie explicitement le statut HTTP. `URLSession.download` considère
+    /// Vérifie explicitement le statut HTTP. `URLSession` considère
     /// aussi une page 403/404 comme un téléchargement réussi et fournit alors
     /// son corps HTML dans un fichier temporaire.
     private func download(
@@ -73,7 +102,7 @@ final class FileDownloadService: ObservableObject {
             throw FileDownloadError.invalidURL
         }
 
-        let (temporaryURL, response) = try await URLSession.shared.download(from: remoteURL)
+        let (temporaryURL, response) = try await downloadWithProgress(from: remoteURL)
         guard let http = response as? HTTPURLResponse else {
             try? FileManager.default.removeItem(at: temporaryURL)
             throw FileDownloadError.invalidResponse
@@ -96,6 +125,33 @@ final class FileDownloadService: ObservableObject {
         return temporaryURL
     }
 
+    /// Téléchargement délégué : la progression réelle remonte via le délégué
+    /// (l'API `URLSession.download(from:)` async n'en fournit aucune) et
+    /// l'annulation suspend la tâche de téléchargement elle-même. Comme pour
+    /// les uploads, la tâche est créée avant le handler d'annulation : une
+    /// Task Swift déjà annulée ne peut plus invalider la session avant la
+    /// création de la tâche.
+    private func downloadWithProgress(from remoteURL: URL) async throws -> (URL, URLResponse) {
+        let delegate = DownloadProgressDelegate(progress: { [weak self] fraction in
+            Task { @MainActor in
+                self?.progress = fraction
+            }
+        })
+        let delegateQueue = OperationQueue()
+        delegateQueue.maxConcurrentOperationCount = 1
+        let session = URLSession(configuration: .default, delegate: delegate, delegateQueue: delegateQueue)
+        defer { session.finishTasksAndInvalidate() }
+
+        let downloadTask = session.downloadTask(with: remoteURL)
+        return try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { continuation in
+                delegate.continuation = continuation
+                downloadTask.resume()
+            }
+        } onCancel: {
+            downloadTask.cancel()
+        }
+    }
     /// Le nom vient du serveur. Il ne doit jamais pouvoir créer un chemin
     /// relatif (`..`) ou un sous-dossier dans le répertoire temporaire.
     private func safeFileName(for file: DriveFile) -> String {
@@ -156,6 +212,58 @@ final class FileDownloadService: ObservableObject {
         }
         topVC.present(activityVC, animated: true)
         return true
+    }
+}
+
+/// Délégué isolé par téléchargement : remonte les octets reçus (coalescés à
+/// ~1 % pour éviter un rendu SwiftUI par tick de URLSession) et résout la
+/// continuation avec le fichier temporaire. Un seul callback par transfert
+/// réussit : `didFinishDownloadingTo` pour le succès, `didCompleteWithError`
+/// pour tout échec (annulation comprise).
+private final class DownloadProgressDelegate: NSObject, URLSessionDownloadDelegate, @unchecked Sendable {
+    let progress: @Sendable (Double) -> Void
+    var continuation: CheckedContinuation<(URL, URLResponse), Error>?
+    private var lastReported = 0.0
+
+    init(progress: @escaping @Sendable (Double) -> Void) {
+        self.progress = progress
+    }
+
+    func urlSession(
+        _ session: URLSession,
+        downloadTask: URLSessionDownloadTask,
+        didWriteData bytesWritten: Int64,
+        totalBytesWritten: Int64,
+        totalBytesExpectedToWrite: Int64
+    ) {
+        guard totalBytesExpectedToWrite > 0 else { return }
+        let fraction = min(max(Double(totalBytesWritten) / Double(totalBytesExpectedToWrite), 0), 1)
+        guard fraction > lastReported + 0.01 || fraction >= 1 else { return }
+        lastReported = fraction
+        progress(fraction)
+    }
+
+    func urlSession(
+        _ session: URLSession,
+        downloadTask: URLSessionDownloadTask,
+        didFinishDownloadingTo location: URL
+    ) {
+        guard let continuation else { return }
+        self.continuation = nil
+        if let response = downloadTask.response {
+            continuation.resume(returning: (location, response))
+        } else {
+            continuation.resume(throwing: APIError.invalidResponse)
+        }
+    }
+
+    func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
+        // Succès déjà résolu par `didFinishDownloadingTo` (continuation nil) :
+        // ce callback ne traite alors rien. Sinon, tout échec — annulation
+        // comprise — reprend la continuation avec son erreur.
+        guard let continuation else { return }
+        self.continuation = nil
+        continuation.resume(throwing: error ?? APIError.invalidResponse)
     }
 }
 

@@ -117,8 +117,11 @@ struct KDriveService {
         case let .recents(limit):
             // 1) Priorité /files/last_modified (fichiers modifiés/uploadés récemment sur le drive).
             // Une liste vide est un résultat valide : on ne bascule vers le
-            // repli que sur une vraie erreur, pour ne pas multiplier les
-            // allers-retours réseau à chaque chargement.
+            // repli que sur une erreur propre à ce endpoint (indisponible
+            // pour le compte, réponse illisible) — `isFallbackCandidate`.
+            // Une panne réseau, un 401 ou un 429 concerne tous les endpoints
+            // de la cascade : l'ancien comportement tentait les quatre et
+            // multipliait les requêtes vouées à l'échec à chaque chargement.
             do {
                 return try await api.get(
                     CursorPage<DriveFile>.self,
@@ -130,7 +133,7 @@ struct KDriveService {
                     ),
                     cachePolicy: cachePolicy
                 )
-            } catch {
+            } catch let error as APIError where error.isFallbackCandidate {
                 // 2) Fallback /files/recents
                 do {
                     return try await api.get(
@@ -144,7 +147,7 @@ struct KDriveService {
                         ),
                         cachePolicy: cachePolicy
                     )
-                } catch {
+                } catch let error as APIError where error.isFallbackCandidate {
                     // 3) Fallback /files/activities
                     do {
                         let activityPage = try await api.get(
@@ -168,7 +171,7 @@ struct KDriveService {
                             cursor: activityPage.cursor,
                             hasMore: activityPage.hasMore
                         )
-                    } catch {
+                    } catch let error as APIError where error.isFallbackCandidate {
                         // 4) Dernier recours : recherche globale
                         endpoint = safeOrdering(
                             .search(driveId: driveId, query: "", directoryId: nil, cursor: cursor, limit: limit),

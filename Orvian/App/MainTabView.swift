@@ -31,6 +31,16 @@ struct MainTabView: View {
             tabs
 
             VStack(spacing: 8) {
+                if downloadService.isDownloading {
+                    DownloadProgressBanner(service: downloadService) {
+                        downloadService.cancelDownload()
+                    }
+                    .transition(.asymmetric(
+                        insertion: .move(edge: .bottom).combined(with: .opacity),
+                        removal: .opacity.combined(with: .scale(scale: 0.9))
+                    ))
+                }
+
                 if uploadManager.isPillVisible {
                     UploadProgressPill(manager: uploadManager) {
                         showUploadSheet = true
@@ -50,6 +60,7 @@ struct MainTabView: View {
             }
             .padding(.bottom, 4)
             .animation(.snappy(duration: 0.28), value: uploadManager.isPillVisible)
+            .animation(.snappy(duration: 0.28), value: downloadService.isDownloading)
         }
         .ignoresSafeArea(.keyboard, edges: .bottom)
         .tint(.accentColor)
@@ -128,5 +139,54 @@ struct MainTabView: View {
             get: { downloadService.errorMessage != nil },
             set: { if !$0 { downloadService.errorMessage = nil } }
         )
+    }
+}
+
+/// Bannière compacte au-dessus de la barre d'onglets : progression réelle du
+/// téléchargement en cours et bouton d'annulation. L'ancien comportement ne
+/// fournissait aucun retour ni moyen d'arrêter un transfert, parfois long.
+private struct DownloadProgressBanner: View {
+    @ObservedObject var service: FileDownloadService
+    let onCancel: () -> Void
+
+    var body: some View {
+        HStack(spacing: 10) {
+            if service.progress > 0.001 {
+                ProgressView(value: service.progress)
+                    .tint(Color.accentColor)
+            } else {
+                ProgressView()
+                    .controlSize(.small)
+                    .tint(Color.accentColor)
+            }
+
+            VStack(alignment: .leading, spacing: 1) {
+                Text(service.downloadingFileName ?? "Téléchargement…")
+                    .font(.footnote.weight(.medium))
+                    .foregroundStyle(.primary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                if service.progress > 0.001 {
+                    Text("\(Int((service.progress * 100).rounded())) %")
+                        .font(.caption2.monospacedDigit())
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            Spacer(minLength: 8)
+
+            Button("Annuler", action: onCancel)
+                .font(.footnote.weight(.semibold))
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 8)
+        .background(.ultraThinMaterial, in: Capsule())
+        .overlay {
+            Capsule()
+                .strokeBorder(.quaternary, lineWidth: 0.5)
+        }
+        .shadow(color: .black.opacity(0.12), radius: 10, x: 0, y: 4)
+        .padding(.horizontal, DS.gridMargin + 8)
+        .accessibilityLabel("Téléchargement en cours")
     }
 }

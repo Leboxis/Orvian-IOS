@@ -465,12 +465,15 @@ private struct ZoomablePhotoPage: View {
 
     /// Miniature (placeholder instantané) : cache mémoire, disque ou réseau
     /// régulé. Toujours chargée, quel que soit l'état du préchargement HD.
+    /// `DS.thumbnailPixels` est la clé canonique : l'API renvoie la même
+    /// image quelle que soit la taille demandée, une autre valeur ne ferait
+    /// que dupliquer le téléchargement et les caches.
     private func loadThumbnail() async {
         guard thumbnail == nil else { return }
         let image = await ThumbnailProvider.shared.thumbnail(
             driveId: driveId,
             fileId: file.id,
-            pixels: 400
+            pixels: DS.thumbnailPixels
         )
         guard !Task.isCancelled, thumbnail == nil else { return }
         thumbnail = image

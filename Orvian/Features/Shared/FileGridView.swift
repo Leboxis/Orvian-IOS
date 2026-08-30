@@ -123,8 +123,11 @@ struct FileGridView: View {
             .onAppear {
                 onVisibleItemsChanged?(visibleItems)
             }
-            .onChange(of: visibleItems) { _, newItems in
-                onVisibleItemsChanged?(newItems)
+            // La clé de mémoïsation change exactement quand la liste visible
+            // peut avoir changé : comparer la clé (O(1)) remplace la
+            // comparaison du tableau complet à chaque rendu.
+            .onChange(of: visibleItemsKey) { _, _ in
+                onVisibleItemsChanged?(visibleItems)
             }
             .task(id: emptyFilteredPageTaskKey) {
                 await loadUntilFilteredResultIfNeeded()
@@ -149,20 +152,14 @@ struct FileGridView: View {
             }
     }
 
-    /// Relance la résolution des métadonnées vidéo uniquement quand il y a de
-    /// nouvelles vidéos à résoudre : la clé repose sur une empreinte additive
-    /// (comptage + somme des identifiants) calculée en un seul passage sans
-    /// allocation — plus de liste triée puis sérialisée à chaque rendu.
+    /// Relance la résolution des métadonnées vidéo quand le contenu change :
+    /// la clé repose sur la version incrémentale de la liste (coût O(1) par
+    /// rendu) au lieu d'une empreinte recalculée sur toutes les vidéos à
+    /// chaque rendu. La résolution déduplique elle-même (mémoire, disque,
+    /// requêtes en vol) : une relance sans vidéo nouvelle ne coûte rien.
     private var filterTaskKey: String {
         guard needsVideoMetadata else { return "none" }
-        let fingerprint = mediaMetadata.unresolvedVideoFingerprint(
-            in: viewModel.items,
-            driveId: viewModel.driveId
-        )
-        guard fingerprint.count > 0 else {
-            return "resolved-\(viewModel.driveId)"
-        }
-        return "resolve-\(viewModel.driveId)-\(fingerprint.count)-\(fingerprint.checksum)"
+        return "resolve-\(viewModel.driveId)-\(viewModel.source)-\(viewModel.itemsRevision)"
     }
 
     @ViewBuilder
@@ -252,13 +249,24 @@ struct FileGridView: View {
     }
 
     /// Éléments après filtres (type, orientation, recherche) et tri.
+    /// La clé de mémoïsation est purement incrémentale : sa comparaison est
+    /// O(1) au lieu de relire tout le tableau à chaque rendu.
     private var visibleItems: [DriveFile] {
         visibleItemsCache.visibleItems(
+            key: visibleItemsKey,
             items: viewModel.items,
+            mediaMetadata: mediaMetadata
+        )
+    }
+
+    private var visibleItemsKey: VisibleItemsKey {
+        VisibleItemsKey(
+            source: viewModel.source,
+            driveId: viewModel.driveId,
+            itemsRevision: viewModel.itemsRevision,
             filters: filters,
             searchText: effectiveSearchText,
-            metadataRevision: metadataRevision,
-            mediaMetadata: mediaMetadata
+            metadataRevision: metadataRevision
         )
     }
 
@@ -383,11 +391,10 @@ struct FileGridView: View {
     }
 
     private struct EmptyFilteredPageTaskKey: Hashable {
-        /// Empreinte additive du contenu (comptage + somme des ids) : égalité
-        /// en O(1) au lieu d'un tableau d'identifiants reconstruit et comparé
-        /// à chaque rendu.
-        let itemCount: Int
-        let itemChecksum: Int
+        /// Version incrémentale du contenu : toute mutation de la liste
+        /// change la clé, sans recalculer une empreinte O(n) à chaque rendu.
+        let source: FileSource
+        let itemsRevision: Int
         let filters: FileFilters
         let searchText: String
         let hasMore: Bool
@@ -395,13 +402,9 @@ struct FileGridView: View {
     }
 
     private var emptyFilteredPageTaskKey: EmptyFilteredPageTaskKey {
-        var checksum = 0
-        for item in viewModel.items {
-            checksum = checksum &+ item.id
-        }
-        return EmptyFilteredPageTaskKey(
-            itemCount: viewModel.items.count,
-            itemChecksum: checksum,
+        EmptyFilteredPageTaskKey(
+            source: viewModel.source,
+            itemsRevision: viewModel.itemsRevision,
             filters: filters,
             searchText: effectiveSearchText,
             hasMore: viewModel.hasMore,
@@ -614,39 +617,37 @@ private struct ScrollRevealMetrics: Equatable {
     let topInset: CGFloat
 }
 
-/// Mémoïse le résultat des filtres/tri de la grille : tant que les données
-/// (items), les filtres, la recherche et la révision des métadonnées vidéo
-/// n'ont pas changé, la liste visible n'est pas recalculée à chaque rendu.
+/// Clé de mémoïsation du résultat des filtres/tri de la grille : la version
+/// incrémentale du contenu (itemsRevision) remplace la comparaison du
+/// tableau complet — tant que les données, les filtres, la recherche et la
+/// révision des métadonnées vidéo n'ont pas changé, la liste visible n'est
+/// pas recalculée à chaque rendu. La source et le drive protègent du
+/// remplacement du vue-modèle (recherche ↔ dossier) dans la même vue.
+fileprivate struct VisibleItemsKey: Hashable {
+    let source: FileSource
+    let driveId: Int
+    let itemsRevision: Int
+    let filters: FileFilters
+    let searchText: String
+    let metadataRevision: Int
+}
+
+/// Mémoïse le résultat des filtres/tri de la grille.
 @MainActor
 private struct VisibleItemsCache {
-    private struct Key: Hashable {
-        let items: [DriveFile]
-        let filters: FileFilters
-        let searchText: String
-        let metadataRevision: Int
-    }
-
-    private var cachedKey: Key?
+    private var cachedKey: VisibleItemsKey?
     private var cachedResult: [DriveFile] = []
 
     mutating func visibleItems(
+        key: VisibleItemsKey,
         items: [DriveFile],
-        filters: FileFilters,
-        searchText: String,
-        metadataRevision: Int,
         mediaMetadata: MediaMetadataStore
     ) -> [DriveFile] {
-        let key = Key(
-            items: items,
-            filters: filters,
-            searchText: searchText,
-            metadataRevision: metadataRevision
-        )
         if key == cachedKey {
             return cachedResult
         }
         cachedKey = key
-        cachedResult = filters.visible(items, searchText: searchText, mediaMetadata: mediaMetadata)
+        cachedResult = key.filters.visible(items, searchText: key.searchText, mediaMetadata: mediaMetadata)
         return cachedResult
     }
 }

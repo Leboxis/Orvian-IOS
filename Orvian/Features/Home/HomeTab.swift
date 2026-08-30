@@ -14,7 +14,6 @@ struct HomeTab: View {
     private let service = KDriveService()
 
     private var cacheKey: String { "home_start_dir_locked_\(driveId)" }
-    private var previousCacheKey: String { "home_start_dir_\(driveId)" }
 
     init(driveId: Int, router: ViewerRouter, isSelected: Bool, path: Binding<[DriveFile]>) {
         self.driveId = driveId
@@ -22,7 +21,7 @@ struct HomeTab: View {
         self.isSelected = isSelected
         self._path = path
 
-        if let data = UserDefaults.standard.data(forKey: "home_start_dir_locked_\(driveId)"),
+        if let data = UserDefaults.standard.data(forKey: cacheKey),
            let cached = try? JSONDecoder().decode(DriveFile.self, from: data) {
             _startDirectory = State(initialValue: cached)
         }
@@ -70,6 +69,34 @@ struct HomeTab: View {
                 )
             }
         }
+        .task(id: driveId) {
+            await revalidateStartDirectory()
+        }
+    }
+
+    /// Revalide en arrière-plan le dossier de démarrage : le dossier affiché
+    /// au lancement provient d'un cache qui peut être obsolète (premier
+    /// dossier renommé ou supprimé à distance). Sans cette relecture,
+    /// l'Accueil restait bloqué sur un dossier disparu, sans moyen d'en
+    /// sortir puisqu'il constitue la racine de la pile de navigation.
+    private func revalidateStartDirectory() async {
+        guard let page = try? await service.page(.directory(1), driveId: driveId, cursor: nil),
+              let resolved = page.data?.first(where: \.isDirectory)
+        else { return }
+        guard !Task.isCancelled else { return }
+
+        // Le dossier mémorisé n'est plus le premier du drive : repartir de la
+        // nouvelle racine pour ne pas laisser l'utilisateur dans un sous-arbre
+        // disparu. Un simple renommage (même identifiant) ne touche pas à la
+        // pile, seul le nom affiché est rafraîchi.
+        if resolved.id != startDirectory?.id {
+            path.removeAll()
+        }
+        startDirectory = resolved
+
+        if let data = try? JSONEncoder().encode(resolved) {
+            UserDefaults.standard.set(data, forKey: cacheKey)
+        }
     }
 
     /// Résout le premier dossier du drive. L'ancien cache contient déjà ce
@@ -78,7 +105,7 @@ struct HomeTab: View {
         let defaults = UserDefaults.standard
         var resolved: DriveFile?
 
-        if let data = defaults.data(forKey: previousCacheKey),
+        if let data = defaults.data(forKey: cacheKey),
            let cached = try? JSONDecoder().decode(DriveFile.self, from: data) {
             resolved = cached
         }

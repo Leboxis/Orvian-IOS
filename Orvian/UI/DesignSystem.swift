@@ -11,6 +11,9 @@ enum DS {
     /// Marges latérales de la grille.
     static let gridMargin: CGFloat = 14
     /// Taille de miniature demandée à l'API (bucket arrondi, max 400).
+    /// C'est aussi la clé canonique de tous les caches de miniatures : le
+    /// serveur renvoie la même image quelle que soit la valeur demandée,
+    /// une autre taille ne ferait que dupliquer téléchargements et caches.
     static let thumbnailPixels: Int = 360
     /// Hauteur réservée sous la barre de recherche flottante : le contenu de
     /// la grille est décalé de cette valeur quand la barre est visible.

@@ -6,7 +6,20 @@ import Observation
 @MainActor
 @Observable
 final class FileGridViewModel {
-    private(set) var items: [DriveFile] = []
+    private(set) var items: [DriveFile] = [] {
+        didSet {
+            // Version incrémentale du contenu : les clés de mémoïsation des
+            // vues (cache des filtres, tâches de pagination et de métadonnées)
+            // s'appuient sur ce compteur au lieu de relire tout le tableau à
+            // chaque rendu — un coût O(n) par frame sur les très grandes
+            // listes. Toute mutation passe ici, y compris la modification
+            // d'un élément (nom, favori, couleur, tags), le tri ou l'ajout
+            // paginé, car un tableau valeur est réécrit en entier.
+            itemsRevision &+= 1
+        }
+    }
+    /// Compteur incrémenté à chaque mutation de `items`.
+    private(set) var itemsRevision = 0
     private(set) var isInitialLoading = false
     private(set) var isLoadingMore = false
     private(set) var hasMore = false
@@ -254,33 +267,84 @@ final class FileGridViewModel {
         }
     }
 
+    // MARK: - Actions de masse
+
+    /// Applique une opération API à chaque identifiant avec une concurrence
+    /// bornée : les versions séquentielles faisaient attendre un aller-retour
+    /// réseau complet par élément (une sélection de 50 fichiers pouvait
+    /// prendre plusieurs dizaines de secondes). Renvoie les identifiants
+    /// réussis et la première erreur rencontrée.
+    private func performConcurrently(
+        ids: Set<Int>,
+        operation: @escaping @Sendable (Int) async throws -> Void
+    ) async -> (succeeded: Set<Int>, firstError: Error?) {
+        let orderedIDs = Array(ids)
+        let concurrency = 4
+        var succeeded: Set<Int> = []
+        var firstError: Error?
+        var index = 0
+
+        while index < orderedIDs.count {
+            let chunk = Array(orderedIDs[index..<min(index + concurrency, orderedIDs.count)])
+            index += chunk.count
+            await withTaskGroup(of: (Int, Error?).self) { group in
+                for id in chunk {
+                    group.addTask {
+                        do {
+                            try await operation(id)
+                            return (id, nil)
+                        } catch {
+                            return (id, error)
+                        }
+                    }
+                }
+                for await (id, error) in group {
+                    if let error {
+                        if firstError == nil { firstError = error }
+                    } else {
+                        succeeded.insert(id)
+                    }
+                }
+            }
+        }
+
+        return (succeeded, firstError)
+    }
+
+    /// Message d'échec partiel identique à l'ancien comportement séquentiel.
+    private func reportPartialFailure(
+        total: Int,
+        succeeded: Int,
+        firstError: Error?,
+        singular: String,
+        plural: String
+    ) {
+        guard let firstError else { return }
+        let failedCount = total - succeeded
+        let detail = (firstError as? APIError)?.errorDescription ?? firstError.localizedDescription
+        errorMessage = failedCount == 1
+            ? String(format: singular, detail)
+            : String(format: plural, failedCount, detail)
+    }
+
     /// Corbeille une sélection entière ; les échecs partiels sont signalés
     /// dans `errorMessage` sans bloquer les autres suppressions.
     @discardableResult
     func trash(ids: Set<Int>) async -> Set<Int> {
         errorMessage = nil
-        var trashedIDs: Set<Int> = []
-        var firstError: Error?
-
-        for id in ids {
-            do {
-                try await service.trash(driveId: driveId, fileId: id)
-                trashedIDs.insert(id)
-            } catch {
-                if firstError == nil { firstError = error }
-            }
+        let service = self.service
+        let driveId = self.driveId
+        let (trashedIDs, firstError) = await performConcurrently(ids: ids) { id in
+            try await service.trash(driveId: driveId, fileId: id)
         }
-
         items.removeAll { trashedIDs.contains($0.id) }
-
-        if let firstError {
-            let failedCount = ids.count - trashedIDs.count
-            let detail = (firstError as? APIError)?.errorDescription ?? firstError.localizedDescription
-            errorMessage = failedCount == 1
-                ? "Un élément n’a pas pu être supprimé : \(detail)"
-                : "\(failedCount) éléments n’ont pas pu être supprimés : \(detail)"
-        }
-
+        reportPartialFailure(
+            total: ids.count,
+            succeeded: trashedIDs.count,
+            firstError: firstError,
+            singular: "Un élément n’a pas pu être supprimé : %@",
+            plural: "%d éléments n’ont pas pu être supprimés : %@"
+        )
         return trashedIDs
     }
 
@@ -321,32 +385,20 @@ final class FileGridViewModel {
     @discardableResult
     func move(ids: Set<Int>, to destinationDirectoryId: Int) async -> Set<Int> {
         errorMessage = nil
-        var movedIDs: Set<Int> = []
-        var firstError: Error?
-
-        for id in ids {
-            do {
-                try await service.move(
-                    driveId: driveId,
-                    fileId: id,
-                    destinationDirectoryId: destinationDirectoryId
-                )
-                movedIDs.insert(id)
-            } catch {
-                if firstError == nil { firstError = error }
-            }
+        let service = self.service
+        let driveId = self.driveId
+        let destination = destinationDirectoryId
+        let (movedIDs, firstError) = await performConcurrently(ids: ids) { id in
+            try await service.move(driveId: driveId, fileId: id, destinationDirectoryId: destination)
         }
-
         items.removeAll { movedIDs.contains($0.id) }
-
-        if let firstError {
-            let failedCount = ids.count - movedIDs.count
-            let detail = (firstError as? APIError)?.errorDescription ?? firstError.localizedDescription
-            errorMessage = failedCount == 1
-                ? "Un élément n’a pas pu être déplacé : \(detail)"
-                : "\(failedCount) éléments n’ont pas pu être déplacés : \(detail)"
-        }
-
+        reportPartialFailure(
+            total: ids.count,
+            succeeded: movedIDs.count,
+            firstError: firstError,
+            singular: "Un élément n’a pas pu être déplacé : %@",
+            plural: "%d éléments n’ont pas pu être déplacés : %@"
+        )
         return movedIDs
     }
 
@@ -365,15 +417,10 @@ final class FileGridViewModel {
     /// Supprime définitivement une sélection entière ; les échecs partiels
     /// sont signalés dans `errorMessage` sans bloquer les autres suppressions.
     func permanentlyDelete(ids: Set<Int>) async {
-        var firstError: Error?
-        var deletedIds: Set<Int> = []
-        for id in ids {
-            do {
-                try await service.permanentlyDelete(driveId: driveId, fileId: id)
-                deletedIds.insert(id)
-            } catch {
-                if firstError == nil { firstError = error }
-            }
+        let service = self.service
+        let driveId = self.driveId
+        let (deletedIds, firstError) = await performConcurrently(ids: ids) { id in
+            try await service.permanentlyDelete(driveId: driveId, fileId: id)
         }
         items.removeAll { deletedIds.contains($0.id) }
         if let firstError {
@@ -410,34 +457,30 @@ final class FileGridViewModel {
     @discardableResult
     func restore(ids: Set<Int>) async -> Set<Int> {
         errorMessage = nil
-        var restoredIDs: Set<Int> = []
-        var firstError: Error?
-
-        for id in ids {
-            let destination = items.first(where: { $0.id == id })?.parentId ?? 1
+        let service = self.service
+        let driveId = self.driveId
+        // Les destinations d'origine sont figées avant le lancement des
+        // requêtes : la closure des tâches enfants n'accède pas à `items`.
+        let destinations = Dictionary(uniqueKeysWithValues: ids.map { id in
+            (id, items.first(where: { $0.id == id })?.parentId ?? 1)
+        })
+        let (restoredIDs, firstError) = await performConcurrently(ids: ids) { id in
+            let destination = destinations[id] ?? 1
             do {
-                do {
-                    try await service.restore(driveId: driveId, fileId: id, destinationDirectoryId: destination)
-                } catch {
-                    guard destination != 1 else { throw error }
-                    try await service.restore(driveId: driveId, fileId: id, destinationDirectoryId: 1)
-                }
-                restoredIDs.insert(id)
+                try await service.restore(driveId: driveId, fileId: id, destinationDirectoryId: destination)
             } catch {
-                if firstError == nil { firstError = error }
+                guard destination != 1 else { throw error }
+                try await service.restore(driveId: driveId, fileId: id, destinationDirectoryId: 1)
             }
         }
-
         items.removeAll { restoredIDs.contains($0.id) }
-
-        if let firstError {
-            let failedCount = ids.count - restoredIDs.count
-            let detail = (firstError as? APIError)?.errorDescription ?? firstError.localizedDescription
-            errorMessage = failedCount == 1
-                ? "Un élément n’a pas pu être restauré : \(detail)"
-                : "\(failedCount) éléments n’ont pas pu être restaurés : \(detail)"
-        }
-
+        reportPartialFailure(
+            total: ids.count,
+            succeeded: restoredIDs.count,
+            firstError: firstError,
+            singular: "Un élément n’a pas pu être restauré : %@",
+            plural: "%d éléments n’ont pas pu être restaurés : %@"
+        )
         return restoredIDs
     }
 

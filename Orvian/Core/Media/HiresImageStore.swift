@@ -26,10 +26,12 @@ actor HiresImageStore {
 
     init() {
         // Une photo pleine résolution occupe plusieurs dizaines de Mo décodée
-        // (48 MP ≈ 195 Mo). La limite de coût globale pilote l'éviction ;
-        // `countLimit` évite seulement d'empiler des dizaines d'entrées.
-        memory.countLimit = 6
-        memory.totalCostLimit = 300 * 1024 * 1024
+        // (48 MP ≈ 195 Mo). Les limites sont volontairement basses : le pager
+        // précharge la page suivante, chaque image décodée peut donc se
+        // cumuler avec la précédente, et l'enveloppe mémoire d'un conteneur
+        // comme LiveContainer est plus contrainte que celle d'une app native.
+        memory.countLimit = 3
+        memory.totalCostLimit = 192 * 1024 * 1024
     }
 
     private func memoryKey(driveId: Int, fileId: Int) -> NSString {
@@ -66,17 +68,20 @@ actor HiresImageStore {
     }
 
     /// Téléchargement vers un fichier temporaire puis décodage pleine
-    /// résolution par ImageIO. Le régulateur borne les téléchargements ; le
-    /// décodage a lieu hors du permis pour ne pas retarder le téléchargement
-    /// suivant. Le fichier source est supprimé dans tous les cas ;
-    /// l'annulation de la tâche interrompt le transfert réseau.
+    /// résolution par ImageIO. Téléchargement **et** décodage partagent le
+    /// régulateur : deux décompressions simultanées (page courante + page
+    /// suivante du pager) formaient un pic mémoire d'environ 400 Mo pour du
+    /// 48 MP, auquel s'ajoutaient les images déjà en cache. Un seul décodage
+    /// à la fois borne le pic sans dégrader la qualité affichée. Le fichier
+    /// source est supprimé dans tous les cas ; l'annulation de la tâche
+    /// interrompt le transfert réseau.
     nonisolated private static func downloadDecodeOriginal(
         url: URL,
         throttler: AsyncThrottler
     ) async -> UIImage? {
         struct DownloadRejected: Error {}
         do {
-            let fileURL: URL = try await throttler.withPermit {
+            let image: UIImage? = try await throttler.withPermit {
                 try Task.checkCancellation()
                 let (downloadedURL, response) = try await URLSession.shared.download(from: url)
                 guard let http = response as? HTTPURLResponse,
@@ -85,10 +90,10 @@ actor HiresImageStore {
                     try? FileManager.default.removeItem(at: downloadedURL)
                     throw DownloadRejected()
                 }
-                return downloadedURL
+                defer { try? FileManager.default.removeItem(at: downloadedURL) }
+                return Self.decodeOriginal(fromFile: downloadedURL)
             }
-            defer { try? FileManager.default.removeItem(at: fileURL) }
-            return Self.decodeOriginal(fromFile: fileURL)
+            return image
         } catch {
             return nil
         }

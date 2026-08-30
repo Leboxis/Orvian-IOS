@@ -18,6 +18,9 @@ enum APIError: LocalizedError {
             if status == 401 {
                 return "Token invalide ou expiré (\(status))."
             }
+            if status == 429 {
+                return "Trop de requêtes vers le serveur (429). Réessayez dans un instant."
+            }
             if let description, !description.isEmpty {
                 return "\(description) (HTTP \(status)\(code.map { ", \($0)" } ?? ""))"
             }
@@ -41,6 +44,22 @@ enum APIError: LocalizedError {
     var isUnauthorized: Bool {
         if case let .http(status, _, _) = self { return status == 401 }
         return false
+    }
+
+    /// Un repli vers un autre endpoint a une chance de réussir : le endpoint
+    /// est indisponible pour ce compte (403/404) ou sa réponse est illisible.
+    /// Une panne réseau, un 401, un rate limit (429) ou une erreur serveur
+    /// concernent tous les endpoints : relancer la cascade ne ferait que
+    /// multiplier les requêtes vouées à l'échec (et aggraver un 429).
+    var isFallbackCandidate: Bool {
+        switch self {
+        case let .http(status, _, _):
+            return status == 403 || status == 404
+        case .decoding, .invalidResponse:
+            return true
+        case .network, .notSignedIn, .invalidURL:
+            return false
+        }
     }
 
     /// Chemin du champ fautif d'un `DecodingError`, p.ex.

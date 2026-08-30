@@ -69,14 +69,27 @@ final class MediaUsageStore {
             records[key] = MediaViewRecord(file: file, count: 1, lastViewedAt: now)
         }
 
-        // Limiter aux 200 éléments les plus pertinents pour préserver la mémoire
+        // Limiter la mémoire : seules les entrées du drive courant sont
+        // compactées aux 200 plus pertinentes. L'ancien code reconstruisait
+        // toutes les clés avec le drive courant et éjectait du même coup
+        // l'historique complet des autres drives.
         if records.count > 200 {
-            let sortedKeys = records.values
-                .sorted { $0.count > $1.count }
-                .prefix(200)
-                .map { "\(driveId)-\($0.file.id)" }
-            let keySet = Set(sortedKeys)
-            records = records.filter { keySet.contains($0.key) }
+            let prefix = "\(driveId)-"
+            let ownEntries = records.filter { $0.key.hasPrefix(prefix) }
+            if ownEntries.count > 200 {
+                let keptKeys = Set(
+                    ownEntries
+                        .sorted { lhs, rhs in
+                            if lhs.value.count != rhs.value.count {
+                                return lhs.value.count > rhs.value.count
+                            }
+                            return lhs.value.lastViewedAt > rhs.value.lastViewedAt
+                        }
+                        .prefix(200)
+                        .map(\.key)
+                )
+                records = records.filter { keptKeys.contains($0.key) || !$0.key.hasPrefix(prefix) }
+            }
         }
 
         saveToDisk()

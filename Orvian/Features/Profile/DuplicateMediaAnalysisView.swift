@@ -275,13 +275,21 @@ private final class DuplicateMediaAnalysisModel {
                     if let image = await ThumbnailProvider.shared.thumbnail(
                         driveId: driveId,
                         fileId: file.id,
-                        pixels: 64
+                        pixels: DS.thumbnailPixels
                     ), let fingerprint = perceptualHash(for: image) {
                         thumbnailFingerprints[file.id] = fingerprint
-                        rebuildSimilarityGroups()
                     }
                     analyzedThumbnailCount += 1
+                    // Le regroupement est O(n²) : le refaire après CHAQUE
+                    // miniature rendait l'analyse cubique et gelait l'interface
+                    // sur les gros dossiers. Recalcul par palier (toutes les 32
+                    // miniatures, l'affichage reste progressif) puis une
+                    // dernière passe avant l'affichage final.
+                    if analyzedThumbnailCount % 32 == 0 {
+                        rebuildSimilarityGroups()
+                    }
                 }
+                rebuildSimilarityGroups()
                 isAnalyzingThumbnails = false
             }
 

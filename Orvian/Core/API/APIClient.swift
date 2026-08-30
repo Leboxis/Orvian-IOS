@@ -136,13 +136,14 @@ actor APIClient {
             )
             defer { uploadSession.finishTasksAndInvalidate() }
 
-            let (data, response) = try await withTaskCancellationHandler {
-                try await withCheckedThrowingContinuation { continuation in
-                    delegate.continuation = continuation
-                    uploadSession.uploadTask(with: request, fromFile: fileURL).resume()
-                }
-            } onCancel: {
-                uploadSession.invalidateAndCancel()
+            let (data, response) = try await Self.uploadWithProgress(uploadSession: uploadSession, delegate: delegate) {
+                // La tâche est créée et démarrée AVANT d'enregistrer le
+                // handler d'annulation : si la Task Swift était déjà annulée
+                // à l'entrée, l'ancien code appelait `invalidateAndCancel()`
+                // avant la création de la tâche, et `resume()` sur une session
+                // invalidée levait une exception fatale. Annuler la tâche,
+                // elle, est toujours sûr.
+                uploadSession.uploadTask(with: request, fromFile: fileURL)
             }
             try Self.check(response: response, data: data, credentialFingerprint: credentialFingerprint)
             do {
@@ -215,19 +216,36 @@ actor APIClient {
             )
             defer { uploadSession.finishTasksAndInvalidate() }
 
-            let (responseData, response) = try await withTaskCancellationHandler {
-                try await withCheckedThrowingContinuation { continuation in
-                    delegate.continuation = continuation
-                    uploadSession.uploadTask(with: request, from: data).resume()
-                }
-            } onCancel: {
-                uploadSession.invalidateAndCancel()
+            let (responseData, response) = try await Self.uploadWithProgress(uploadSession: uploadSession, delegate: delegate) {
+                // Même garde que `uploadFile` : créer la tâche avant tout
+                // `invalidateAndCancel` potentiel (voir le commentaire ici-haut).
+                uploadSession.uploadTask(with: request, from: data)
             }
             try Self.check(response: response, data: responseData, credentialFingerprint: credentialFingerprint)
             return responseData
         } catch {
             if error is APIError { throw error }
             throw APIError.network(error)
+        }
+    }
+
+    /// Crée la tâche d'upload, démarre-la, puis seul le handler d'annulation
+    /// suspend la tâche elle-même (jamais la session avant sa création) :
+    /// une Task Swift déjà annulée à l'entrée ne peut plus provoquer
+    /// l'exception « Task created in a session that has been invalidated ».
+    private static func uploadWithProgress(
+        uploadSession: URLSession,
+        delegate: UploadProgressDelegate,
+        makeTask: () -> URLSessionTask
+    ) async throws -> (Data, URLResponse) {
+        let uploadTask = makeTask()
+        return try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { continuation in
+                delegate.continuation = continuation
+                uploadTask.resume()
+            }
+        } onCancel: {
+            uploadTask.cancel()
         }
     }
 
