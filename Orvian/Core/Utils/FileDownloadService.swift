@@ -217,9 +217,10 @@ final class FileDownloadService: ObservableObject {
 
 /// Délégué isolé par téléchargement : remonte les octets reçus (coalescés à
 /// ~1 % pour éviter un rendu SwiftUI par tick de URLSession) et résout la
-/// continuation avec le fichier temporaire. Un seul callback par transfert
-/// réussit : `didFinishDownloadingTo` pour le succès, `didCompleteWithError`
-/// pour tout échec (annulation comprise).
+/// continuation avec le fichier déplacé dans le répertoire temporaire de
+/// l'app — le système supprime le sien au retour du callback. Un seul
+/// callback par transfert réussit : `didFinishDownloadingTo` pour le succès,
+/// `didCompleteWithError` pour tout échec (annulation comprise).
 private final class DownloadProgressDelegate: NSObject, URLSessionDownloadDelegate, @unchecked Sendable {
     let progress: @Sendable (Double) -> Void
     var continuation: CheckedContinuation<(URL, URLResponse), Error>?
@@ -250,10 +251,23 @@ private final class DownloadProgressDelegate: NSObject, URLSessionDownloadDelega
     ) {
         guard let continuation else { return }
         self.continuation = nil
-        if let response = downloadTask.response {
-            continuation.resume(returning: (location, response))
-        } else {
-            continuation.resume(throwing: APIError.invalidResponse)
+        // Le système supprime le fichier de `location` dès le retour de ce
+        // callback : le déplacer de façon synchrone vers un fichier que l'on
+        // contrôle évite que le `moveItem` de l'appelant s'exécute sur un
+        // fichier déjà supprimé (« CFNetworkDownload_xxx.tmp couldn't be
+        // moved… » atteint 100 % puis échoue).
+        let safeURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("OrvianDownload-\(UUID().uuidString)")
+        do {
+            try FileManager.default.moveItem(at: location, to: safeURL)
+            if let response = downloadTask.response {
+                continuation.resume(returning: (safeURL, response))
+            } else {
+                try? FileManager.default.removeItem(at: safeURL)
+                continuation.resume(throwing: APIError.invalidResponse)
+            }
+        } catch {
+            continuation.resume(throwing: error)
         }
     }
 

@@ -124,12 +124,6 @@ struct ProfileView: View {
                     }
                     .padding(.vertical, 4)
                 }
-
-                NavigationLink {
-                    DuplicateMediaAnalysisView(driveId: drive.id, router: router)
-                } label: {
-                    Label("Analyser les doublons de médias", systemImage: "doc.on.doc")
-                }
             }
         } header: {
             if let drive = session.selectedDrive {
