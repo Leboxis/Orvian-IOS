@@ -149,6 +149,11 @@ struct DirectoryView: View {
     @State private var busyMessage = ""
     @State private var addError: String?
     @State private var searchText = ""
+    /// Requête possédée actuellement par `searchViewModel` : évite d'afficher
+    /// les résultats d'une recherche précédente pendant le debounce ou le
+    /// chargement d'une requête plus récente (y compris après un changement
+    /// de portée).
+    @State private var searchQuery = ""
     @State private var scrolledPastTop = false
     @State private var filters = FileFilters()
     @State private var selectionMode = false
@@ -206,7 +211,8 @@ struct DirectoryView: View {
     }
 
     private var activeViewModel: FileGridViewModel {
-        if isSearching, let searchViewModel {
+        if let searchViewModel,
+           searchQuery == searchText.trimmingCharacters(in: .whitespacesAndNewlines) {
             return searchViewModel
         }
         return viewModel
@@ -392,6 +398,7 @@ struct DirectoryView: View {
             let trimmed = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !trimmed.isEmpty else {
                 searchViewModel = nil
+                searchQuery = ""
                 return
             }
             // Debounce de 300 ms pour éviter les requêtes superflues pendant la saisie
@@ -409,6 +416,7 @@ struct DirectoryView: View {
                 ),
                 driveId: driveId
             )
+            searchQuery = trimmed
             searchViewModel = searchVM
             await searchVM.reload()
         }
@@ -479,6 +487,9 @@ struct DirectoryView: View {
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        // La zone tactile (30 pt) déborde de la ligne : la pastille conserve
+        // la hauteur d'origine au lieu d'épouser celle du bouton.
+        .padding(.vertical, -4)
         .accessibilityLabel(searchRestrictedToFolder
             ? "Recherche limitée au dossier et ses sous-dossiers"
             : "Recherche sur tout le drive")
