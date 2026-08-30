@@ -83,20 +83,43 @@ private struct BootstrapError: View {
     }
 }
 
-/// Monogramme de l'app (placeholder en attendant une icône dédiée).
+/// Monogramme Constellation affiché pendant l'onboarding et le verrouillage.
 struct AppMark: View {
     var body: some View {
-        Text("O")
-            .foregroundStyle(.white)
-            .frame(width: 88, height: 88)
-            .background(
-                LinearGradient(
-                    colors: [Color(red: 0.26, green: 0.52, blue: 0.96), Color(red: 0.56, green: 0.38, blue: 0.94)],
-                    startPoint: .topLeading,
-                    endPoint: .bottomTrailing
-                ),
-                in: RoundedRectangle(cornerRadius: 24, style: .continuous)
-            )
-            .shadow(color: .black.opacity(0.18), radius: 12, y: 6)
+        ZStack {
+            RoundedRectangle(cornerRadius: 24, style: .continuous)
+                .fill(
+                    LinearGradient(
+                        colors: [Color(red: 0.16, green: 0.47, blue: 0.95), Color(red: 0.53, green: 0.35, blue: 0.91)],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
+                )
+
+            Circle()
+                .stroke(.white.opacity(0.28), lineWidth: 1)
+                .frame(width: 58, height: 58)
+
+            Path { path in
+                path.move(to: CGPoint(x: 27, y: 28))
+                path.addLine(to: CGPoint(x: 60, y: 33))
+                path.addLine(to: CGPoint(x: 51, y: 61))
+                path.closeSubpath()
+            }
+            .stroke(.white.opacity(0.55), lineWidth: 1.6)
+
+            Circle()
+                .fill(.white.opacity(0.87))
+                .frame(width: 34, height: 34)
+            Circle()
+                .stroke(Color(red: 0.42, green: 0.38, blue: 0.87), lineWidth: 4.5)
+                .frame(width: 19, height: 19)
+
+            Circle().fill(.white).frame(width: 9, height: 9).offset(x: -17, y: -16)
+            Circle().fill(.white).frame(width: 9, height: 9).offset(x: 16, y: -11)
+            Circle().fill(.white).frame(width: 9, height: 9).offset(x: 7, y: 17)
+        }
+        .frame(width: 88, height: 88)
+        .shadow(color: .black.opacity(0.18), radius: 12, y: 6)
     }
 }
