@@ -154,6 +154,10 @@ struct DirectoryView: View {
     /// chargement d'une requête plus récente (y compris après un changement
     /// de portée).
     @State private var searchQuery = ""
+    /// Vrai une fois le rechargement du `searchViewModel` courant terminé.
+    /// Une task redémarrée après un aller-retour de navigation ne réutilise
+    /// les résultats existants que s'ils sont complets.
+    @State private var searchResultsReady = false
     @State private var scrolledPastTop = false
     @State private var filters = FileFilters()
     @State private var selectionMode = false
@@ -221,8 +225,14 @@ struct DirectoryView: View {
     var body: some View {
         FileGridView(
             viewModel: activeViewModel,
-            onOpenDirectory: onOpenFolder,
+            onOpenDirectory: { folder in
+                // La vue reste montée dans le NavigationStack : sans ce
+                // retrait explicite, le clavier suit jusqu'à l'écran poussé.
+                searchFocused = false
+                onOpenFolder(folder)
+            },
             onOpenFile: { file, siblings in
+                searchFocused = false
                 router.open(
                     file,
                     siblings: siblings,
@@ -399,6 +409,22 @@ struct DirectoryView: View {
             guard !trimmed.isEmpty else {
                 searchViewModel = nil
                 searchQuery = ""
+                searchResultsReady = false
+                return
+            }
+            let source = FileSource.search(
+                query: trimmed,
+                // Restreint au dossier courant et à toute sa descendance ;
+                // sinon la recherche porte sur tout le drive.
+                directoryId: searchRestrictedToFolder ? directory.id : nil
+            )
+            // La task redémarre à l'identique au retour arrière (elle avait été
+            // annulée quand l'écran a été couvert) : réutiliser les résultats
+            // déjà chargés évite un squelette et un saut de scroll.
+            if let existing = searchViewModel,
+               searchQuery == trimmed,
+               existing.source == source,
+               searchResultsReady {
                 return
             }
             // Debounce de 300 ms pour éviter les requêtes superflues pendant la saisie
@@ -407,18 +433,12 @@ struct DirectoryView: View {
             } catch {
                 return
             }
-            let searchVM = FileGridViewModel(
-                source: .search(
-                    query: trimmed,
-                    // Restreint au dossier courant et à toute sa descendance ;
-                    // sinon la recherche porte sur tout le drive.
-                    directoryId: searchRestrictedToFolder ? directory.id : nil
-                ),
-                driveId: driveId
-            )
+            let searchVM = FileGridViewModel(source: source, driveId: driveId)
             searchQuery = trimmed
             searchViewModel = searchVM
+            searchResultsReady = false
             await searchVM.reload()
+            searchResultsReady = !Task.isCancelled
         }
     }
 
@@ -518,6 +538,7 @@ struct DirectoryView: View {
 
     private func openRandomFile() {
         guard let random = playableFiles.randomElement() else { return }
+        searchFocused = false
         router.open(
             random,
             siblings: playableFiles,
@@ -565,6 +586,9 @@ struct DirectoryView: View {
 
     private func startSelection() {
         searchFocused = false
+        // La révélation par scroll est consommée : sans cette remise à zéro,
+        // quitter la sélection ferait ressusciter la barre sans action.
+        scrolledPastTop = false
         selectionMode = true
     }
 

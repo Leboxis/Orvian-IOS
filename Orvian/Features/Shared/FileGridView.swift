@@ -70,20 +70,29 @@ struct FileGridView: View {
 
     var body: some View {
         scrollContent
-            .onScrollGeometryChange(for: SearchScrollRegion.self, of: {
+            .onScrollGeometryChange(for: ScrollRevealMetrics.self, of: {
                 // Au repos, iOS applique déjà l'inset supérieur au décalage.
                 // Seul un dépassement réel de cette position doit afficher la recherche.
                 let offset = $0.contentOffset.y + $0.contentInsets.top
+                let region: SearchScrollRegion
                 if offset < -8 {
-                    return .pulledPastTop
+                    region = .pulledPastTop
+                } else if offset > 24 {
+                    region = .content
+                } else {
+                    region = .nearTop
                 }
-                if offset > 24 {
-                    return .content
-                }
-                return .nearTop
-            }) { _, newRegion in
-                searchScrollRegion = newRegion
-                switch newRegion {
+                return ScrollRevealMetrics(region: region, topInset: $0.contentInsets.top)
+            }) { old, new in
+                searchScrollRegion = new.region
+                // L'apparition ou la disparition de la barre modifie l'inset
+                // sans geste de l'utilisateur : l'offset réinterprété dans le
+                // nouvel espace peut franchir les seuils et provoquer un
+                // clignotement (masquée puis aussitôt ré-affichée). Ces
+                // transitions ne déclenchent donc aucun callback ; le prochain
+                // défilement, à inset constant, reprendra la main.
+                guard old.topInset == new.topInset else { return }
+                switch new.region {
                 case .content:
                     onScrolledPastTop?(false)
                 case .pulledPastTop:
@@ -194,6 +203,17 @@ struct FileGridView: View {
                            value.translation.height > abs(value.translation.width) {
                             onScrolledPastTop?(true)
                         }
+                        // Masquage symétrique : un dossier trop court pour
+                        // défiler n'atteint jamais la région `.content`, c'est
+                        // donc le geste qui fait disparaître la barre. Le seuil
+                        // (24 pt) est celui du scroll : sur une longue liste,
+                        // la région passe en `.content` au même moment et la
+                        // garde rend ce secours sans effet.
+                        if searchScrollRegion == .nearTop,
+                           value.translation.height < -24,
+                           value.translation.height < -abs(value.translation.width) {
+                            onScrolledPastTop?(false)
+                        }
                     }
             )
             .onChange(of: scrollToTopRequest) { oldValue, newValue in
@@ -218,12 +238,20 @@ struct FileGridView: View {
         !searchKeywords.isEmpty
     }
 
+    /// Source déjà filtrée par le serveur : relancer les mots-clés en local
+    /// masquerait des résultats trouvés par l'API selon des règles plus larges
+    /// que `localizedStandardContains` sur le nom.
+    private var effectiveSearchText: String {
+        if case .search = viewModel.source { return "" }
+        return searchText
+    }
+
     /// Éléments après filtres (type, orientation, recherche) et tri.
     private var visibleItems: [DriveFile] {
         visibleItemsCache.visibleItems(
             items: viewModel.items,
             filters: filters,
-            searchText: searchText,
+            searchText: effectiveSearchText,
             metadataRevision: metadataRevision,
             mediaMetadata: mediaMetadata
         )
@@ -370,7 +398,7 @@ struct FileGridView: View {
             itemCount: viewModel.items.count,
             itemChecksum: checksum,
             filters: filters,
-            searchText: searchText,
+            searchText: effectiveSearchText,
             hasMore: viewModel.hasMore,
             isReloading: viewModel.isReloading
         )
@@ -571,6 +599,14 @@ private enum SearchScrollRegion: Equatable {
     case pulledPastTop
     case nearTop
     case content
+}
+
+/// Valeur observée par `onScrollGeometryChange` : la région de défilement
+/// accompagnée de l'inset supérieur, afin de distinguer un défilement réel
+/// d'un changement de disposition (barre qui apparaît ou disparaît).
+private struct ScrollRevealMetrics: Equatable {
+    let region: SearchScrollRegion
+    let topInset: CGFloat
 }
 
 /// Mémoïse le résultat des filtres/tri de la grille : tant que les données
