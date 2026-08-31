@@ -150,6 +150,7 @@ extension Endpoint {
     }
 
     /// Contenu de la corbeille (v3, pagination curseur).
+    static func trashContent(driveId: Int, cursor: String?, limit: Int = 60) -> Endpoint {
         Endpoint(
             path: "/3/drive/\(driveId)/trash",
             query: [
