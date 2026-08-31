@@ -138,16 +138,21 @@ struct CursorPage<T: Decodable>: Decodable {
     let data: [T]?
     let cursor: String?
     let hasMore: Bool?
+    /// Nombre total d'éléments du jeu de résultats, indépendant de la
+    /// pagination : permet d'afficher la vraie quantité d'un dossier avant
+    /// d'avoir chargé toutes ses pages.
+    let total: Int?
 
-    init(result: String? = "success", data: [T]?, cursor: String? = nil, hasMore: Bool? = nil) {
+    init(result: String? = "success", data: [T]?, cursor: String? = nil, hasMore: Bool? = nil, total: Int? = nil) {
         self.result = result
         self.data = data
         self.cursor = cursor
         self.hasMore = hasMore
+        self.total = total
     }
 
     enum CodingKeys: String, CodingKey {
-        case result, data, cursor
+        case result, data, cursor, total
         case hasMore = "has_more"
     }
 }

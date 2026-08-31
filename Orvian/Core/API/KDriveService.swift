@@ -169,7 +169,8 @@ struct KDriveService {
                             result: activityPage.result,
                             data: files,
                             cursor: activityPage.cursor,
-                            hasMore: activityPage.hasMore
+                            hasMore: activityPage.hasMore,
+                            total: activityPage.total
                         )
                     } catch let error as APIError where error.isFallbackCandidate {
                         // 4) Dernier recours : recherche globale

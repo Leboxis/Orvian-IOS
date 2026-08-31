@@ -796,9 +796,13 @@ struct DirectoryView: View {
     }
 
     /// Le nombre d'éléments est volontairement séparé du fil d'Ariane et
-    /// placé entre la recherche et le début de la grille.
+    /// placé entre la recherche et le début de la grille. On préfère le total
+    /// annoncé par le serveur (vraie quantité du dossier, même avant que la
+    /// pagination ait tout chargé) et on retombe sur les éléments chargés
+    /// lorsque l'API ne fournit pas de total.
     private var itemCountLabel: some View {
-        let count = activeViewModel.items.count
+        let total = activeViewModel.totalItemCount
+        let count = total ?? activeViewModel.items.count
         return Text("\(count) élément\(count > 1 ? "s" : "")")
             .font(.caption.weight(.medium))
             .foregroundStyle(.secondary)

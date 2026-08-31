@@ -23,6 +23,10 @@ final class FileGridViewModel {
     private(set) var isInitialLoading = false
     private(set) var isLoadingMore = false
     private(set) var hasMore = false
+    /// Nombre total d'éléments renvoyé par le serveur (première page).
+    /// `nil` tant que le chargement n'a pas eu lieu ou si le endpoint
+    /// ne fournit pas cette information.
+    private(set) var totalItemCount: Int?
     private(set) var errorMessage: String?
     /// Index id → catégorie pour afficher les pastilles de tags des cartes.
     /// Il reste lié au cache partagé afin que les renommages et suppressions
@@ -102,6 +106,7 @@ final class FileGridViewModel {
             items = filterItemsIfNeeded(page.data ?? [])
             cursor = page.cursor
             hasMore = page.hasMore ?? false
+            totalItemCount = page.total
             loadedOnce = true
         } catch {
             guard !Task.isCancelled, dataGeneration == requestGeneration else { return }
@@ -140,6 +145,7 @@ final class FileGridViewModel {
             items.append(contentsOf: filtered.filter { !existing.contains($0.id) })
             cursor = page.cursor
             hasMore = page.hasMore ?? false
+            totalItemCount = page.total ?? totalItemCount
         } catch {
             guard !Task.isCancelled, dataGeneration == requestGeneration else { return }
             errorMessage = (error as? APIError)?.errorDescription ?? error.localizedDescription

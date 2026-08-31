@@ -39,11 +39,14 @@ extension Endpoint {
     /// `with=is_favorite,categories,path` : ces champs ne sont renvoyés que sur
     /// demande explicite (cf. app kDrive officielle). `path` fournit le chemin
     /// complet depuis la racine du drive, affiché dans la fiche « Détails ».
+    /// `total=true` fait renvoyer le nombre total d'éléments du dossier, sinon
+    /// l'API l'omet et on ne peut afficher que le nombre d'éléments déjà paginés.
     static func directoryContent(driveId: Int, directoryId: Int, cursor: String?, limit: Int = 60) -> Endpoint {
         Endpoint(
             path: "/3/drive/\(driveId)/files/\(directoryId)/files",
             query: [
                 URLQueryItem(name: "with", value: "is_favorite,categories,path"),
+                URLQueryItem(name: "total", value: "true"),
                 URLQueryItem(name: "limit", value: String(limit)),
                 URLQueryItem(name: "order_by[]", value: "type"),
                 URLQueryItem(name: "order_by[]", value: "name"),
@@ -114,6 +117,7 @@ extension Endpoint {
     static func search(driveId: Int, query: String, directoryId: Int?, cursor: String?, limit: Int = 60) -> Endpoint {
         var queryItems: [URLQueryItem] = [
             URLQueryItem(name: "with", value: "is_favorite,categories,path"),
+            URLQueryItem(name: "total", value: "true"),
             URLQueryItem(name: "limit", value: String(limit)),
             URLQueryItem(name: "depth", value: "unlimited"),
         ]
