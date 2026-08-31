@@ -56,6 +56,7 @@ struct FileGridView: View {
     @AppStorage("prefetchVideoURLs") private var prefetchVideoURLs = true
     @AppStorage("prefetchOnWiFiOnly") private var prefetchOnWiFiOnly = false
     @AppStorage("fileGridColumns") private var fileGridColumns = 3
+    @AppStorage("foldersFirstInTags") private var foldersFirstInTags = true
     @State private var metadataRevision = 0
     @State private var prefetchTask: Task<Void, Never>?
     @State private var sortReloadTask: Task<Void, Never>?
@@ -252,11 +253,15 @@ struct FileGridView: View {
     /// La clé de mémoïsation est purement incrémentale : sa comparaison est
     /// O(1) au lieu de relire tout le tableau à chaque rendu.
     private var visibleItems: [DriveFile] {
-        visibleItemsCache.visibleItems(
+        var result = visibleItemsCache.visibleItems(
             key: visibleItemsKey,
             items: viewModel.items,
             mediaMetadata: mediaMetadata
         )
+        if foldersFirstInTags, case .category = viewModel.source {
+            result = result.filter(\.isDirectory) + result.filter { !$0.isDirectory }
+        }
+        return result
     }
 
     private var visibleItemsKey: VisibleItemsKey {
@@ -266,7 +271,8 @@ struct FileGridView: View {
             itemsRevision: viewModel.itemsRevision,
             filters: filters,
             searchText: effectiveSearchText,
-            metadataRevision: metadataRevision
+            metadataRevision: metadataRevision,
+            foldersFirst: foldersFirstInTags && (viewModel.source == .category)
         )
     }
 
@@ -630,6 +636,7 @@ fileprivate struct VisibleItemsKey: Hashable {
     let filters: FileFilters
     let searchText: String
     let metadataRevision: Int
+    let foldersFirst: Bool
 }
 
 /// Mémoïse le résultat des filtres/tri de la grille.

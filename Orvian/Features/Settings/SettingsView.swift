@@ -12,6 +12,7 @@ struct SettingsView: View {
     @AppStorage("fileGridColumns") private var fileGridColumns = 3
     @AppStorage("tagGridColumns") private var tagGridColumns = 2
     @AppStorage("alwaysShowSearch") private var alwaysShowSearch = false
+    @AppStorage("foldersFirstInTags") private var foldersFirstInTags = true
     @AppStorage("favoritesReselectScrollToTop") private var favoritesReselectScrollToTop = true
     @AppStorage("prefetchThumbnails") private var prefetchThumbnails = true
     @AppStorage("prefetchVideoURLs") private var prefetchVideoURLs = true
@@ -68,6 +69,14 @@ struct SettingsView: View {
                             Text("2 colonnes").tag(2)
                             Text("3 colonnes").tag(3)
                         }
+                        settingsDivider
+                        settingsToggle(
+                            "Dossiers en premier dans les tags",
+                            detail: "Les dossiers sont toujours affichés avant les fichiers dans les tags.",
+                            icon: "folder.fill",
+                            tint: .brown,
+                            isOn: $foldersFirstInTags
+                        )
                         settingsDivider
                         settingsToggle(
                             "Recherche toujours visible",
