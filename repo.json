@@ -7,12 +7,12 @@
     {
       "name": "Orvian",
       "bundleIdentifier": "com.orvian.app",
-      "version": "0.8.107",
-      "downloadURL": "https://github.com/Leboxis/Orvian-IOS/releases/download/v0.8.107/Orvian-0.8.107-unsigned.ipa",
+      "version": "0.8.108",
+      "downloadURL": "https://github.com/Leboxis/Orvian-IOS/releases/download/v0.8.108/Orvian-0.8.108-unsigned.ipa",
       "iconURL": "https://raw.githubusercontent.com/Leboxis/Orvian-IOS/refs/heads/main/Orvian/Assets.xcassets/AppIcon.appiconset/icon-1024.png",
       "tintColor": "#4285F5",
       "category": "utilities",
-      "size": 2342083
+      "size": 2342035
     }
   ]
 }
