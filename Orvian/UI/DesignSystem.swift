@@ -4,6 +4,8 @@ import SwiftUI
 enum DS {
     /// Coins arrondis des cartes.
     static let cardRadius: CGFloat = 18
+    /// Coins arrondis de la barre d'onglets flottante.
+    static let tabBarRadius: CGFloat = 28
     /// Espacement horizontal entre cartes de la grille.
     static let gridSpacing: CGFloat = 10
     /// Marges latérales de la grille.

@@ -1,39 +1,33 @@
 import SwiftUI
 
-/// Barre d'onglets flottante « Liquid Glass » (iOS 26) : capsule de verre
-/// fondu avec reflets spéculaires réactifs au toucher, et lentille de
-/// sélection claire qui se métamorphose d'un onglet à l'autre au sein d'un
-/// conteneur à effet de fusion (`GlassEffectContainer`).
+/// Barre d'onglets flottante translucide à coins arrondis.
 struct FloatingTabBar: View {
     @Binding var selection: AppTab
     var onReselect: ((AppTab) -> Void)? = nil
     @AppStorage("hapticFeedbackEnabled") private var hapticFeedbackEnabled = true
-    @Namespace private var glassNamespace
 
     var body: some View {
-        GlassEffectContainer(spacing: 10) {
-            HStack(spacing: 4) {
-                ForEach(AppTab.allCases) { tab in
-                    TabButton(
-                        tab: tab,
-                        isSelected: selection == tab,
-                        namespace: glassNamespace
-                    ) {
-                        if selection == tab {
-                            onReselect?(tab)
-                        } else {
-                            withAnimation(.snappy(duration: 0.3)) {
-                                selection = tab
-                            }
+        HStack(spacing: 4) {
+            ForEach(AppTab.allCases) { tab in
+                TabButton(tab: tab, isSelected: selection == tab) {
+                    if selection == tab {
+                        onReselect?(tab)
+                    } else {
+                        withAnimation(.snappy(duration: 0.25)) {
+                            selection = tab
                         }
                     }
                 }
             }
-            .padding(.horizontal, 10)
-            .padding(.vertical, 8)
-            .glassEffect(.regular.interactive(), in: Capsule())
         }
-        .shadow(color: .black.opacity(0.16), radius: 18, x: 0, y: 8)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 8)
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: DS.tabBarRadius, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: DS.tabBarRadius, style: .continuous)
+                .strokeBorder(.quaternary, lineWidth: 0.5)
+        }
+        .shadow(color: .black.opacity(0.12), radius: 14, x: 0, y: 6)
         .padding(.horizontal, DS.gridMargin + 8)
         .sensoryFeedback(.selection, trigger: selection) { oldValue, newValue in
             hapticFeedbackEnabled && oldValue != newValue
@@ -44,7 +38,6 @@ struct FloatingTabBar: View {
 private struct TabButton: View {
     let tab: AppTab
     let isSelected: Bool
-    let namespace: Namespace.ID
     let action: () -> Void
 
     var body: some View {
@@ -63,35 +56,8 @@ private struct TabButton: View {
             .padding(.vertical, 6)
             .background {
                 if isSelected {
-                    // Lentille de sélection : verre clair légèrement teinté,
-                    // surmonté d'un reflet spéculaire (brillant en haut,
-                    // diffus vers le bas) pour l'effet « lentille » d'Apple.
-                    // Grâce au `GlassEffectContainer` parent et au
-                    // `glassEffectID` partagé, la lentille se liquéfie et
-                    // migre d'un onglet à l'autre lors du changement.
-                    Color.clear
-                        .glassEffect(
-                            Glass.regular
-                                .tint(Color.accentColor.opacity(0.16))
-                                .interactive(),
-                            in: Capsule()
-                        )
-                        .overlay {
-                            Capsule()
-                                .fill(
-                                    LinearGradient(
-                                        colors: [
-                                            .white.opacity(0.45),
-                                            .white.opacity(0.05),
-                                            .clear,
-                                        ],
-                                        startPoint: .top,
-                                        endPoint: .bottom
-                                    )
-                                )
-                                .allowsHitTesting(false)
-                        }
-                        .glassEffectID(tab, in: namespace)
+                    Capsule()
+                        .fill(Color.accentColor.opacity(0.12))
                 }
             }
             .contentShape(Rectangle())
