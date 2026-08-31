@@ -169,8 +169,7 @@ struct KDriveService {
                             result: activityPage.result,
                             data: files,
                             cursor: activityPage.cursor,
-                            hasMore: activityPage.hasMore,
-                            total: activityPage.total
+                            hasMore: activityPage.hasMore
                         )
                     } catch let error as APIError where error.isFallbackCandidate {
                         // 4) Dernier recours : recherche globale
@@ -242,6 +241,14 @@ struct KDriveService {
             throw APIError.invalidResponse
         }
         return file
+    }
+
+    /// Nombre total d'éléments d'un dossier (fichiers + dossiers), via
+    /// l'endpoint `count` dédié : les listes paginées n'exposent pas de total.
+    func directoryCount(driveId: Int, directoryId: Int) async throws -> Int {
+        let wrapper = try await api.get(DataResponse<DirectoryCount>.self, .directoryCount(driveId: driveId, directoryId: directoryId))
+        guard let count = wrapper.data?.count else { throw APIError.invalidResponse }
+        return count
     }
 
     // MARK: - Catégories

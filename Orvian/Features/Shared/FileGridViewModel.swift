@@ -106,11 +106,23 @@ final class FileGridViewModel {
             items = filterItemsIfNeeded(page.data ?? [])
             cursor = page.cursor
             hasMore = page.hasMore ?? false
-            totalItemCount = page.total
+            await refreshDirectoryCount()
             loadedOnce = true
         } catch {
             guard !Task.isCancelled, dataGeneration == requestGeneration else { return }
             errorMessage = (error as? APIError)?.errorDescription ?? error.localizedDescription
+        }
+    }
+
+    /// Vraie quantité d'un dossier via l'endpoint `count` dédié (les listes
+    /// paginées n'exposent pas de total). Sans résultat, `totalItemCount`
+    /// reste `nil` et le compteur affiché retombe sur les éléments chargés.
+    private func refreshDirectoryCount() async {
+        guard case let .directory(directoryId) = source else { return }
+        do {
+            totalItemCount = try await service.directoryCount(driveId: driveId, directoryId: directoryId)
+        } catch {
+            totalItemCount = nil
         }
     }
 
@@ -145,7 +157,6 @@ final class FileGridViewModel {
             items.append(contentsOf: filtered.filter { !existing.contains($0.id) })
             cursor = page.cursor
             hasMore = page.hasMore ?? false
-            totalItemCount = page.total ?? totalItemCount
         } catch {
             guard !Task.isCancelled, dataGeneration == requestGeneration else { return }
             errorMessage = (error as? APIError)?.errorDescription ?? error.localizedDescription

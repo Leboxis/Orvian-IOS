@@ -39,20 +39,26 @@ extension Endpoint {
     /// `with=is_favorite,categories,path` : ces champs ne sont renvoyés que sur
     /// demande explicite (cf. app kDrive officielle). `path` fournit le chemin
     /// complet depuis la racine du drive, affiché dans la fiche « Détails ».
-    /// `total=true` fait renvoyer le nombre total d'éléments du dossier, sinon
-    /// l'API l'omet et on ne peut afficher que le nombre d'éléments déjà paginés.
+    /// Le nombre total d'éléments ne se lit pas ici (l'endpoint rejette un
+    /// paramètre `total`) : il passe par l'endpoint `count` dédié.
     static func directoryContent(driveId: Int, directoryId: Int, cursor: String?, limit: Int = 60) -> Endpoint {
         Endpoint(
             path: "/3/drive/\(driveId)/files/\(directoryId)/files",
             query: [
                 URLQueryItem(name: "with", value: "is_favorite,categories,path"),
-                URLQueryItem(name: "total", value: "true"),
                 URLQueryItem(name: "limit", value: String(limit)),
                 URLQueryItem(name: "order_by[]", value: "type"),
                 URLQueryItem(name: "order_by[]", value: "name"),
                 URLQueryItem(name: "order", value: "asc"),
             ] + (cursor.map { [URLQueryItem(name: "cursor", value: $0)] } ?? [])
         )
+    }
+
+    /// Nombre d'éléments d'un dossier (total, fichiers, dossiers).
+    /// Le contenu paginé ne renvoyant pas de total, c'est cet endpoint dédié
+    /// qui fournit la vraie quantité, indépendamment de la pagination.
+    static func directoryCount(driveId: Int, directoryId: Int) -> Endpoint {
+        Endpoint(path: "/3/drive/\(driveId)/files/\(directoryId)/count")
     }
 
     /// Fichiers récemment modifiés / uploadés (/3/drive/{id}/files/last_modified).
@@ -117,7 +123,6 @@ extension Endpoint {
     static func search(driveId: Int, query: String, directoryId: Int?, cursor: String?, limit: Int = 60) -> Endpoint {
         var queryItems: [URLQueryItem] = [
             URLQueryItem(name: "with", value: "is_favorite,categories,path"),
-            URLQueryItem(name: "total", value: "true"),
             URLQueryItem(name: "limit", value: String(limit)),
             URLQueryItem(name: "depth", value: "unlimited"),
         ]
@@ -145,7 +150,6 @@ extension Endpoint {
     }
 
     /// Contenu de la corbeille (v3, pagination curseur).
-    static func trashContent(driveId: Int, cursor: String?, limit: Int = 60) -> Endpoint {
         Endpoint(
             path: "/3/drive/\(driveId)/trash",
             query: [
