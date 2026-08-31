@@ -272,8 +272,14 @@ struct FileGridView: View {
             filters: filters,
             searchText: effectiveSearchText,
             metadataRevision: metadataRevision,
-            foldersFirst: foldersFirstInTags && (viewModel.source == .category)
+            foldersFirst: foldersFirstInTags && sourceIsCategory
         )
+    }
+
+    /// Vrai quand la grille affiche le contenu d'un tag (source `.category`).
+    private var sourceIsCategory: Bool {
+        if case .category = viewModel.source { return true }
+        return false
     }
 
     /// Message quand aucun élément ne correspond aux filtres ou à la recherche.
