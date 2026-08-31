@@ -293,6 +293,9 @@ struct DirectoryView: View {
                                 .padding(.vertical, 10)
                         }
                         .transition(.move(edge: .top).combined(with: .opacity))
+                    } else if !showsSearchBar {
+                        itemCountLabel
+                            .padding(.vertical, 10)
                     }
                 }
                 .padding(.top, 2)
