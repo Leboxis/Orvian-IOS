@@ -28,10 +28,11 @@ struct PerfView: View {
             LabeledContent("Requêtes totales", value: "\(perf.totalRequests)")
             LabeledContent("Durée moyenne", value: "\(perf.averageMs) ms")
             LabeledContent("Dont miniatures", value: "\(perf.thumbnailRequests)")
+            LabeledContent("Servies du cache", value: "\(perf.cachedRequests)")
         } header: {
             Text("Depuis l'ouverture")
         } footer: {
-            Text("Les miniatures sont comptées dans le total mais exclues de la moyenne : elles masqueraient la latence des appels de données.")
+            Text("Les miniatures sont comptées dans le total mais exclues de la moyenne : elles masqueraient la latence des appels de données. « Servies du cache » = réponses revalidées par 304 ou encore fraîches : aucun corps transféré.")
         }
     }
 
@@ -70,6 +71,14 @@ struct PerfView: View {
                     HStack {
                         Text("\(entry.method) \(entry.endpointName)")
                             .font(.callout.weight(.medium))
+                        if entry.fromCache {
+                            Text("cache")
+                                .font(.caption2.weight(.semibold))
+                                .padding(.horizontal, 5)
+                                .padding(.vertical, 1)
+                                .background(.green.opacity(0.15), in: Capsule())
+                                .foregroundStyle(.green)
+                        }
                         Spacer()
                         Text("\(entry.durationMs) ms")
                             .font(.callout.monospaced().weight(.semibold))
@@ -95,7 +104,7 @@ struct PerfView: View {
         } header: {
             Text("Dernières requêtes")
         } footer: {
-            Text("La liste exclut les miniatures (voir le décompte dédié). Code 304 = réponse valide depuis le cache HTTP, quasiment gratuite.")
+            Text("La liste exclut les miniatures (voir le décompte dédié). Badge « cache » = réponse servie sans re-transfert (304 ou entrée fraîche).")
         }
     }
 }

@@ -220,6 +220,13 @@ final class FileGridViewModel {
         }
     }
 
+    /// Recale localement le compteur du dossier après corbeille, déplacement
+    /// ou import : évite un aller-retour `count` juste pour le badge.
+    private func adjustItemCount(by delta: Int) {
+        guard delta != 0, case .directory = source, let current = totalItemCount else { return }
+        totalItemCount = max(0, current + delta)
+    }
+
     /// Écrit (ou réécrit) l'instantané de la liste dans le cache mémoire.
     /// Appelé après un chargement complet, et à chaque mutation de `items`
     /// via `didSet` tant que la liste a été chargée au moins une fois.
@@ -253,6 +260,10 @@ final class FileGridViewModel {
             return file
         }
         let uploadedIDs = Set(merged.map(\.id))
+        let existingIDs = Set(items.map(\.id))
+        // Compteur d'abord, items ensuite : le snapshot issu de `didSet`
+        // capture le badge recalé avec les cartes insérées.
+        adjustItemCount(by: merged.filter { !existingIDs.contains($0.id) }.count)
         items.removeAll { uploadedIDs.contains($0.id) }
         items.append(contentsOf: merged)
         resortAfterMerge()
@@ -346,13 +357,16 @@ final class FileGridViewModel {
     }
 
     /// Applique une mutation deja confirmee par une autre interface, telle que
-    /// la visionneuse, sans repeter l'appel API.
+    /// la visionneuse ou le dossier resté ouvert derrière la recherche, sans
+    /// repeter l'appel API.
     func apply(_ mutation: FileGridMutation) {
         switch mutation {
         case let .favorite(_, fileId, isFavorite):
             applyFavoriteChange(fileId: fileId, isFavorite: isFavorite)
         case let .category(_, fileId, category, applied):
             applyCategoryChange(fileId: fileId, category: category, applied: applied)
+        case let .removal(_, fileIds):
+            items.removeAll { fileIds.contains($0.id) }
         }
     }
 
@@ -389,6 +403,7 @@ final class FileGridViewModel {
     func trash(_ file: DriveFile) async {
         do {
             try await service.trash(driveId: driveId, fileId: file.id)
+            adjustItemCount(by: -1)
             items.removeAll { $0.id == file.id }
         } catch {
             mutationErrorMessage = "Suppression impossible : \((error as? APIError)?.errorDescription ?? error.localizedDescription)"
@@ -465,7 +480,13 @@ final class FileGridViewModel {
         let (trashedIDs, firstError) = await performConcurrently(ids: ids) { id in
             try await service.trash(driveId: driveId, fileId: id)
         }
+        adjustItemCount(by: -trashedIDs.count)
         items.removeAll { trashedIDs.contains($0.id) }
+        // Les grilles ouvertes du même drive (ex. recherche au-dessus du
+        // dossier) retirent les cartes confirmées sans rechargement réseau.
+        if !trashedIDs.isEmpty {
+            FileGridMutationCenter.shared.publish(.removal(driveId: driveId, fileIds: trashedIDs))
+        }
         reportPartialFailure(
             total: ids.count,
             succeeded: trashedIDs.count,
@@ -519,7 +540,13 @@ final class FileGridViewModel {
         let (movedIDs, firstError) = await performConcurrently(ids: ids) { id in
             try await service.move(driveId: driveId, fileId: id, destinationDirectoryId: destination)
         }
+        adjustItemCount(by: -movedIDs.count)
         items.removeAll { movedIDs.contains($0.id) }
+        // Les autres grilles ouvertes du même drive (ex. recherche au-dessus
+        // du dossier déplacé) retirent les cartes confirmées sans rechargement.
+        if !movedIDs.isEmpty {
+            FileGridMutationCenter.shared.publish(.removal(driveId: driveId, fileIds: movedIDs))
+        }
         reportPartialFailure(
             total: ids.count,
             succeeded: movedIDs.count,

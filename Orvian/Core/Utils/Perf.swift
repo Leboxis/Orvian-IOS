@@ -23,6 +23,9 @@ final class Perf: ObservableObject {
         /// Durée complète de l'appel réseau, en millisecondes.
         let durationMs: Int
         let bytes: Int
+        /// Réponse servie par le cache HTTP (fraîche, ou revalidée par un
+        /// 304) : aucun corps transféré, coût quasi nul.
+        let fromCache: Bool
 
         /// Nom court de l'endpoint pour les statistiques groupées
         /// (ex. `/3/drive/1/files/832/count` → `count`). Les chemins se
@@ -48,14 +51,15 @@ final class Perf: ObservableObject {
 
     private init() {}
 
-    func record(method: String, path: String, status: Int, durationMs: Int, bytes: Int) {
+    func record(method: String, path: String, status: Int, durationMs: Int, bytes: Int, fromCache: Bool = false) {
         let entry = Entry(
             date: Date(),
             method: method,
             path: path,
             status: status,
             durationMs: durationMs,
-            bytes: bytes
+            bytes: bytes,
+            fromCache: fromCache
         )
         allEntries.append(entry)
         if allEntries.count > capacity {
@@ -98,6 +102,7 @@ final class Perf: ObservableObject {
 
     var totalRequests: Int { allEntries.count }
     var thumbnailRequests: Int { allEntries.filter(\.isThumbnail).count }
+    var cachedRequests: Int { allEntries.filter(\.fromCache).count }
 }
 
 /// Chronomètre un appel réseau : signpost + journal. Le bloc `operation`
@@ -114,13 +119,13 @@ enum PerfTimer {
     static func measure<T>(
         method: String,
         path: String,
-        operation: () async throws -> (T, status: Int, bytes: Int)
+        operation: () async throws -> (T, status: Int, bytes: Int, fromCache: Bool)
     ) async throws -> T {
         let signposter = signposter
         let state = signposter.beginInterval("request", id: signposter.makeSignpostID())
         let start = CFAbsoluteTimeGetCurrent()
         do {
-            let (value, status, bytes) = try await operation()
+            let (value, status, bytes, fromCache) = try await operation()
             let elapsed = Int(((CFAbsoluteTimeGetCurrent() - start) * 1000).rounded())
             signposter.endInterval("request", state)
             await Perf.shared.record(
@@ -128,7 +133,8 @@ enum PerfTimer {
                 path: path,
                 status: status,
                 durationMs: elapsed,
-                bytes: bytes
+                bytes: bytes,
+                fromCache: fromCache
             )
             return value
         } catch {

@@ -15,6 +15,11 @@ actor APIClient {
     static let baseURL = URL(string: "https://api.infomaniak.com")!
 
     private let session: URLSession
+    /// GET identiques actuellement en vol, par empreinte (compte + jeton,
+    /// politique de cache, URL complète). Une même ressource demandée par
+    /// deux vues en même temps ne part qu'une fois sur le réseau ; les
+    /// appelants suivants attendent la réponse de la première.
+    private var inFlightGETs: [String: Task<Data, Error>] = [:]
 
     init(session: URLSession = .shared) {
         self.session = session
@@ -29,14 +34,53 @@ actor APIClient {
     /// répond 304 sans re-transférer le corps quand rien n'a changé). Les
     /// appelants qui exigent un état strictement à jour passent
     /// `.reloadIgnoringLocalCacheData`.
+    ///
+    /// Les GET identiques lancés en parallèle sont dédoublonnés (coalescing) :
+    /// la requête part une seule fois et chaque appelant reçoit la même
+    /// réponse. Une requête coalescée n'est pas annulable individuellement —
+    /// elle continue pour servir les appelants restants — et son résultat est
+    /// réconcilié par les gardes de génération des vue-modèles.
     func data(
         _ endpoint: Endpoint,
         method: String = "GET",
         cachePolicy: URLRequest.CachePolicy = .useProtocolCachePolicy
     ) async throws -> Data {
-        let (data, response, credentialFingerprint) = try await send(endpoint, method: method, cachePolicy: cachePolicy)
-        try Self.check(response: response, data: data, credentialFingerprint: credentialFingerprint)
+        let request = try request(for: endpoint, method: method, cachePolicy: cachePolicy)
+        if method == "GET" {
+            return try await coalescedData(for: request, measuredPath: endpoint.path)
+        }
+        let (data, response, _) = try await transmit(
+            request: request,
+            measuredMethod: method,
+            measuredPath: endpoint.path
+        )
+        try Self.check(response: response, data: data, credentialFingerprint: Self.credentialFingerprint(for: request))
         return data
+    }
+
+    /// Dédoublonnage des GET concurrent : premier appelant = initiateur
+    /// (la requête part réellement), appelants suivants = spectateurs de la
+    /// même `Task`.
+    private func coalescedData(for request: URLRequest, measuredPath: String) async throws -> Data {
+        let fingerprint = Self.credentialFingerprint(for: request)
+        let key = "\(fingerprint ?? "anon")|\(request.cachePolicy.rawValue)|\(request.url?.absoluteString ?? measuredPath)"
+        if let existing = inFlightGETs[key] {
+            return try await existing.value
+        }
+        let task = Task {
+            let (data, response, _) = try await self.transmit(
+                request: request,
+                measuredMethod: "GET",
+                measuredPath: measuredPath
+            )
+            try Self.check(response: response, data: data, credentialFingerprint: fingerprint)
+            return data
+        }
+        inFlightGETs[key] = task
+        // L'initiateur libère la clé dès sa propre réponse : un appel suivant
+        // repart sur une vraie transaction au lieu d'écouter indéfiniment.
+        defer { inFlightGETs[key] = nil }
+        return try await task.value
     }
 
     /// Requête authentifiée décodée en JSON.
@@ -55,25 +99,27 @@ actor APIClient {
 
     /// Requête « vide » (POST/DELETE renvoyant `{result, data}`).
     func sendEmpty(_ endpoint: Endpoint, method: String) async throws {
-        let (data, response, credentialFingerprint) = try await send(
-            endpoint,
-            method: method,
-            cachePolicy: .reloadIgnoringLocalCacheData
+        let request = try request(for: endpoint, method: method, cachePolicy: .reloadIgnoringLocalCacheData)
+        let (data, response, _) = try await transmit(
+            request: request,
+            measuredMethod: method,
+            measuredPath: endpoint.path
         )
-        try Self.check(response: response, data: data, credentialFingerprint: credentialFingerprint)
+        try Self.check(response: response, data: data, credentialFingerprint: Self.credentialFingerprint(for: request))
     }
 
     /// POST avec corps brut (JSON, octet-stream…). Lève une erreur si le
     /// statut HTTP n'est pas 2xx ; le contenu de la réponse est ignoré.
     func post(_ endpoint: Endpoint, body: Data, contentType: String) async throws {
-        let (data, response, credentialFingerprint) = try await send(
-            endpoint,
-            method: "POST",
-            httpBody: body,
-            contentType: contentType,
-            cachePolicy: .reloadIgnoringLocalCacheData
+        var request = try request(for: endpoint, method: "POST", cachePolicy: .reloadIgnoringLocalCacheData)
+        request.httpBody = body
+        request.setValue(contentType, forHTTPHeaderField: "Content-Type")
+        let (data, response, _) = try await transmit(
+            request: request,
+            measuredMethod: "POST",
+            measuredPath: endpoint.path
         )
-        try Self.check(response: response, data: data, credentialFingerprint: credentialFingerprint)
+        try Self.check(response: response, data: data, credentialFingerprint: Self.credentialFingerprint(for: request))
     }
 
     /// POST décodé, notamment pour l'ouverture et la fermeture des sessions
@@ -84,14 +130,17 @@ actor APIClient {
         body: Data? = nil,
         contentType: String = "application/json"
     ) async throws -> T {
-        let (data, response, credentialFingerprint) = try await send(
-            endpoint,
-            method: "POST",
-            httpBody: body,
-            contentType: body == nil ? nil : contentType,
-            cachePolicy: .reloadIgnoringLocalCacheData
+        var request = try request(for: endpoint, method: "POST", cachePolicy: .reloadIgnoringLocalCacheData)
+        if let body {
+            request.httpBody = body
+            request.setValue(contentType, forHTTPHeaderField: "Content-Type")
+        }
+        let (data, response, _) = try await transmit(
+            request: request,
+            measuredMethod: "POST",
+            measuredPath: endpoint.path
         )
-        try Self.check(response: response, data: data, credentialFingerprint: credentialFingerprint)
+        try Self.check(response: response, data: data, credentialFingerprint: Self.credentialFingerprint(for: request))
         do {
             return try JSONDecoder.api.decode(T.self, from: data)
         } catch {
@@ -101,14 +150,15 @@ actor APIClient {
 
     /// PUT avec corps brut (JSON…). Lève une erreur si le statut HTTP n'est pas 2xx.
     func put(_ endpoint: Endpoint, body: Data, contentType: String = "application/json") async throws {
-        let (data, response, credentialFingerprint) = try await send(
-            endpoint,
-            method: "PUT",
-            httpBody: body,
-            contentType: contentType,
-            cachePolicy: .reloadIgnoringLocalCacheData
+        var request = try request(for: endpoint, method: "PUT", cachePolicy: .reloadIgnoringLocalCacheData)
+        request.httpBody = body
+        request.setValue(contentType, forHTTPHeaderField: "Content-Type")
+        let (data, response, _) = try await transmit(
+            request: request,
+            measuredMethod: "PUT",
+            measuredPath: endpoint.path
         )
-        try Self.check(response: response, data: data, credentialFingerprint: credentialFingerprint)
+        try Self.check(response: response, data: data, credentialFingerprint: Self.credentialFingerprint(for: request))
     }
 
     /// Upload d'un fichier local par streaming (évite le chargement du fichier en RAM).
@@ -251,28 +301,21 @@ actor APIClient {
 
     // MARK: - Internes
 
-    private func send(
-        _ endpoint: Endpoint,
-        method: String,
-        httpBody: Data? = nil,
-        contentType: String? = nil,
-        cachePolicy: URLRequest.CachePolicy
+    /// Transmission réelle d'une requête construite : mesure Perf (durée,
+    /// drapeau cache via la sonde de métriques) puis renvoi des données.
+    private func transmit(
+        request: URLRequest,
+        measuredMethod: String,
+        measuredPath: String
     ) async throws -> (Data, URLResponse, String?) {
-        var request = try request(for: endpoint, method: method, cachePolicy: cachePolicy)
-        if let httpBody {
-            request.httpBody = httpBody
-            request.setValue(contentType, forHTTPHeaderField: "Content-Type")
-        }
-
         let credentialFingerprint = Self.credentialFingerprint(for: request)
-        let measuredMethod = method
-        let measuredPath = endpoint.path
+        let probe = CacheProbeDelegate()
         let (data, response): (Data, URLResponse)
         do {
             (data, response) = try await PerfTimer.measure(method: measuredMethod, path: measuredPath) {
-                let (data, response) = try await session.data(for: request)
+                let (data, response) = try await session.data(for: request, delegate: probe)
                 let status = (response as? HTTPURLResponse)?.statusCode ?? 0
-                return ((data, response), status: status, bytes: data.count)
+                return ((data, response), status: status, bytes: data.count, fromCache: probe.fromCache)
             }
             return (data, response, credentialFingerprint)
         } catch {
@@ -430,6 +473,24 @@ private struct ErrorEnvelope: Decodable {
     }
 
     let error: Inner?
+}
+
+/// Sonde par requête : les métriques URLSession indiquent si la réponse
+/// finale a été servie depuis le cache local (entrée encore fraîche, ou
+/// revalidée par un 304 sans re-transfert du corps).
+private final class CacheProbeDelegate: NSObject, URLSessionTaskDelegate, @unchecked Sendable {
+    private(set) var fromCache = false
+
+    func urlSession(
+        _ session: URLSession,
+        task: URLSessionTask,
+        didFinishCollecting metrics: URLSessionTaskMetrics
+    ) {
+        fromCache = metrics.transactionMetrics.contains { transaction in
+            transaction.resourceFetchType == .localCache
+                || (transaction.response as? HTTPURLResponse)?.statusCode == 304
+        }
+    }
 }
 
 extension JSONDecoder {

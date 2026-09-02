@@ -409,8 +409,8 @@ struct DirectoryView: View {
             ApplyTagsSheet(
                 driveId: driveId,
                 files: request.files,
-                onDone: {
-                    Task { await refreshAfterTags() }
+                onDone: { changes in
+                    Task { await refreshAfterTags(changes) }
                 }
             )
         }
@@ -649,12 +649,15 @@ struct DirectoryView: View {
 
         deleteBusy = true
         busyMessage = "Suppression de \(ids.count) élément\(ids.count > 1 ? "s" : "")…"
-        let deletedIDs = await activeViewModel.trash(ids: ids)
+        let deletingViewModel = activeViewModel
+        let deletedIDs = await deletingViewModel.trash(ids: ids)
 
-        // La recherche possède sa propre vue-modèle ; rafraîchir également le
-        // dossier courant évite d'y conserver une carte devenue obsolète.
-        if isSearching {
-            await viewModel.reload(forceNetwork: true)
+        // La diffusion `.removal` couvre les grilles à l'écoute ; quand la
+        // suppression part de la recherche, la vue du dossier n'écoute pas
+        // pendant ce temps : la mutation lui est appliquée directement pour
+        // que son retour à l'écran n'affiche pas de carte disparue.
+        if !deletedIDs.isEmpty, deletingViewModel !== viewModel {
+            viewModel.apply(FileGridMutation.removal(driveId: driveId, fileIds: deletedIDs))
         }
 
         selectedIDs.subtract(deletedIDs)
@@ -675,12 +678,27 @@ struct DirectoryView: View {
         }
     }
 
-    /// Après application des tags : recharge les cartes pour afficher les
-    /// pastilles de couleur, dans le dossier courant et dans la recherche.
-    private func refreshAfterTags() async {
-        await viewModel.reload(forceNetwork: true)
-        if isSearching {
-            await searchViewModel?.reload(forceNetwork: true)
+    /// Après application des tags : les modifications confirmées par l'API
+    /// arrivent de la feuille et sont diffusées aux grilles (dossier courant,
+    /// recherche) — pastilles à jour sans rechargement réseau ni saut de
+    /// scroll.
+    private func refreshAfterTags(_ changes: [TagChange]) async {
+        let library = CategoryLibrary.shared.categories(for: driveId)
+        for change in changes {
+            guard let category = library[change.categoryId] else { continue }
+            let mutation = FileGridMutation.category(
+                driveId: driveId,
+                fileId: change.file.id,
+                category: category,
+                applied: change.isAdd
+            )
+            // Quand la feuille a été ouverte depuis la recherche, la vue du
+            // dossier n'écoute pas la diffusion pendant ce temps : la
+            // mutation lui est appliquée directement.
+            if activeViewModel !== viewModel {
+                viewModel.apply(mutation)
+            }
+            FileGridMutationCenter.shared.publish(mutation)
         }
     }
 
@@ -701,10 +719,11 @@ struct DirectoryView: View {
         let movingViewModel = activeViewModel
         let movedIDs = await movingViewModel.move(ids: ids, to: destination.id)
 
-        // La recherche possède sa propre vue-modèle ; rafraîchir également le
-        // dossier courant évite d'y conserver une carte devenue obsolète.
-        if isSearching {
-            await viewModel.reload(forceNetwork: true)
+        // La diffusion `.removal` couvre les grilles à l'écoute ; quand le
+        // déplacement part de la recherche, la vue du dossier n'écoute pas
+        // pendant ce temps : la mutation lui est appliquée directement.
+        if !movedIDs.isEmpty, movingViewModel !== viewModel {
+            viewModel.apply(FileGridMutation.removal(driveId: driveId, fileIds: movedIDs))
         }
 
         selectedIDs.subtract(movedIDs)
@@ -766,13 +785,16 @@ struct DirectoryView: View {
         .accessibilityLabel("Ajouter ou importer")
     }
 
-    /// Une seule synchronisation suffit : le rechargement force la lecture
-    /// réseau et lit donc l'état courant du dossier.
+    /// Affichage immédiat : les fichiers confirmés par l'API entrent dans la
+    /// grille (tri courant respecté, compteur recalé par `mergeUploaded`)
+    /// sans attendre le moindre aller-retour. La recherche, si elle est
+    /// affichée, est revalidée en arrière-plan : c'est le serveur qui décide
+    /// de l'appartenance au résultat.
     private func refreshAfterImport(_ uploadedFiles: [DriveFile]) async {
-        await viewModel.reload(forceNetwork: true)
+        guard !uploadedFiles.isEmpty else { return }
         viewModel.mergeUploaded(uploadedFiles)
         if isSearching {
-            await searchViewModel?.reload(forceNetwork: true)
+            await searchViewModel?.reload()
         }
     }
 
@@ -823,10 +845,19 @@ struct DirectoryView: View {
 /// Feuille « Mettre des tags » : affiche les tags déjà présents sur la
 /// sélection (coche = sur tous les éléments, tiret = sur certains) et permet
 /// de les ajouter ou de les retirer en une passe (échecs partiels signalés).
+/// Modification de tag confirmée par l'API, transmise à la fermeture de la
+/// feuille pour une mise à jour locale des grilles (pastilles) sans
+/// rechargement réseau.
+private struct TagChange {
+    let file: DriveFile
+    let categoryId: Int
+    let isAdd: Bool
+}
+
 private struct ApplyTagsSheet: View {
     let driveId: Int
     let files: [DriveFile]
-    let onDone: () async -> Void
+    let onDone: ([TagChange]) async -> Void
 
     @Environment(\.dismiss) private var dismiss
     @State private var categories: [Category] = []
@@ -999,34 +1030,34 @@ private struct ApplyTagsSheet: View {
             }
         }
 
-        var addedCount = 0
-        var removedCount = 0
+        var appliedChanges: [TagChange] = []
         var firstErrorDescription: String?
 
         var index = 0
         while index < work.count {
             let chunk = Array(work[index..<min(index + concurrency, work.count)])
             index += chunk.count
-            await withTaskGroup(of: (added: Bool, removed: Bool, error: String?).self) { group in
+            await withTaskGroup(of: (change: TagChange?, error: String?).self) { group in
                 for item in chunk {
                     group.addTask {
                         do {
                             if item.isAdd {
                                 try await service.addCategory(driveId: driveId, fileId: item.file.id, categoryId: item.categoryId)
                                 TagUsageStore.markUsed(driveId: driveId, categoryId: item.categoryId)
-                                return (true, false, nil)
+                                return (TagChange(file: item.file, categoryId: item.categoryId, isAdd: true), nil)
                             } else {
                                 try await service.removeCategory(driveId: driveId, fileId: item.file.id, categoryId: item.categoryId)
-                                return (false, true, nil)
+                                return (TagChange(file: item.file, categoryId: item.categoryId, isAdd: false), nil)
                             }
                         } catch {
-                            return (false, false, (error as? APIError)?.errorDescription ?? error.localizedDescription)
+                            return (nil, (error as? APIError)?.errorDescription ?? error.localizedDescription)
                         }
                     }
                 }
                 for await result in group {
-                    addedCount += result.added ? 1 : 0
-                    removedCount += result.removed ? 1 : 0
+                    if let change = result.change {
+                        appliedChanges.append(change)
+                    }
                     if firstErrorDescription == nil {
                         firstErrorDescription = result.error
                     }
@@ -1034,19 +1065,27 @@ private struct ApplyTagsSheet: View {
             }
         }
 
+        // Les modifications confirmées parviennent aux grilles même en cas
+        // d'échec partiel : seules les paires en erreur restent à refaire.
+        if !appliedChanges.isEmpty {
+            await onDone(appliedChanges)
+        }
         if let firstErrorDescription {
             var details: [String] = []
-            if addedCount > 0 {
-                details.append("\(addedCount) tag\(addedCount > 1 ? "s" : "") appliqué\(addedCount > 1 ? "s" : "")")
-            }
-            if removedCount > 0 {
-                details.append("\(removedCount) tag\(removedCount > 1 ? "s" : "") retiré\(removedCount > 1 ? "s" : "")")
+            if !appliedChanges.isEmpty {
+                let addedCount = appliedChanges.filter(\.isAdd).count
+                let removedCount = appliedChanges.count - addedCount
+                if addedCount > 0 {
+                    details.append("\(addedCount) tag\(addedCount > 1 ? "s" : "") appliqué\(addedCount > 1 ? "s" : "")")
+                }
+                if removedCount > 0 {
+                    details.append("\(removedCount) tag\(removedCount > 1 ? "s" : "") retiré\(removedCount > 1 ? "s" : "")")
+                }
             }
             let summary = details.isEmpty ? "Aucune modification" : details.joined(separator: ", ")
             errorMessage = "\(summary) sur \(files.count) élément\(files.count > 1 ? "s" : "") — \(firstErrorDescription)"
         } else {
             dismiss()
-            await onDone()
         }
     }
 }
