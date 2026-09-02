@@ -191,6 +191,11 @@ struct ProfileView: View {
                 Text(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "—")
                     .foregroundStyle(.secondary)
             }
+            NavigationLink {
+                PerfView()
+            } label: {
+                Label("Mesures réseau", systemImage: "gauge.with.dots")
+            }
         } header: {
             Text("À propos")
         } footer: {

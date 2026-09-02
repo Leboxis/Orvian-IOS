@@ -265,8 +265,15 @@ actor APIClient {
         }
 
         let credentialFingerprint = Self.credentialFingerprint(for: request)
+        let measuredMethod = method
+        let measuredPath = endpoint.path
+        let (data, response): (Data, URLResponse)
         do {
-            let (data, response) = try await session.data(for: request)
+            (data, response) = try await PerfTimer.measure(method: measuredMethod, path: measuredPath) {
+                let (data, response) = try await session.data(for: request)
+                let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+                return (data, status: status, bytes: data.count)
+            }
             return (data, response, credentialFingerprint)
         } catch {
             throw APIError.network(error)
