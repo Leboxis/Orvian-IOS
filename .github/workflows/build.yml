@@ -113,7 +113,11 @@ jobs:
             NOTES="• Première version publiée automatiquement"
           fi
           NOTES=${NOTES:-"• Version publiée automatiquement depuis main"}
-          python3 .github/scripts/update_repo.py "$VERSION" "$TAG" "$SIZE" "$TODAY" "$NOTES" > repo.json
+          UPDATED_REPO_JSON=$(mktemp)
+          python3 .github/scripts/update_repo.py \
+            "$VERSION" "$TAG" "$SIZE" "$TODAY" "$NOTES" repo.json \
+            > "$UPDATED_REPO_JSON"
+          mv "$UPDATED_REPO_JSON" repo.json
 
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
