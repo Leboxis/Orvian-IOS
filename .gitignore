@@ -17,3 +17,5 @@ xcuserdata/
 
 # ZCode local
 .zcode/
+
+__pycache__/
