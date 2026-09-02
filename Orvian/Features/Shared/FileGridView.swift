@@ -151,6 +151,18 @@ struct FileGridView: View {
                 sortReloadTask?.cancel()
                 sortReloadTask = nil
             }
+            .alert("Action impossible", isPresented: mutationErrorBinding) {
+                Button("OK", role: .cancel) {}
+            } message: {
+                Text(viewModel.mutationErrorMessage ?? "")
+            }
+    }
+
+    private var mutationErrorBinding: Binding<Bool> {
+        Binding(
+            get: { viewModel.mutationErrorMessage != nil },
+            set: { if !$0 { viewModel.clearMutationError() } }
+        )
     }
 
     /// Relance la résolution des métadonnées vidéo quand le contenu change :

@@ -61,10 +61,13 @@ final class MediaUsageStore {
     private func record(driveId: Int, file: DriveFile) {
         let key = "\(driveId)-\(file.id)"
         let now = Date().timeIntervalSince1970
-        if var existing = records[key] {
-            existing.count += 1
-            existing.lastViewedAt = now
-            records[key] = existing
+        if let existing = records[key] {
+            // Resynchronise le fichier mémorisé (nom, taille, tags…) sur la
+            // version fraîche reçue de l'API : ne mettre à jour que le
+            // compteur laissait indéfiniment des métadonnées périmées dans
+            // les « médias les plus consultés » après un renommage ou un
+            // déplacement.
+            records[key] = MediaViewRecord(file: file, count: existing.count + 1, lastViewedAt: now)
         } else {
             records[key] = MediaViewRecord(file: file, count: 1, lastViewedAt: now)
         }

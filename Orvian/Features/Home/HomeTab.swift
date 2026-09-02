@@ -661,9 +661,8 @@ struct DirectoryView: View {
         selectedIDs.formIntersection(visibleSelectionIDs)
         deleteBusy = false
 
-        if deletedIDs.count < ids.count {
-            addError = activeViewModel.errorMessage ?? "Certains éléments n’ont pas pu être supprimés."
-        }
+        // L'échec éventuel est signalé par l'alerte de FileGridView
+        // (mutationErrorMessage du même view model que la grille affiche).
         if selectedIDs.isEmpty {
             selectionMode = false
         }
@@ -711,9 +710,9 @@ struct DirectoryView: View {
         selectedIDs.subtract(movedIDs)
         moveBusy = false
 
-        if movedIDs.count < ids.count {
-            addError = movingViewModel.errorMessage ?? "Certains éléments n’ont pas pu être déplacés."
-        }
+        // L'échec éventuel est signalé par l'alerte de FileGridView
+        // (mutationErrorMessage du view model utilisé pour le déplacement,
+        // grille courante ou résultats de recherche).
         if selectedIDs.isEmpty {
             selectionMode = false
         }

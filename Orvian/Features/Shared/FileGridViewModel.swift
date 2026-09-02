@@ -28,6 +28,11 @@ final class FileGridViewModel {
     /// ne fournit pas cette information.
     private(set) var totalItemCount: Int?
     private(set) var errorMessage: String?
+    /// Erreurs des opérations de mutation (favoris, corbeille, restauration,
+    /// déplacement, renommage, couleur) : séparées de `errorMessage` (chargement
+    /// et pagination) pour que l'UI affiche une alerte dédiée au lieu du
+    /// bouton « Réessayer » réservé à la pagination.
+    private(set) var mutationErrorMessage: String?
     /// Index id → catégorie pour afficher les pastilles de tags des cartes.
     /// Il reste lié au cache partagé afin que les renommages et suppressions
     /// confirmés soient reflétés sans recharger tous les fichiers.
@@ -62,6 +67,11 @@ final class FileGridViewModel {
     func loadIfNeeded() async {
         guard !loadedOnce, !isInitialLoading else { return }
         await reload()
+    }
+
+    /// Efface l'erreur de mutation après sa présentation à l'utilisateur.
+    func clearMutationError() {
+        mutationErrorMessage = nil
     }
 
     /// Rafraîchit en conservant les anciennes cartes à l'écran.
@@ -191,11 +201,58 @@ final class FileGridViewModel {
         let uploadedIDs = Set(merged.map(\.id))
         items.removeAll { uploadedIDs.contains($0.id) }
         items.append(contentsOf: merged)
-        items.sort { lhs, rhs in
-            if lhs.isDirectory != rhs.isDirectory {
-                return lhs.isDirectory
+        resortAfterMerge()
+    }
+
+    /// Re-trie la grille selon le tri serveur courant (`orderBy` / `order`)
+    /// après une insertion : l'ancien code triait toujours par nom, ce qui
+    /// écrasait un tri actif par date, type ou taille. Dossiers en premier,
+    /// comme partout ailleurs. Sans tri serveur (ordre d'origine), le tri
+    /// alphabétique par défaut est conservé.
+    private func resortAfterMerge() {
+        let ascending = order != "desc"
+        func dateOrder(_ lhs: Double?, _ rhs: Double?) -> Bool {
+            switch (lhs, rhs) {
+            case let (l?, r?): return ascending ? l < r : l > r
+            case (_?, nil): return true
+            case (nil, _?): return false
+            case (nil, nil): return false
             }
-            return lhs.name.localizedStandardCompare(rhs.name) == .orderedAscending
+        }
+        switch orderBy.first {
+        case "last_modified_at":
+            items.sort {
+                if $0.isDirectory != $1.isDirectory { return $0.isDirectory }
+                return dateOrder($0.lastModifiedAt, $1.lastModifiedAt)
+            }
+        case "added_at":
+            items.sort {
+                if $0.isDirectory != $1.isDirectory { return $0.isDirectory }
+                return dateOrder($0.addedAt, $1.addedAt)
+            }
+        case "size":
+            items.sort {
+                if $0.isDirectory != $1.isDirectory { return $0.isDirectory }
+                let l = $0.size ?? -1
+                let r = $1.size ?? -1
+                if l == r { return $0.id < $1.id }
+                return ascending ? l < r : l > r
+            }
+        case "type":
+            items.sort {
+                if $0.isDirectory != $1.isDirectory { return $0.isDirectory }
+                let l = $0.fileKind.rawValue
+                let r = $1.fileKind.rawValue
+                if l == r {
+                    return $0.name.localizedStandardCompare($1.name) == .orderedAscending
+                }
+                return ascending ? l < r : l > r
+            }
+        default:
+            items.sort {
+                if $0.isDirectory != $1.isDirectory { return $0.isDirectory }
+                return $0.name.localizedStandardCompare($1.name) == .orderedAscending
+            }
         }
     }
 
@@ -221,7 +278,7 @@ final class FileGridViewModel {
             } else if let restoredIndex = items.firstIndex(where: { $0.id == file.id }) {
                 items[restoredIndex].isFavorite = file.isFavorite
             }
-            errorMessage = "Impossible de modifier le favori : \((error as? APIError)?.errorDescription ?? error.localizedDescription)"
+            mutationErrorMessage = "Impossible de modifier le favori : \((error as? APIError)?.errorDescription ?? error.localizedDescription)"
         }
     }
 
@@ -280,7 +337,7 @@ final class FileGridViewModel {
             try await service.trash(driveId: driveId, fileId: file.id)
             items.removeAll { $0.id == file.id }
         } catch {
-            errorMessage = "Suppression impossible : \((error as? APIError)?.errorDescription ?? error.localizedDescription)"
+            mutationErrorMessage = "Suppression impossible : \((error as? APIError)?.errorDescription ?? error.localizedDescription)"
         }
     }
 
@@ -339,16 +396,16 @@ final class FileGridViewModel {
         guard let firstError else { return }
         let failedCount = total - succeeded
         let detail = (firstError as? APIError)?.errorDescription ?? firstError.localizedDescription
-        errorMessage = failedCount == 1
+        mutationErrorMessage = failedCount == 1
             ? String(format: singular, detail)
             : String(format: plural, failedCount, detail)
     }
 
     /// Corbeille une sélection entière ; les échecs partiels sont signalés
-    /// dans `errorMessage` sans bloquer les autres suppressions.
+    /// dans `mutationErrorMessage` sans bloquer les autres suppressions.
     @discardableResult
     func trash(ids: Set<Int>) async -> Set<Int> {
-        errorMessage = nil
+        mutationErrorMessage = nil
         let service = self.service
         let driveId = self.driveId
         let (trashedIDs, firstError) = await performConcurrently(ids: ids) { id in
@@ -376,7 +433,7 @@ final class FileGridViewModel {
                items[restoredIndex].name == name {
                 items[restoredIndex].name = oldName
             }
-            errorMessage = "Renommage impossible : \((error as? APIError)?.errorDescription ?? error.localizedDescription)"
+            mutationErrorMessage = "Renommage impossible : \((error as? APIError)?.errorDescription ?? error.localizedDescription)"
         }
     }
 
@@ -393,7 +450,7 @@ final class FileGridViewModel {
                items[restoredIndex].color == color {
                 items[restoredIndex].color = oldColor
             }
-            errorMessage = "Couleur impossible à modifier : \((error as? APIError)?.errorDescription ?? error.localizedDescription)"
+            mutationErrorMessage = "Couleur impossible à modifier : \((error as? APIError)?.errorDescription ?? error.localizedDescription)"
         }
     }
 
@@ -401,7 +458,7 @@ final class FileGridViewModel {
     /// immédiatement de la grille ; les éventuels échecs restent affichés.
     @discardableResult
     func move(ids: Set<Int>, to destinationDirectoryId: Int) async -> Set<Int> {
-        errorMessage = nil
+        mutationErrorMessage = nil
         let service = self.service
         let driveId = self.driveId
         let destination = destinationDirectoryId
@@ -427,22 +484,30 @@ final class FileGridViewModel {
             try await service.permanentlyDelete(driveId: driveId, fileId: file.id)
             items.removeAll { $0.id == file.id }
         } catch {
-            errorMessage = "Suppression définitive impossible : \((error as? APIError)?.errorDescription ?? error.localizedDescription)"
+            mutationErrorMessage = "Suppression définitive impossible : \((error as? APIError)?.errorDescription ?? error.localizedDescription)"
         }
     }
 
     /// Supprime définitivement une sélection entière ; les échecs partiels
-    /// sont signalés dans `errorMessage` sans bloquer les autres suppressions.
-    func permanentlyDelete(ids: Set<Int>) async {
+    /// sont signalés dans `mutationErrorMessage` sans bloquer les autres
+    /// suppressions. Renvoie les identifiants réellement supprimés.
+    @discardableResult
+    func permanentlyDelete(ids: Set<Int>) async -> Set<Int> {
+        mutationErrorMessage = nil
         let service = self.service
         let driveId = self.driveId
         let (deletedIds, firstError) = await performConcurrently(ids: ids) { id in
             try await service.permanentlyDelete(driveId: driveId, fileId: id)
         }
         items.removeAll { deletedIds.contains($0.id) }
-        if let firstError {
-            errorMessage = "Suppression définitive impossible : \((firstError as? APIError)?.errorDescription ?? firstError.localizedDescription)"
-        }
+        reportPartialFailure(
+            total: ids.count,
+            succeeded: deletedIds.count,
+            firstError: firstError,
+            singular: "Un élément n’a pas pu être supprimé définitivement : %@",
+            plural: "%d éléments n’ont pas pu être supprimés définitivement : %@"
+        )
+        return deletedIds
     }
 
     /// Restaure un fichier de la corbeille vers son dossier d'origine ; si ce
@@ -455,7 +520,7 @@ final class FileGridViewModel {
             return true
         } catch {
             guard destination != 1 else {
-                errorMessage = "Restauration impossible : \((error as? APIError)?.errorDescription ?? error.localizedDescription)"
+                mutationErrorMessage = "Restauration impossible : \((error as? APIError)?.errorDescription ?? error.localizedDescription)"
                 return false
             }
             do {
@@ -463,17 +528,18 @@ final class FileGridViewModel {
                 items.removeAll { $0.id == file.id }
                 return true
             } catch {
-                errorMessage = "Restauration impossible : \((error as? APIError)?.errorDescription ?? error.localizedDescription)"
+                mutationErrorMessage = "Restauration impossible : \((error as? APIError)?.errorDescription ?? error.localizedDescription)"
                 return false
             }
         }
     }
 
     /// Restaure une sélection entière de la corbeille ; les échecs partiels
-    /// sont signalés dans `errorMessage` sans bloquer les autres restaurations.
+    /// sont signalés dans `mutationErrorMessage` sans bloquer les autres
+    /// restaurations.
     @discardableResult
     func restore(ids: Set<Int>) async -> Set<Int> {
-        errorMessage = nil
+        mutationErrorMessage = nil
         let service = self.service
         let driveId = self.driveId
         // Les destinations d'origine sont figées avant le lancement des

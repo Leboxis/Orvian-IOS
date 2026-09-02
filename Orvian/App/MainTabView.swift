@@ -87,7 +87,12 @@ struct MainTabView: View {
                 SettingsView(session: session, path: $navState.settingsPath)
             }
             tabPane(.tag) {
-                TagsView(driveId: drive.id, router: router, path: $navState.tagsPath)
+                TagsView(
+                    driveId: drive.id,
+                    router: router,
+                    path: $navState.tagsPath,
+                    trail: $navState.tagsTrail
+                )
             }
             tabPane(.home) {
                 HomeTab(

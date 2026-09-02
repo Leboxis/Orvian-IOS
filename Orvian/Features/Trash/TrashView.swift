@@ -177,8 +177,16 @@ struct TrashView: View {
     }
 
     private func deleteSelected() async {
-        await viewModel.permanentlyDelete(ids: selectedIDs)
-        selectedIDs = []
-        selectionMode = false
+        let ids = selectedIDs
+        guard !ids.isEmpty else { return }
+        let deleted = await viewModel.permanentlyDelete(ids: ids)
+        // Ne retire de la sélection que les suppressions réussies : en cas
+        // d'échec total ou partiel, l'utilisateur garde le reste sélectionné
+        // pour retenter sans tout recommencer (l'erreur est affichée par
+        // l'alerte de FileGridView).
+        selectedIDs.subtract(deleted)
+        if selectedIDs.isEmpty {
+            selectionMode = false
+        }
     }
 }

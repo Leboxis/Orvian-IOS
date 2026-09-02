@@ -9,6 +9,9 @@ struct TagsView: View {
     let driveId: Int
     let router: ViewerRouter
     @Binding var path: NavigationPath
+    /// Noms des éléments de `path` pour le fil d'Ariane ; persiste dans
+    /// `TabNavigationState` pour survivre au démontage de l'onglet.
+    @Binding var trail: [String]
 
     @State private var categories: [Category] = []
     @State private var isLoading = false
@@ -16,7 +19,6 @@ struct TagsView: View {
     @State private var hasLoadedCategories = false
     @State private var errorMessage: String?
     @State private var operationErrorMessage: String?
-    @State private var trail: [String] = []
     /// Affichage des catégories : grille (défaut) ou liste.
     @AppStorage("tagsLayout") private var layout = CategoryLayout.grid
     /// Nombre de colonnes de la grille, partagé avec l'éditeur de tags.
