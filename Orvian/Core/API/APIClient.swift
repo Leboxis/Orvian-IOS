@@ -272,7 +272,7 @@ actor APIClient {
             (data, response) = try await PerfTimer.measure(method: measuredMethod, path: measuredPath) {
                 let (data, response) = try await session.data(for: request)
                 let status = (response as? HTTPURLResponse)?.statusCode ?? 0
-                return (data, status: status, bytes: data.count)
+                return ((data, response), status: status, bytes: data.count)
             }
             return (data, response, credentialFingerprint)
         } catch {
