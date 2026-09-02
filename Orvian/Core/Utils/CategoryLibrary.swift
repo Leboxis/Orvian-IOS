@@ -20,6 +20,17 @@ final class CategoryLibrary {
         categoriesByDrive[driveId] ?? [:]
     }
 
+    /// Indique si les catégories du drive ont déjà été chargées cette session
+    /// (y compris pour un drive sans tag : liste vide ≠ jamais chargé).
+    func hasLoaded(for driveId: Int) -> Bool {
+        categoriesByDrive[driveId] != nil
+    }
+
+    /// Liste des catégories du drive déjà chargées (vide si aucune donnée).
+    func categoryList(for driveId: Int) -> [Category] {
+        categoriesByDrive[driveId].map { Array($0.values) } ?? []
+    }
+
     /// Charge les catégories d'un drive (une seule fois par session).
     func ensureLoaded(for driveId: Int) async {
         guard categoriesByDrive[driveId] == nil else { return }

@@ -16,6 +16,12 @@ final class FileGridViewModel {
             // d'un élément (nom, favori, couleur, tags), le tri ou l'ajout
             // paginé, car un tableau valeur est réécrit en entier.
             itemsRevision &+= 1
+            // Les mutations locales (corbeille, déplacement, import, favoris,
+            // renommage…) resynchronisent l'entrée de cache : une réouverture
+            // de la liste affiche immédiatement l'état à jour.
+            if loadedOnce {
+                storeListSnapshot()
+            }
         }
     }
     /// Compteur incrémenté à chaque mutation de `items`.
@@ -63,9 +69,33 @@ final class FileGridViewModel {
 
     // MARK: - Chargement
 
-    /// Charge au premier affichage de l'onglet uniquement.
+    /// Charge au premier affichage de l'onglet uniquement. Si une liste
+    /// déjà consultée figure dans le cache mémoire, elle est affichée
+    /// immédiatement (contenu, pagination et compteur) pendant que le
+    /// réseau revalide en arrière-plan : la réouverture d'un dossier ne
+    /// repasse plus par le squelette ni par un aller-retour bloquant.
     func loadIfNeeded() async {
         guard !loadedOnce, !isInitialLoading else { return }
+        if let snapshot = DirectoryListStore.shared.snapshot(
+            source: source,
+            driveId: driveId,
+            orderBy: orderBy,
+            order: order
+        ) {
+            // L'ordre des affectations importe : `items` en dernier déclenche
+            // la resynchronisation du cache avec un état déjà complet.
+            orderBy = snapshot.orderBy
+            order = snapshot.order
+            cursor = snapshot.cursor
+            hasMore = snapshot.hasMore
+            totalItemCount = snapshot.totalItemCount
+            loadedOnce = true
+            items = snapshot.items
+            // Revalidation silencieuse : les cartes restent affichées et
+            // l'ETag renvoie 304 (quelques octets) si rien n'a changé.
+            Task { await reload() }
+            return
+        }
         await reload()
     }
 
@@ -103,6 +133,10 @@ final class FileGridViewModel {
         }
         do {
             async let categoriesTask: Void = CategoryLibrary.shared.ensureLoaded(for: driveId)
+            // Le compteur part en même temps que la page : la durée perçue
+            // est le max des deux allers-retours au lieu de leur somme, et
+            // le badge « N éléments » n'attend plus la fin de la liste.
+            async let countTask: Int? = fetchDirectoryCount()
             let page = try await service.page(
                 source,
                 driveId: driveId,
@@ -111,13 +145,17 @@ final class FileGridViewModel {
                 order: requestedOrder,
                 forceNetwork: forceNetwork
             )
+            let freshCount = await countTask
             await categoriesTask
             guard !Task.isCancelled, dataGeneration == requestGeneration else { return }
-            items = filterItemsIfNeeded(page.data ?? [])
+            // Curseur et compteur d'abord, items en dernier : la sauvegarde
+            // déclenchée par `didSet` capture toujours un état cohérent.
             cursor = page.cursor
             hasMore = page.hasMore ?? false
-            await refreshDirectoryCount()
+            totalItemCount = freshCount
             loadedOnce = true
+            items = filterItemsIfNeeded(page.data ?? [])
+            storeListSnapshot()
         } catch {
             guard !Task.isCancelled, dataGeneration == requestGeneration else { return }
             errorMessage = (error as? APIError)?.errorDescription ?? error.localizedDescription
@@ -125,15 +163,11 @@ final class FileGridViewModel {
     }
 
     /// Vraie quantité d'un dossier via l'endpoint `count` dédié (les listes
-    /// paginées n'exposent pas de total). Sans résultat, `totalItemCount`
-    /// reste `nil` et le compteur affiché retombe sur les éléments chargés.
-    private func refreshDirectoryCount() async {
-        guard case let .directory(directoryId) = source else { return }
-        do {
-            totalItemCount = try await service.directoryCount(driveId: driveId, directoryId: directoryId)
-        } catch {
-            totalItemCount = nil
-        }
+    /// paginées n'exposent pas de total). Sans résultat, `nil` : le compteur
+    /// affiché retombe sur les éléments chargés ou conserve l'ancienne valeur.
+    private func fetchDirectoryCount() async -> Int? {
+        guard case let .directory(directoryId) = source else { return nil }
+        return try? await service.directoryCount(driveId: driveId, directoryId: directoryId)
     }
 
     /// Pagination infinie : déclenché par l'apparition des dernières cartes.
@@ -164,9 +198,13 @@ final class FileGridViewModel {
             guard !Task.isCancelled, dataGeneration == requestGeneration else { return }
             let existing = Set(items.map(\.id))
             let filtered = filterItemsIfNeeded(page.data ?? [])
-            items.append(contentsOf: filtered.filter { !existing.contains($0.id) })
+            let appended = filtered.filter { !existing.contains($0.id) }
+            // Même invariant que dans `reload` : cursor/hasMore d'abord,
+            // items ensuite, pour que le snapshot issu de `didSet` capture
+            // la pagination à jour avec les nouvelles cartes.
             cursor = page.cursor
             hasMore = page.hasMore ?? false
+            items.append(contentsOf: appended)
         } catch {
             guard !Task.isCancelled, dataGeneration == requestGeneration else { return }
             errorMessage = (error as? APIError)?.errorDescription ?? error.localizedDescription
@@ -180,6 +218,22 @@ final class FileGridViewModel {
         default:
             return raw
         }
+    }
+
+    /// Écrit (ou réécrit) l'instantané de la liste dans le cache mémoire.
+    /// Appelé après un chargement complet, et à chaque mutation de `items`
+    /// via `didSet` tant que la liste a été chargée au moins une fois.
+    private func storeListSnapshot() {
+        DirectoryListStore.shared.store(
+            source: source,
+            driveId: driveId,
+            orderBy: orderBy,
+            order: order,
+            items: items,
+            cursor: cursor,
+            hasMore: hasMore,
+            totalItemCount: totalItemCount
+        )
     }
 
     /// Insère immédiatement les fichiers confirmés par la réponse d'upload.

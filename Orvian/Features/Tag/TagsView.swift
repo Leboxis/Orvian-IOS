@@ -286,6 +286,17 @@ struct TagsView: View {
 
     private func loadIfNeeded() async {
         guard categories.isEmpty, !isLoading else { return }
+        // Bibliothèque partagée déjà chargée cette session (grilles,
+        // éditeur de tags, visite précédente) : affichage immédiat sans
+        // spinner ni requête. Les mutations locales (création, renommage,
+        // suppression) mettent déjà la bibliothèque à jour ; le
+        // pull-to-refresh reste la voie explicite pour revalider le serveur.
+        let library = CategoryLibrary.shared
+        if library.hasLoaded(for: driveId) {
+            categories = library.categoryList(for: driveId)
+            hasLoadedCategories = true
+            return
+        }
         await load(force: false)
     }
 
