@@ -175,7 +175,7 @@ final class FileGridViewModel {
 
     private func filterItemsIfNeeded(_ raw: [DriveFile]) -> [DriveFile] {
         switch source {
-        case .recents, .mostViewed:
+        case .recents:
             return raw.filter { !$0.isDirectory }
         default:
             return raw

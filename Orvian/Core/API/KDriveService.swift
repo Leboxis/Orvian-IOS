@@ -25,14 +25,12 @@ enum FileSource: Hashable {
     case directory(Int)
     case favorites(limit: Int = 60)
     case recents(limit: Int = 12)
-    case mostViewed(limit: Int = 12)
     case category(Int)
     case trash
     case search(query: String, directoryId: Int?)
 
     static var favorites: FileSource { .favorites() }
     static var recents: FileSource { .recents() }
-    static var mostViewed: FileSource { .mostViewed() }
 }
 
 /// Couche Repository : unique point d'accès aux données kDrive.
@@ -182,9 +180,6 @@ struct KDriveService {
                     }
                 }
             }
-        case let .mostViewed(limit):
-            let files = await MediaUsageStore.mostViewedFiles(driveId: driveId, limit: limit)
-            return CursorPage<DriveFile>(data: files, cursor: nil, hasMore: false)
         case let .category(categoryId):
             endpoint = safeOrdering(
                 .categoryFiles(driveId: driveId, categoryId: categoryId, cursor: cursor),

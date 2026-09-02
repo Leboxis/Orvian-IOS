@@ -11,9 +11,7 @@ struct ProfileView: View {
     var refreshRequest: Int = 0
 
     @State private var recentUploads: [DriveFile] = []
-    @State private var frequentFavorites: [DriveFile] = []
     @State private var isLoadingRecents = true
-    @State private var isLoadingFavorites = true
 
     private let service = KDriveService()
 
@@ -21,7 +19,6 @@ struct ProfileView: View {
         NavigationStack(path: $path) {
             List {
                 recentUploadsSection
-                frequentFavoritesSection
                 trashSection
                 aboutSection
             }
@@ -101,55 +98,6 @@ struct ProfileView: View {
 
     // MARK: - Médias les plus consultés (3 miniatures + bouton voir plus)
 
-    private var frequentFavoritesSection: some View {
-        Section {
-            if let drive = session.selectedDrive {
-                if isLoadingFavorites {
-                    thumbnailsSkeleton
-                } else if frequentFavorites.isEmpty {
-                    Text("Aucun média consulté")
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-                } else {
-                    HStack(spacing: 10) {
-                        ForEach(frequentFavorites.prefix(3)) { file in
-                            Button {
-                                router.open(file, siblings: frequentFavorites)
-                            } label: {
-                                ProfileThumbnailCard(file: file, driveId: drive.id)
-                            }
-                            .buttonStyle(.plain)
-                            .frame(maxWidth: .infinity)
-                        }
-                    }
-                    .padding(.vertical, 4)
-                }
-            }
-        } header: {
-            if let drive = session.selectedDrive {
-                NavigationLink {
-                    RecentFilesView(
-                        driveId: drive.id,
-                        title: "Médias les plus consultés",
-                        source: .mostViewed(limit: 12),
-                        router: router
-                    )
-                } label: {
-                    HStack {
-                        Text("Médias les plus consultés")
-                            .foregroundStyle(.primary)
-                        Spacer()
-                        Image(systemName: "chevron.right")
-                            .font(.caption.weight(.bold))
-                            .foregroundStyle(.secondary)
-                    }
-                }
-            } else {
-                Text("Médias les plus consultés")
-            }
-        }
-    }
-
     private var thumbnailsSkeleton: some View {
         HStack(spacing: 10) {
             ForEach(0..<3, id: \.self) { _ in
@@ -208,28 +156,10 @@ struct ProfileView: View {
     private func loadPreviews() async {
         guard let drive = session.selectedDrive else { return }
 
-        // Chargement immédiat des médias les plus consultés (lecture locale asynchrone)
-        let tracked = await MediaUsageStore.mostViewedFiles(driveId: drive.id, limit: 12)
-        if !tracked.isEmpty {
-            frequentFavorites = tracked
-            isLoadingFavorites = false
-        }
-
-        async let recentsTask = try? service.page(.recents(limit: 12), driveId: drive.id, cursor: nil)
-        async let favsTask = try? service.page(.favorites(limit: 12), driveId: drive.id, cursor: nil)
-
-        let (recentsPage, favsPage) = await (recentsTask, favsTask)
-        if let recentsPage {
+        if let recentsPage = try? await service.page(.recents(limit: 12), driveId: drive.id, cursor: nil) {
             recentUploads = (recentsPage.data ?? []).filter { !$0.isDirectory }
         }
         isLoadingRecents = false
-
-        if frequentFavorites.isEmpty {
-            if let favsPage {
-                frequentFavorites = (favsPage.data ?? []).filter { !$0.isDirectory }
-            }
-        }
-        isLoadingFavorites = false
     }
 }
 

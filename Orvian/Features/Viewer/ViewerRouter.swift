@@ -42,7 +42,6 @@ final class ViewerRouter {
         searchText: String = "",
         viewModel: FileGridViewModel? = nil
     ) {
-        MediaUsageStore.recordView(driveId: driveId, file: file)
         if file.isImage || file.isVideo {
             // Les « voisins » fournis par la grille respectent déjà le tri et
             // les filtres du moment ; on ne garde que les médias pour le pager.

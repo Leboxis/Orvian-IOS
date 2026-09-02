@@ -68,8 +68,6 @@ struct MediaPagerView: View {
         .onChange(of: selectedFileID) { _, newID in
             dismissOffset = 0
             guard let index = files.firstIndex(where: { $0.id == newID }) else { return }
-            // Consigne la consultation pour les « médias les plus consultés ».
-            MediaUsageStore.recordView(driveId: context.driveId, file: files[index])
             // Proche de la fin de la liste : demande la page suivante à la
             // vue-modèle de la grille, qui reprend là où elle s'était arrêtée.
             if index >= files.count - 2 {
