@@ -2,7 +2,7 @@ import UIKit
 
 /// Pipeline de miniatures : mémoire → disque → réseau avec concurrence bornée.
 ///
-/// - dédoublonne les requêtes en vol (une seule par fichier/taille) ;
+/// - dédoublonne les requêtes en vol (une seule par fichier) ;
 /// - régule la concurrence réseau (max 5 téléchargements simultanés sans bloquer de thread) ;
 /// - priorise les cellules visibles sur le préchargement ;
 /// - purge les requêtes de préchargement obsolètes lors d'un défilement rapide ;
@@ -53,9 +53,8 @@ actor ThumbnailProvider {
     private struct Key: Hashable {
         let driveId: Int
         let fileId: Int
-        let pixels: Int
 
-        var nsString: NSString { "\(driveId)-\(fileId)-\(pixels)" as NSString }
+        var nsString: NSString { "\(driveId)-\(fileId)" as NSString }
     }
 
     init(service: KDriveService = KDriveService(), disk: DiskImageCache = .init()) {
@@ -64,15 +63,15 @@ actor ThumbnailProvider {
     }
 
     /// Accès synchrone ultra-rapide au cache mémoire (sans saut de thread).
-    nonisolated func cachedMemoryThumbnail(driveId: Int, fileId: Int, pixels: Int = DS.thumbnailPixels) -> UIImage? {
-        let key = "\(driveId)-\(fileId)-\(pixels)" as NSString
+    nonisolated func cachedMemoryThumbnail(driveId: Int, fileId: Int) -> UIImage? {
+        let key = "\(driveId)-\(fileId)" as NSString
         return Self.memory.object(forKey: key)
     }
 
     /// Miniature pour une carte visible ; nil si le fichier n'en a pas ou si annulé.
     /// `isTrashed` : les fichiers de la corbeille utilisent l'endpoint dédié.
-    func thumbnail(driveId: Int, fileId: Int, pixels: Int = DS.thumbnailPixels, isTrashed: Bool = false) async -> UIImage? {
-        let key = Key(driveId: driveId, fileId: fileId, pixels: pixels)
+    func thumbnail(driveId: Int, fileId: Int, isTrashed: Bool = false) async -> UIImage? {
+        let key = Key(driveId: driveId, fileId: fileId)
 
         if let cached = Self.memory.object(forKey: key.nsString) {
             return cached
@@ -107,15 +106,15 @@ actor ThumbnailProvider {
     /// async = global concurrent executor) : les chargements tournent en
     /// parallèle au lieu de se sérialiser derrière chaque décodage.
     private nonisolated func loadFromDisk(_ key: Key) async -> UIImage? {
-        guard disk.hasEntry(driveId: key.driveId, fileId: key.fileId, pixels: key.pixels) else {
+        guard disk.hasEntry(driveId: key.driveId, fileId: key.fileId) else {
             return nil
         }
-        if let image = disk.loadImage(driveId: key.driveId, fileId: key.fileId, pixels: key.pixels) {
+        if let image = disk.loadImage(driveId: key.driveId, fileId: key.fileId) {
             return image
         }
         // Une ancienne réponse non image ne doit pas empêcher une
         // nouvelle tentative réseau (cas des posters encore générés).
-        disk.removeEntry(driveId: key.driveId, fileId: key.fileId, pixels: key.pixels)
+        disk.removeEntry(driveId: key.driveId, fileId: key.fileId)
         return nil
     }
 
@@ -127,11 +126,10 @@ actor ThumbnailProvider {
     func thumbnailWhenAvailable(
         driveId: Int,
         fileId: Int,
-        pixels: Int = DS.thumbnailPixels,
         isTrashed: Bool = false,
         includeImmediateAttempt: Bool = true
     ) async -> UIImage? {
-        let key = Key(driveId: driveId, fileId: fileId, pixels: pixels)
+        let key = Key(driveId: driveId, fileId: fileId)
 
         // Absence récemment établie : ne pas relancer la boucle de réessais.
         if let failedAt = recentFailures[key], Date().timeIntervalSince(failedAt) < failureRetryTTL {
@@ -153,7 +151,6 @@ actor ThumbnailProvider {
             if let image = await thumbnail(
                 driveId: driveId,
                 fileId: fileId,
-                pixels: pixels,
                 isTrashed: isTrashed
             ) {
                 // Succès (poster enfin généré) : l'absence n'est plus d'actualité.
@@ -184,13 +181,13 @@ actor ThumbnailProvider {
     }
 
     /// Préchargement discret avec régulation de concurrence et abandon des requêtes lointaines.
-    func prefetch(driveId: Int, fileIds: [Int], pixels: Int = DS.thumbnailPixels, isTrashed: Bool = false) {
+    func prefetch(driveId: Int, fileIds: [Int], isTrashed: Bool = false) {
         var newestKeys: [Key] = []
         for fileId in fileIds {
-            let key = Key(driveId: driveId, fileId: fileId, pixels: pixels)
+            let key = Key(driveId: driveId, fileId: fileId)
             guard inFlight[key] == nil,
                   Self.memory.object(forKey: key.nsString) == nil,
-                  !disk.hasEntry(driveId: driveId, fileId: fileId, pixels: pixels)
+                  !disk.hasEntry(driveId: driveId, fileId: fileId)
             else { continue }
             if !newestKeys.contains(key) {
                 newestKeys.append(key)
@@ -219,7 +216,7 @@ actor ThumbnailProvider {
         prefetchTask = Task { [weak self] in
             while let nextKey = await self?.popNextPrefetchKey() {
                 guard !Task.isCancelled else { break }
-                _ = await self?.thumbnail(driveId: nextKey.driveId, fileId: nextKey.fileId, pixels: nextKey.pixels, isTrashed: isTrashed)
+                _ = await self?.thumbnail(driveId: nextKey.driveId, fileId: nextKey.fileId, isTrashed: isTrashed)
             }
             await self?.clearPrefetchTask()
         }
@@ -242,7 +239,7 @@ actor ThumbnailProvider {
         do {
             let data = try await throttler.withPermit {
                 try Task.checkCancellation()
-                return try await service.thumbnailData(driveId: key.driveId, fileId: key.fileId, pixels: key.pixels, isTrashed: isTrashed)
+                return try await service.thumbnailData(driveId: key.driveId, fileId: key.fileId, isTrashed: isTrashed)
             }
             guard !Task.isCancelled else { return nil }
             guard !data.isEmpty else {
@@ -255,7 +252,7 @@ actor ThumbnailProvider {
                 return nil
             }
             // Les données validées sont conservées sans ré-encodage CPU.
-            disk.store(data: data, driveId: key.driveId, fileId: key.fileId, pixels: key.pixels)
+            disk.store(data: data, driveId: key.driveId, fileId: key.fileId)
             return image
         } catch is CancellationError {
             return nil

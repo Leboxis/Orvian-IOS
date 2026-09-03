@@ -307,10 +307,10 @@ struct KDriveService {
         return url
     }
 
-    func thumbnailData(driveId: Int, fileId: Int, pixels: Int, isTrashed: Bool = false) async throws -> Data {
+    func thumbnailData(driveId: Int, fileId: Int, isTrashed: Bool = false) async throws -> Data {
         let endpoint: Endpoint = isTrashed
-            ? .trashedThumbnail(driveId: driveId, fileId: fileId, pixels: pixels)
-            : .thumbnail(driveId: driveId, fileId: fileId, pixels: pixels)
+            ? .trashedThumbnail(driveId: driveId, fileId: fileId)
+            : .thumbnail(driveId: driveId, fileId: fileId)
         // Les miniatures disposent de leur propre cache disque : inutile de
         // dupliquer leurs octets dans le cache HTTP partagé.
         return try await api.data(endpoint, cachePolicy: .reloadIgnoringLocalCacheData)

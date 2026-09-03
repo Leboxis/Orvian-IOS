@@ -244,7 +244,7 @@ private struct AsyncProfileThumbnail: View {
             guard file.fileKind.supportsThumbnail else { return }
             // Clé canonique partagée avec les grilles : miniature servie
             // depuis le cache au lieu d'un second téléchargement.
-            image = await ThumbnailProvider.shared.thumbnail(driveId: driveId, fileId: file.id, pixels: DS.thumbnailPixels)
+            image = await ThumbnailProvider.shared.thumbnail(driveId: driveId, fileId: file.id)
         }
     }
 }

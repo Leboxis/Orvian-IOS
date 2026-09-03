@@ -36,33 +36,50 @@ final class DiskImageCache: @unchecked Sendable {
         try? FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
     }
 
-    private func url(driveId: Int, fileId: Int, pixels: Int) -> URL {
+    /// Suffixe des fichiers créés par les versions antérieures : l'API kDrive
+    /// ignore la taille demandée, un seul bucket existait en pratique.
+    private static let legacyPixelsSuffix = 360
+
+    /// Les fichiers historiques portaient un suffixe de taille (`123-360.jpg`)
+    /// que l'API kDrive ignore : l'identifiant seul suffit désormais
+    /// (`123.jpg`). Les lectures retombent sur l'ancien nom, et une écriture
+    /// nettoie le doublon.
+    private func url(driveId: Int, fileId: Int) -> URL {
         root
             .appendingPathComponent("\(driveId)", isDirectory: true)
-            .appendingPathComponent("\(fileId)-\(pixels).jpg")
+            .appendingPathComponent("\(fileId).jpg")
+    }
+
+    private func legacyURL(driveId: Int, fileId: Int) -> URL {
+        root
+            .appendingPathComponent("\(driveId)", isDirectory: true)
+            .appendingPathComponent("\(fileId)-\(Self.legacyPixelsSuffix).jpg")
     }
 
     // MARK: - Lecture / écriture
 
-    func hasEntry(driveId: Int, fileId: Int, pixels: Int) -> Bool {
-        let fileURL = url(driveId: driveId, fileId: fileId, pixels: pixels)
+    func hasEntry(driveId: Int, fileId: Int) -> Bool {
         // Les anciens marqueurs `.none` ne sont plus pris en compte : un 404
         // juste après un upload pouvait être temporaire et ne doit jamais
         // condamner définitivement la miniature sur les versions suivantes.
-        return FileManager.default.fileExists(atPath: fileURL.path)
+        return FileManager.default.fileExists(atPath: url(driveId: driveId, fileId: fileId).path)
+            || FileManager.default.fileExists(atPath: legacyURL(driveId: driveId, fileId: fileId).path)
     }
 
-    func loadImage(driveId: Int, fileId: Int, pixels: Int) -> UIImage? {
-        let fileURL = url(driveId: driveId, fileId: fileId, pixels: pixels)
-        guard let data = try? Data(contentsOf: fileURL, options: .mappedIfSafe) else { return nil }
+    func loadImage(driveId: Int, fileId: Int) -> UIImage? {
+        let fileURL = url(driveId: driveId, fileId: fileId)
+        guard let data = try? Data(contentsOf: fileURL, options: .mappedIfSafe) else {
+            // Tombée de compatibilité : ancien fichier `-<taille>.jpg`.
+            guard let legacyData = try? Data(contentsOf: legacyURL(driveId: driveId, fileId: fileId), options: .mappedIfSafe) else { return nil }
+            guard !legacyData.isEmpty, let legacyImage = UIImage(data: legacyData) else { return nil }
+            return legacyImage.preparingForDisplay() ?? legacyImage
+        }
         guard !data.isEmpty, let image = UIImage(data: data) else { return nil }
         return image.preparingForDisplay() ?? image
     }
 
-    /// Retire une entrée illisible afin qu'elle ne bloque jamais un nouveau
-    /// téléchargement de miniature valide.
-    func removeEntry(driveId: Int, fileId: Int, pixels: Int) {
-        let fileURL = url(driveId: driveId, fileId: fileId, pixels: pixels)
+    /// Retire un fichier en mettant à jour la taille estimée du cache.
+    private func removeFileAndAccount(_ fileURL: URL) {
         let size = (try? fileURL.resourceValues(forKeys: [.fileSizeKey]))?.fileSize ?? 0
         guard (try? FileManager.default.removeItem(at: fileURL)) != nil else { return }
         lock.lock()
@@ -72,26 +89,29 @@ final class DiskImageCache: @unchecked Sendable {
         lock.unlock()
     }
 
+    /// Retire une entrée illisible afin qu'elle ne bloque jamais un nouveau
+    /// téléchargement de miniature valide.
+    func removeEntry(driveId: Int, fileId: Int) {
+        removeFileAndAccount(url(driveId: driveId, fileId: fileId))
+        removeFileAndAccount(legacyURL(driveId: driveId, fileId: fileId))
+    }
+
     /// Enregistre directement les données brutes reçues du réseau (JPEG, PNG, WebP...) sans ré-encodage CPU.
     /// Utilise Data.write(options: .atomic) pour garantir qu'aucun fichier incomplet ne peut être lu.
-    func store(data: Data, driveId: Int, fileId: Int, pixels: Int) {
+    func store(data: Data, driveId: Int, fileId: Int) {
         guard !data.isEmpty else { return }
-        let fileURL = url(driveId: driveId, fileId: fileId, pixels: pixels)
+        let fileURL = url(driveId: driveId, fileId: fileId)
         let oldSize = (try? fileURL.resourceValues(forKeys: [.fileSizeKey]))?.fileSize ?? 0
         try? FileManager.default.createDirectory(at: fileURL.deletingLastPathComponent(), withIntermediateDirectories: true)
         do {
             try data.write(to: fileURL, options: .atomic)
-            let delta = data.count - oldSize
-            onFileWritten(deltaSize: delta)
+            // L'ancien nom `-<taille>.jpg` devient un doublon : retiré ici,
+            // sa taille est décomptée avant le delta de la nouvelle écriture.
+            removeFileAndAccount(legacyURL(driveId: driveId, fileId: fileId))
+            onFileWritten(deltaSize: data.count - oldSize)
         } catch {
             // Disque plein ou permissions : on continue sans cache disque pour cette entrée.
         }
-    }
-
-    /// Rétrocompatibilité : encode un UIImage si les données brutes ne sont pas fournies.
-    func store(image: UIImage, driveId: Int, fileId: Int, pixels: Int) {
-        guard let data = image.jpegData(compressionQuality: 0.85) ?? image.pngData() else { return }
-        store(data: data, driveId: driveId, fileId: fileId, pixels: pixels)
     }
 
     // MARK: - Maintenance

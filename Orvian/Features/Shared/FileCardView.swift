@@ -686,7 +686,7 @@ private struct AsyncThumbnail<S: InsettableShape>: View {
         .task {
             // Clé canonique partagée avec les grilles : même image servie
             // depuis le cache au lieu d'un second téléchargement.
-            image = await ThumbnailProvider.shared.thumbnail(driveId: driveId, fileId: fileId, pixels: DS.thumbnailPixels, isTrashed: isTrashed)
+            image = await ThumbnailProvider.shared.thumbnail(driveId: driveId, fileId: fileId, isTrashed: isTrashed)
         }
     }
 }

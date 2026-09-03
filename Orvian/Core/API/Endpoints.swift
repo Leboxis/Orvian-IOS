@@ -173,12 +173,12 @@ extension Endpoint {
     /// Miniature d'un fichier. L'API choisit elle-même la représentation
     /// disponible ; des dimensions forcées ont empêché certains posters vidéo
     /// fraîchement générés d'être renvoyés.
-    static func thumbnail(driveId: Int, fileId: Int, pixels _: Int) -> Endpoint {
+    static func thumbnail(driveId: Int, fileId: Int) -> Endpoint {
         Endpoint(path: "/2/drive/\(driveId)/files/\(fileId)/thumbnail")
     }
 
     /// Miniature d'un fichier corbeillé (même format que `.thumbnail`).
-    static func trashedThumbnail(driveId: Int, fileId: Int, pixels _: Int) -> Endpoint {
+    static func trashedThumbnail(driveId: Int, fileId: Int) -> Endpoint {
         Endpoint(path: "/2/drive/\(driveId)/trash/\(fileId)/thumbnail")
     }
 

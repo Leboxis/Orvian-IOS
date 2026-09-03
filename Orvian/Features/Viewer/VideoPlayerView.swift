@@ -707,14 +707,12 @@ struct VideoPlayerView: View {
         // sur une page gardée en mémoire).
         if poster == nil {
             Task {
-                // Même bucket que les cartes de la grille (`DS.thumbnailPixels`)
-                // : le poster réutilise la miniature déjà en cache mémoire au
-                // lieu d'une requête réseau distincte qui ferait la file
+                // La miniature réutilise le poster déjà en cache mémoire
+                // au lieu d'une requête réseau distincte qui ferait la file
                 // derrière les autres téléchargements.
                 let image = await ThumbnailProvider.shared.thumbnail(
                     driveId: driveId,
-                    fileId: file.id,
-                    pixels: DS.thumbnailPixels
+                    fileId: file.id
                 )
                 guard !isDisappeared, poster == nil else { return }
                 poster = image
