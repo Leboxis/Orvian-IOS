@@ -167,7 +167,7 @@ actor ThumbnailProvider {
     }
 
     /// Inscrit une clé dans le cache négatif en bornant sa taille.
-    private mutating func markAsFailed(_ key: Key) {
+    private func markAsFailed(_ key: Key) {
         // Éviction FIFO simple : la table ne peut pas croître sans limite.
         if recentFailures.count >= failureCacheLimit, recentFailures[key] == nil {
             if let oldest = recentFailures.min(by: { $0.value < $1.value })?.key {
