@@ -287,7 +287,7 @@ struct MediaPagerView: View {
     private func titleArea(for file: DriveFile) -> some View {
         VStack(spacing: 1) {
             Text(file.name)
-                .font(.footnote.weight(.medium))
+                .font(.body.weight(.medium))
                 .foregroundStyle(.white)
                 .lineLimit(1)
                 .minimumScaleFactor(0.6)
@@ -458,12 +458,21 @@ private struct ZoomablePhotoPage: View {
 
     var body: some View {
         GeometryReader { proxy in
+            // Zone réservée à la barre du pager (tags, titre, favori) : les
+            // images plein cadre (16/9 et plus) commencent sous les boutons
+            // au lieu de passer derrière eux.
+            let clearance = topBarClearance(in: proxy)
+            let contentSize = CGSize(
+                width: proxy.size.width,
+                height: max(0, proxy.size.height - clearance)
+            )
             ZStack {
-                interactiveImage(in: proxy.size)
+                interactiveImage(in: contentSize)
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .frame(width: contentSize.width, height: contentSize.height)
             .contentShape(Rectangle())
-            .gesture(magnifyGesture(in: proxy.size))
+            .gesture(magnifyGesture(in: contentSize))
+            .padding(.top, clearance)
         }
         .task(id: file.id) {
             await loadThumbnail()
@@ -484,6 +493,14 @@ private struct ZoomablePhotoPage: View {
     }
 
     // MARK: - Image
+
+    /// Marge haute réservée à la barre du pager : hauteur de la safe area
+    /// (barre d'état) plus la barre elle-même, plafonnée pour ne pas écraser
+    /// l'image sur les grands écrans.
+    private func topBarClearance(in proxy: GeometryProxy) -> CGFloat {
+        let safeTop = proxy.safeAreaInsets.top
+        return min(160, safeTop + 64)
+    }
 
     @ViewBuilder
     private var image: some View {
