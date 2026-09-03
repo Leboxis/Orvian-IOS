@@ -28,6 +28,11 @@ enum FileSource: Hashable {
     case category(Int)
     case trash
     case search(query: String, directoryId: Int?)
+
+    /// Raccourci requis par les comparaisons et affectations `.favorites`
+    /// (le cas associé porte un paramètre avec défaut et n'est pas référence
+    /// ainsi sans lui).
+    static var favorites: FileSource { .favorites() }
 }
 
 /// Couche Repository : unique point d'accès aux données kDrive.
