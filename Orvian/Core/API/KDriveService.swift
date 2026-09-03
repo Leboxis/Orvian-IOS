@@ -28,9 +28,6 @@ enum FileSource: Hashable {
     case category(Int)
     case trash
     case search(query: String, directoryId: Int?)
-
-    static var favorites: FileSource { .favorites() }
-    static var recents: FileSource { .recents() }
 }
 
 /// Couche Repository : unique point d'accès aux données kDrive.
@@ -382,21 +379,6 @@ struct KDriveService {
     func createFolder(driveId: Int, directoryId: Int, name: String) async throws {
         let body = try JSONEncoder().encode(CreateFolderRequest(name: name))
         try await api.post(.createFolder(driveId: driveId, directoryId: directoryId), body: body, contentType: "application/json")
-    }
-
-    /// Upload d'un fichier complet (corps brut) dans `directoryId`.
-    func upload(driveId: Int, directoryId: Int, data: Data, fileName: String, mimeType: String) async throws {
-        try await api.post(
-            .upload(
-                driveId: driveId,
-                directoryId: directoryId,
-                fileName: fileName,
-                totalSize: data.count,
-                lastModifiedAt: Int(Date().timeIntervalSince1970)
-            ),
-            body: data,
-            contentType: mimeType.isEmpty ? "application/octet-stream" : mimeType
-        )
     }
 
     /// Remplace le contenu d'un fichier existant (nouvelle version) : utilisé

@@ -176,26 +176,6 @@ final class MediaMetadataStore: ObservableObject {
         }
     }
 
-    /// Empreinte stable et bon marché des vidéos d'une liste dont les
-    /// métadonnées manquent encore (mémoire, disque valide ou analyse en vol).
-    /// Somme additive + comptage : aucun tableau, aucun tri, aucune chaîne —
-    /// la clé `.task(id:)` de la grille n'est plus reconstruite en O(n log n)
-    /// à chaque rendu.
-    func unresolvedVideoFingerprint(in items: [DriveFile], driveId: Int) -> (count: Int, checksum: Int) {
-        ensurePersistenceLoaded()
-        var count = 0
-        var checksum = 0
-        for file in items where file.isVideo {
-            guard cache[file.id] == nil,
-                  persistedInfo(driveId: driveId, file: file) == nil,
-                  inFlight[file.id] == nil
-            else { continue }
-            count += 1
-            checksum = checksum &+ file.id
-        }
-        return (count, checksum)
-    }
-
     private func resolve(driveId: Int, file: DriveFile) async -> Bool {
         guard cache[file.id] == nil else { return false }
         if let task = inFlight[file.id] {
