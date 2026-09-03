@@ -5,8 +5,8 @@ import UIKit
 
 /// Lecteur vidéo personnalisé : les barres (titre + boutons en haut,
 /// transport en bas) sont hors de la zone de lecture de la vidéo.
-/// Haut : AirPlay (RP), tag, favori à gauche — muet + fermer à droite.
-/// Bas : play/pause, progression agrandie, vitesse de lecture.
+/// Haut : tag et favori à gauche — muet + fermer à droite.
+/// Bas : play/pause, progression agrandie, vitesse de lecture et AirPlay.
 struct VideoPlayerView: View {
     let file: DriveFile
     let driveId: Int
@@ -223,8 +223,6 @@ struct VideoPlayerView: View {
     private var topBar: some View {
         ZStack {
             HStack(spacing: 8) {
-                AirPlayButton()
-                    .frame(width: 32, height: 32)
                 tagMenu
                 favoriteButton
                 Spacer()
@@ -247,7 +245,7 @@ struct VideoPlayerView: View {
         Group {
             if titleCopied {
                 Label("Copié", systemImage: "doc.on.doc")
-                    .font(.body.weight(.medium))
+                    .font(.footnote.weight(.medium))
             } else {
                 Text(file.name)
                     .font(.body.weight(.medium))
@@ -378,6 +376,9 @@ struct VideoPlayerView: View {
                 .frame(minWidth: 34, alignment: .leading)
 
             speedMenu
+
+            AirPlayButton()
+                .frame(width: 32, height: 32)
         }
         .padding(.horizontal, 0)
         .padding(.top, 2)
