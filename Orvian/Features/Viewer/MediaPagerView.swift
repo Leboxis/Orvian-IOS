@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 /// Visionneuse plein écran de médias : pager horizontal sur les images et
 /// vidéos voisines. L'ordre et la composition de la liste respectent le tri et
@@ -20,6 +21,21 @@ struct MediaPagerView: View {
     /// ensemble permet au pager de ne jamais interpréter leur pan comme une
     /// demande de fermeture.
     @State private var zoomedImageIDs: Set<Int> = []
+
+    // Barre du haut (images uniquement) : favori et tags, même chrome que le
+    // lecteur vidéo. Les états sont tenus par fichier afin de survivre aux
+    // allers-retours entre les pages du pager.
+    @State private var favoriteByFileID: [Int: Bool] = [:]
+    @State private var favoriteMutationsInFlight: Set<Int> = []
+    @State private var appliedCategoryIdsByFileID: [Int: Set<Int>] = [:]
+    @State private var tagSheetFile: DriveFile?
+    @State private var favoriteErrorMessage: String?
+
+    // Copie du titre : pastille « Copié » brève après le tap.
+    @State private var titleCopied = false
+    @State private var titleCopyResetTask: Task<Void, Never>?
+
+    private let service = KDriveService()
 
     init(context: MediaViewerContext) {
         self.context = context
@@ -190,6 +206,9 @@ struct MediaPagerView: View {
         }
     }
 
+    /// Barre du haut des images : même composition que la barre du lecteur
+    /// vidéo (tag à gauche du titre, favori à droite), sans AirPlay ni mute.
+    /// Le titre se copie au tap et le compteur « n / total » reste sous lui.
     @ViewBuilder
     private var overlay: some View {
         VStack {
@@ -197,33 +216,17 @@ struct MediaPagerView: View {
             // transport, fermer) : on n'ajoute rien au-dessus. Les images, en
             // revanche, n'ont aucun chrome propre : la barre du pager les sert.
             if let currentFile, currentFile.isImage {
-                HStack(spacing: 12) {
-                    Button {
-                        dismiss()
-                    } label: {
-                        Image(systemName: "xmark")
-                            .font(.system(size: 15, weight: .semibold))
-                            .foregroundStyle(.white)
-                            .padding(10)
-                            .background(.ultraThinMaterial, in: Circle())
+                ZStack {
+                    HStack(spacing: 8) {
+                        tagButton(for: currentFile)
+                        Spacer()
                     }
-                    .accessibilityLabel("Fermer")
-
-                    VStack(spacing: 1) {
-                        Text(currentFile.name)
-                            .font(.footnote.weight(.medium))
-                            .foregroundStyle(.white)
-                            .lineLimit(1)
-                        if let index = files.firstIndex(where: { $0.id == selectedFileID }) {
-                            Text("\(index + 1) / \(files.count)")
-                                .font(.caption2)
-                                .foregroundStyle(.white.opacity(0.7))
-                        }
+                    titleArea(for: currentFile)
+                    HStack(spacing: 8) {
+                        Spacer()
+                        favoriteButton(for: currentFile)
+                        closeButton
                     }
-                    .frame(maxWidth: .infinity)
-                    .padding(.horizontal, 8)
-
-                    Color.clear.frame(width: 35, height: 35)
                 }
                 .padding(.horizontal, 14)
                 .padding(.top, 6)
@@ -244,6 +247,149 @@ struct MediaPagerView: View {
                 .accessibilityHint(Text(errorMessage))
                 .padding(.bottom, currentFile?.isVideo == true ? 64 : 24)
             }
+        }
+        .sheet(item: $tagSheetFile) { sheetFile in
+            TagsEditorSheet(
+                driveId: context.driveId,
+                file: sheetFile,
+                initialAppliedIds: appliedCategoryIdsByFileID[sheetFile.id]
+                    ?? Set((sheetFile.categories ?? []).map(\.categoryId)),
+                onChanged: { category, applied in
+                    var ids = appliedCategoryIdsByFileID[sheetFile.id]
+                        ?? Set((sheetFile.categories ?? []).map(\.categoryId))
+                    if applied {
+                        ids.insert(category.id)
+                    } else {
+                        ids.remove(category.id)
+                    }
+                    appliedCategoryIdsByFileID[sheetFile.id] = ids
+                    FileGridMutationCenter.shared.publish(
+                        .category(driveId: context.driveId, fileId: sheetFile.id, category: category, applied: applied)
+                    )
+                }
+            )
+        }
+        .alert("Erreur", isPresented: .init(
+            get: { favoriteErrorMessage != nil },
+            set: { if !$0 { favoriteErrorMessage = nil } }
+        )) {
+            Button("OK") { favoriteErrorMessage = nil }
+        } message: {
+            Text(favoriteErrorMessage ?? "")
+        }
+    }
+
+    // MARK: - Barre du haut (images)
+
+    /// Titre centré + compteur : le tap sur le nom copie le texte dans le
+    /// presse-papiers (comportement natif des visionneuses iOS). La pastille
+    /// « Copié » remplace brièvement le compteur comme accusé visuel.
+    private func titleArea(for file: DriveFile) -> some View {
+        VStack(spacing: 1) {
+            Text(file.name)
+                .font(.footnote.weight(.medium))
+                .foregroundStyle(.white)
+                .lineLimit(1)
+                .minimumScaleFactor(0.6)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 6)
+                .background(.black.opacity(0.25), in: Capsule())
+                .contentShape(Capsule())
+                .onTapGesture {
+                    UIPasteboard.general.string = file.name
+                    titleCopied = true
+                    scheduleTitleCopyReset()
+                }
+            if titleCopied {
+                Label("Copié", systemImage: "doc.on.doc")
+                    .font(.caption2)
+                    .foregroundStyle(.white.opacity(0.9))
+            } else if let index = files.firstIndex(where: { $0.id == selectedFileID }) {
+                Text("\(index + 1) / \(files.count)")
+                    .font(.caption2)
+                    .foregroundStyle(.white.opacity(0.7))
+            }
+        }
+        .padding(.horizontal, 120)
+        .frame(maxWidth: .infinity)
+    }
+
+    /// Même pastille « Copié » brève que dans les autres visionneuses : le
+    /// drapeau retombe tout seul, sauf si le titre est copié à nouveau avant.
+    private func scheduleTitleCopyReset() {
+        titleCopyResetTask?.cancel()
+        titleCopyResetTask = Task {
+            try? await Task.sleep(for: .seconds(1.5))
+            guard !Task.isCancelled else { return }
+            withAnimation(.easeInOut(duration: 0.2)) {
+                titleCopied = false
+            }
+        }
+    }
+
+    /// Même éditeur que le lecteur vidéo (feuille partagée, couleurs visibles).
+    private func tagButton(for file: DriveFile) -> some View {
+        Button {
+            tagSheetFile = file
+        } label: {
+            Image(systemName: "tag")
+                .font(.system(size: 16, weight: .medium))
+                .foregroundStyle(.white)
+                .frame(width: 30, height: 30)
+        }
+        .accessibilityLabel("Appliquer un tag")
+    }
+
+    /// Étoile pleine jaune si favori, identique au lecteur vidéo ; mise à
+    /// jour optimiste avec repli en cas d'échec réseau.
+    private func favoriteButton(for file: DriveFile) -> some View {
+        Button {
+            Task { await toggleFavorite(for: file) }
+        } label: {
+            Image(systemName: isFavorite(file) ? "star.fill" : "star")
+                .font(.system(size: 16, weight: .medium))
+                .foregroundStyle(isFavorite(file) ? .yellow : .white)
+                .frame(width: 30, height: 30)
+        }
+        .disabled(favoriteMutationsInFlight.contains(file.id))
+        .accessibilityLabel(isFavorite(file) ? "Retirer des favoris" : "Ajouter aux favoris")
+    }
+
+    private var closeButton: some View {
+        Button {
+            dismiss()
+        } label: {
+            Image(systemName: "xmark")
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundStyle(.white)
+                .padding(10)
+                .background(.ultraThinMaterial, in: Circle())
+        }
+        .accessibilityLabel("Fermer")
+    }
+
+    /// État favori par fichier : la valeur connue du pager fait foi, sinon
+    /// repli sur les données de la grille (reprises à chaque `refreshFiles`).
+    private func isFavorite(_ file: DriveFile) -> Bool {
+        favoriteByFileID[file.id] ?? (file.isFavorite ?? false)
+    }
+
+    private func toggleFavorite(for file: DriveFile) async {
+        guard !favoriteMutationsInFlight.contains(file.id) else { return }
+        favoriteMutationsInFlight.insert(file.id)
+        defer { favoriteMutationsInFlight.remove(file.id) }
+        let newValue = !isFavorite(file)
+        favoriteByFileID[file.id] = newValue
+        do {
+            try await service.setFavorite(driveId: context.driveId, fileId: file.id, favorite: newValue)
+            FileGridMutationCenter.shared.publish(
+                .favorite(driveId: context.driveId, fileId: file.id, isFavorite: newValue)
+            )
+        } catch {
+            if favoriteByFileID[file.id] == newValue {
+                favoriteByFileID[file.id] = !newValue
+            }
+            favoriteErrorMessage = "Impossible de modifier le favori : \((error as? APIError)?.errorDescription ?? error.localizedDescription)"
         }
     }
 }
