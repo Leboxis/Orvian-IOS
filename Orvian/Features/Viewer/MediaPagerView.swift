@@ -206,9 +206,9 @@ struct MediaPagerView: View {
         }
     }
 
-    /// Barre du haut des images : même composition que la barre du lecteur
-    /// vidéo (tag à gauche du titre, favori à droite), sans AirPlay ni mute.
-    /// Le titre se copie au tap et le compteur « n / total » reste sous lui.
+    /// Barre du haut des images : favori puis tags à gauche du titre, fermer
+    /// à droite — même pastille de titre que le lecteur vidéo. Le tap sur le
+    /// titre copie le nom dans le presse-papiers.
     @ViewBuilder
     private var overlay: some View {
         VStack {
@@ -218,13 +218,13 @@ struct MediaPagerView: View {
             if let currentFile, currentFile.isImage {
                 ZStack {
                     HStack(spacing: 8) {
+                        favoriteButton(for: currentFile)
                         tagButton(for: currentFile)
                         Spacer()
                     }
                     titleArea(for: currentFile)
                     HStack(spacing: 8) {
                         Spacer()
-                        favoriteButton(for: currentFile)
                         closeButton
                     }
                 }
@@ -281,36 +281,34 @@ struct MediaPagerView: View {
 
     // MARK: - Barre du haut (images)
 
-    /// Titre centré + compteur : le tap sur le nom copie le texte dans le
-    /// presse-papiers (comportement natif des visionneuses iOS). La pastille
-    /// « Copié » remplace brièvement le compteur comme accusé visuel.
+    /// Titre centré, largeur bornée à 40 % de l'écran (20 % de part et
+    /// d'autre du centre) : le tap copie le nom dans le presse-papiers ; la
+    /// pastille « Copié » remplace brièvement le titre comme accusé visuel.
     private func titleArea(for file: DriveFile) -> some View {
         VStack(spacing: 1) {
-            Text(file.name)
-                .font(.body.weight(.medium))
-                .foregroundStyle(.white)
-                .lineLimit(1)
-                .minimumScaleFactor(0.6)
-                .padding(.horizontal, 14)
-                .padding(.vertical, 6)
-                .background(.black.opacity(0.25), in: Capsule())
-                .contentShape(Capsule())
-                .onTapGesture {
-                    UIPasteboard.general.string = file.name
-                    titleCopied = true
-                    scheduleTitleCopyReset()
+            Group {
+                if titleCopied {
+                    Label("Copié", systemImage: "doc.on.doc")
+                        .font(.body.weight(.medium))
+                } else {
+                    Text(file.name)
+                        .font(.body.weight(.medium))
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.6)
                 }
-            if titleCopied {
-                Label("Copié", systemImage: "doc.on.doc")
-                    .font(.caption2)
-                    .foregroundStyle(.white.opacity(0.9))
-            } else if let index = files.firstIndex(where: { $0.id == selectedFileID }) {
-                Text("\(index + 1) / \(files.count)")
-                    .font(.caption2)
-                    .foregroundStyle(.white.opacity(0.7))
+            }
+            .foregroundStyle(.white)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 6)
+            .background(.black.opacity(0.25), in: Capsule())
+            .contentShape(Capsule())
+            .onTapGesture {
+                UIPasteboard.general.string = file.name
+                titleCopied = true
+                scheduleTitleCopyReset()
             }
         }
-        .padding(.horizontal, 120)
+        .padding(.horizontal, UIScreen.main.bounds.width * 0.2)
         .frame(maxWidth: .infinity)
     }
 
@@ -499,7 +497,7 @@ private struct ZoomablePhotoPage: View {
     /// l'image sur les grands écrans.
     private func topBarClearance(in proxy: GeometryProxy) -> CGFloat {
         let safeTop = proxy.safeAreaInsets.top
-        return min(160, safeTop + 64)
+        return min(160, safeTop + 56)
     }
 
     @ViewBuilder
