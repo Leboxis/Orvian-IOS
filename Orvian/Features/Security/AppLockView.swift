@@ -4,9 +4,12 @@ import LocalAuthentication
 /// Écran de verrouillage affiché au lancement lorsqu'un code est configuré :
 /// monogramme, zone de saisie centrée et pavé numérique dans le style de l'app.
 /// Un tap sur le monogramme lance la biométrie (Face ID / Touch ID / Optic ID)
-/// sans avoir à saisir le code. Tant que le déverrouillage n'a pas eu lieu,
-/// le contenu de l'app n'est pas construit.
+/// sans avoir à saisir le code ; elle est aussi présentée automatiquement au
+/// retour d'arrière-plan (`autoPromptBiometrics`), jamais au premier lancement.
+/// Tant que le déverrouillage n'a pas eu lieu, le contenu de l'app n'est pas
+/// construit.
 struct AppLockView: View {
+    var autoPromptBiometrics = false
     var onUnlock: () -> Void
 
     @State private var code = ""
@@ -56,6 +59,12 @@ struct AppLockView: View {
                     .padding(.bottom, 24)
             }
             .padding(.horizontal, 24)
+        }
+        .task {
+            // Face ID est proposé d'office au retour d'arrière-plan,
+            // mais pas au premier lancement de l'app.
+            guard autoPromptBiometrics, biometricsAvailable else { return }
+            authenticateWithBiometrics()
         }
     }
 
