@@ -1,6 +1,7 @@
 import SwiftUI
 import AVFoundation
 import AVKit
+import UIKit
 
 /// Lecteur vidéo personnalisé : les barres (titre + boutons en haut,
 /// transport en bas) sont hors de la zone de lecture de la vidéo.
@@ -84,6 +85,10 @@ struct VideoPlayerView: View {
     // Masquage automatique des contrôles après 2.5 secondes
     @State private var showControls = true
     @State private var hideControlsTask: Task<Void, Never>?
+
+    // Copie du titre : pastille « Copié » brève après le tap.
+    @State private var titleCopied = false
+    @State private var titleCopyResetTask: Task<Void, Never>?
 
     private let service = KDriveService()
 
@@ -224,16 +229,7 @@ struct VideoPlayerView: View {
                 favoriteButton
                 Spacer()
             }
-            Text(file.name)
-                .font(.footnote.weight(.medium))
-                .foregroundStyle(.white)
-                .lineLimit(1)
-                .minimumScaleFactor(0.6)
-                .padding(.horizontal, 14)
-                .padding(.vertical, 6)
-                .background(.black.opacity(0.25), in: Capsule())
-                .padding(.horizontal, 120)
-                .frame(maxWidth: .infinity)
+            titleArea
             HStack(spacing: 8) {
                 Spacer()
                 muteButton
@@ -243,6 +239,45 @@ struct VideoPlayerView: View {
         .padding(.horizontal, 0)
         .padding(.top, -4)
         .padding(.bottom, 2)
+    }
+
+    /// Même titre copiable et même accusé visuel que dans la visionneuse
+    /// d'image.
+    private var titleArea: some View {
+        Group {
+            if titleCopied {
+                Label("Copié", systemImage: "doc.on.doc")
+                    .font(.body.weight(.medium))
+            } else {
+                Text(file.name)
+                    .font(.body.weight(.medium))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.6)
+            }
+        }
+        .foregroundStyle(.white)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 6)
+        .background(.black.opacity(0.25), in: Capsule())
+        .contentShape(Capsule())
+        .onTapGesture {
+            UIPasteboard.general.string = file.name
+            titleCopied = true
+            scheduleTitleCopyReset()
+        }
+        .padding(.horizontal, UIScreen.main.bounds.width * 0.2)
+        .frame(maxWidth: .infinity)
+    }
+
+    private func scheduleTitleCopyReset() {
+        titleCopyResetTask?.cancel()
+        titleCopyResetTask = Task {
+            try? await Task.sleep(for: .seconds(1.5))
+            guard !Task.isCancelled else { return }
+            withAnimation(.easeInOut(duration: 0.2)) {
+                titleCopied = false
+            }
+        }
     }
 
     // MARK: - Zone vidéo
