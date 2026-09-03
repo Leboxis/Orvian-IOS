@@ -174,3 +174,25 @@ struct TemporaryURL: Decodable {
         case temporaryUrl = "temporary_url"
     }
 }
+
+extension DriveFile {
+    /// Racine du drive (id 1).
+    static func root(name: String) -> DriveFile {
+        DriveFile(
+            id: 1,
+            name: name,
+            type: "dir",
+            size: nil,
+            mimeType: nil,
+            extensionType: nil,
+            fileExtension: nil,
+            isFavorite: nil,
+            parentId: nil,
+            path: nil,
+            color: nil,
+            categories: nil,
+            addedAt: nil,
+            lastModifiedAt: nil
+        )
+    }
+}
