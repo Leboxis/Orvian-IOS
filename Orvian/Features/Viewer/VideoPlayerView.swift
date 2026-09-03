@@ -396,7 +396,11 @@ struct VideoPlayerView: View {
         scrubValue = playerTime ?? currentTime
         // `.waitingToPlayAtSpecifiedRate` compte comme « en lecture » : un
         // scrub pendant une mise en mémoire tampon relance bien la vidéo.
-        wasPlayingBeforeScrub = player?.timeControlStatus != .paused
+        // La mémoire du geste précédent est conservée : son seek de reprise
+        // vient d'être annulé par `cancelPendingSeek`, le lecteur est donc
+        // encore en pause alors que la lecture devait reprendre — sans cela,
+        // un second glissement rapproché terminait en pause toute seule.
+        wasPlayingBeforeScrub = (player?.timeControlStatus != .paused) || wasPlayingBeforeScrub
         isScrubbing = true
         // Le son cesse pendant le geste : le suivi visuel sous le doigt
         // remplace la lecture (comportement natif).
