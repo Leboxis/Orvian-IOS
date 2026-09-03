@@ -1030,7 +1030,6 @@ private struct ApplyTagsSheet: View {
         defer { busy = false }
         let toAdd = addIDs
         let toRemove = removeIDs
-        let concurrency = 4
 
         // Petits lots de 4 requêtes simultanées : appliquer des tags sur une
         // grande sélection ne défile plus les appels API un par un.
@@ -1046,38 +1045,29 @@ private struct ApplyTagsSheet: View {
             }
         }
 
+        let results = await mapBounded(work, concurrency: 4) { item -> Result<TagChange, String> in
+            do {
+                if item.isAdd {
+                    try await service.addCategory(driveId: driveId, fileId: item.file.id, categoryId: item.categoryId)
+                    TagUsageStore.markUsed(driveId: driveId, categoryId: item.categoryId)
+                    return .success(TagChange(file: item.file, categoryId: item.categoryId, isAdd: true))
+                } else {
+                    try await service.removeCategory(driveId: driveId, fileId: item.file.id, categoryId: item.categoryId)
+                    return .success(TagChange(file: item.file, categoryId: item.categoryId, isAdd: false))
+                }
+            } catch {
+                return .failure((error as? APIError)?.errorDescription ?? error.localizedDescription)
+            }
+        }
+
         var appliedChanges: [TagChange] = []
         var firstErrorDescription: String?
-
-        var index = 0
-        while index < work.count {
-            let chunk = Array(work[index..<min(index + concurrency, work.count)])
-            index += chunk.count
-            await withTaskGroup(of: (change: TagChange?, error: String?).self) { group in
-                for item in chunk {
-                    group.addTask {
-                        do {
-                            if item.isAdd {
-                                try await service.addCategory(driveId: driveId, fileId: item.file.id, categoryId: item.categoryId)
-                                TagUsageStore.markUsed(driveId: driveId, categoryId: item.categoryId)
-                                return (TagChange(file: item.file, categoryId: item.categoryId, isAdd: true), nil)
-                            } else {
-                                try await service.removeCategory(driveId: driveId, fileId: item.file.id, categoryId: item.categoryId)
-                                return (TagChange(file: item.file, categoryId: item.categoryId, isAdd: false), nil)
-                            }
-                        } catch {
-                            return (nil, (error as? APIError)?.errorDescription ?? error.localizedDescription)
-                        }
-                    }
-                }
-                for await result in group {
-                    if let change = result.change {
-                        appliedChanges.append(change)
-                    }
-                    if firstErrorDescription == nil {
-                        firstErrorDescription = result.error
-                    }
-                }
+        for result in results {
+            switch result {
+            case let .success(change):
+                appliedChanges.append(change)
+            case let .failure(description):
+                if firstErrorDescription == nil { firstErrorDescription = description }
             }
         }
 

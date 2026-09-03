@@ -422,35 +422,25 @@ final class FileGridViewModel {
         operation: @escaping @Sendable (Int) async throws -> Void
     ) async -> (succeeded: Set<Int>, firstError: Error?) {
         let orderedIDs = Array(ids)
-        let concurrency = 4
-        var succeeded: Set<Int> = []
-        var firstError: Error?
-        var index = 0
-
-        while index < orderedIDs.count {
-            let chunk = Array(orderedIDs[index..<min(index + concurrency, orderedIDs.count)])
-            index += chunk.count
-            await withTaskGroup(of: (Int, Error?).self) { group in
-                for id in chunk {
-                    group.addTask {
-                        do {
-                            try await operation(id)
-                            return (id, nil)
-                        } catch {
-                            return (id, error)
-                        }
-                    }
-                }
-                for await (id, error) in group {
-                    if let error {
-                        if firstError == nil { firstError = error }
-                    } else {
-                        succeeded.insert(id)
-                    }
-                }
+        let results = await mapBounded(orderedIDs, concurrency: 4) { id -> Result<Void, Error> in
+            do {
+                try await operation(id)
+                return .success(())
+            } catch {
+                return .failure(error)
             }
         }
 
+        var succeeded: Set<Int> = []
+        var firstError: Error?
+        for (index, result) in results.enumerated() {
+            switch result {
+            case .success:
+                succeeded.insert(orderedIDs[index])
+            case let .failure(error):
+                if firstError == nil { firstError = error }
+            }
+        }
         return (succeeded, firstError)
     }
 

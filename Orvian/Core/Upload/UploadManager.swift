@@ -212,36 +212,19 @@ final class UploadManager {
             guard let self else { return }
             defer { self.uploadJobs.removeValue(forKey: jobID) }
 
-            var uploadedFiles: [DriveFile] = []
-            var start = 0
-            while start < items.count, !Task.isCancelled {
-                let chunk = Array(items[start..<min(start + Self.maxConcurrentUploads, items.count)])
-                let chunkStart = start
-                start += chunk.count
-                let ordered = await withTaskGroup(of: (Int, DriveFile?).self) { group in
-                    for (offset, item) in chunk.enumerated() {
-                        let taskId = newTasks[chunkStart + offset].id
-                        let itemIndex = chunkStart + offset
-                        group.addTask {
-                            guard !Task.isCancelled else { return (offset, nil) }
-                            let uploaded = await self.prepareAndUploadPhoto(
-                                item: item,
-                                taskId: taskId,
-                                itemIndex: itemIndex,
-                                driveId: driveId,
-                                directoryId: directoryId
-                            )
-                            return (offset, uploaded)
-                        }
-                    }
-                    var results: [DriveFile?] = Array(repeating: nil, count: chunk.count)
-                    for await (offset, uploaded) in group {
-                        results[offset] = uploaded
-                    }
-                    return results
-                }
-                uploadedFiles.append(contentsOf: ordered.compactMap { $0 })
+            let work: [(item: PhotosPickerItem, taskId: UUID, itemIndex: Int)] = items.enumerated().map { entry in
+                (item: entry.element, taskId: newTasks[entry.offset].id, itemIndex: entry.offset)
             }
+            let results = await mapBounded(work, concurrency: Self.maxConcurrentUploads) { entry in
+                await self.prepareAndUploadPhoto(
+                    item: entry.item,
+                    taskId: entry.taskId,
+                    itemIndex: entry.itemIndex,
+                    driveId: driveId,
+                    directoryId: directoryId
+                )
+            }
+            let uploadedFiles = results.compactMap { $0 }
 
             guard !Task.isCancelled else { return }
             onDone?(uploadedFiles)
@@ -303,34 +286,18 @@ final class UploadManager {
             guard let self else { return }
             defer { self.uploadJobs.removeValue(forKey: jobID) }
 
-            var uploadedFiles: [DriveFile] = []
-            var start = 0
-            while start < urls.count, !Task.isCancelled {
-                let chunk = Array(urls[start..<min(start + Self.maxConcurrentUploads, urls.count)])
-                let chunkStart = start
-                start += chunk.count
-                let ordered = await withTaskGroup(of: (Int, DriveFile?).self) { group in
-                    for (offset, url) in chunk.enumerated() {
-                        let taskId = newTasks[chunkStart + offset].id
-                        group.addTask {
-                            guard !Task.isCancelled else { return (offset, nil) }
-                            let uploaded = await self.prepareAndUploadDocument(
-                                url: url,
-                                taskId: taskId,
-                                driveId: driveId,
-                                directoryId: directoryId
-                            )
-                            return (offset, uploaded)
-                        }
-                    }
-                    var results: [DriveFile?] = Array(repeating: nil, count: chunk.count)
-                    for await (offset, uploaded) in group {
-                        results[offset] = uploaded
-                    }
-                    return results
-                }
-                uploadedFiles.append(contentsOf: ordered.compactMap { $0 })
+            let work: [(url: URL, taskId: UUID)] = urls.enumerated().map { entry in
+                (url: entry.element, taskId: newTasks[entry.offset].id)
             }
+            let results = await mapBounded(work, concurrency: Self.maxConcurrentUploads) { entry in
+                await self.prepareAndUploadDocument(
+                    url: entry.url,
+                    taskId: entry.taskId,
+                    driveId: driveId,
+                    directoryId: directoryId
+                )
+            }
+            let uploadedFiles = results.compactMap { $0 }
 
             guard !Task.isCancelled else { return }
             onDone?(uploadedFiles)
