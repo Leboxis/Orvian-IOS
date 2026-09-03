@@ -870,6 +870,11 @@ private struct TagChange {
     let isAdd: Bool
 }
 
+/// Échec d'application d'un tag sur un élément, porteur du message affiché.
+private struct TagApplyError: Error {
+    let message: String
+}
+
 private struct ApplyTagsSheet: View {
     let driveId: Int
     let files: [DriveFile]
@@ -1045,7 +1050,7 @@ private struct ApplyTagsSheet: View {
             }
         }
 
-        let results = await mapBounded(work, concurrency: 4) { item -> Result<TagChange, String> in
+        let results = await mapBounded(work, concurrency: 4) { item -> Result<TagChange, TagApplyError> in
             do {
                 if item.isAdd {
                     try await service.addCategory(driveId: driveId, fileId: item.file.id, categoryId: item.categoryId)
@@ -1056,7 +1061,7 @@ private struct ApplyTagsSheet: View {
                     return .success(TagChange(file: item.file, categoryId: item.categoryId, isAdd: false))
                 }
             } catch {
-                return .failure((error as? APIError)?.errorDescription ?? error.localizedDescription)
+                return .failure(TagApplyError(message: (error as? APIError)?.errorDescription ?? error.localizedDescription))
             }
         }
 
@@ -1066,8 +1071,8 @@ private struct ApplyTagsSheet: View {
             switch result {
             case let .success(change):
                 appliedChanges.append(change)
-            case let .failure(description):
-                if firstErrorDescription == nil { firstErrorDescription = description }
+            case let .failure(error):
+                if firstErrorDescription == nil { firstErrorDescription = error.message }
             }
         }
 
