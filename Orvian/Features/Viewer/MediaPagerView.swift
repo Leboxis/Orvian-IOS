@@ -468,6 +468,9 @@ private struct ZoomablePhotoPage: View {
                 interactiveImage(in: contentSize)
             }
             .frame(width: contentSize.width, height: contentSize.height)
+            // Les portraits très étroits dépassent volontairement en hauteur
+            // pour conserver toute la largeur ; on rogne alors hors de la page.
+            .clipped()
             .contentShape(Rectangle())
             .gesture(magnifyGesture(in: contentSize))
             .padding(.top, clearance)
@@ -501,11 +504,14 @@ private struct ZoomablePhotoPage: View {
     }
 
     @ViewBuilder
-    private var image: some View {
+    private func image(in screenSize: CGSize) -> some View {
         if let display {
             Image(uiImage: display)
                 .resizable()
                 .scaledToFit()
+                // La largeur est la contrainte maîtresse : les photos étroites
+                // ne laissent plus de bandes latérales dans la visionneuse.
+                .frame(width: screenSize.width)
         } else {
             ProgressView()
                 .tint(.white)
@@ -529,8 +535,7 @@ private struct ZoomablePhotoPage: View {
     }
 
     private func displayedImage(in screenSize: CGSize) -> some View {
-        image
-            .frame(width: screenSize.width, height: screenSize.height)
+        image(in: screenSize)
             .scaleEffect(scale)
             .offset(panOffset)
             .onTapGesture(count: 2) {
