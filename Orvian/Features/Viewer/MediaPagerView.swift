@@ -289,7 +289,7 @@ struct MediaPagerView: View {
             Group {
                 if titleCopied {
                     Label("Copié", systemImage: "doc.on.doc")
-                        .font(.body.weight(.medium))
+                        .font(.footnote.weight(.medium))
                 } else {
                     Text(file.name)
                         .font(.body.weight(.medium))
