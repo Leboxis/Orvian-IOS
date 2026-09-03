@@ -6,8 +6,11 @@ import UIKit
 /// - régule la concurrence réseau (max 5 téléchargements simultanés sans bloquer de thread) ;
 /// - priorise les cellules visibles sur le préchargement ;
 /// - purge les requêtes de préchargement obsolètes lors d'un défilement rapide ;
-/// - ne mémorise jamais une absence : un 404 ou une réponse vide peut
-///   simplement signifier qu'un média importé est encore en préparation ;
+/// - ne mémorise pas une absence immédiate (un 404 ou une réponse vide peut
+///   simplement signifier qu'un média importé est encore en préparation),
+///   mais une fenêtre complète de réessais infructueuse arme un cache
+///   négatif borné dans le temps : les réapparitions de la carte cessent
+///   de relancer la boucle pendant la TTL au lieu de retester 8 fois ;
 /// - le décodage et la préparation s'exécutent hors du MainActor.
 actor ThumbnailProvider {
     static let shared = ThumbnailProvider()
@@ -36,6 +39,16 @@ actor ThumbnailProvider {
         .zero, .seconds(2), .seconds(3), .seconds(5),
         .seconds(8), .seconds(12), .seconds(15), .seconds(15),
     ]
+
+    /// Cache négatif borné : une fenêtre complète de réessais terminée sans
+    /// miniature y inscrit la clé. Pendant la TTL, `thumbnailWhenAvailable`
+    /// renvoie nil sans relancer la boucle — sinon chaque réapparition de la
+    /// carte rejouait 7 tentatives sur ~60 s pour des fichiers qui n'auront
+    /// jamais de miniature (documents, archives…). La TTL laisse toutefois
+    /// une nouvelle chance aux posters de vidéos longues à encoder.
+    private var recentFailures: [Key: Date] = [:]
+    private let failureRetryTTL: TimeInterval = 5 * 60
+    private let failureCacheLimit = 512
 
     private struct Key: Hashable {
         let driveId: Int
@@ -83,6 +96,9 @@ actor ThumbnailProvider {
         let image = await task.value
         if !Task.isCancelled, let image {
             Self.memory.setObject(image, forKey: key.nsString, cost: image.estimatedByteSize)
+            // Une miniature obtenue par le chemin direct invalide une absence
+            // enregistrée (poster généré entre-temps).
+            recentFailures[key] = nil
         }
         return image
     }
@@ -105,6 +121,9 @@ actor ThumbnailProvider {
 
     /// Attend la disponibilité d'une miniature récemment créée. Le travail est
     /// annulable et chaque tentative passe par le cache/dédoublonnage normal.
+    /// Une fenêtre complète de réessais infructueuse inscrit la clé dans le
+    /// cache négatif : les appels suivants renvoient nil sans retester
+    /// pendant la TTL (les posters vidéo longs retrouvent une chance après).
     func thumbnailWhenAvailable(
         driveId: Int,
         fileId: Int,
@@ -112,6 +131,13 @@ actor ThumbnailProvider {
         isTrashed: Bool = false,
         includeImmediateAttempt: Bool = true
     ) async -> UIImage? {
+        let key = Key(driveId: driveId, fileId: fileId, pixels: pixels)
+
+        // Absence récemment établie : ne pas relancer la boucle de réessais.
+        if let failedAt = recentFailures[key], Date().timeIntervalSince(failedAt) < failureRetryTTL {
+            return nil
+        }
+
         let delays = includeImmediateAttempt
             ? uploadedMediaRetryDelays
             : Array(uploadedMediaRetryDelays.dropFirst())
@@ -130,10 +156,25 @@ actor ThumbnailProvider {
                 pixels: pixels,
                 isTrashed: isTrashed
             ) {
+                // Succès (poster enfin généré) : l'absence n'est plus d'actualité.
+                recentFailures[key] = nil
                 return image
             }
         }
+
+        markAsFailed(key)
         return nil
+    }
+
+    /// Inscrit une clé dans le cache négatif en bornant sa taille.
+    private mutating func markAsFailed(_ key: Key) {
+        // Éviction FIFO simple : la table ne peut pas croître sans limite.
+        if recentFailures.count >= failureCacheLimit, recentFailures[key] == nil {
+            if let oldest = recentFailures.min(by: { $0.value < $1.value })?.key {
+                recentFailures.removeValue(forKey: oldest)
+            }
+        }
+        recentFailures[key] = Date()
     }
 
     /// Amorce la génération des miniatures dès la confirmation de l'upload,
@@ -233,6 +274,7 @@ actor ThumbnailProvider {
         pendingPrefetchKeys.removeAll()
         prefetchTask?.cancel()
         prefetchTask = nil
+        recentFailures.removeAll()
         disk.purge()
     }
 

@@ -11,6 +11,11 @@ struct HomeTab: View {
     /// racine technique du drive n'est jamais ajoutée au NavigationStack et
     /// n'est donc pas accessible par retour.
     @State private var startDirectory: DriveFile?
+    /// Vrai quand le dossier de démarrage vient d'être résolu par le réseau
+    /// dans cette même session : la revalidation immédiate du NavigationStack
+    /// relirait alors l'endpoint `.directory(1)` à quelques dixièmes de
+    /// seconde d'intervalle. Un aller-retour par lancement est économisé.
+    @State private var startDirectoryIsFresh = false
     private let service = KDriveService()
 
     private var cacheKey: String { "home_start_dir_locked_\(driveId)" }
@@ -80,6 +85,11 @@ struct HomeTab: View {
     /// l'Accueil restait bloqué sur un dossier disparu, sans moyen d'en
     /// sortir puisqu'il constitue la racine de la pile de navigation.
     private func revalidateStartDirectory() async {
+        // Dossier tout juste résolu par le réseau : rien à revalider.
+        if startDirectoryIsFresh {
+            startDirectoryIsFresh = false
+            return
+        }
         guard let page = try? await service.page(.directory(1), driveId: driveId, cursor: nil),
               let resolved = page.data?.first(where: \.isDirectory)
         else { return }
@@ -104,6 +114,7 @@ struct HomeTab: View {
     private func resolveStartDirectory() async {
         let defaults = UserDefaults.standard
         var resolved: DriveFile?
+        var fromNetwork = false
 
         if let data = defaults.data(forKey: cacheKey),
            let cached = try? JSONDecoder().decode(DriveFile.self, from: data) {
@@ -113,6 +124,7 @@ struct HomeTab: View {
         if resolved == nil,
            let page = try? await service.page(.directory(1), driveId: driveId, cursor: nil) {
             resolved = page.data?.first(where: \.isDirectory)
+            fromNetwork = true
         }
 
         guard !Task.isCancelled else { return }
@@ -121,11 +133,15 @@ struct HomeTab: View {
             // session seulement. La résolution sera retentée au prochain départ.
             path.removeAll()
             startDirectory = DriveFile.root(name: "Accueil")
+            startDirectoryIsFresh = false
             return
         }
 
         path.removeAll()
         startDirectory = resolved
+        // La lecture réseau vient de vérifier le dossier : la revalidation
+        // immédiate du NavigationStack n'a plus rien à apprendre.
+        startDirectoryIsFresh = fromNetwork
 
         if let data = try? JSONEncoder().encode(resolved) {
             defaults.set(data, forKey: cacheKey)
