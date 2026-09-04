@@ -16,6 +16,7 @@ struct VideoPlayerView: View {
     let isActive: Bool
 
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.layoutDirection) private var layoutDirection
     @State private var player: AVPlayer?
     @State private var poster: UIImage?
 
@@ -54,6 +55,7 @@ struct VideoPlayerView: View {
     @State private var hasFailedSetup = false
     @State private var timeObserver: Any?
     @State private var endObserver: NSObjectProtocol?
+    @State private var routeChangeObserver: NSObjectProtocol?
     @State private var itemStatusObserver: NSKeyValueObservation?
     /// Observation du `timeControlStatus` : source unique de vérité pour
     /// distinguer une vraie pause d'une mise en mémoire tampon (stall).
@@ -73,6 +75,7 @@ struct VideoPlayerView: View {
     @State private var playbackRetryCount = 0
     @State private var isDisappeared = false
     @State private var isExternalPlaybackActive = false
+    @State private var videoAreaWidth: CGFloat = 0
     /// Vrai pendant la préparation de la vidéo (conditionne le bouton
     /// « Réessayer »).
     @State private var isLoadingVideo = false
@@ -89,6 +92,10 @@ struct VideoPlayerView: View {
     // Copie du titre : pastille « Copié » brève après le tap.
     @State private var titleCopied = false
     @State private var titleCopyResetTask: Task<Void, Never>?
+
+    // Rebond visuel du double-tap : pastille « ±10 s » brève du côté tapé.
+    @State private var skipFeedback: SkipDirection?
+    @State private var skipFeedbackResetTask: Task<Void, Never>?
 
     private let service = KDriveService()
 
@@ -107,9 +114,24 @@ struct VideoPlayerView: View {
             videoArea
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .contentShape(Rectangle())
+                .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { videoAreaWidth = $0 }
+                .overlay(alignment: .center) {
+                    skipFeedbackOverlay
+                }
+                // Double-tap à gauche = recul, à droite = avance (10 s) ;
+                // déclaré avant le simple tap pour que SwiftUI donne la
+                // priorité au double et ne fasse pas clignoter les contrôles.
+                .onTapGesture(count: 2, coordinateSpace: .local) { location in
+                    let onLeftHalf = location.x * 2 < videoAreaWidth
+                    // En RTL, l'avance se fait côté gauche (lecture inversée).
+                    let forward = layoutDirection == .rightToLeft ? onLeftHalf : !onLeftHalf
+                    skipTime(by: forward ? 10 : -10)
+                }
                 .onTapGesture {
                     toggleControls()
                 }
+                .accessibilityAction(named: Text("Reculer de 10 secondes")) { skipTime(by: -10) }
+                .accessibilityAction(named: Text("Avancer de 10 secondes")) { skipTime(by: 10) }
 
             VStack(spacing: 0) {
                 topBar
@@ -124,7 +146,9 @@ struct VideoPlayerView: View {
             isDisappeared = false
             showControls = true
             scheduleControlsAutoHide(delay: 2.5)
-            setupAudioSession()
+            // La session audio est retenue par `startPlayback` (et non ici) :
+            // une page voisine du pager qui apparaît sans jouer ne doit pas
+            // réserver la session.
         }
         .task(id: isActive) {
             // Dans un pager, les pages hors écran ne chargent jamais : seule
@@ -742,6 +766,9 @@ struct VideoPlayerView: View {
     }
 
     private func startPlayback(asset: AVURLAsset) {
+        // Dernier verrou anti-double-lecture : si un lecteur existe déjà
+        // (chargement concurrent gagnant la course), ne rien créer du tout.
+        guard player == nil else { return }
         cancelPendingSeek()
         isScrubbing = false
         wasPlayingBeforeScrub = false
@@ -765,6 +792,9 @@ struct VideoPlayerView: View {
             newPlayer.pause()
             return
         }
+        // Session retenue seulement si le lecteur démarre vraiment : chaque
+        // `retain` est apparié au `release` du teardown correspondant.
+        AudioSessionKeeper.shared.retain()
         player = newPlayer
         addObservers(to: newPlayer)
         currentTime = 0
@@ -788,6 +818,7 @@ struct VideoPlayerView: View {
             guard item.status == .failed else { return }
             Task { @MainActor in
                 await self.retryPlaybackAfterProcessingDelay(
+                    failedItem: item,
                     lastError: item.error?.localizedDescription ?? "la vidéo n’est pas disponible"
                 )
             }
@@ -797,8 +828,13 @@ struct VideoPlayerView: View {
     /// Après un upload, le fichier peut être listé avant d'être servi par le
     /// endpoint de téléchargement. Deux nouvelles tentatives suffisent à
     /// absorber ce court délai sans demander une action manuelle.
-    private func retryPlaybackAfterProcessingDelay(lastError: String) async {
+    private func retryPlaybackAfterProcessingDelay(failedItem: AVPlayerItem, lastError: String) async {
         guard !isDisappeared, isActive else { return }
+        // La relance ne vaut que si l'item fautif est toujours celui du lecteur
+        // courant : un swipe hors page puis un retour ont pu recréer un lecteur
+        // entre l'échec et ce réveil. Le remplacer donnerait deux AVPlayer en
+        // lecture simultanée, avec des observateurs écrasés jamais invalidés.
+        guard player?.currentItem === failedItem else { return }
         guard playbackRetryCount < 2 else {
             isPlaying = false
             hasFailedSetup = true
@@ -816,7 +852,9 @@ struct VideoPlayerView: View {
         } catch {
             return
         }
-        guard !isDisappeared, isActive,
+        // Un retour sur la page pendant le sommeil peut avoir relancé un
+        // lecteur sain via `.task(id:)` : il ne doit jamais être écrasé ici.
+        guard !isDisappeared, isActive, player == nil,
               let asset = await VideoAssetCache.shared.asset(driveId: driveId, fileId: file.id)
         else { return }
         startPlayback(asset: asset)
@@ -871,6 +909,24 @@ struct VideoPlayerView: View {
         ) { _ in
             isPlaying = false
         }
+        // Casque/enceinte Bluetooth débranché : pause immédiate, comme les
+        // apps Apple. Le son ne doit jamais basculer sur le haut-parleur.
+        routeChangeObserver = NotificationCenter.default.addObserver(
+            forName: AVAudioSession.routeChangeNotification,
+            object: nil,
+            queue: .main
+        ) { [weak player] notification in
+            guard let player else { return }
+            let reasonRaw = notification.userInfo?[AVAudioSessionRouteChangeReasonKey] as? UInt
+            guard let reason = reasonRaw.flatMap(AVAudioSession.RouteChangeReason.init(rawValue:)),
+                  reason == .oldDeviceUnavailable
+            else { return }
+            Task { @MainActor in
+                guard self.player === player, !isDisappeared else { return }
+                player.pause()
+                isPlaying = false
+            }
+        }
         // Source unique de vérité lecture/pause/buffering : `.waiting` garde
         // `isPlaying` tel quel et affiche l'indicateur au lieu de simuler
         // une pause. Pas d'option `.initial` : l'état de départ est posé par
@@ -913,19 +969,79 @@ struct VideoPlayerView: View {
             NotificationCenter.default.removeObserver(endObserver)
         }
         endObserver = nil
-        player?.pause()
-        player = nil
+        if let routeChangeObserver {
+            NotificationCenter.default.removeObserver(routeChangeObserver)
+        }
+        routeChangeObserver = nil
+        skipFeedbackResetTask?.cancel()
+        skipFeedbackResetTask = nil
+        // Une page qui n'a jamais créé de lecteur ne touche pas à la session :
+        // une autre page du pager peut être en train de l'utiliser. La
+        // désactivation est différée via le gardien : si une page voisine
+        // démarre dans la seconde, la session reste active.
+        if player != nil {
+            player?.pause()
+            player = nil
+            AudioSessionKeeper.shared.release()
+        }
     }
 
-    private func setupAudioSession() {
-        let session = AVAudioSession.sharedInstance()
-        do {
-            try session.setCategory(.playback, mode: .moviePlayback, policy: .longFormVideo)
-            try session.setActive(true)
-        } catch {
-            try? session.setCategory(.playback, mode: .moviePlayback)
-            try? session.setActive(true)
+    // MARK: - Double-tap ±10 s
+
+    private func skipTime(by delta: Double) {
+        guard let player, !isScrubbing, !isSeeking else { return }
+        // Source de vérité : la position réelle du lecteur (l'état peut être
+        // périmé quand les contrôles sont masqués).
+        let position = playerTime ?? currentTime
+        let upperBound = duration.isFinite && duration > 0 ? duration : Double.infinity
+        let target = min(max(position + delta, 0), upperBound)
+        guard target != position else { return }
+        // `seek` relance la lecture si elle tournait (mémoire
+        // `wasPlayingBeforeScrub`) et reste en pause sinon — comportement natif.
+        wasPlayingBeforeScrub = player.timeControlStatus != .paused
+        seek(to: target, precise: false)
+        showSkipFeedback(delta < 0 ? .backward : .forward)
+    }
+
+    private func showSkipFeedback(_ direction: SkipDirection) {
+        withAnimation(.snappy(duration: 0.15)) {
+            skipFeedback = direction
         }
+        skipFeedbackResetTask?.cancel()
+        skipFeedbackResetTask = Task {
+            try? await Task.sleep(for: .seconds(0.6))
+            guard !Task.isCancelled else { return }
+            withAnimation(.easeOut(duration: 0.25)) {
+                skipFeedback = nil
+            }
+        }
+    }
+
+    /// Pastille « ±10 s » : cercle avec chevrons + libellé, côté tapé.
+    @ViewBuilder
+    private var skipFeedbackOverlay: some View {
+        if let direction = skipFeedback {
+            VStack(spacing: 6) {
+                Image(systemName: direction == .forward ? "goforward.10" : "gobackward.10")
+                    .font(.system(size: 34, weight: .medium))
+                Text(direction == .forward ? "10 secondes" : "-10 secondes")
+                    .font(.caption2.weight(.medium))
+            }
+            .foregroundStyle(.white)
+            .padding(18)
+            .background(.black.opacity(0.45), in: Circle())
+            .offset(x: skipFeedbackOffset(for: direction))
+            .transition(.opacity)
+            .allowsHitTesting(false)
+        }
+    }
+
+    /// La pastille apparaît côté tapé ; en RTL, les côtés s'inversent.
+    private func skipFeedbackOffset(for direction: SkipDirection) -> CGFloat {
+        let forwardOffset: CGFloat = 90
+        let backwardOffset: CGFloat = -90
+        let base = direction == .forward ? forwardOffset : backwardOffset
+        return layoutDirection == .rightToLeft ? -base : base
     }
 
     // MARK: - Format
@@ -949,6 +1065,12 @@ struct VideoPlayerView: View {
 }
 
 // MARK: - Vues UIKit embarquées
+
+/// Sens du saut déclenché par le double-tap (pilote la pastille de rebond).
+private enum SkipDirection {
+    case forward
+    case backward
+}
 
 /// Vitesses de lecture proposées par la pastille en bas à droite.
 private enum SpeedOption: Float, CaseIterable, Identifiable {
@@ -999,4 +1121,52 @@ private struct AirPlayButton: UIViewRepresentable {
     }
 
     func updateUIView(_ uiView: AVRoutePickerView, context: Context) {}
+}
+
+/// Référence comptée sur la session audio : chaque lecteur actif la retient,
+/// la désactivation ne survient que lorsque le dernier la relâche. Évite
+/// qu'une page voisine du pager (qui vient de détruire son lecteur) ne coupe
+/// la session d'une page encore en lecture. La désactivation notifie les
+/// autres apps pour que leur musique reprenne.
+@MainActor
+private final class AudioSessionKeeper {
+    static let shared = AudioSessionKeeper()
+
+    private var retainCount = 0
+    /// Désactivation différée : une page voisine qui démarre dans la seconde
+    /// annule la libération en retenant la session.
+    private var pendingReleaseTask: Task<Void, Never>?
+
+    private init() {}
+
+    func retain() {
+        pendingReleaseTask?.cancel()
+        pendingReleaseTask = nil
+        if retainCount == 0 {
+            let session = AVAudioSession.sharedInstance()
+            do {
+                try session.setCategory(.playback, mode: .moviePlayback, policy: .longFormVideo)
+                try session.setActive(true)
+            } catch {
+                try? session.setCategory(.playback, mode: .moviePlayback)
+                try? session.setActive(true)
+            }
+        }
+        retainCount += 1
+    }
+
+    func release() {
+        guard retainCount > 0 else { return }
+        retainCount -= 1
+        guard retainCount == 0 else { return }
+        pendingReleaseTask?.cancel()
+        pendingReleaseTask = Task {
+            try? await Task.sleep(for: .seconds(0.5))
+            guard !Task.isCancelled else { return }
+            try? AVAudioSession.sharedInstance().setActive(
+                false,
+                options: [.notifyOthersOnDeactivation]
+            )
+        }
+    }
 }
