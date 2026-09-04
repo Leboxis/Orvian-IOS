@@ -30,214 +30,208 @@ struct SettingsView: View {
     var body: some View {
         NavigationStack(path: $path) {
             ScrollView {
-                VStack(alignment: .leading, spacing: 26) {
+                VStack(alignment: .leading, spacing: 28) {
                     if let drive = session.selectedDrive {
                         driveSummary(drive)
                     }
 
                     settingsCard(
-                        title: "Affichage",
-                        message: "Personnalisez les informations visibles dans vos fichiers."
+                        title: "Interface",
+                        message: "Adaptez l’affichage et la navigation à votre façon d’utiliser Orvian.",
+                        icon: "paintbrush.fill",
+                        tint: .indigo
                     ) {
-                        settingsToggle(
-                            "Afficher le poids des fichiers",
-                            detail: "La taille apparaît sous chaque fichier.",
-                            icon: "scalemass",
-                            tint: .indigo,
-                            isOn: $showFileSizes
-                        )
-                        settingsDivider
-                        settingsChoice(
-                            "Cartes par ligne",
-                            icon: "square.grid.2x2",
-                            tint: .blue,
-                            selection: $fileGridColumns
-                        ) {
-                            Text("2 cartes").tag(2)
-                            Text("3 cartes").tag(3)
-                            Text("4 cartes").tag(4)
-                            Text("5 cartes").tag(5)
-                            Text("6 cartes").tag(6)
-                            Text("7 cartes").tag(7)
+                        settingsSubsection("Affichage des fichiers") {
+                            settingsToggle(
+                                "Afficher le poids des fichiers",
+                                detail: "La taille apparaît sous chaque fichier.",
+                                icon: "scalemass",
+                                tint: .indigo,
+                                isOn: $showFileSizes
+                            )
+                            settingsChoice(
+                                "Cartes par ligne",
+                                icon: "square.grid.2x2",
+                                tint: .blue,
+                                selection: $fileGridColumns
+                            ) {
+                                Text("2 cartes").tag(2)
+                                Text("3 cartes").tag(3)
+                                Text("4 cartes").tag(4)
+                                Text("5 cartes").tag(5)
+                                Text("6 cartes").tag(6)
+                                Text("7 cartes").tag(7)
+                            }
+                            settingsToggle(
+                                "Recherche toujours visible",
+                                detail: "Évite de devoir faire glisser la liste pour l’afficher.",
+                                icon: "magnifyingglass",
+                                tint: .teal,
+                                isOn: $alwaysShowSearch
+                            )
                         }
-                        settingsDivider
-                        settingsChoice(
-                            "Colonnes des tags",
-                            icon: "tag.fill",
-                            tint: .brown,
-                            selection: $tagGridColumns
-                        ) {
-                            Text("2 colonnes").tag(2)
-                            Text("3 colonnes").tag(3)
+
+                        settingsSubsection("Tags et dossiers") {
+                            settingsChoice(
+                                "Colonnes des tags",
+                                icon: "tag.fill",
+                                tint: .brown,
+                                selection: $tagGridColumns
+                            ) {
+                                Text("2 colonnes").tag(2)
+                                Text("3 colonnes").tag(3)
+                            }
+                            settingsToggle(
+                                "Dossiers en premier",
+                                detail: "Dans les tags, les dossiers apparaissent avant les fichiers.",
+                                icon: "folder.fill",
+                                tint: .brown,
+                                isOn: $foldersFirstInTags
+                            )
+                            settingsColorPicker(
+                                "Couleur par défaut",
+                                detail: "Pour les dossiers sans couleur personnalisée.",
+                                icon: "folder.fill",
+                                color: defaultFolderColorBinding
+                            )
                         }
-                        settingsDivider
-                        settingsToggle(
-                            "Dossiers en premier dans les tags",
-                            detail: "Les dossiers sont toujours affichés avant les fichiers dans les tags.",
-                            icon: "folder.fill",
-                            tint: .brown,
-                            isOn: $foldersFirstInTags
-                        )
-                        settingsDivider
-                        settingsToggle(
-                            "Recherche toujours visible",
-                            detail: "Évite de devoir faire glisser la liste pour l’afficher.",
-                            icon: "magnifyingglass",
-                            tint: .teal,
-                            isOn: $alwaysShowSearch
-                        )
-                        settingsDivider
-                        settingsColorPicker(
-                            "Couleur par défaut des dossiers",
-                            detail: "S’applique aux dossiers sans couleur personnalisée.",
-                            icon: "folder.fill",
-                            color: defaultFolderColorBinding
-                        )
+
+                        settingsSubsection("Navigation et interactions") {
+                            settingsToggle(
+                                "Revenir en haut dans les favoris",
+                                detail: "Un second appui sur l’onglet replace la liste au début.",
+                                icon: "arrow.up.to.line",
+                                tint: .orange,
+                                isOn: $favoritesReselectScrollToTop
+                            )
+                            settingsToggle(
+                                "Retours haptiques",
+                                detail: "Une légère vibration accompagne les changements d’onglet.",
+                                icon: "hand.tap.fill",
+                                tint: .blue,
+                                isOn: $hapticFeedbackEnabled
+                            )
+                        }
                     }
 
                     settingsCard(
-                        title: "Navigation",
-                        message: "Choisissez le comportement de l’onglet Favoris."
+                        title: "Données et performances",
+                        message: "Contrôlez le préchargement, l’espace local et les mesures réseau.",
+                        icon: "bolt.fill",
+                        tint: .orange
                     ) {
-                        settingsToggle(
-                            "Revenir en haut dans les favoris",
-                            detail: "Un second appui sur l’onglet replace la liste au début.",
-                            icon: "arrow.up.to.line",
-                            tint: .orange,
-                            isOn: $favoritesReselectScrollToTop
-                        )
-                    }
-
-                    settingsCard(
-                        title: "Médias",
-                        message: "Le préchargement rend les miniatures et vidéos plus immédiates."
-                    ) {
-                        settingsToggle(
-                            "Précharger les miniatures",
-                            icon: "photo.stack",
-                            tint: .pink,
-                            isOn: $prefetchThumbnails
-                        )
-                        settingsDivider
-                        settingsToggle(
-                            "Précharger les vidéos",
-                            icon: "play.rectangle.fill",
-                            tint: .purple,
-                            isOn: $prefetchVideoURLs
-                        )
-                        settingsDivider
-                        settingsToggle(
-                            "Précharger seulement en Wi-Fi",
-                            detail: "Réduit l’utilisation des données mobiles.",
-                            icon: "wifi",
-                            tint: .cyan,
-                            isOn: $prefetchOnWiFiOnly,
-                            isEnabled: prefetchThumbnails || prefetchVideoURLs
-                        )
-                    }
-
-                    settingsCard(
-                        title: "Stockage local",
-                        message: "Les miniatures sont conservées temporairement pour accélérer l’affichage."
-                    ) {
-                        HStack(spacing: 12) {
-                            settingIcon("internaldrive.fill", tint: .mint)
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text("Miniatures enregistrées")
-                                    .font(.body.weight(.medium))
-                                Text(ByteFormatter.string(fromBytes: cacheSize))
-                                    .font(.subheadline)
-                                    .foregroundStyle(.secondary)
-                            }
-                            Spacer()
+                        settingsSubsection("Préchargement") {
+                            settingsToggle(
+                                "Précharger les miniatures",
+                                icon: "photo.stack",
+                                tint: .pink,
+                                isOn: $prefetchThumbnails
+                            )
+                            settingsToggle(
+                                "Précharger les vidéos",
+                                icon: "play.rectangle.fill",
+                                tint: .purple,
+                                isOn: $prefetchVideoURLs
+                            )
+                            settingsToggle(
+                                "Seulement en Wi-Fi",
+                                detail: "Réduit l’utilisation des données mobiles.",
+                                icon: "wifi",
+                                tint: .cyan,
+                                isOn: $prefetchOnWiFiOnly,
+                                isEnabled: prefetchThumbnails || prefetchVideoURLs
+                            )
                         }
-                        .padding(.vertical, 2)
 
-                        settingsDivider
-                        settingsChoice(
-                            "Limite automatique",
-                            icon: "gauge.with.dots.needle.50percent",
-                            tint: .green,
-                            selection: $thumbnailCacheLimitMB
-                        ) {
-                            Text("250 Mo").tag(250)
-                            Text("500 Mo").tag(500)
-                            Text("1 Go").tag(1_024)
-                            Text("Sans limite").tag(0)
-                        }
-                        settingsDivider
-                        Button {
-                            Task {
-                                await ThumbnailProvider.shared.purgeDiskCache()
-                                cacheSize = await ThumbnailProvider.shared.diskCacheSize()
+                        settingsSubsection("Cache des miniatures") {
+                            settingsInfo(
+                                "Espace utilisé",
+                                detail: ByteFormatter.string(fromBytes: cacheSize),
+                                icon: "internaldrive.fill",
+                                tint: .mint
+                            )
+                            settingsChoice(
+                                "Limite automatique",
+                                icon: "gauge.with.dots.needle.50percent",
+                                tint: .green,
+                                selection: $thumbnailCacheLimitMB
+                            ) {
+                                Text("250 Mo").tag(250)
+                                Text("500 Mo").tag(500)
+                                Text("1 Go").tag(1_024)
+                                Text("Sans limite").tag(0)
                             }
-                        } label: {
-                            Label("Vider le cache", systemImage: "trash")
-                                .font(.body.weight(.medium))
-                                .foregroundStyle(.red)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                                .padding(.vertical, 4)
+                            settingsButton(
+                                "Vider le cache",
+                                icon: "trash",
+                                tint: .red,
+                                role: .destructive
+                            ) {
+                                Task {
+                                    await ThumbnailProvider.shared.purgeDiskCache()
+                                    cacheSize = await ThumbnailProvider.shared.diskCacheSize()
+                                }
+                            }
+                        }
+
+                        settingsSubsection("Diagnostic") {
+                            settingsToggle(
+                                "Suivi des requêtes réseau",
+                                detail: "Consultables dans Profil → Réseau. Désactivé, aucune mesure n’est conservée.",
+                                icon: "antenna.radiowaves.left.and.right",
+                                tint: .indigo,
+                                isOn: $networkPerfEnabled
+                            )
                         }
                     }
 
-                    settingsCard(title: "Confort") {
-                        settingsToggle(
-                            "Retours haptiques",
-                            detail: "Une légère vibration accompagne les changements d’onglet.",
-                            icon: "hand.tap.fill",
-                            tint: .blue,
-                            isOn: $hapticFeedbackEnabled
-                        )
-                    }
-
                     settingsCard(
-                        title: "Diagnostic",
-                        message: "Journal des durées et codes HTTP, consultable dans Profil → Réseau."
+                        title: "Sécurité et compte",
+                        message: "Protégez l’accès à l’app et gérez la session enregistrée sur cet appareil.",
+                        icon: "lock.shield.fill",
+                        tint: .green
                     ) {
-                        settingsToggle(
-                            "Suivi des requêtes réseau",
-                            detail: "Désactivé, aucune mesure n’est collectée ni conservée.",
-                            icon: "antenna.radiowaves.left.and.right",
-                            tint: .indigo,
-                            isOn: $networkPerfEnabled
-                        )
-                    }
+                        settingsSubsection("Verrouillage de l’app") {
+                            if isLockCodeEnabled {
+                                settingsButton(
+                                    "Modifier le code",
+                                    icon: "pencil",
+                                    tint: .blue
+                                ) {
+                                    showChangeCode = true
+                                }
+                                settingsButton(
+                                    "Désactiver le code",
+                                    icon: "lock.open",
+                                    tint: .red,
+                                    role: .destructive
+                                ) {
+                                    showDisableCode = true
+                                }
+                            } else {
+                                settingsButton(
+                                    "Activer le code de verrouillage",
+                                    detail: "Le code sera demandé à chaque ouverture de l’app.",
+                                    icon: "lock.fill",
+                                    tint: .green
+                                ) {
+                                    showActivateCode = true
+                                }
+                            }
+                        }
 
-                    settingsCard(
-                        title: "Sécurité",
-                        message: "Demande un code à chaque ouverture de l’app."
-                    ) {
-                        if isLockCodeEnabled {
-                            Button {
-                                showChangeCode = true
-                            } label: {
-                                Label("Modifier le code", systemImage: "pencil")
-                                    .font(.body.weight(.medium))
-                                    .frame(maxWidth: .infinity, alignment: .leading)
-                                    .padding(.vertical, 4)
-                            }
-                            settingsDivider
-                            Button(role: .destructive) {
-                                showDisableCode = true
-                            } label: {
-                                Label("Désactiver le code", systemImage: "lock.open")
-                                    .font(.body.weight(.medium))
-                                    .frame(maxWidth: .infinity, alignment: .leading)
-                                    .padding(.vertical, 4)
-                            }
-                        } else {
-                            Button {
-                                showActivateCode = true
-                            } label: {
-                                Label("Activer le code de verrouillage", systemImage: "lock.fill")
-                                    .font(.body.weight(.medium))
-                                    .frame(maxWidth: .infinity, alignment: .leading)
-                                    .padding(.vertical, 4)
+                        settingsSubsection("Session") {
+                            settingsButton(
+                                "Changer de token / se déconnecter",
+                                detail: "Le token et le drive choisi seront retirés de cet appareil.",
+                                icon: "rectangle.portrait.and.arrow.right",
+                                tint: .red,
+                                role: .destructive
+                            ) {
+                                showSignOutConfirm = true
                             }
                         }
                     }
-
-                    accountSection
                 }
                 .padding(.horizontal, 20)
                 .padding(.top, 12)
@@ -336,26 +330,64 @@ struct SettingsView: View {
     private func settingsCard<Content: View>(
         title: String,
         message: String? = nil,
+        icon: String,
+        tint: Color,
         @ViewBuilder content: () -> Content
     ) -> some View {
-        VStack(alignment: .leading, spacing: 14) {
-            VStack(alignment: .leading, spacing: 3) {
-                Text(title)
-                    .font(.headline)
-                if let message {
-                    Text(message)
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
+        VStack(alignment: .leading, spacing: 20) {
+            HStack(alignment: .top, spacing: 12) {
+                settingIcon(icon, tint: tint, size: 42)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(title)
+                        .font(.title3.weight(.bold))
+                        .accessibilityAddTraits(.isHeader)
+                    if let message {
+                        Text(message)
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
                 }
             }
             content()
         }
-        .padding(18)
-        .background(.background, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+        .padding(16)
+        .background(Color(uiColor: .systemBackground), in: RoundedRectangle(cornerRadius: 22, style: .continuous))
         .overlay {
             RoundedRectangle(cornerRadius: 22, style: .continuous)
-                .strokeBorder(.primary.opacity(0.06), lineWidth: 1)
+                .strokeBorder(.primary.opacity(0.09), lineWidth: 1)
         }
+        .shadow(color: .black.opacity(0.04), radius: 10, x: 0, y: 4)
+    }
+
+    private func settingsSubsection<Content: View>(
+        _ title: String,
+        @ViewBuilder content: () -> Content
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(title.uppercased())
+                .font(.caption2.weight(.bold))
+                .tracking(0.7)
+                .foregroundStyle(.secondary)
+                .padding(.leading, 4)
+                .accessibilityAddTraits(.isHeader)
+            content()
+        }
+    }
+
+    private func settingRow<Content: View>(@ViewBuilder content: () -> Content) -> some View {
+        content()
+            .padding(.horizontal, 12)
+            .padding(.vertical, 11)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(
+                Color(uiColor: .tertiarySystemGroupedBackground),
+                in: RoundedRectangle(cornerRadius: 14, style: .continuous)
+            )
+            .overlay {
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .strokeBorder(.primary.opacity(0.06), lineWidth: 1)
+            }
     }
 
     private func settingsToggle(
@@ -366,24 +398,25 @@ struct SettingsView: View {
         isOn: Binding<Bool>,
         isEnabled: Bool = true
     ) -> some View {
-        Toggle(isOn: isOn) {
-            HStack(spacing: 12) {
-                settingIcon(icon, tint: tint)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(title)
-                        .font(.body.weight(.medium))
-                    if let detail {
-                        Text(detail)
-                            .font(.footnote)
-                            .foregroundStyle(.secondary)
-                            .fixedSize(horizontal: false, vertical: true)
+        settingRow {
+            Toggle(isOn: isOn) {
+                HStack(spacing: 12) {
+                    settingIcon(icon, tint: tint)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(title)
+                            .font(.body.weight(.medium))
+                        if let detail {
+                            Text(detail)
+                                .font(.footnote)
+                                .foregroundStyle(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
                     }
                 }
             }
+            .tint(.accentColor)
+            .disabled(!isEnabled)
         }
-        .tint(.accentColor)
-        .disabled(!isEnabled)
-        .padding(.vertical, 2)
     }
 
     private func settingsChoice<Content: View>(
@@ -393,18 +426,19 @@ struct SettingsView: View {
         selection: Binding<Int>,
         @ViewBuilder options: () -> Content
     ) -> some View {
-        HStack(spacing: 12) {
-            settingIcon(icon, tint: tint)
-            Text(title)
-                .font(.body.weight(.medium))
-            Spacer(minLength: 8)
-            Picker(title, selection: selection) {
-                options()
+        settingRow {
+            HStack(spacing: 12) {
+                settingIcon(icon, tint: tint)
+                Text(title)
+                    .font(.body.weight(.medium))
+                Spacer(minLength: 8)
+                Picker(title, selection: selection) {
+                    options()
+                }
+                    .labelsHidden()
+                    .pickerStyle(.menu)
             }
-                .labelsHidden()
-                .pickerStyle(.menu)
         }
-        .padding(.vertical, 2)
     }
 
     private func settingsColorPicker(
@@ -413,20 +447,71 @@ struct SettingsView: View {
         icon: String,
         color: Binding<Color>
     ) -> some View {
-        HStack(spacing: 12) {
-            settingIcon(icon, tint: color.wrappedValue)
-            VStack(alignment: .leading, spacing: 2) {
+        settingRow {
+            HStack(spacing: 12) {
+                settingIcon(icon, tint: color.wrappedValue)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(title)
+                        .font(.body.weight(.medium))
+                    Text(detail)
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer(minLength: 8)
+                ColorPicker(title, selection: color, supportsOpacity: false)
+                    .labelsHidden()
+            }
+        }
+    }
+
+    private func settingsInfo(
+        _ title: String,
+        detail: String,
+        icon: String,
+        tint: Color
+    ) -> some View {
+        settingRow {
+            HStack(spacing: 12) {
+                settingIcon(icon, tint: tint)
                 Text(title)
                     .font(.body.weight(.medium))
+                Spacer(minLength: 8)
                 Text(detail)
-                    .font(.footnote)
+                    .font(.subheadline.monospacedDigit())
                     .foregroundStyle(.secondary)
             }
-            Spacer(minLength: 8)
-            ColorPicker(title, selection: color, supportsOpacity: false)
-                .labelsHidden()
         }
-        .padding(.vertical, 2)
+    }
+
+    private func settingsButton(
+        _ title: String,
+        detail: String? = nil,
+        icon: String,
+        tint: Color,
+        role: ButtonRole? = nil,
+        action: @escaping () -> Void
+    ) -> some View {
+        settingRow {
+            Button(role: role, action: action) {
+                HStack(spacing: 12) {
+                    settingIcon(icon, tint: tint)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(title)
+                            .font(.body.weight(.medium))
+                            .foregroundStyle(role == nil ? Color.primary : Color.red)
+                        if let detail {
+                            Text(detail)
+                                .font(.footnote)
+                                .foregroundStyle(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
+                    Spacer(minLength: 8)
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+        }
     }
 
     private var defaultFolderColorBinding: Binding<Color> {
@@ -444,26 +529,6 @@ struct SettingsView: View {
             .background(tint.opacity(0.12), in: RoundedRectangle(cornerRadius: size * 0.30, style: .continuous))
     }
 
-    private var settingsDivider: some View {
-        Divider()
-            .padding(.leading, 46)
-    }
-
-    private var accountSection: some View {
-        settingsCard(
-            title: "Compte",
-            message: "Le token et le drive choisi sont enregistrés uniquement sur cet appareil."
-        ) {
-            Button(role: .destructive) {
-                showSignOutConfirm = true
-            } label: {
-                Label("Changer de token / se déconnecter", systemImage: "rectangle.portrait.and.arrow.right")
-                    .font(.body.weight(.medium))
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.vertical, 4)
-            }
-        }
-    }
 }
 
 /// Sélection du drive quand le compte en possède plusieurs.
