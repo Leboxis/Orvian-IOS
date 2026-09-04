@@ -834,7 +834,8 @@ struct VideoPlayerView: View {
                     playbackRetryCount = 0
                     hasFailedSetup = false
                 }
-            }            guard item.status == .failed else { return }
+            }
+            guard item.status == .failed else { return }
             Task { @MainActor in
                 await self.retryPlaybackAfterProcessingDelay(
                     failedItem: item,
