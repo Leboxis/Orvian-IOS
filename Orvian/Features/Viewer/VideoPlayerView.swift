@@ -97,6 +97,10 @@ struct VideoPlayerView: View {
     @State private var skipFeedback: SkipDirection?
     @State private var skipFeedbackResetTask: Task<Void, Never>?
 
+    // Désambiguïsation manuelle simple/double tap (fenêtre 300 ms).
+    @State private var lastTapDate: Date?
+    @State private var lastTapLocation: CGPoint = .zero
+
     private let service = KDriveService()
 
     init(file: DriveFile, driveId: Int, isActive: Bool = true) {
@@ -118,17 +122,11 @@ struct VideoPlayerView: View {
                 .overlay(alignment: .center) {
                     skipFeedbackOverlay
                 }
-                // Double-tap à gauche = recul, à droite = avance (10 s) ;
-                // déclaré avant le simple tap pour que SwiftUI donne la
-                // priorité au double et ne fasse pas clignoter les contrôles.
-                .onTapGesture(count: 2, coordinateSpace: .local) { location in
-                    let onLeftHalf = location.x * 2 < videoAreaWidth
-                    // En RTL, l'avance se fait côté gauche (lecture inversée).
-                    let forward = layoutDirection == .rightToLeft ? onLeftHalf : !onLeftHalf
-                    skipTime(by: forward ? 10 : -10)
-                }
-                .onTapGesture {
-                    toggleControls()
+                // Détection manuelle du double-tap : le simple tap reste
+                // instantané (un `onTapGesture(count: 2)` en amont retarde
+                // chaque simple tap de la fenêtre de désambiguïsation).
+                .onTapGesture(count: 1, coordinateSpace: .local) { location in
+                    handleVideoTap(at: location)
                 }
                 .accessibilityAction(named: Text("Reculer de 10 secondes")) { skipTime(by: -10) }
                 .accessibilityAction(named: Text("Avancer de 10 secondes")) { skipTime(by: 10) }
@@ -987,6 +985,41 @@ struct VideoPlayerView: View {
     }
 
     // MARK: - Double-tap ±10 s
+
+    /// Simple tap instantané : bascule les contrôles, sauf si un tap très
+    /// rapproché au même endroit révèle un double-tap — alors la bascule est
+    /// annulée (rattrapage) et remplacée par le saut de 10 s.
+    private func handleVideoTap(at location: CGPoint) {
+        let now = Date()
+        let isDoubleTap = lastTapDate.map {
+            now.timeIntervalSince($0) < 0.3
+                && abs(location.x - lastTapLocation.x) < 44
+                && abs(location.y - lastTapLocation.y) < 44
+        } ?? false
+
+        if isDoubleTap {
+            // Second tap d'un double : annule l'effet du premier tap.
+            cancelPendingToggle()
+            lastTapDate = nil
+            guard player != nil, !hasFailedSetup, !isScrubbing, !isSeeking else { return }
+            let onLeftHalf = location.x * 2 < videoAreaWidth
+            // En RTL, l'avance se fait côté gauche (lecture inversée).
+            let forward = layoutDirection == .rightToLeft ? onLeftHalf : !onLeftHalf
+            skipTime(by: forward ? 10 : -10)
+        } else {
+            lastTapDate = now
+            lastTapLocation = location
+            toggleControls()
+        }
+    }
+
+    /// Retour visuel si le premier tap d'un double a masqué les contrôles.
+    private func cancelPendingToggle() {
+        withAnimation(.easeInOut(duration: 0.2)) {
+            showControls = true
+        }
+        scheduleControlsAutoHide(delay: 2.5)
+    }
 
     private func skipTime(by delta: Double) {
         guard let player, !isScrubbing, !isSeeking else { return }
