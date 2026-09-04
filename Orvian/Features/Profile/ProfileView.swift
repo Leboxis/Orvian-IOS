@@ -14,6 +14,13 @@ struct ProfileView: View {
     @State private var isLoadingRecents = true
 
     private let service = KDriveService()
+    private let previewSource = FileSource.recents(limit: 12)
+
+    /// Âge au-delà duquel l'instantané partagé est revalidé en arrière-plan.
+    /// En deçà, chaque sélection de l'onglet n'émet aucune requête :
+    /// `/files/last_modified` coûte ~1 s de calcul serveur par appel et ne
+    /// doit pas repartir pour trois miniatures à chaque bascule d'onglet.
+    private static let revalidationInterval: TimeInterval = 60
 
     var body: some View {
         NavigationStack(path: $path) {
@@ -40,7 +47,9 @@ struct ProfileView: View {
         }
         .onChange(of: refreshRequest) { _, _ in
             Task {
-                await loadPreviews()
+                // Retour à la racine par second appui sur l'onglet : lecture
+                // réseau explicite, hors seuil de fraîcheur.
+                await loadPreviews(forceNetwork: true)
             }
         }
     }
@@ -153,11 +162,51 @@ struct ProfileView: View {
 
     // MARK: - Chargement
 
-    private func loadPreviews() async {
+    private func loadPreviews(forceNetwork: Bool = false) async {
         guard let drive = session.selectedDrive else { return }
 
-        if let recentsPage = try? await service.page(.recents(limit: 12), driveId: drive.id, cursor: nil) {
-            recentUploads = (recentsPage.data ?? []).filter { !$0.isDirectory }
+        // Instantané partagé avec la grille « Uploads récents » : les
+        // miniatures s'affichent sans attendre le réseau, et un onglet
+        // consulté à moins de 60 s d'intervalle n'émet aucune requête —
+        // `/files/last_modified` coûte ~1 s de calcul serveur par appel.
+        // Au-delà, revalidation silencieuse (ETag → 304 si rien n'a changé).
+        if !forceNetwork,
+           let snapshot = DirectoryListStore.shared.snapshot(
+            source: previewSource,
+            driveId: drive.id,
+            orderBy: [],
+            order: "asc"
+           ) {
+            recentUploads = snapshot.items.filter { !$0.isDirectory }
+            isLoadingRecents = false
+            if Date().timeIntervalSince(snapshot.fetchedAt) < Self.revalidationInterval {
+                return
+            }
+        }
+
+        if let recentsPage = try? await service.page(previewSource, driveId: drive.id, cursor: nil, forceNetwork: forceNetwork) {
+            let files = (recentsPage.data ?? []).filter { !$0.isDirectory }
+            recentUploads = files
+            // Alimente le cache partagé (bascules d'onglet suivantes, grille)
+            // sans écraser un instantané de grille plus profondément paginé.
+            let existingCount = DirectoryListStore.shared.snapshot(
+                source: previewSource,
+                driveId: drive.id,
+                orderBy: [],
+                order: "asc"
+            )?.items.count ?? 0
+            if existingCount <= files.count {
+                DirectoryListStore.shared.store(
+                    source: previewSource,
+                    driveId: drive.id,
+                    orderBy: [],
+                    order: "asc",
+                    items: files,
+                    cursor: recentsPage.cursor,
+                    hasMore: recentsPage.hasMore ?? false,
+                    totalItemCount: nil
+                )
+            }
         }
         isLoadingRecents = false
     }

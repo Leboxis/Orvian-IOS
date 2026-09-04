@@ -61,6 +61,12 @@ final class FileGridViewModel {
     let driveId: Int
     private let service: KDriveService
 
+    /// Âge maximal d'un instantané servi sans revalidation réseau. Au-delà,
+    /// la réouverture revalide en arrière-plan (ETag → 304 si inchangé).
+    /// Pull-to-refresh, changement de tri et mutations passent toujours par
+    /// le réseau, indépendamment de ce seuil.
+    private static let freshSnapshotInterval: TimeInterval = 60
+
     init(source: FileSource, driveId: Int, service: KDriveService = KDriveService()) {
         self.source = source
         self.driveId = driveId
@@ -74,6 +80,9 @@ final class FileGridViewModel {
     /// immédiatement (contenu, pagination et compteur) pendant que le
     /// réseau revalide en arrière-plan : la réouverture d'un dossier ne
     /// repasse plus par le squelette ni par un aller-retour bloquant.
+    /// Un instantané encore frais (moins de 60 s) saute cette revalidation :
+    /// les endpoints coûteux côté serveur (`last_modified`, ~1 s) ne sont pas
+    /// relancés à chaque bascule d'onglet.
     func loadIfNeeded() async {
         guard !loadedOnce, !isInitialLoading else { return }
         if let snapshot = DirectoryListStore.shared.snapshot(
@@ -93,7 +102,10 @@ final class FileGridViewModel {
             items = snapshot.items
             // Revalidation silencieuse : les cartes restent affichées et
             // l'ETag renvoie 304 (quelques octets) si rien n'a changé.
-            Task { await reload() }
+            // Un instantané de moins de 60 s est jugé à jour : aucun appel.
+            if Date().timeIntervalSince(snapshot.fetchedAt) > Self.freshSnapshotInterval {
+                Task { await reload() }
+            }
             return
         }
         await reload()

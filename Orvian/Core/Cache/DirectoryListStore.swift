@@ -9,6 +9,11 @@ struct DirectoryListSnapshot {
     var totalItemCount: Int?
     var orderBy: [String]
     var order: String
+    /// Date de la lecture réseau qui a produit cet instantané : permet aux
+    /// appelants de sauter la revalidation quand l'entrée est encore fraîche
+    /// (les endpoints coûteux comme `last_modified` ne doivent pas repartir
+    /// à chaque bascule d'onglet).
+    var fetchedAt: Date = Date()
 }
 
 /// Mémoire des listings déjà consultés (dossiers, favoris, recents, tag,
@@ -68,6 +73,9 @@ final class DirectoryListStore {
         return snapshot
     }
 
+    /// Âge de l'instantané mémorisé pour une clé, `nil` s'il n'existe pas ou
+    /// a expiré. Les vues l'utilisent pour sauter une revalidation réseau
+    /// encore inutile (pull-to-refresh et mutations restent toujours servis).
     func store(
         source: FileSource,
         driveId: Int,
