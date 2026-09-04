@@ -1,7 +1,7 @@
 import SwiftUI
 
 /// Bulle flottante compacte située au-dessus de la barre de navigation et centrée,
-/// indiquant l'avancée globale des uploads (débit et temps restant inclus).
+/// indiquant l'avancée globale des uploads.
 struct UploadProgressPill: View {
     let manager: UploadManager
     let onTap: () -> Void
@@ -16,33 +16,13 @@ struct UploadProgressPill: View {
                         .controlSize(.small)
                         .tint(Color.accentColor)
 
-                    VStack(alignment: .leading, spacing: 1) {
-                        Text(titleText)
-                            .font(.footnote.weight(.medium))
-                            .foregroundStyle(.primary)
-                        if !subtitleText.isEmpty {
-                            Text(subtitleText)
-                                .font(.caption2.monospacedDigit())
-                                .foregroundStyle(.secondary)
-                        }
-                    }
+                    Text(titleText)
+                        .font(.footnote.weight(.medium))
+                        .foregroundStyle(.primary)
 
                     Text("\(Int(manager.overallProgress * 100))%")
                         .font(.caption2.weight(.bold))
                         .foregroundStyle(.secondary)
-                } else if manager.pausedTasksCount > 0 {
-                    Image(systemName: "pause.circle.fill")
-                        .font(.system(size: 15))
-                        .foregroundStyle(.orange)
-
-                    VStack(alignment: .leading, spacing: 1) {
-                        Text(pausedTitleText)
-                            .font(.footnote.weight(.medium))
-                            .foregroundStyle(.primary)
-                        Text("Toucher pour reprendre")
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                    }
                 } else if manager.hasFailures {
                     Image(systemName: "exclamationmark.circle.fill")
                         .font(.system(size: 15))
@@ -76,7 +56,6 @@ struct UploadProgressPill: View {
         }
         .buttonStyle(.plain)
         .accessibilityLabel("Suivi de l'upload")
-        .accessibilityValue(accessibilityValue)
     }
 
     private var titleText: String {
@@ -86,37 +65,5 @@ struct UploadProgressPill: View {
         } else {
             return "\(count) uploads en cours"
         }
-    }
-
-    private var pausedTitleText: String {
-        let count = manager.pausedTasksCount
-        if count == 1 {
-            return "1 upload en pause"
-        } else {
-            return "\(count) uploads en pause"
-        }
-    }
-
-    /// « 4,2 Mo/s • reste 0:42 » (chaque morceau n'apparaît que s'il est connu).
-    private var subtitleText: String {
-        var parts: [String] = []
-        if !manager.overallSpeedText.isEmpty {
-            parts.append(manager.overallSpeedText)
-        }
-        if !manager.overallETAText.isEmpty {
-            parts.append("reste \(manager.overallETAText)")
-        }
-        return parts.joined(separator: " • ")
-    }
-
-    private var accessibilityValue: String {
-        if manager.activeTasksCount > 0 {
-            var value = "\(Int(manager.overallProgress * 100)) pour cent"
-            if !subtitleText.isEmpty {
-                value += ", \(subtitleText)"
-            }
-            return value
-        }
-        return titleText
     }
 }
