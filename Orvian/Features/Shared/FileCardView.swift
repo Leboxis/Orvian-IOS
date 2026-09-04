@@ -3,8 +3,20 @@ import SwiftUI
 /// Carte de fichier : miniature, étoile favori, nom et informations secondaires.
 /// Tap → ouverture du fichier/dossier. Appui long → menu contextuel
 /// (détails, couleur pour les dossiers, télécharger, tags, favori,
-/// renommer, déplacer, supprimer).
+/// renommer, déplacer, supprimer). Les feuilles et alertes issues de ce menu
+/// sont montées une seule fois par la grille parente : la carte émet une
+/// demande (`onPresent`), ce qui évite de porter ces modificateurs sur
+/// chaque carte du view-graph.
 struct FileCardView: View {
+    /// Actions du menu contextuel dont la présentation est portée par la grille.
+    enum Intent {
+        case details
+        case colorPicker
+        case tags
+        case rename
+        case deleteConfirm
+    }
+
     let file: DriveFile
     let driveId: Int
     /// Index id → catégorie du drive, pour les pastilles de tags des cartes
@@ -23,14 +35,9 @@ struct FileCardView: View {
     var showsFavoriteBadge = true
     var onToggleSelection: (() -> Void)?
     var onToggleFavorite: (() -> Void)?
-    var onDelete: (() -> Void)?
-    var onRename: ((String) -> Void)?
     var onMove: (() -> Void)?
-    /// Change la couleur d'un dossier (menu contextuel des dossiers).
-    var onSetColor: ((String) -> Void)?
-    /// Confirme localement un changement de tag pour rafraîchir les pastilles
-    /// des cartes derrière l'éditeur.
-    var onTagChanged: ((Category, Bool) -> Void)?
+    /// Demande d'ouverture d'une feuille/alerte gérée par la grille parente.
+    var onPresent: ((Intent) -> Void)?
     var action: () -> Void
 
     /// Préférence globale : conserve le type comme repère lorsque le poids est masqué.
@@ -38,12 +45,6 @@ struct FileCardView: View {
     @AppStorage("defaultFolderColor") private var defaultFolderColor = "#4285F5"
     @State private var thumbnail: UIImage?
     @State private var thumbnailLoaded = false
-    @State private var showDetail = false
-    @State private var showTagsSheet = false
-    @State private var showColorPicker = false
-    @State private var showDeleteConfirm = false
-    @State private var showRenameAlert = false
-    @State private var renameText = ""
 
     private var kind: FileKind { file.fileKind }
 
@@ -97,14 +98,14 @@ struct FileCardView: View {
         .contextMenu {
             if !selectionMode {
                 Button {
-                    showDetail = true
+                    onPresent?(.details)
                 } label: {
                     Label("Détails", systemImage: "info.circle")
                 }
                 if !isTrashed {
-                    if file.isDirectory, onSetColor != nil {
+                    if file.isDirectory, onPresent != nil {
                         Button {
-                            showColorPicker = true
+                            onPresent?(.colorPicker)
                         } label: {
                             Label("Changer la couleur", systemImage: "paintpalette")
                         }
@@ -119,7 +120,7 @@ struct FileCardView: View {
                         }
                     }
                     Button {
-                        showTagsSheet = true
+                        onPresent?(.tags)
                     } label: {
                         Label("Tags", systemImage: "tag")
                     }
@@ -131,10 +132,9 @@ struct FileCardView: View {
                             systemImage: file.isFavorite == true ? "star.slash" : "star"
                         )
                     }
-                    if onRename != nil {
+                    if onPresent != nil {
                         Button {
-                            renameText = file.name
-                            showRenameAlert = true
+                            onPresent?(.rename)
                         } label: {
                             Label("Renommer", systemImage: "pencil")
                         }
@@ -146,57 +146,15 @@ struct FileCardView: View {
                             Label("Déplacer", systemImage: "folder")
                         }
                     }
-                    if onDelete != nil {
+                    if onPresent != nil {
                         Button(role: .destructive) {
-                            showDeleteConfirm = true
+                            onPresent?(.deleteConfirm)
                         } label: {
                             Label("Supprimer", systemImage: "trash")
                         }
                     }
                 }
             }
-        }
-        .sheet(isPresented: $showDetail) {
-            FileDetailSheet(
-                file: file,
-                driveId: driveId,
-                isTrashed: isTrashed,
-                onOpen: action,
-                onToggleFavorite: onToggleFavorite,
-                onDelete: onDelete,
-                onRename: onRename,
-                onMove: onMove
-            )
-        }
-        .sheet(isPresented: $showTagsSheet) {
-            TagsEditorSheet(
-                driveId: driveId,
-                file: file,
-                onChanged: onTagChanged
-            )
-        }
-        .sheet(isPresented: $showColorPicker) {
-            FolderColorPickerSheet(
-                file: file,
-                onSetColor: onSetColor
-            )
-        }
-        .alert("Supprimer", isPresented: $showDeleteConfirm) {
-            Button("Supprimer", role: .destructive) { onDelete?() }
-            Button("Annuler", role: .cancel) {}
-        } message: {
-            Text("« \(file.name) » sera déplacé dans la corbeille.")
-        }
-        .alert("Renommer", isPresented: $showRenameAlert) {
-            TextField("Nouveau nom", text: $renameText)
-            Button("Renommer") {
-                let trimmed = renameText.trimmingCharacters(in: .whitespacesAndNewlines)
-                if !trimmed.isEmpty { onRename?(trimmed) }
-                renameText = ""
-            }
-            Button("Annuler", role: .cancel) { renameText = "" }
-        } message: {
-            Text("Ancien nom : \(file.name)")
         }
         .task(id: file.id) {
             await loadThumbnail()
@@ -357,8 +315,9 @@ struct FileCardView: View {
 
 /// Sélecteur de couleur d'un dossier (menu contextuel → « Changer la couleur »).
 /// Grille des couleurs officielles de kDrive ; un tap applique la couleur
-/// directement via l'API et referme la feuille.
-private struct FolderColorPickerSheet: View {
+/// directement via l'API et referme la feuille. Présenté par la grille
+/// (`FileGridView`), une seule instance pour toutes les cartes.
+struct FolderColorPickerSheet: View {
     let file: DriveFile
     let onSetColor: ((String) -> Void)?
 

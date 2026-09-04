@@ -62,6 +62,18 @@ struct FileGridView: View {
     @State private var sortReloadTask: Task<Void, Never>?
     @State private var searchScrollRegion: SearchScrollRegion = .nearTop
     @State private var videoMetadataResolutionCount = 0
+    /// Fiche détails demandée par une carte (une seule feuille pour toute la grille).
+    @State private var detailRequest: FilePresentation?
+    /// Éditeur de tags demandé par une carte.
+    @State private var tagsRequest: FilePresentation?
+    /// Sélecteur de couleur demandé par une carte (dossiers).
+    @State private var colorRequest: FilePresentation?
+    /// Confirmation de suppression demandée par une carte.
+    @State private var deleteRequest: FilePresentation?
+    /// Alerte de renommage demandée par une carte.
+    @State private var renameRequest: FilePresentation?
+    /// Texte de l'alerte de renommage, conservé entre l'ouverture et la validation.
+    @State private var renameText = ""
     /// Cache du calcul `visibleItems` : les filtres/tri/regroupement ne sont
     /// recalculés que si les données, les filtres, la recherche ou les
     /// métadonnées vidéo changent — pas à chaque rendu du body.
@@ -156,6 +168,144 @@ struct FileGridView: View {
             } message: {
                 Text(viewModel.mutationErrorMessage ?? "")
             }
+            .sheet(item: $detailRequest) { request in
+                FileDetailSheet(
+                    file: currentFile(matching: request),
+                    driveId: viewModel.driveId,
+                    isTrashed: viewModel.source == .trash,
+                    onOpen: { open(request: request) },
+                    onToggleFavorite: { Task { await viewModel.toggleFavorite(request.file) } },
+                    onDelete: { Task { await viewModel.trash(request.file) } },
+                    onRename: { newName in
+                        Task { await viewModel.rename(request.file, name: newName) }
+                    },
+                    onMove: onMove == nil ? nil : { onMove?(request.file) }
+                )
+            }
+            .sheet(item: $tagsRequest) { request in
+                TagsEditorSheet(
+                    driveId: viewModel.driveId,
+                    file: currentFile(matching: request),
+                    onChanged: { category, applied in
+                        viewModel.updateCategories(for: request.file, category: category, applied: applied)
+                    }
+                )
+            }
+            .sheet(item: $colorRequest) { request in
+                FolderColorPickerSheet(
+                    file: currentFile(matching: request),
+                    onSetColor: { color in
+                        Task { await viewModel.setColor(request.file, color: color) }
+                    }
+                )
+            }
+            .alert(
+                "Supprimer",
+                isPresented: deleteAlertBinding,
+                presenting: deleteRequest
+            ) { request in
+                Button("Supprimer", role: .destructive) {
+                    Task { await viewModel.trash(request.file) }
+                }
+                Button("Annuler", role: .cancel) {}
+            } message: { request in
+                Text("« \(request.file.name) » sera déplacé dans la corbeille.")
+            }
+            .alert(
+                "Renommer",
+                isPresented: renameAlertBinding,
+                presenting: renameRequest
+            ) { request in
+                TextField("Nouveau nom", text: $renameText)
+                Button("Renommer") {
+                    let trimmed = renameText.trimmingCharacters(in: .whitespacesAndNewlines)
+                    if !trimmed.isEmpty {
+                        Task { await viewModel.rename(request.file, name: trimmed) }
+                    }
+                    renameText = ""
+                }
+                Button("Annuler", role: .cancel) { renameText = "" }
+            } message: { request in
+                Text("Ancien nom : \(request.file.name)")
+            }
+            // Les présentations vivaient sur les cartes : une carte dont
+            // l'élément quittait la grille démontait sa feuille (suppression
+            // depuis la fiche, retrait des favoris…). La grille referme donc
+            // ses présentations quand leur fichier disparaît de la liste.
+            .onChange(of: viewModel.itemsRevision) { _, _ in
+                if isMissing(detailRequest) { detailRequest = nil }
+                if isMissing(tagsRequest) { tagsRequest = nil }
+                if isMissing(colorRequest) { colorRequest = nil }
+                if isMissing(deleteRequest) { deleteRequest = nil }
+                if isMissing(renameRequest) { renameRequest = nil }
+            }
+    }
+
+    // MARK: - Présentations contextuelles
+
+    /// Fichier ciblé par une présentation de la grille, avec les voisins du
+    /// pager pour l'ouverture depuis la fiche détails.
+    private struct FilePresentation: Identifiable {
+        let file: DriveFile
+        var siblings: [DriveFile] = []
+        var id: Int { file.id }
+    }
+
+    private var deleteAlertBinding: Binding<Bool> {
+        Binding(
+            get: { deleteRequest != nil },
+            set: { if !$0 { deleteRequest = nil } }
+        )
+    }
+
+    private var renameAlertBinding: Binding<Bool> {
+        Binding(
+            get: { renameRequest != nil },
+            set: { if !$0 { renameRequest = nil } }
+        )
+    }
+
+    /// Version la plus récente du fichier présenté : une mutation confirmée
+    /// pendant l'ouverture (renommage depuis la fiche…) doit se refléter dans
+    /// la feuille, comme lorsque celle-ci vivait sur la carte re-rendue.
+    private func currentFile(matching request: FilePresentation) -> DriveFile {
+        viewModel.items.first { $0.id == request.file.id } ?? request.file
+    }
+
+    private func isMissing(_ request: FilePresentation?) -> Bool {
+        guard let request else { return false }
+        return !viewModel.items.contains { $0.id == request.file.id }
+    }
+
+    /// Ouvre la présentation demandée par une carte. Une seule occurrence de
+    /// chaque feuille/alerte est montée au niveau de la grille : le view-graph
+    /// ne porte plus ces modificateurs sur chacune des cartes.
+    private func present(_ intent: FileCardView.Intent, for file: DriveFile, siblings: [DriveFile]) {
+        switch intent {
+        case .details:
+            detailRequest = FilePresentation(file: file, siblings: siblings)
+        case .colorPicker:
+            colorRequest = FilePresentation(file: file)
+        case .tags:
+            tagsRequest = FilePresentation(file: file)
+        case .rename:
+            renameText = file.name
+            renameRequest = FilePresentation(file: file)
+        case .deleteConfirm:
+            deleteRequest = FilePresentation(file: file)
+        }
+    }
+
+    /// Ouverture depuis la fiche détails : même routage que le tap sur la
+    /// carte, avec les voisins capturés au moment de la demande (le pager
+    /// navigue dans l'ordre du tri et des filtres affichés).
+    private func open(request: FilePresentation) {
+        let file = request.file
+        if file.isDirectory {
+            onOpenDirectory?(file)
+        } else {
+            onOpenFile?(file, request.siblings)
+        }
     }
 
     private var mutationErrorBinding: Binding<Bool> {
@@ -494,20 +644,11 @@ struct FileGridView: View {
             onToggleFavorite: {
                 Task { await viewModel.toggleFavorite(file) }
             },
-            onDelete: {
-                Task { await viewModel.trash(file) }
-            },
-            onRename: { newName in
-                Task { await viewModel.rename(file, name: newName) }
-            },
             onMove: onMove == nil ? nil : {
                 onMove?(file)
             },
-            onSetColor: { color in
-                Task { await viewModel.setColor(file, color: color) }
-            },
-            onTagChanged: { category, applied in
-                viewModel.updateCategories(for: file, category: category, applied: applied)
+            onPresent: { intent in
+                present(intent, for: file, siblings: siblings)
             },
             action: {
                 if selectionMode {

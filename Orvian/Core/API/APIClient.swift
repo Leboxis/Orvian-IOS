@@ -21,9 +21,32 @@ actor APIClient {
     /// appelants suivants attendent la réponse de la première.
     private var inFlightGETs: [String: Task<Data, Error>] = [:]
 
-    init(session: URLSession = .shared) {
+    /// Session dédiée à l'API au lieu de `URLSession.shared` :
+    /// - cache URLCache propre à Orvian, dimensionné pour que la revalidation
+    ///   ETag/304 reste efficace — le cache partagé système, quelques Mo
+    ///   partagés avec tout le téléphone, évince les réponses de listes
+    ///   paginées et force leur re-téléchargement complet au retour dans un
+    ///   dossier déjà consulté ;
+    /// - `httpMaximumConnectionsPerHost` aligné sur le throttler de
+    ///   miniatures (9 requêtes simultanées) : à 6 connexions par défaut,
+    ///   3 d'entre elles patientaient dans une file TCP.
+    /// Les uploads ne passent PAS par cette session (sessions dédiées créées
+    /// à la volée) ; les miniatures non plus (`reloadIgnoringLocalCacheData`
+    /// + cache disque propre à `ThumbnailProvider`).
+    init(session: URLSession = URLSession(configuration: APIClient.apiConfiguration)) {
         self.session = session
     }
+
+    private static let apiConfiguration: URLSessionConfiguration = {
+        let configuration = URLSessionConfiguration.default
+        configuration.urlCache = URLCache(
+            memoryCapacity: 20 * 1024 * 1024,
+            diskCapacity: 150 * 1024 * 1024,
+            diskPath: "api-url-cache"
+        )
+        configuration.httpMaximumConnectionsPerHost = 8
+        return configuration
+    }()
 
     // MARK: - Requêtes
 
