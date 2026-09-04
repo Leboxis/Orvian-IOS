@@ -196,7 +196,6 @@ struct ApplyTagsSheet: View {
             do {
                 if item.isAdd {
                     try await service.addCategory(driveId: driveId, fileId: item.file.id, categoryId: item.categoryId)
-                    TagUsageStore.markUsed(driveId: driveId, categoryId: item.categoryId)
                     return .success(TagChange(file: item.file, categoryId: item.categoryId, isAdd: true))
                 } else {
                     try await service.removeCategory(driveId: driveId, fileId: item.file.id, categoryId: item.categoryId)

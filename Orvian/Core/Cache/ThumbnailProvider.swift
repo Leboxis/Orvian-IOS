@@ -3,7 +3,7 @@ import UIKit
 /// Pipeline de miniatures : mémoire → disque → réseau avec concurrence bornée.
 ///
 /// - dédoublonne les requêtes en vol (une seule par fichier) ;
-/// - régule la concurrence réseau (max 5 téléchargements simultanés sans bloquer de thread) ;
+/// - régule la concurrence réseau (max 9 téléchargements simultanés sans bloquer de thread) ;
 /// - priorise les cellules visibles sur le préchargement ;
 /// - purge les requêtes de préchargement obsolètes lors d'un défilement rapide ;
 /// - ne mémorise pas une absence immédiate (un 404 ou une réponse vide peut
@@ -24,7 +24,7 @@ actor ThumbnailProvider {
 
     private let disk: DiskImageCache
     private let service: KDriveService
-    private let throttler = AsyncThrottler(maxConcurrent: 5)
+    private let throttler = AsyncThrottler(maxConcurrent: 9)
     private var inFlight: [Key: Task<UIImage?, Never>] = [:]
 
     private var pendingPrefetchKeys: [Key] = []
@@ -234,6 +234,21 @@ actor ThumbnailProvider {
         }
     }
 
+    /// Décodage et enregistrement disque exécutés hors de l'executor de
+    /// l'actor (`nonisolated` async = global concurrent executor) : pendant
+    /// un défilement rapide, chaque décodage JPEG et chaque écriture fichier
+    /// ne sérialisent plus les autres chargements derrière eux.
+    private nonisolated func decodeAndStore(_ data: Data, key: Key) async -> UIImage? {
+        guard !data.isEmpty else { return nil }
+        // Vérifier le contenu avant de le placer dans le cache. Une page
+        // d'erreur renvoyée à tort en 2xx ne doit jamais devenir une
+        // absence de miniature persistante.
+        guard let image = UIImage.decode(data) else { return nil }
+        // Les données validées sont conservées sans ré-encodage CPU.
+        disk.store(data: data, driveId: key.driveId, fileId: key.fileId)
+        return image
+    }
+
     private func fetch(key: Key, isTrashed: Bool) async -> UIImage? {
         guard !Task.isCancelled else { return nil }
         do {
@@ -242,18 +257,7 @@ actor ThumbnailProvider {
                 return try await service.thumbnailData(driveId: key.driveId, fileId: key.fileId, isTrashed: isTrashed)
             }
             guard !Task.isCancelled else { return nil }
-            guard !data.isEmpty else {
-                return nil
-            }
-            // Vérifier le contenu avant de le placer dans le cache. Une page
-            // d'erreur renvoyée à tort en 2xx ne doit jamais devenir une
-            // absence de miniature persistante.
-            guard let image = UIImage.decode(data) else {
-                return nil
-            }
-            // Les données validées sont conservées sans ré-encodage CPU.
-            disk.store(data: data, driveId: key.driveId, fileId: key.fileId)
-            return image
+            return await decodeAndStore(data, key: key)
         } catch is CancellationError {
             return nil
         } catch {

@@ -32,6 +32,12 @@ struct TagsView: View {
     @State private var tagToDelete: Category?
     @State private var showDeleteConfirm = false
 
+    /// Mode réordonnancement : bouton crayon, flèches haut/bas par tag,
+    /// ordre mémorisé par drive via `TagOrderStore`.
+    @State private var isReordering = false
+    /// Ordre personnalisé (IDs) chargé depuis `TagOrderStore` ; nil → ordre du serveur.
+    @State private var customOrder: [Int]?
+
     private let service = KDriveService()
 
     var body: some View {
@@ -47,6 +53,13 @@ struct TagsView: View {
                             Image(systemName: layout == .grid ? "list.bullet" : "square.grid.2x2")
                         }
                         .accessibilityLabel(layout == .grid ? "Afficher en liste" : "Afficher en grille")
+
+                        Button {
+                            isReordering.toggle()
+                        } label: {
+                            Image(systemName: "pencil")
+                        }
+                        .accessibilityLabel(isReordering ? "Terminer le réarrangement" : "Réarranger les tags")
 
                         Button {
                             showCreateSheet = true
@@ -153,21 +166,17 @@ struct TagsView: View {
             .font(.system(size: 10, weight: .medium))
     }
 
-    /// Catégories triées de la plus récemment utilisée à la plus ancienne ;
-    /// celles jamais utilisées arrivent en fin, par ordre alphabétique.
+    /// Ordre d'affichage : ordre personnalisé si l'utilisateur l'a défini
+    /// (bouton crayon), sinon l'ordre renvoyé par le serveur. Les tags créés
+    /// après un réarrangement sont ajoutés à la fin.
     private var orderedCategories: [Category] {
-        categories.sorted { lhs, rhs in
-            switch (TagUsageStore.lastUsed(driveId: driveId, categoryId: lhs.id),
-                    TagUsageStore.lastUsed(driveId: driveId, categoryId: rhs.id)) {
-            case let (lhsDate?, rhsDate?):
-                return lhsDate > rhsDate
-            case (nil, _?):
-                return false
-            case (_?, nil):
-                return true
-            case (nil, nil):
-                return lhs.name.localizedCaseInsensitiveCompare(rhs.name) == .orderedAscending
-            }
+        guard let customOrder, !customOrder.isEmpty else { return categories }
+        let rank = Dictionary(customOrder.enumerated().map { ($1, $0) }, uniquingKeysWith: { first, _ in first })
+        return categories.sorted { lhs, rhs in
+            let l = rank[lhs.id] ?? Int.max
+            let r = rank[rhs.id] ?? Int.max
+            if l != r { return l < r }
+            return lhs.name.localizedCaseInsensitiveCompare(rhs.name) == .orderedAscending
         }
     }
 
@@ -175,14 +184,18 @@ struct TagsView: View {
         ScrollView {
             LazyVGrid(columns: gridColumns, spacing: DS.gridSpacing) {
                 ForEach(orderedCategories) { category in
-                    Button {
-                        open(category)
-                    } label: {
-                        TagGridCard(category: category)
-                    }
-                    .buttonStyle(.plain)
-                    .contextMenu {
-                        tagContextMenu(for: category)
+                    if isReordering {
+                        reorderCell(for: category)
+                    } else {
+                        Button {
+                            open(category)
+                        } label: {
+                            TagGridCard(category: category)
+                        }
+                        .buttonStyle(.plain)
+                        .contextMenu {
+                            tagContextMenu(for: category)
+                        }
                     }
                 }
             }
@@ -204,31 +217,35 @@ struct TagsView: View {
         ScrollView {
             LazyVStack(spacing: 10) {
                 ForEach(orderedCategories) { category in
-                    Button {
-                        open(category)
-                    } label: {
-                        CategoryRow(category: category)
-                    }
-                    .buttonStyle(.plain)
-                    .contextMenu {
-                        tagContextMenu(for: category)
-                    }
-                    .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-                        Button(role: .destructive) {
-                            tagToDelete = category
-                            showDeleteConfirm = true
-                        } label: {
-                            Label("Supprimer", systemImage: "trash")
-                        }
-
+                    if isReordering {
+                        reorderCell(for: category)
+                    } else {
                         Button {
-                            tagToRename = category
-                            renameText = category.name
-                            showRenameAlert = true
+                            open(category)
                         } label: {
-                            Label("Renommer", systemImage: "pencil")
+                            CategoryRow(category: category)
                         }
-                        .tint(.orange)
+                        .buttonStyle(.plain)
+                        .contextMenu {
+                            tagContextMenu(for: category)
+                        }
+                        .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                            Button(role: .destructive) {
+                                tagToDelete = category
+                                showDeleteConfirm = true
+                            } label: {
+                                Label("Supprimer", systemImage: "trash")
+                            }
+
+                            Button {
+                                tagToRename = category
+                                renameText = category.name
+                                showRenameAlert = true
+                            } label: {
+                                Label("Renommer", systemImage: "pencil")
+                            }
+                            .tint(.orange)
+                        }
                     }
                 }
             }
@@ -240,6 +257,73 @@ struct TagsView: View {
         .refreshable {
             await load(force: true)
         }
+    }
+
+    /// Cellule du mode réarrangement : carte sans navigation, flèches
+    /// haut/bas pour déplacer le tag, bordure pour signaler le mode actif.
+    /// Reprend la présentation du mode courant (grille ou liste).
+    @ViewBuilder
+    private func reorderCell(for category: Category) -> some View {
+        if layout == .grid {
+            TagGridCard(category: category)
+                .overlay {
+                    RoundedRectangle(cornerRadius: 16, style: .continuous)
+                        .strokeBorder(Color.accentColor.opacity(0.6), lineWidth: 1.5)
+                }
+                .overlay(alignment: .topTrailing) {
+                    HStack(spacing: 6) {
+                        reorderButton(systemName: "arrow.up", accessibilityLabel: "Monter \(category.name)") {
+                            move(category, offset: -1)
+                        }
+                        reorderButton(systemName: "arrow.down", accessibilityLabel: "Descendre \(category.name)") {
+                            move(category, offset: 1)
+                        }
+                    }
+                    .padding(6)
+                }
+        } else {
+            CategoryRow(category: category)
+                .overlay {
+                    RoundedRectangle(cornerRadius: 16, style: .continuous)
+                        .strokeBorder(Color.accentColor.opacity(0.6), lineWidth: 1.5)
+                }
+                .overlay(alignment: .trailing) {
+                    HStack(spacing: 10) {
+                        reorderButton(systemName: "arrow.up", accessibilityLabel: "Monter \(category.name)") {
+                            move(category, offset: -1)
+                        }
+                        reorderButton(systemName: "arrow.down", accessibilityLabel: "Descendre \(category.name)") {
+                            move(category, offset: 1)
+                        }
+                    }
+                    .padding(.trailing, 38)
+                }
+        }
+    }
+
+    private func reorderButton(systemName: String, accessibilityLabel: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: systemName)
+                .font(.system(size: 10, weight: .bold))
+                .foregroundStyle(.white)
+                .frame(width: 22, height: 22)
+                .background(.black.opacity(0.55), in: Circle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(accessibilityLabel)
+    }
+
+    /// Déplace un tag de `offset` positions (-1 = vers le haut) dans l'ordre
+    /// affiché, puis persiste le nouvel ordre complet.
+    private func move(_ category: Category, offset: Int) {
+        var ordered = orderedCategories
+        guard let index = ordered.firstIndex(where: { $0.id == category.id }) else { return }
+        let target = index + offset
+        guard ordered.indices.contains(target) else { return }
+        ordered.swapAt(index, target)
+        let ids = ordered.map(\.id)
+        customOrder = ids
+        TagOrderStore.save(ids, driveId: driveId)
     }
 
     @ViewBuilder
@@ -274,7 +358,6 @@ struct TagsView: View {
     }
 
     private func open(_ category: Category) {
-        TagUsageStore.markUsed(driveId: driveId, categoryId: category.id)
         path.append(category)
         trail.append(category.name)
     }
@@ -286,6 +369,9 @@ struct TagsView: View {
 
     private func loadIfNeeded() async {
         guard categories.isEmpty, !isLoading else { return }
+        if customOrder == nil {
+            customOrder = TagOrderStore.order(for: driveId)
+        }
         // Bibliothèque partagée déjà chargée cette session (grilles,
         // éditeur de tags, visite précédente) : affichage immédiat sans
         // spinner ni requête. Les mutations locales (création, renommage,

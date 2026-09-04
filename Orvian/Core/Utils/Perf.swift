@@ -109,6 +109,17 @@ final class Perf: ObservableObject {
 /// s'exécute dans le contexte d'isolation de l'appelant (l'actor
 /// `APIClient`) et renvoie la valeur, le code HTTP et les octets reçus.
 enum PerfTimer {
+    /// Réglage « Réglages → Diagnostic → Suivi des requêtes réseau ».
+    /// Lu directement (dictionnaire en mémoire, aucun saut MainActor) :
+    /// une lecture par requête reste négligeable. Absent = activé, pour
+    /// conserver le comportement des versions antérieures.
+    private static let isEnabledKey = "networkPerfEnabled"
+    /// Clé partagée avec Réglages (`@AppStorage`).
+    static let settingsKey = isEnabledKey
+    static var isEnabled: Bool {
+        UserDefaults.standard.object(forKey: isEnabledKey) as? Bool ?? true
+    }
+
     /// Signposts System Trace (visibles dans Instruments sur un Mac),
     /// isolés du `@MainActor` de `Perf` : l'actor les lit directement.
     private static let signposter = OSSignposter(
@@ -121,6 +132,9 @@ enum PerfTimer {
         path: String,
         operation: () async throws -> (T, status: Int, bytes: Int, fromCache: Bool)
     ) async throws -> T {
+        // Suivi désactivé : exécution directe — ni signpost, ni journal,
+        // ni saut sur le MainActor. Aucune mesure n'est collectée.
+        guard isEnabled else { return try await operation().0 }
         let signposter = signposter
         let state = signposter.beginInterval("request", id: signposter.makeSignpostID())
         let start = CFAbsoluteTimeGetCurrent()

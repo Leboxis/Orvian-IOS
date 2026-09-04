@@ -20,6 +20,7 @@ struct SettingsView: View {
     @AppStorage("thumbnailCacheLimitMB") private var thumbnailCacheLimitMB = 250
     @AppStorage("hapticFeedbackEnabled") private var hapticFeedbackEnabled = true
     @AppStorage("defaultFolderColor") private var defaultFolderColor = "#4285F5"
+    @AppStorage(PerfTimer.settingsKey) private var networkPerfEnabled = true
 
     @State private var isLockCodeEnabled = AppLockStore.isConfigured
     @State private var showActivateCode = false
@@ -186,6 +187,19 @@ struct SettingsView: View {
                             icon: "hand.tap.fill",
                             tint: .blue,
                             isOn: $hapticFeedbackEnabled
+                        )
+                    }
+
+                    settingsCard(
+                        title: "Diagnostic",
+                        message: "Journal des durées et codes HTTP, consultable dans Profil → Réseau."
+                    ) {
+                        settingsToggle(
+                            "Suivi des requêtes réseau",
+                            detail: "Désactivé, aucune mesure n’est collectée ni conservée.",
+                            icon: "antenna.radiowaves.left.and.right",
+                            tint: .indigo,
+                            isOn: $networkPerfEnabled
                         )
                     }
 

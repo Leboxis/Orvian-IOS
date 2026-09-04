@@ -119,21 +119,17 @@ struct TagsEditorSheet: View {
         .buttonStyle(.plain)
     }
 
-    /// Même ordre que l'onglet Tag : les catégories récemment utilisées sont
-    /// placées en premier, puis les autres par ordre alphabétique.
+    /// Même ordre que l'onglet Tag : ordre personnalisé s'il a été défini
+    /// (bouton crayon de l'onglet), sinon l'ordre du serveur. Les tags
+    /// inconnus de cet ordre sont ajoutés à la fin.
     private var orderedCategories: [Category] {
-        categories.sorted { lhs, rhs in
-            switch (TagUsageStore.lastUsed(driveId: driveId, categoryId: lhs.id),
-                    TagUsageStore.lastUsed(driveId: driveId, categoryId: rhs.id)) {
-            case let (lhsDate?, rhsDate?):
-                return lhsDate > rhsDate
-            case (nil, _?):
-                return false
-            case (_?, nil):
-                return true
-            case (nil, nil):
-                return lhs.name.localizedCaseInsensitiveCompare(rhs.name) == .orderedAscending
-            }
+        guard let order = TagOrderStore.order(for: driveId) else { return categories }
+        let rank = Dictionary(order.enumerated().map { ($1, $0) }, uniquingKeysWith: { first, _ in first })
+        return categories.sorted { lhs, rhs in
+            let l = rank[lhs.id] ?? Int.max
+            let r = rank[rhs.id] ?? Int.max
+            if l != r { return l < r }
+            return lhs.name.localizedCaseInsensitiveCompare(rhs.name) == .orderedAscending
         }
     }
 
@@ -174,7 +170,6 @@ struct TagsEditorSheet: View {
         do {
             if isApplying {
                 try await service.addCategory(driveId: driveId, fileId: file.id, categoryId: category.id)
-                TagUsageStore.markUsed(driveId: driveId, categoryId: category.id)
             } else {
                 try await service.removeCategory(driveId: driveId, fileId: file.id, categoryId: category.id)
             }

@@ -8,9 +8,13 @@ struct PerfView: View {
 
     var body: some View {
         List {
-            summarySection
-            statsSection
-            entriesSection
+            if PerfTimer.isEnabled {
+                summarySection
+                statsSection
+                entriesSection
+            } else {
+                disabledSection
+            }
         }
         .navigationTitle("Mesures réseau")
         .navigationBarTitleDisplayMode(.inline)
@@ -20,6 +24,21 @@ struct PerfView: View {
                     perf.reset()
                 }
             }
+        }
+    }
+
+    private var disabledSection: some View {
+        Section {
+            VStack(alignment: .leading, spacing: 8) {
+                Label("Suivi désactivé", systemImage: "antenna.radiowaves.left.and.right.slash")
+                    .font(.body.weight(.medium))
+                Text("Le suivi des requêtes est désactivé dans Réglages → Diagnostic. Aucune nouvelle mesure n’est collectée ; les données ci-dessous datent d’avant la désactivation.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
+            .padding(.vertical, 6)
+        } footer: {
+            Text("Activez « Suivi des requêtes réseau » dans Réglages pour reprendre la mesure.")
         }
     }
 
