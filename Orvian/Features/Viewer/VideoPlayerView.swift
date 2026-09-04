@@ -63,6 +63,10 @@ struct VideoPlayerView: View {
     /// Vrai pendant qu'AVPlayer attend des données (image figée ≠ pause) :
     /// l'état `isPlaying` est conservé et un indicateur s'affiche.
     @State private var isBuffering = false
+    /// Watchdog anti-stall : un `.waiting` qui dépasse ~20 s (lien signé
+    /// expiré en cours de lecture, réseau coupé) ne produit jamais `.failed`,
+    /// il faut donc le détecter soi-même et relancer.
+    @State private var stallWatchdogTask: Task<Void, Never>?
     /// État de lecture mémorisé au début d'un scrub : le seek relance la
     /// lecture à l'issue s'il était en cours, au lieu de laisser la vidéo en
     /// pause après le déplacement du curseur.
@@ -763,7 +767,7 @@ struct VideoPlayerView: View {
         startPlayback(asset: asset)
     }
 
-    private func startPlayback(asset: AVURLAsset) {
+    private func startPlayback(asset: AVURLAsset, at resumePosition: Double? = nil) {
         // Dernier verrou anti-double-lecture : si un lecteur existe déjà
         // (chargement concurrent gagnant la course), ne rien créer du tout.
         guard player == nil else { return }
@@ -795,12 +799,30 @@ struct VideoPlayerView: View {
         AudioSessionKeeper.shared.retain()
         player = newPlayer
         addObservers(to: newPlayer)
-        currentTime = 0
-        scrubValue = 0
-        // Pas de seek : la lecture démarre déjà à zéro, un seek à tolérance
-        // nulle forcerait une préparation précise avant la première frame.
-        newPlayer.playImmediately(atRate: playbackRate)
-        isPlaying = true
+        if let resumePosition, resumePosition.isFinite, resumePosition > 0.1 {
+            // Reprise après stall : retour à la position du gel. Tolérance
+            // large : l'image exacte importe peu, la vitesse de reprise si.
+            currentTime = resumePosition
+            scrubValue = resumePosition
+            newPlayer.seek(
+                to: CMTime(seconds: resumePosition, preferredTimescale: 600),
+                toleranceBefore: CMTime(seconds: 1.5, preferredTimescale: 600),
+                toleranceAfter: CMTime(seconds: 1.5, preferredTimescale: 600)
+            ) { [weak newPlayer] _ in
+                Task { @MainActor in
+                    guard let newPlayer, self.player === newPlayer, !isDisappeared else { return }
+                    newPlayer.playImmediately(atRate: playbackRate)
+                    isPlaying = true
+                }
+            }
+        } else {
+            currentTime = 0
+            scrubValue = 0
+            // Pas de seek : la lecture démarre déjà à zéro, un seek à tolérance
+            // nulle forcerait une préparation précise avant la première frame.
+            newPlayer.playImmediately(atRate: playbackRate)
+            isPlaying = true
+        }
 
         itemStatusObserver = newPlayer.currentItem?.observe(\.status, options: [.new]) { item, _ in
             // Lecture prête : le quota de tentatives repart de zéro pour
@@ -812,8 +834,7 @@ struct VideoPlayerView: View {
                     playbackRetryCount = 0
                     hasFailedSetup = false
                 }
-            }
-            guard item.status == .failed else { return }
+            }            guard item.status == .failed else { return }
             Task { @MainActor in
                 await self.retryPlaybackAfterProcessingDelay(
                     failedItem: item,
@@ -875,14 +896,13 @@ struct VideoPlayerView: View {
             if !isScrubbing, !isSeeking, showControls, time.seconds.isFinite {
                 currentTime = time.seconds
             }
-            // Plage bufferisée : segment contenant la position courante, sinon
-            // le premier intervalle connu. Sert au remplissage grisée du
-            // scrubber ; borné à la durée quand elle est connue.
+            // Plage bufferisée : fin la plus avancée des segments chargés —
+            // après un seek en avant, le segment contenant la position peut
+            // ne pas exister encore ; prendre le premier intervalle afficherait
+            // un buffer résiduel derrière le curseur. Borné à la durée.
             let ranges = player.currentItem?.loadedTimeRanges.map(\.timeRangeValue) ?? []
             if !ranges.isEmpty {
-                let ct = player.currentTime()
-                let containing = ranges.first { $0.start <= ct && ct <= $0.end }
-                let rawEnd = (containing ?? ranges[0]).end.seconds
+                let rawEnd = ranges.map(\.end.seconds).max() ?? 0
                 let clampedEnd = duration.isFinite && duration > 0 ? min(rawEnd, duration) : rawEnd
                 if abs(bufferedEnd - clampedEnd) > 0.05 {
                     bufferedEnd = max(0, clampedEnd)
@@ -936,11 +956,16 @@ struct VideoPlayerView: View {
                 case .playing:
                     isBuffering = false
                     isPlaying = true
+                    cancelStallWatchdog()
                 case .waitingToPlayAtSpecifiedRate:
                     isBuffering = true
+                    // Un tampon qui ne se remplit pas ne lèvera jamais
+                    // `.failed` : seul un chronomètre détecte ce gel.
+                    startStallWatchdog(player: observedPlayer)
                 case .paused:
                     isBuffering = false
                     isPlaying = false
+                    cancelStallWatchdog()
                 @unknown default:
                     break
                 }
@@ -948,8 +973,67 @@ struct VideoPlayerView: View {
         }
     }
 
-    private func teardown() {
+    // MARK: - Watchdog anti-stall
+
+    /// Attente prolongée (> 20 s, image figée) : le lien signé a pu expirer
+    /// ou le réseau rester coupé. On relance avec une URL fraîche, comme un
+    /// échec explicite — au lieu d'un spinner éternel.
+    private func startStallWatchdog(player: AVPlayer) {
+        cancelStallWatchdog()
+        let stalledItem = player.currentItem
+        stallWatchdogTask = Task {
+            try? await Task.sleep(for: .seconds(20))
+            guard !Task.isCancelled else { return }
+            // Toujours en attente sur le même item ? (un seek ou une pause
+            // aurait changé l'état et annulé cette tâche)
+            guard !isDisappeared, isActive,
+                  player.timeControlStatus == .waitingToPlayAtSpecifiedRate,
+                  player.currentItem === stalledItem
+            else { return }
+            // La position de gel est celle du curseur : le temps n'avance
+            // plus pendant l'attente. La reprise y reviendra.
+            let resumePosition = player.currentTime().seconds
+            // Quota partagé avec le retry d'échec : sans lui, un réseau mort
+            // ferait tourner la récupération en boucle toutes les 20 s. Le
+            // compteur est remis à zéro dès que la lecture repart vraiment.
+            guard playbackRetryCount < 2 else {
+                isPlaying = false
+                isBuffering = false
+                teardown()
+                hasFailedSetup = true
+                errorMessage = "Lecture interrompue trop longtemps. Vérifiez votre connexion puis réessayez."
+                return
+            }
+            playbackRetryCount += 1
+            isPlaying = false
+            isBuffering = false
+            // Ne pas s'auto-annuler : ce teardown est appelé depuis la tâche
+            // du watchdog elle-même.
+            teardown(cancelsStallWatchdog: false)
+            VideoAssetCache.shared.invalidate(driveId: driveId, fileId: file.id)
+            guard let asset = await VideoAssetCache.shared.asset(driveId: driveId, fileId: file.id)
+            else {
+                hasFailedSetup = true
+                errorMessage = "Lecture interrompue trop longtemps. Vérifiez votre connexion puis réessayez."
+                return
+            }
+            startPlayback(asset: asset, at: resumePosition.isFinite ? resumePosition : nil)
+        }
+    }
+
+    private func cancelStallWatchdog() {
+        stallWatchdogTask?.cancel()
+        stallWatchdogTask = nil
+    }
+
+    /// Détruit lecteur et observateurs. `cancelsStallWatchdog` est faux quand
+    /// le teardown est déclenché PAR le watchdog (récupération de stall) :
+    /// il ne doit pas tuer la tâche de récupération en cours.
+    private func teardown(cancelsStallWatchdog: Bool = true) {
         cancelPendingSeek()
+        if cancelsStallWatchdog {
+            cancelStallWatchdog()
+        }
         isScrubbing = false
         wasPlayingBeforeScrub = false
         bufferedEnd = 0
