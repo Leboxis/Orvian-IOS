@@ -1,4 +1,5 @@
 import SwiftUI
+import UniformTypeIdentifiers
 
 /// Onglet « Tag » : catégories kDrive du drive, puis fichiers de la
 /// catégorie sélectionnée (grille avec navigation dans les dossiers).
@@ -32,9 +33,11 @@ struct TagsView: View {
     @State private var tagToDelete: Category?
     @State private var showDeleteConfirm = false
 
-    /// Mode réordonnancement : bouton crayon, flèches haut/bas par tag,
+    /// Mode réordonnancement : bouton crayon, glisser-déposer des cartes,
     /// ordre mémorisé par drive via `TagOrderStore`.
     @State private var isReordering = false
+    /// Tag actuellement saisi pendant le glisser-déposer.
+    @State private var draggedCategory: Category?
     /// Ordre personnalisé (IDs) chargé depuis `TagOrderStore` ; nil → ordre du serveur.
     @State private var customOrder: [Int]?
 
@@ -208,7 +211,6 @@ struct TagsView: View {
             await load(force: true)
         }
     }
-
     private var gridColumns: [GridItem] {
         Array(repeating: GridItem(.flexible(), spacing: DS.gridSpacing), count: max(2, tagGridColumns))
     }
@@ -259,71 +261,51 @@ struct TagsView: View {
         }
     }
 
-    /// Cellule du mode réarrangement : carte sans navigation, flèches
-    /// haut/bas pour déplacer le tag, bordure pour signaler le mode actif.
-    /// Reprend la présentation du mode courant (grille ou liste).
+    /// Cellule du mode réarrangement : même présentation que le mode courant
+    /// (grille ou liste), bordure pour signaler le mode actif, et
+    /// glisser-déposer natif (`onDrag`/`onDrop`) pour déplacer le tag.
     @ViewBuilder
     private func reorderCell(for category: Category) -> some View {
-        if layout == .grid {
-            TagGridCard(category: category)
-                .overlay {
-                    RoundedRectangle(cornerRadius: 16, style: .continuous)
-                        .strokeBorder(Color.accentColor.opacity(0.6), lineWidth: 1.5)
-                }
-                .overlay(alignment: .topTrailing) {
-                    HStack(spacing: 6) {
-                        reorderButton(systemName: "arrow.up", accessibilityLabel: "Monter \(category.name)") {
-                            move(category, offset: -1)
-                        }
-                        reorderButton(systemName: "arrow.down", accessibilityLabel: "Descendre \(category.name)") {
-                            move(category, offset: 1)
-                        }
-                    }
-                    .padding(6)
-                }
-        } else {
-            CategoryRow(category: category)
-                .overlay {
-                    RoundedRectangle(cornerRadius: 16, style: .continuous)
-                        .strokeBorder(Color.accentColor.opacity(0.6), lineWidth: 1.5)
-                }
-                .overlay(alignment: .trailing) {
-                    HStack(spacing: 10) {
-                        reorderButton(systemName: "arrow.up", accessibilityLabel: "Monter \(category.name)") {
-                            move(category, offset: -1)
-                        }
-                        reorderButton(systemName: "arrow.down", accessibilityLabel: "Descendre \(category.name)") {
-                            move(category, offset: 1)
-                        }
-                    }
-                    .padding(.trailing, 38)
-                }
+        Group {
+            if layout == .grid {
+                TagGridCard(category: category)
+            } else {
+                CategoryRow(category: category)
+            }
         }
+        .overlay {
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .strokeBorder(Color.accentColor.opacity(0.6), lineWidth: 1.5)
+        }
+        .opacity(draggedCategory?.id == category.id ? 0.55 : 1)
+        .onDrag {
+            draggedCategory = category
+            return NSItemProvider(object: category.name as NSString)
+        }
+        .onDrop(of: [UTType.plainText], delegate: TagReorderDropDelegate(
+            item: category,
+            dragged: $draggedCategory,
+            move: moveCategory,
+            finish: { draggedCategory = nil }
+        ))
     }
 
-    private func reorderButton(systemName: String, accessibilityLabel: String, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            Image(systemName: systemName)
-                .font(.system(size: 10, weight: .bold))
-                .foregroundStyle(.white)
-                .frame(width: 22, height: 22)
-                .background(.black.opacity(0.55), in: Circle())
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel(accessibilityLabel)
-    }
-
-    /// Déplace un tag de `offset` positions (-1 = vers le haut) dans l'ordre
-    /// affiché, puis persiste le nouvel ordre complet.
-    private func move(_ category: Category, offset: Int) {
+    /// Déplace `source` à la position de `target` dans l'ordre affiché, avec
+    /// animation, puis persiste le nouvel ordre complet.
+    private func moveCategory(_ source: Category, to target: Category) {
         var ordered = orderedCategories
-        guard let index = ordered.firstIndex(where: { $0.id == category.id }) else { return }
-        let target = index + offset
-        guard ordered.indices.contains(target) else { return }
-        ordered.swapAt(index, target)
-        let ids = ordered.map(\.id)
-        customOrder = ids
-        TagOrderStore.save(ids, driveId: driveId)
+        guard let fromIndex = ordered.firstIndex(where: { $0.id == source.id }),
+              let toIndex = ordered.firstIndex(where: { $0.id == target.id }),
+              fromIndex != toIndex
+        else { return }
+        withAnimation(.snappy(duration: 0.25)) {
+            ordered.move(
+                fromOffsets: IndexSet(integer: fromIndex),
+                toOffset: toIndex > fromIndex ? toIndex + 1 : toIndex
+            )
+            customOrder = ordered.map(\.id)
+        }
+        TagOrderStore.save(ordered.map(\.id), driveId: driveId)
     }
 
     @ViewBuilder
@@ -707,5 +689,33 @@ private struct CreateTagSheet: View {
         } catch {
             errorMessage = (error as? APIError)?.errorDescription ?? error.localizedDescription
         }
+    }
+}
+
+/// Dépose d'une carte de tag pendant le réarrangement : dès que la carte
+/// saisie survole une autre carte, l'ordre est échangé (glissement continu,
+/// sans bouton). Le relâchement hors cible ne change rien.
+private struct TagReorderDropDelegate: DropDelegate {
+    let item: Category
+    @Binding var dragged: Category?
+    let move: (Category, Category) -> Void
+    let finish: () -> Void
+
+    func dropEntered(info: DropInfo) {
+        guard let dragged, dragged.id != item.id else { return }
+        move(dragged, to: item)
+    }
+
+    func dropUpdated(info: DropInfo) -> DropProposal? {
+        DropProposal(operation: .move)
+    }
+
+    func performDrop(info: DropInfo) -> Bool {
+        finish()
+        return true
+    }
+
+    func validateDrop(info: DropInfo) -> Bool {
+        dragged != nil
     }
 }
