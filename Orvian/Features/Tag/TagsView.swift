@@ -285,14 +285,14 @@ struct TagsView: View {
         .onDrop(of: [UTType.plainText], delegate: TagReorderDropDelegate(
             item: category,
             dragged: $draggedCategory,
-            move: moveCategory,
+            move: reorderCategory,
             finish: { draggedCategory = nil }
         ))
     }
 
     /// Déplace `source` à la position de `target` dans l'ordre affiché, avec
     /// animation, puis persiste le nouvel ordre complet.
-    private func moveCategory(_ source: Category, to target: Category) {
+    private func reorderCategory(_ source: Category, to target: Category) {
         var ordered = orderedCategories
         guard let fromIndex = ordered.firstIndex(where: { $0.id == source.id }),
               let toIndex = ordered.firstIndex(where: { $0.id == target.id }),
@@ -698,12 +698,12 @@ private struct CreateTagSheet: View {
 private struct TagReorderDropDelegate: DropDelegate {
     let item: Category
     @Binding var dragged: Category?
-    let move: (Category, Category) -> Void
+    let move: (_ source: Category, _ target: Category) -> Void
     let finish: () -> Void
 
     func dropEntered(info: DropInfo) {
         guard let dragged, dragged.id != item.id else { return }
-        move(dragged, to: item)
+        move(dragged, item)
     }
 
     func dropUpdated(info: DropInfo) -> DropProposal? {
