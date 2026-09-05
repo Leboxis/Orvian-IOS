@@ -60,6 +60,8 @@ final class SessionStore {
     /// Connexion avec un token collé par l'utilisateur.
     func signIn(token: String) async throws {
         signedOutMessage = nil
+        DirectoryListStore.shared.clear()
+        CategoryLibrary.shared.clear()
         TokenStore.save(token)
         phase = .bootstrapping
         do {
@@ -91,6 +93,8 @@ final class SessionStore {
         // Annuler avant d'effacer le token afin que les URLSession actives
         // cessent d'envoyer des octets avec les anciennes autorisations.
         UploadManager.shared.cancelAllAndClear()
+        DirectoryListStore.shared.clear()
+        CategoryLibrary.shared.clear()
         TokenStore.clear()
         defaults.removeObject(forKey: Keys.accountId)
         defaults.removeObject(forKey: Keys.driveId)
@@ -138,3 +142,4 @@ final class SessionStore {
         }
     }
 }
+

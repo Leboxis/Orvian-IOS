@@ -13,7 +13,18 @@ final class CategoryLibrary {
     private var categoriesByDrive: [Int: [Int: Category]] = [:]
     private var refreshGenerationByDrive: [Int: Int] = [:]
 
+    private var loadingByDrive: [Int: Task<Void, Never>] = [:]
+    private var sessionGeneration = 0
+
     private init() {}
+
+    func clear() {
+        sessionGeneration &+= 1
+        loadingByDrive.values.forEach { $0.cancel() }
+        loadingByDrive.removeAll()
+        categoriesByDrive.removeAll()
+        refreshGenerationByDrive.removeAll()
+    }
 
     /// Index id → catégorie du drive, vide tant que le chargement n'a pas eu lieu.
     func categories(for driveId: Int) -> [Int: Category] {
@@ -34,16 +45,28 @@ final class CategoryLibrary {
     /// Charge les catégories d'un drive (une seule fois par session).
     func ensureLoaded(for driveId: Int) async {
         guard categoriesByDrive[driveId] == nil else { return }
-        _ = try? await refresh(for: driveId)
+        if let task = loadingByDrive[driveId] {
+            await task.value
+            return
+        }
+        let generation = sessionGeneration
+        let task = Task { _ = try? await self.refresh(for: driveId) }
+        loadingByDrive[driveId] = task
+        await task.value
+        if sessionGeneration == generation { loadingByDrive[driveId] = nil }
     }
 
     /// Revalide le cache apres une creation, un renommage ou une suppression.
     @discardableResult
     func refresh(for driveId: Int) async throws -> [Category] {
+        let session = sessionGeneration
+        let credential = TokenStore.credentialFingerprint()
         let generation = (refreshGenerationByDrive[driveId] ?? 0) + 1
         refreshGenerationByDrive[driveId] = generation
         let categories = try await KDriveService().categories(driveId: driveId)
-        guard refreshGenerationByDrive[driveId] == generation else {
+        guard !Task.isCancelled, sessionGeneration == session,
+              credential == TokenStore.credentialFingerprint(),
+              refreshGenerationByDrive[driveId] == generation else {
             return categoriesByDrive[driveId].map { Array($0.values) } ?? categories
         }
         categoriesByDrive[driveId] = Dictionary(uniqueKeysWithValues: categories.map { ($0.id, $0) })
@@ -62,3 +85,4 @@ final class CategoryLibrary {
         categoriesByDrive[driveId] = categories
     }
 }
+

@@ -63,6 +63,9 @@ jobs:
           path.write_text(updated, encoding="utf-8")
           PY
 
+      - name: Check favorites disk cache
+        run: python3 .github/scripts/check_favorites_cache.py
+
       - name: Install XcodeGen
         run: brew install xcodegen
 
@@ -130,3 +133,4 @@ jobs:
           tag_name: v${{ steps.version.outputs.value }}
           files: Orvian-${{ steps.version.outputs.value }}-unsigned.ipa
           generate_release_notes: true
+
