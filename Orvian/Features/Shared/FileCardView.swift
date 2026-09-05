@@ -43,7 +43,6 @@ struct FileCardView: View {
     /// Préférence globale : conserve le type comme repère lorsque le poids est masqué.
     @AppStorage("showFileSizes") private var showFileSizes = true
     @AppStorage("defaultFolderColor") private var defaultFolderColor = "#4285F5"
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var thumbnail: UIImage?
     @State private var thumbnailLoaded = false
 
@@ -94,7 +93,7 @@ struct FileCardView: View {
             .opacity(enabled ? 1 : 0.55)
             .contentShape(Rectangle())
         }
-        .buttonStyle(FileCardPressStyle())
+        .buttonStyle(.plain)
         .disabled(!enabled)
         .contextMenu {
             if !selectionMode {
@@ -256,9 +255,6 @@ struct FileCardView: View {
             .font(.system(size: 20, weight: .medium))
             .foregroundStyle(isSelected ? Color.accentColor : .white)
             .shadow(color: .black.opacity(isSelected ? 0 : 0.35), radius: 3, y: 1)
-            .contentTransition(.symbolEffect(.replace))
-            .symbolEffectsRemoved(reduceMotion)
-            .animation(reduceMotion ? nil : .easeInOut(duration: 0.16), value: isSelected)
             .padding(5)
     }
 
@@ -314,21 +310,6 @@ struct FileCardView: View {
         }
         guard !Task.isCancelled else { return }
         thumbnailLoaded = true
-    }
-}
-
-/// Retour d'appui local : ne modifie ni la grille ni ses gestes de défilement.
-private struct FileCardPressStyle: ButtonStyle {
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @Environment(\.isEnabled) private var isEnabled
-
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .scaleEffect(configuration.isPressed && isEnabled && !reduceMotion ? 0.98 : 1)
-            .animation(
-                reduceMotion ? nil : .easeOut(duration: 0.14),
-                value: configuration.isPressed
-            )
     }
 }
 
