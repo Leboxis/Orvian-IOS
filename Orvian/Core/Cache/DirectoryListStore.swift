@@ -2,7 +2,7 @@ import Foundation
 
 /// Instantané d'une liste déjà chargée : première(s) page(s), curseur de
 /// pagination, compteur du dossier et tri serveur utilisé.
-struct DirectoryListSnapshot {
+struct DirectoryListSnapshot: Codable {
     var items: [DriveFile]
     var cursor: String?
     var hasMore: Bool
@@ -22,8 +22,8 @@ struct DirectoryListSnapshot {
 /// en arrière-plan (ETag → 304 si rien n'a changé) et resynchronise
 /// l'entrée à chaque mutation locale (corbeille, déplacement, import…).
 ///
-/// Rien n'est écrit sur disque : au lancement, l'app repart du cache HTTP
-/// comme avant. Les sources de recherche ne sont pas mémorisées (espace
+/// Les favoris sont aussi conservés sur disque, isolés par autorisation.
+/// Leur restauration est toujours suivie d’une actualisation réseau. Les sources de recherche ne sont pas mémorisées (espace
 /// de clés trop vaste pour leur réutilisation).
 @MainActor
 final class DirectoryListStore {
@@ -44,18 +44,19 @@ final class DirectoryListStore {
     /// de tri relit une autre clé ; le retour au tri par défaut retrouve
     /// l'instantané d'origine. `nil` pour les sources non mémorisées.
     static func cacheKey(source: FileSource, driveId: Int, orderBy: [String], order: String) -> String? {
+        guard let credential = TokenStore.credentialFingerprint() else { return nil }
         let ordering = "\(orderBy.joined(separator: ","))|\(order)"
         switch source {
         case let .directory(directoryId):
-            return "\(driveId)|dir|\(directoryId)|\(ordering)"
+            return "\(credential)|\(driveId)|dir|\(directoryId)|\(ordering)"
         case let .favorites(limit):
-            return "\(driveId)|fav|\(limit)|\(ordering)"
+            return "\(credential)|\(driveId)|fav|\(limit)|\(ordering)"
         case let .recents(limit):
-            return "\(driveId)|rec|\(limit)|\(ordering)"
+            return "\(credential)|\(driveId)|rec|\(limit)|\(ordering)"
         case let .category(categoryId):
-            return "\(driveId)|cat|\(categoryId)|\(ordering)"
+            return "\(credential)|\(driveId)|cat|\(categoryId)|\(ordering)"
         case .trash:
-            return "\(driveId)|trash|\(ordering)"
+            return "\(credential)|\(driveId)|trash|\(ordering)"
         case .search:
             return nil
         }
@@ -84,7 +85,8 @@ final class DirectoryListStore {
         items: [DriveFile],
         cursor: String?,
         hasMore: Bool,
-        totalItemCount: Int?
+        totalItemCount: Int?,
+        fetchedAt: Date = Date()
     ) {
         guard let key = Self.cacheKey(source: source, driveId: driveId, orderBy: orderBy, order: order) else { return }
         entries[key] = DirectoryListSnapshot(
@@ -93,10 +95,27 @@ final class DirectoryListStore {
             hasMore: hasMore,
             totalItemCount: totalItemCount,
             orderBy: orderBy,
-            order: order
+            order: order,
+            fetchedAt: fetchedAt
         )
         dates[key] = Date()
         evictIfNeeded()
+        if case .favorites = source, let snapshot = entries[key] {
+            FavoritesDiskCache.shared.store(snapshot, key: key)
+        }
+    }
+
+    func diskSnapshot(source: FileSource, driveId: Int, orderBy: [String], order: String) async -> DirectoryListSnapshot? {
+        guard case .favorites = source,
+              let key = Self.cacheKey(source: source, driveId: driveId, orderBy: orderBy, order: order)
+        else { return nil }
+        return await FavoritesDiskCache.shared.snapshot(key: key)
+    }
+
+    func clear() {
+        entries.removeAll()
+        dates.removeAll()
+        FavoritesDiskCache.shared.clear()
     }
 
     private func evictIfNeeded() {
@@ -112,3 +131,4 @@ final class DirectoryListStore {
         }
     }
 }
+

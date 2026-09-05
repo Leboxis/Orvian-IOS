@@ -48,6 +48,8 @@ final class FileGridViewModel {
 
     private var cursor: String?
     private var loadedOnce = false
+    private var fetchedAt = Date.distantPast
+    private let credentialFingerprint = TokenStore.credentialFingerprint()
     private(set) var isReloading = false
     /// Invalide toute réponse appartenant à un rechargement ou une pagination
     /// antérieur. Un ancien tri ne peut ainsi jamais remplacer le plus récent.
@@ -85,12 +87,29 @@ final class FileGridViewModel {
     /// relancés à chaque bascule d'onglet.
     func loadIfNeeded() async {
         guard !loadedOnce, !isInitialLoading else { return }
-        if let snapshot = DirectoryListStore.shared.snapshot(
+        let restoreGeneration = dataGeneration
+        let memorySnapshot = DirectoryListStore.shared.snapshot(
             source: source,
             driveId: driveId,
             orderBy: orderBy,
             order: order
-        ) {
+        )
+        // Une lecture disque n'empêche pas SwiftUI de rendre l'écran.
+        // Réserver le chargement pendant l'attente évite deux restaurations.
+        isInitialLoading = true
+        let diskSnapshot: DirectoryListSnapshot?
+        if memorySnapshot == nil {
+            diskSnapshot = await DirectoryListStore.shared.diskSnapshot(
+                source: source, driveId: driveId, orderBy: orderBy, order: order
+            )
+        } else {
+            diskSnapshot = nil
+        }
+        guard dataGeneration == restoreGeneration else { return }
+        isInitialLoading = false
+        guard !Task.isCancelled,
+              credentialFingerprint == TokenStore.credentialFingerprint() else { return }
+        if let snapshot = memorySnapshot ?? diskSnapshot {
             // L'ordre des affectations importe : `items` en dernier déclenche
             // la resynchronisation du cache avec un état déjà complet.
             orderBy = snapshot.orderBy
@@ -98,13 +117,14 @@ final class FileGridViewModel {
             cursor = snapshot.cursor
             hasMore = snapshot.hasMore
             totalItemCount = snapshot.totalItemCount
+            fetchedAt = snapshot.fetchedAt
             loadedOnce = true
             items = snapshot.items
             // Revalidation silencieuse : les cartes restent affichées et
             // l'ETag renvoie 304 (quelques octets) si rien n'a changé.
             // Un instantané de moins de 60 s est jugé à jour : aucun appel.
-            if Date().timeIntervalSince(snapshot.fetchedAt) > Self.freshSnapshotInterval {
-                Task { await reload() }
+            if diskSnapshot != nil || Date().timeIntervalSince(snapshot.fetchedAt) > Self.freshSnapshotInterval {
+                await reload(forceNetwork: diskSnapshot != nil)
             }
             return
         }
@@ -122,6 +142,7 @@ final class FileGridViewModel {
     /// post-mutation) impose une lecture réseau sans cache HTTP. Sans lui,
     /// la revalidation ETag/304 sert la liste inchangée en quelques octets.
     func reload(sortedBy: FileFilters? = nil, forceNetwork: Bool = false) async {
+        guard credentialFingerprint == TokenStore.credentialFingerprint() else { return }
         if let sortedBy {
             // Un tri serveur (dates, type, poids) remplace l'ordre par défaut
             // ; les tris restants (durée, médias, orientation) sont locaux et
@@ -144,7 +165,14 @@ final class FileGridViewModel {
             }
         }
         do {
-            async let categoriesTask: Void = CategoryLibrary.shared.ensureLoaded(for: driveId)
+            // Les tags sont observables : leurs pastilles apparaîtront à la
+            // fin de cette tâche, sans retenir la publication des fichiers.
+            let categoryDriveId = driveId
+            let categoryCredential = credentialFingerprint
+            Task {
+                guard categoryCredential == TokenStore.credentialFingerprint() else { return }
+                await CategoryLibrary.shared.ensureLoaded(for: categoryDriveId)
+            }
             // Le compteur part en même temps que la page : la durée perçue
             // est le max des deux allers-retours au lieu de leur somme, et
             // le badge « N éléments » n'attend plus la fin de la liste.
@@ -158,18 +186,19 @@ final class FileGridViewModel {
                 forceNetwork: forceNetwork
             )
             let freshCount = await countTask
-            await categoriesTask
-            guard !Task.isCancelled, dataGeneration == requestGeneration else { return }
+            guard !Task.isCancelled, dataGeneration == requestGeneration,
+                  credentialFingerprint == TokenStore.credentialFingerprint() else { return }
             // Curseur et compteur d'abord, items en dernier : la sauvegarde
             // déclenchée par `didSet` capture toujours un état cohérent.
             cursor = page.cursor
             hasMore = page.hasMore ?? false
             totalItemCount = freshCount
+            fetchedAt = Date()
             loadedOnce = true
             items = filterItemsIfNeeded(page.data ?? [])
-            storeListSnapshot()
         } catch {
-            guard !Task.isCancelled, dataGeneration == requestGeneration else { return }
+            guard !Task.isCancelled, dataGeneration == requestGeneration,
+                  credentialFingerprint == TokenStore.credentialFingerprint() else { return }
             errorMessage = (error as? APIError)?.errorDescription ?? error.localizedDescription
         }
     }
@@ -207,7 +236,8 @@ final class FileGridViewModel {
                 orderBy: requestedOrderBy.isEmpty ? nil : requestedOrderBy,
                 order: requestedOrder
             )
-            guard !Task.isCancelled, dataGeneration == requestGeneration else { return }
+            guard !Task.isCancelled, dataGeneration == requestGeneration,
+                  credentialFingerprint == TokenStore.credentialFingerprint() else { return }
             let existing = Set(items.map(\.id))
             let filtered = filterItemsIfNeeded(page.data ?? [])
             let appended = filtered.filter { !existing.contains($0.id) }
@@ -218,7 +248,8 @@ final class FileGridViewModel {
             hasMore = page.hasMore ?? false
             items.append(contentsOf: appended)
         } catch {
-            guard !Task.isCancelled, dataGeneration == requestGeneration else { return }
+            guard !Task.isCancelled, dataGeneration == requestGeneration,
+                  credentialFingerprint == TokenStore.credentialFingerprint() else { return }
             errorMessage = (error as? APIError)?.errorDescription ?? error.localizedDescription
         }
     }
@@ -243,6 +274,7 @@ final class FileGridViewModel {
     /// Appelé après un chargement complet, et à chaque mutation de `items`
     /// via `didSet` tant que la liste a été chargée au moins une fois.
     private func storeListSnapshot() {
+        guard credentialFingerprint == TokenStore.credentialFingerprint() else { return }
         DirectoryListStore.shared.store(
             source: source,
             driveId: driveId,
@@ -251,7 +283,8 @@ final class FileGridViewModel {
             items: items,
             cursor: cursor,
             hasMore: hasMore,
-            totalItemCount: totalItemCount
+            totalItemCount: totalItemCount,
+            fetchedAt: fetchedAt
         )
     }
 
@@ -671,3 +704,4 @@ final class FileGridViewModel {
         return buckets.map { Group(title: title($0.0), files: $0.1) }
     }
 }
+
