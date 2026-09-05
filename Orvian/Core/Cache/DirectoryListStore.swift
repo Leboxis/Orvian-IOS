@@ -86,7 +86,7 @@ final class DirectoryListStore {
         cursor: String?,
         hasMore: Bool,
         totalItemCount: Int?,
-        fetchedAt: Date
+        fetchedAt: Date = Date()
     ) {
         guard let key = Self.cacheKey(source: source, driveId: driveId, orderBy: orderBy, order: order) else { return }
         entries[key] = DirectoryListSnapshot(
