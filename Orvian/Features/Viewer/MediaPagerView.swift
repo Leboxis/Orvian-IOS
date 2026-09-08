@@ -483,14 +483,15 @@ private struct ZoomablePhotoPage: View {
             await loadThumbnail()
         }
         .task(id: hiresRequested) {
-            guard hiresRequested else { return }
+            guard hiresRequested, !file.isGIF else { return }
             await loadHiresWithRetry()
         }
-        .task(id: isActive) {
-            guard file.isGIF, isActive else {
+        .task(id: hiresRequested) {
+            guard file.isGIF, hiresRequested else {
                 gif = nil
                 return
             }
+            guard gif == nil else { return }
             let delays: [Duration] = [.zero, .seconds(3), .seconds(8)]
             for delay in delays {
                 try? await Task.sleep(for: delay)

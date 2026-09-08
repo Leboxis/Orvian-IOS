@@ -27,8 +27,9 @@ visionneuse photos avec zoom, lecteur vidéo AVPlayer quasi instantané.
   AirPlay, favori et tags), lecture via URL temporaire, seule la page courante lit
 - **GIF animés** : lecture dans la visionneuse avec les délais de chaque frame,
   zoom et gestes habituels ; animation limitée à la page active, arrêt en arrière-plan.
-  Décodage hors thread principal avec budget mémoire de 48 Mo (résolution adaptée),
-  aperçu statique en cas de fichier invalide ou excessif. Import Photos sans transcodage demandé.
+  Un seul téléchargement, première frame préchargée pour le média suivant,
+  puis décodage progressif hors thread principal à la résolution originale.
+  Seules la première frame, la courante et la suivante restent en mémoire. Import Photos sans transcodage demandé.
 - **Favoris & tags sur les cartes** : étoile dorée en haut à droite des favoris,
   pastilles colorées des tags à côté du poids (`with=is_favorite,categories`)
 - **Ajout** : bouton « + » dans les dossiers — créer un dossier, importer un

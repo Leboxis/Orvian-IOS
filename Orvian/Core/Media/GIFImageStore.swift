@@ -2,16 +2,59 @@ import Foundation
 import CoreGraphics
 import ImageIO
 
-/// Frames décodées une seule fois, sans duplication pour représenter les délais.
-struct GIFImage {
-    let frames: [CGImage]
-    let delays: [Double]
-    let loopCount: Int
-    var duration: Double { delays.reduce(0, +) }
-    var aspectRatio: CGFloat { CGFloat(frames[0].width) / CGFloat(frames[0].height) }
+struct GIFFrame {
+    let image: CGImage
+    let delay: Double
 }
 
-/// Seule la page active demande une animation. Aucun cache ne retient ses frames.
+/// L'original reste sur disque ; seule la première frame est conservée ici.
+struct GIFImage {
+    let id = UUID()
+    let firstFrame: GIFFrame
+    let frameCount: Int
+    let loopCount: Int
+    let source: GIFFrameSource
+    var aspectRatio: CGFloat {
+        CGFloat(firstFrame.image.width) / CGFloat(firstFrame.image.height)
+    }
+}
+
+/// Accès sérialisé à ImageIO, hors MainActor. Pas de tableau de frames décodées.
+actor GIFFrameSource {
+    private let source: CGImageSource
+    private let ownedURL: URL?
+
+    init(source: CGImageSource, ownedURL: URL?) {
+        self.source = source
+        self.ownedURL = ownedURL
+    }
+
+    deinit {
+        if let ownedURL { try? FileManager.default.removeItem(at: ownedURL) }
+    }
+
+    func frame(at index: Int) -> GIFFrame? {
+        guard !Task.isCancelled, index >= 0, index < CGImageSourceGetCount(source) else { return nil }
+        return Self.decodeFrame(source, at: index)
+    }
+
+    nonisolated static func decodeFrame(_ source: CGImageSource, at index: Int) -> GIFFrame? {
+        autoreleasepool {
+            // Le cache de la source est désactivé ; décompresser maintenant pour
+            // éviter de reporter le travail sur le thread d'affichage.
+            guard let image = CGImageSourceCreateImageAtIndex(source, index,
+                [kCGImageSourceShouldCacheImmediately: true] as CFDictionary) else { return nil }
+            defer { CGImageSourceRemoveCacheAtIndex(source, index) }
+            let info = CGImageSourceCopyPropertiesAtIndex(source, index, nil) as? [CFString: Any]
+            let gif = info?[kCGImagePropertyGIFDictionary] as? [CFString: Any]
+            let rawDelay = (gif?[kCGImagePropertyGIFUnclampedDelayTime] as? NSNumber)?.doubleValue
+                ?? (gif?[kCGImagePropertyGIFDelayTime] as? NSNumber)?.doubleValue ?? 0.1
+            let delay = rawDelay.isFinite && rawDelay > 0 ? max(0.02, rawDelay) : 0.1
+            return GIFFrame(image: image, delay: delay)
+        }
+    }
+}
+
 actor GIFImageStore {
     static let shared = GIFImageStore()
 
@@ -20,54 +63,31 @@ actor GIFImageStore {
               !Task.isCancelled else { return nil }
         do {
             let (localURL, response) = try await URLSession.shared.download(from: url)
-            defer { try? FileManager.default.removeItem(at: localURL) }
+            // Transférer la propriété du fichier à la source si le GIF est valide.
+            var retained = false
+            defer { if !retained { try? FileManager.default.removeItem(at: localURL) } }
             try Task.checkCancellation()
             guard let http = response as? HTTPURLResponse,
                   (200..<300).contains(http.statusCode) else { return nil }
-            return Self.decode(localURL)
+            let image = Self.decode(localURL, ownsFile: true)
+            retained = image != nil
+            return image
         } catch {
             return nil
         }
     }
 
-    nonisolated static func decode(_ url: URL) -> GIFImage? {
+    nonisolated static func decode(_ url: URL, ownsFile: Bool = false) -> GIFImage? {
         guard let source = CGImageSourceCreateWithURL(url as CFURL,
                 [kCGImageSourceShouldCache: false] as CFDictionary),
-              CGImageSourceGetType(source) as String? == "com.compuserve.gif"
+              CGImageSourceGetType(source) as String? == "com.compuserve.gif",
+              CGImageSourceGetCount(source) > 0,
+              let firstFrame = GIFFrameSource.decodeFrame(source, at: 0)
         else { return nil }
-        let count = CGImageSourceGetCount(source)
-        // Les fichiers excessifs ou invalides gardent leur aperçu statique.
-        guard count > 0, count <= 2000 else { return nil }
         let properties = CGImageSourceCopyProperties(source, nil) as? [CFString: Any]
         let gif = properties?[kCGImagePropertyGIFDictionary] as? [CFString: Any]
         let loops = (gif?[kCGImagePropertyGIFLoopCount] as? NSNumber)?.intValue ?? 1
-        // Budget conservateur de 48 Mo pour les frames, même pour un GIF long.
-        let budget = 48 * 1024 * 1024
-        let maxPixelSize = max(1, min(1280, Int(sqrt(Double(budget / count / 4)))))
-        let options = [
-            kCGImageSourceCreateThumbnailFromImageAlways: true,
-            kCGImageSourceCreateThumbnailWithTransform: true,
-            kCGImageSourceThumbnailMaxPixelSize: maxPixelSize,
-            kCGImageSourceShouldCacheImmediately: true
-        ] as CFDictionary
-        var frames: [CGImage] = []
-        var delays: [Double] = []
-        var cost = 0
-        for index in 0..<count {
-            guard !Task.isCancelled else { return nil }
-            let frame: CGImage? = autoreleasepool {
-                CGImageSourceCreateThumbnailAtIndex(source, index, options)
-            }
-            guard let frame else { return nil }
-            cost += frame.bytesPerRow * frame.height
-            guard cost <= budget else { return nil }
-            let info = CGImageSourceCopyPropertiesAtIndex(source, index, nil) as? [CFString: Any]
-            let frameGIF = info?[kCGImagePropertyGIFDictionary] as? [CFString: Any]
-            let rawDelay = (frameGIF?[kCGImagePropertyGIFUnclampedDelayTime] as? NSNumber)?.doubleValue
-                ?? (frameGIF?[kCGImagePropertyGIFDelayTime] as? NSNumber)?.doubleValue ?? 0.1
-            frames.append(frame)
-            delays.append(rawDelay.isFinite && rawDelay > 0 ? max(0.02, rawDelay) : 0.1)
-        }
-        return GIFImage(frames: frames, delays: delays, loopCount: max(0, loops))
+        return GIFImage(firstFrame: firstFrame, frameCount: CGImageSourceGetCount(source),
+            loopCount: max(0, loops), source: GIFFrameSource(source: source, ownedURL: ownsFile ? url : nil))
     }
 }
