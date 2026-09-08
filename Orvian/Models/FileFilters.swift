@@ -113,12 +113,11 @@ struct FileFilters: Equatable, Hashable {
     /// Tris exprimables par l'API kDrive (`order_by[]`) : les appliquer côté
     /// serveur garantit que la pagination entière respecte le tri, pas
     /// seulement les éléments déjà chargés. `nil` pour les tris restant
-    /// locaux (durée : calculée à partir des métadonnées vidéo) ou l'ordre
-    /// serveur d'origine.
+    /// locaux (durée : métadonnées vidéo) ou l'ordre serveur d'origine.
     var serverOrderBy: [String]? {
         switch sort {
         case .original, .duration: return nil
-        case .modifiedDate: return ["last_modified_at"]
+        case .modifiedDate: return ["updated_at"]
         case .addedDate: return ["added_at"]
         case .type: return ["type"]
         case .size: return ["size"]
@@ -191,7 +190,7 @@ struct FileFilters: Equatable, Hashable {
             case .original:
                 return false
             case .modifiedDate:
-                return ordered(lhs.lastModifiedAt ?? -.infinity, rhs.lastModifiedAt ?? -.infinity, lhs: lhs, rhs: rhs)
+                return ordered(lhs.updatedAt ?? lhs.lastModifiedAt ?? -.infinity, rhs.updatedAt ?? rhs.lastModifiedAt ?? -.infinity, lhs: lhs, rhs: rhs)
             case .addedDate:
                 return ordered(lhs.addedAt ?? -.infinity, rhs.addedAt ?? -.infinity, lhs: lhs, rhs: rhs)
             case .type:

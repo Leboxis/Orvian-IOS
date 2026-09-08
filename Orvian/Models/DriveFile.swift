@@ -28,6 +28,9 @@ struct DriveFile: Codable, Identifiable, Hashable {
     /// Timestamps Unix (secondes)
     var addedAt: Double?
     var lastModifiedAt: Double?
+    /// Dernière mise à jour du fichier (contenu, renommage, déplacement,
+    /// tags…) — plus large que `lastModifiedAt` qui ne couvre que le contenu.
+    var updatedAt: Double?
 
     var isDirectory: Bool { type == "dir" }
     var isImage: Bool { fileKind == .image }
@@ -72,6 +75,8 @@ struct DriveFile: Codable, Identifiable, Hashable {
         case addedAtSnake = "added_at"
         case lastModifiedAt
         case lastModifiedAtSnake = "last_modified_at"
+        case updatedAt
+        case updatedAtSnake = "updated_at"
     }
 }
 
@@ -98,6 +103,10 @@ extension DriveFile {
         categories = try c.decodeIfPresent([FileCategory].self, forKey: .categories)
         addedAt = Self.decode(c, camel: .addedAt, snake: .addedAtSnake)
         lastModifiedAt = Self.decode(c, camel: .lastModifiedAt, snake: .lastModifiedAtSnake)
+        // Repli sur `last_modified_at` pour les réponses qui n'exposent pas
+        // `updated_at` (entrées d'activités notamment).
+        updatedAt = Self.decode(c, camel: .updatedAt, snake: .updatedAtSnake)
+            ?? (try? c.decode(Double.self, forKey: .lastModifiedAtSnake))
     }
 
     /// Décode une valeur en essayant d'abord la clé camelCase, puis la clé
@@ -129,6 +138,7 @@ extension DriveFile {
         try c.encodeIfPresent(categories, forKey: .categories)
         try c.encodeIfPresent(addedAt, forKey: .addedAtSnake)
         try c.encodeIfPresent(lastModifiedAt, forKey: .lastModifiedAtSnake)
+        try c.encodeIfPresent(updatedAt, forKey: .updatedAtSnake)
     }
 }
 
@@ -192,7 +202,8 @@ extension DriveFile {
             color: nil,
             categories: nil,
             addedAt: nil,
-            lastModifiedAt: nil
+            lastModifiedAt: nil,
+            updatedAt: nil
         )
     }
 }

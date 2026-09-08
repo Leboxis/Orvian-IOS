@@ -129,7 +129,8 @@ struct KDriveService {
                         .lastModified(driveId: driveId, cursor: cursor, limit: limit),
                         requested: orderBy,
                         order: order,
-                        allowed: ["last_modified_at"]
+                        allowed: ["last_modified_at"],
+                        aliases: ["updated_at": "last_modified_at"]
                     ),
                     cachePolicy: cachePolicy
                 )
@@ -157,7 +158,7 @@ struct KDriveService {
                                 requested: orderBy,
                                 order: order,
                                 allowed: ["created_at"],
-                                aliases: ["last_modified_at": "created_at"]
+                                aliases: ["last_modified_at": "created_at", "updated_at": "created_at"]
                             ),
                             cachePolicy: cachePolicy
                         )
@@ -177,7 +178,8 @@ struct KDriveService {
                             .search(driveId: driveId, query: "", directoryId: nil, cursor: cursor, limit: limit),
                             requested: orderBy,
                             order: order,
-                            allowed: ["last_modified_at"]
+                            allowed: ["last_modified_at"],
+                            aliases: ["updated_at": "last_modified_at"]
                         )
                     }
                 }
@@ -187,7 +189,8 @@ struct KDriveService {
                 .categoryFiles(driveId: driveId, categoryId: categoryId, cursor: cursor),
                 requested: orderBy,
                 order: order,
-                allowed: ["last_modified_at"]
+                allowed: ["last_modified_at"],
+                aliases: ["updated_at": "last_modified_at"]
             )
         case .trash:
             endpoint = safeOrdering(
@@ -201,7 +204,8 @@ struct KDriveService {
                 .search(driveId: driveId, query: query, directoryId: directoryId, cursor: cursor),
                 requested: orderBy,
                 order: order,
-                allowed: ["last_modified_at"]
+                allowed: ["last_modified_at"],
+                aliases: ["updated_at": "last_modified_at"]
             )
         }
         return try await api.get(CursorPage<DriveFile>.self, endpoint, cachePolicy: cachePolicy)

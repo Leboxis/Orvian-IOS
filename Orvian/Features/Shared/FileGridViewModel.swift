@@ -302,6 +302,7 @@ final class FileGridViewModel {
             var file = file
             if file.addedAt == nil { file.addedAt = now }
             if file.lastModifiedAt == nil { file.lastModifiedAt = now }
+            if file.updatedAt == nil { file.updatedAt = now }
             return file
         }
         let uploadedIDs = Set(merged.map(\.id))
@@ -330,6 +331,11 @@ final class FileGridViewModel {
             }
         }
         switch orderBy.first {
+        case "updated_at":
+            items.sort {
+                if $0.isDirectory != $1.isDirectory { return $0.isDirectory }
+                return dateOrder($0.updatedAt ?? $0.lastModifiedAt, $1.updatedAt ?? $1.lastModifiedAt)
+            }
         case "last_modified_at":
             items.sort {
                 if $0.isDirectory != $1.isDirectory { return $0.isDirectory }
@@ -694,7 +700,7 @@ final class FileGridViewModel {
     func groups(calendar: Calendar = .current, by component: Calendar.Component, title: (Date) -> String) -> [Group] {
         var buckets: [(Date, [DriveFile])] = []
         for file in items {
-            let date = Date(timeIntervalSince1970: file.lastModifiedAt ?? file.addedAt ?? 0)
+            let date = Date(timeIntervalSince1970: file.updatedAt ?? file.lastModifiedAt ?? file.addedAt ?? 0)
             if let last = buckets.last, calendar.isDate(last.0, equalTo: date, toGranularity: component) {
                 buckets[buckets.count - 1].1.append(file)
             } else {
