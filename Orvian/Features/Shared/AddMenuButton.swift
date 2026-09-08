@@ -86,7 +86,8 @@ struct AddMenuButton: View {
             isPresented: $showPhotosPicker,
             selection: $photoItems,
             maxSelectionCount: 20,
-            matching: .any(of: [.images, .videos])
+            matching: .any(of: [.images, .videos]),
+            preferredItemEncoding: .current
         )
         .onChange(of: photoItems) { _, items in
             guard !items.isEmpty else { return }

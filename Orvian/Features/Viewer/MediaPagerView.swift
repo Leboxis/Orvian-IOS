@@ -411,6 +411,7 @@ private struct MediaPagerPage: View {
                     file: file,
                     driveId: driveId,
                     hiresRequested: hiresRequested,
+                    isActive: isActive,
                     onZoomChanged: onImageZoomChanged
                 )
             } else if file.isVideo {
@@ -443,8 +444,11 @@ private struct ZoomablePhotoPage: View {
     /// Vrai dès que la page est courante ou devenue la page suivante : lance
     /// (ou relance après annulation) le téléchargement pleine résolution.
     let hiresRequested: Bool
+    let isActive: Bool
     let onZoomChanged: (Bool) -> Void
 
+    @Environment(\.scenePhase) private var scenePhase
+    @State private var gif: GIFImage?
     @State private var hires: UIImage?
     @State private var thumbnail: UIImage?
     @State private var scale: CGFloat = 1
@@ -482,6 +486,23 @@ private struct ZoomablePhotoPage: View {
             guard hiresRequested else { return }
             await loadHiresWithRetry()
         }
+        .task(id: isActive) {
+            guard file.isGIF, isActive else {
+                gif = nil
+                return
+            }
+            let delays: [Duration] = [.zero, .seconds(3), .seconds(8)]
+            for delay in delays {
+                try? await Task.sleep(for: delay)
+                guard !Task.isCancelled else { return }
+                let loaded = await GIFImageStore.shared.image(driveId: driveId, fileId: file.id)
+                guard !Task.isCancelled else { return }
+                if let loaded {
+                    gif = loaded
+                    return
+                }
+            }
+        }
         .onAppear {
             onZoomChanged(isZoomed)
         }
@@ -505,7 +526,10 @@ private struct ZoomablePhotoPage: View {
 
     @ViewBuilder
     private func image(in screenSize: CGSize) -> some View {
-        if let display {
+        if let gif {
+            AnimatedGIFView(image: gif, isPlaying: isActive && scenePhase == .active)
+                .frame(width: screenSize.width, height: screenSize.width / gif.aspectRatio)
+        } else if let display {
             Image(uiImage: display)
                 .resizable()
                 .scaledToFit()

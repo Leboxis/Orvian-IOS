@@ -25,6 +25,10 @@ visionneuse photos avec zoom, lecteur vidéo AVPlayer quasi instantané.
   fermeture au swipe vertical, miniature instantanée puis haute résolution sous-échantillonnée (ImageIO).
   Vidéos : interface personnalisée (titre et fermer en haut, play/pause, progression, muet,
   AirPlay, favori et tags), lecture via URL temporaire, seule la page courante lit
+- **GIF animés** : lecture dans la visionneuse avec les délais de chaque frame,
+  zoom et gestes habituels ; animation limitée à la page active, arrêt en arrière-plan.
+  Décodage hors thread principal avec budget mémoire de 48 Mo (résolution adaptée),
+  aperçu statique en cas de fichier invalide ou excessif. Import Photos sans transcodage demandé.
 - **Favoris & tags sur les cartes** : étoile dorée en haut à droite des favoris,
   pastilles colorées des tags à côté du poids (`with=is_favorite,categories`)
 - **Ajout** : bouton « + » dans les dossiers — créer un dossier, importer un

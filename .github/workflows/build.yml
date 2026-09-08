@@ -66,6 +66,11 @@ jobs:
       - name: Check favorites disk cache
         run: python3 .github/scripts/check_favorites_cache.py
 
+      - name: Check GIF decoding
+        run: |
+          swiftc Orvian/Core/Media/GIFImageStore.swift Tests/GIFImageChecks.swift -o /tmp/orvian-gif-checks
+          /tmp/orvian-gif-checks
+
       - name: Install XcodeGen
         run: brew install xcodegen
 

@@ -34,6 +34,12 @@ struct DriveFile: Codable, Identifiable, Hashable {
 
     var isDirectory: Bool { type == "dir" }
     var isImage: Bool { fileKind == .image }
+    var isGIF: Bool {
+        guard !isDirectory else { return false }
+        return (name as NSString).pathExtension.lowercased() == "gif"
+            || fileExtension?.lowercased() == "gif"
+            || mimeType?.split(separator: ";").first?.trimmingCharacters(in: .whitespaces).lowercased() == "image/gif"
+    }
     var isVideo: Bool { fileKind == .video }
 
     /// Fichier texte brut (.txt) : l'extension peut être absente du nom
@@ -47,7 +53,8 @@ struct DriveFile: Codable, Identifiable, Hashable {
     }
 
     var fileKind: FileKind {
-        FileKind(extensionType: extensionType, mimeType: mimeType, fileName: name, isDirectory: isDirectory)
+        if isGIF { return .image }
+        return FileKind(extensionType: extensionType, mimeType: mimeType, fileName: name, isDirectory: isDirectory)
     }
 
     /// Vérifie si le nom du fichier contient l'ensemble des mots-clés recherchés.
