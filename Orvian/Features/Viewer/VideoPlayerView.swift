@@ -14,6 +14,9 @@ struct VideoPlayerView: View {
     /// active charge et lit la vidéo. Toujours vrai quand le lecteur est
     /// présenté seul (visionneuse directe).
     let isActive: Bool
+    /// Verrouille le pager parent pendant un geste commencé sur le chrome du
+    /// lecteur, sans empêcher le scrubber ni les boutons de recevoir ce geste.
+    let onControlsInteractionChanged: (Bool) -> Void
 
     @Environment(\.dismiss) private var dismiss
     @Environment(\.layoutDirection) private var layoutDirection
@@ -104,13 +107,20 @@ struct VideoPlayerView: View {
     // Désambiguïsation manuelle simple/double tap (fenêtre 300 ms).
     @State private var lastTapDate: Date?
     @State private var lastTapLocation: CGPoint = .zero
+    @GestureState private var isTouchingControls = false
 
     private let service = KDriveService()
 
-    init(file: DriveFile, driveId: Int, isActive: Bool = true) {
+    init(
+        file: DriveFile,
+        driveId: Int,
+        isActive: Bool = true,
+        onControlsInteractionChanged: @escaping (Bool) -> Void = { _ in }
+    ) {
         self.file = file
         self.driveId = driveId
         self.isActive = isActive
+        self.onControlsInteractionChanged = onControlsInteractionChanged
         _isFavorite = State(initialValue: file.isFavorite ?? false)
         _appliedCategoryIds = State(initialValue: Set((file.categories ?? []).map(\.categoryId)))
     }
@@ -137,8 +147,12 @@ struct VideoPlayerView: View {
 
             VStack(spacing: 0) {
                 topBar
+                    .contentShape(Rectangle())
+                    .simultaneousGesture(controlRegionGesture)
                 Spacer()
                 bottomBar
+                    .contentShape(Rectangle())
+                    .simultaneousGesture(controlRegionGesture)
             }
             .opacity(showControls ? 1 : 0)
             .allowsHitTesting(showControls)
@@ -182,7 +196,11 @@ struct VideoPlayerView: View {
         .onDisappear {
             isDisappeared = true
             hideControlsTask?.cancel()
+            onControlsInteractionChanged(false)
             teardown()
+        }
+        .onChange(of: isTouchingControls) { _, isTouching in
+            onControlsInteractionChanged(isTouching)
         }
         .alert("Erreur", isPresented: errorBinding) {
             Button("OK") { errorMessage = nil }
@@ -219,6 +237,15 @@ struct VideoPlayerView: View {
     }
 
     // MARK: - Gestion de l'affichage des contrôles
+
+    /// Reconnaît le contact sur une barre avant que le pager atteigne son
+    /// seuil horizontal. GestureState se réinitialise aussi sur annulation.
+    private var controlRegionGesture: some Gesture {
+        DragGesture(minimumDistance: 0)
+            .updating($isTouchingControls) { _, isTouching, _ in
+                isTouching = true
+            }
+    }
 
     private func scheduleControlsAutoHide(delay: Double = 2.5) {
         hideControlsTask?.cancel()

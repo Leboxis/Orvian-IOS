@@ -21,6 +21,9 @@ struct MediaPagerView: View {
     /// ensemble permet au pager de ne jamais interpréter leur pan comme une
     /// demande de fermeture.
     @State private var zoomedImageIDs: Set<Int> = []
+    /// Pages vidéo dont une barre de contrôle est actuellement touchée.
+    /// Tant que l'ensemble n'est pas vide, le pager horizontal est suspendu.
+    @State private var controlInteractionFileIDs: Set<Int> = []
 
     // Barre du haut (images uniquement) : favori et tags, même chrome que le
     // lecteur vidéo. Les états sont tenus par fichier afin de survivre aux
@@ -59,12 +62,16 @@ struct MediaPagerView: View {
                         hiresRequested: hiresPreloadIDs.contains(file.id),
                         onImageZoomChanged: { isZoomed in
                             setImageZoomed(isZoomed, fileID: file.id)
+                        },
+                        onVideoControlsInteractionChanged: { isInteracting in
+                            setVideoControlsInteracting(isInteracting, fileID: file.id)
                         }
                     )
                     .tag(file.id)
                 }
             }
             .tabViewStyle(.page(indexDisplayMode: .never))
+            .scrollDisabled(!controlInteractionFileIDs.isEmpty)
             .offset(y: dismissOffset * 0.55)
             .opacity(1 - min(0.55, abs(dismissOffset) / 700))
             // Le geste vit sur le TabView lui-même : il peut ainsi reconnaître
@@ -83,6 +90,7 @@ struct MediaPagerView: View {
         }
         .onChange(of: selectedFileID) { _, newID in
             dismissOffset = 0
+            controlInteractionFileIDs.removeAll()
             guard let index = files.firstIndex(where: { $0.id == newID }) else { return }
             // Proche de la fin de la liste : demande la page suivante à la
             // vue-modèle de la grille, qui reprend là où elle s'était arrêtée.
@@ -203,6 +211,14 @@ struct MediaPagerView: View {
             zoomedImageIDs.insert(fileID)
         } else {
             zoomedImageIDs.remove(fileID)
+        }
+    }
+
+    private func setVideoControlsInteracting(_ isInteracting: Bool, fileID: Int) {
+        if isInteracting {
+            controlInteractionFileIDs.insert(fileID)
+        } else {
+            controlInteractionFileIDs.remove(fileID)
         }
     }
 
@@ -403,6 +419,7 @@ private struct MediaPagerPage: View {
     /// téléchargement de l'image pleine résolution.
     let hiresRequested: Bool
     let onImageZoomChanged: (Bool) -> Void
+    let onVideoControlsInteractionChanged: (Bool) -> Void
 
     var body: some View {
         Group {
@@ -415,7 +432,12 @@ private struct MediaPagerPage: View {
                     onZoomChanged: onImageZoomChanged
                 )
             } else if file.isVideo {
-                VideoPlayerView(file: file, driveId: driveId, isActive: isActive)
+                VideoPlayerView(
+                    file: file,
+                    driveId: driveId,
+                    isActive: isActive,
+                    onControlsInteractionChanged: onVideoControlsInteractionChanged
+                )
             } else {
                 // Défensif : le pager ne contient que des images et des vidéos.
                 VStack(spacing: 12) {
