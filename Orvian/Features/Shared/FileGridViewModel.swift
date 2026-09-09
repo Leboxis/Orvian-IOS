@@ -292,6 +292,10 @@ final class FileGridViewModel {
     /// Cela masque le léger délai possible de l'index du dossier côté serveur,
     /// sans déclencher plusieurs rechargements réseau successifs.
     func mergeUploaded(_ uploadedFiles: [DriveFile]) {
+        mergeUploaded(uploadedFiles, broadcast: true)
+    }
+
+    private func mergeUploaded(_ uploadedFiles: [DriveFile], broadcast: Bool) {
         guard !uploadedFiles.isEmpty else { return }
         let now = Date().timeIntervalSince1970
         // La réponse d'upload n'annonce pas toujours les dates ; les compléter
@@ -313,6 +317,10 @@ final class FileGridViewModel {
         items.removeAll { uploadedIDs.contains($0.id) }
         items.append(contentsOf: merged)
         resortAfterMerge()
+        if broadcast {
+            DirectoryListStore.shared.mergeRecentUploads(driveId: driveId, files: merged)
+            FileGridMutationCenter.shared.publish(.uploaded(driveId: driveId, files: merged))
+        }
     }
 
     /// Re-trie la grille selon le tri serveur courant (`orderBy` / `order`)
@@ -329,6 +337,13 @@ final class FileGridViewModel {
             case (nil, _?): return false
             case (nil, nil): return false
             }
+        }
+        if case .recents = source, orderBy.isEmpty {
+            items.sort {
+                ($0.updatedAt ?? $0.lastModifiedAt ?? $0.addedAt ?? 0) >
+                ($1.updatedAt ?? $1.lastModifiedAt ?? $1.addedAt ?? 0)
+            }
+            return
         }
         switch orderBy.first {
         case "updated_at":
@@ -418,6 +433,10 @@ final class FileGridViewModel {
             applyCategoryChange(fileId: fileId, category: category, applied: applied)
         case let .removal(_, fileIds):
             items.removeAll { fileIds.contains($0.id) }
+        case let .uploaded(_, files):
+            if case .recents = source {
+                mergeUploaded(files, broadcast: false)
+            }
         }
     }
 
@@ -710,4 +729,3 @@ final class FileGridViewModel {
         return buckets.map { Group(title: title($0.0), files: $0.1) }
     }
 }
-

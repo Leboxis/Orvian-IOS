@@ -1,8 +1,9 @@
 import Foundation
 import CryptoKit
 
-/// File IO and JSON coding stay off the main thread. The serial queue also
-/// orders writes and logout purges so an older write cannot undo a purge.
+/// Cache disque historique des favoris, également réutilisé pour le petit
+/// aperçu des fichiers récents. Les I/O et le codage JSON restent hors du
+/// thread principal. La file série ordonne aussi écritures et purge de logout.
 final class FavoritesDiskCache {
     static let shared = FavoritesDiskCache()
 

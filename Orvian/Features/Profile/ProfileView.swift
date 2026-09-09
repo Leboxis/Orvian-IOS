@@ -13,14 +13,7 @@ struct ProfileView: View {
     @State private var recentUploads: [DriveFile] = []
     @State private var isLoadingRecents = true
 
-    private let service = KDriveService()
-    private let previewSource = FileSource.recents(limit: 12)
-
-    /// Âge au-delà duquel l'instantané partagé est revalidé en arrière-plan.
-    /// En deçà, chaque sélection de l'onglet n'émet aucune requête :
-    /// `/files/last_modified` coûte ~1 s de calcul serveur par appel et ne
-    /// doit pas repartir pour trois miniatures à chaque bascule d'onglet.
-    private static let revalidationInterval: TimeInterval = 60
+    private let recentUploadsLoader = RecentUploadsLoader.shared
 
     var body: some View {
         NavigationStack(path: $path) {
@@ -51,6 +44,11 @@ struct ProfileView: View {
                 // réseau explicite, hors seuil de fraîcheur.
                 await loadPreviews(forceNetwork: true)
             }
+        }
+        .onReceive(FileGridMutationCenter.shared.mutations) { mutation in
+            guard case let .uploaded(driveId, files) = mutation,
+                  driveId == session.selectedDrive?.id else { return }
+            mergeUploaded(files)
         }
     }
 
@@ -165,49 +163,24 @@ struct ProfileView: View {
     private func loadPreviews(forceNetwork: Bool = false) async {
         guard let drive = session.selectedDrive else { return }
 
-        // Instantané partagé avec la grille « Uploads récents » : les
-        // miniatures s'affichent sans attendre le réseau, et un onglet
-        // consulté à moins de 60 s d'intervalle n'émet aucune requête —
-        // `/files/last_modified` coûte ~1 s de calcul serveur par appel.
-        // Au-delà, revalidation silencieuse (ETag → 304 si rien n'a changé).
-        if !forceNetwork,
-           let snapshot = DirectoryListStore.shared.snapshot(
-            source: previewSource,
-            driveId: drive.id,
-            orderBy: [],
-            order: "asc"
-           ) {
+        // Mémoire puis disque : les cartes connues apparaissent avant la
+        // requête `last_modified`, y compris au premier accès après lancement.
+        if !forceNetwork, let snapshot = await recentUploadsLoader.cachedSnapshot(driveId: drive.id) {
             recentUploads = snapshot.items.filter { !$0.isDirectory }
             isLoadingRecents = false
-            if Date().timeIntervalSince(snapshot.fetchedAt) < Self.revalidationInterval {
-                return
-            }
         }
 
-        if let recentsPage = try? await service.page(previewSource, driveId: drive.id, cursor: nil, forceNetwork: forceNetwork) {
-            let files = (recentsPage.data ?? []).filter { !$0.isDirectory }
-            recentUploads = files
-            // Alimente le cache partagé (bascules d'onglet suivantes, grille)
-            // sans écraser un instantané de grille plus profondément paginé.
-            let existingCount = DirectoryListStore.shared.snapshot(
-                source: previewSource,
-                driveId: drive.id,
-                orderBy: [],
-                order: "asc"
-            )?.items.count ?? 0
-            if existingCount <= files.count {
-                DirectoryListStore.shared.store(
-                    source: previewSource,
-                    driveId: drive.id,
-                    orderBy: [],
-                    order: "asc",
-                    items: files,
-                    cursor: recentsPage.cursor,
-                    hasMore: recentsPage.hasMore ?? false,
-                    totalItemCount: nil
-                )
-            }
+        if let snapshot = await recentUploadsLoader.refresh(
+            driveId: drive.id, forceNetwork: forceNetwork
+        ) {
+            recentUploads = snapshot.items.filter { !$0.isDirectory }
         }
+        isLoadingRecents = false
+    }
+
+    private func mergeUploaded(_ files: [DriveFile]) {
+        let uploadedIDs = Set(files.map(\.id))
+        recentUploads = Array((files + recentUploads.filter { !uploadedIDs.contains($0.id) }).prefix(12))
         isLoadingRecents = false
     }
 }

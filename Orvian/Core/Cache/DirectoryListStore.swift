@@ -22,8 +22,9 @@ struct DirectoryListSnapshot: Codable {
 /// en arrière-plan (ETag → 304 si rien n'a changé) et resynchronise
 /// l'entrée à chaque mutation locale (corbeille, déplacement, import…).
 ///
-/// Les favoris sont aussi conservés sur disque, isolés par autorisation.
-/// Leur restauration est toujours suivie d’une actualisation réseau. Les sources de recherche ne sont pas mémorisées (espace
+/// Les favoris et le petit aperçu des fichiers récents sont aussi conservés
+/// sur disque, isolés par autorisation. Leur restauration est toujours suivie
+/// d’une actualisation réseau. Les sources de recherche ne sont pas mémorisées (espace
 /// de clés trop vaste pour leur réutilisation).
 @MainActor
 final class DirectoryListStore {
@@ -100,16 +101,45 @@ final class DirectoryListStore {
         )
         dates[key] = Date()
         evictIfNeeded()
-        if case .favorites = source, let snapshot = entries[key] {
+        if source.isPersistedList, let snapshot = entries[key] {
             FavoritesDiskCache.shared.store(snapshot, key: key)
         }
     }
 
     func diskSnapshot(source: FileSource, driveId: Int, orderBy: [String], order: String) async -> DirectoryListSnapshot? {
-        guard case .favorites = source,
+        guard source.isPersistedList,
               let key = Self.cacheKey(source: source, driveId: driveId, orderBy: orderBy, order: order)
         else { return nil }
         return await FavoritesDiskCache.shared.snapshot(key: key)
+    }
+
+    /// Place immédiatement les réponses d'upload en tête de l'aperçu récent.
+    /// L'âge réseau n'est pas renouvelé : le prochain chargement revalide donc
+    /// toujours l'index serveur, qui peut mettre quelques secondes à converger.
+    func mergeRecentUploads(driveId: Int, files: [DriveFile], limit: Int = 12) {
+        guard !files.isEmpty else { return }
+        let source = FileSource.recents(limit: limit)
+        let previous = snapshot(source: source, driveId: driveId, orderBy: [], order: "asc")
+        let uploadedIDs = Set(files.map(\.id))
+        let merged = (files + (previous?.items ?? []).filter { !uploadedIDs.contains($0.id) })
+            .filter { !$0.isDirectory }
+        // Une grille « voir plus » a peut-être déjà paginé au-delà de 12 :
+        // conserver sa profondeur et son curseur au lieu de la rabattre à
+        // l'aperçu du Profil.
+        let storedItems = previous == nil ? Array(merged.prefix(limit)) : merged
+        store(
+            source: source,
+            driveId: driveId,
+            orderBy: [],
+            order: "asc",
+            items: storedItems,
+            cursor: previous?.cursor,
+            hasMore: previous?.hasMore ?? false,
+            totalItemCount: previous?.totalItemCount,
+            // Une entrée créée uniquement par une mutation locale doit être
+            // assez ancienne pour provoquer une revalidation immédiate.
+            fetchedAt: previous?.fetchedAt ?? Date(timeIntervalSinceNow: -61)
+        )
     }
 
     func clear() {
@@ -132,3 +162,11 @@ final class DirectoryListStore {
     }
 }
 
+private extension FileSource {
+    var isPersistedList: Bool {
+        switch self {
+        case .favorites, .recents: return true
+        default: return false
+        }
+    }
+}

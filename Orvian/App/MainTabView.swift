@@ -51,12 +51,23 @@ struct MainTabView: View {
                     ))
                 }
 
-                FloatingTabBar(selection: $tab, onReselect: { targetTab in
-                    navState.reset(
-                        tab: targetTab,
-                        scrollFavoritesToTop: favoritesReselectScrollToTop
-                    )
-                })
+                FloatingTabBar(
+                    selection: $tab,
+                    onSelect: { targetTab in
+                        guard targetTab == .profile else { return }
+                        // Démarre au clic, avant que ProfileView soit montée.
+                        // Sa propre tâche rejoint ensuite la même requête.
+                        Task {
+                            await RecentUploadsLoader.shared.prefetch(driveId: drive.id)
+                        }
+                    },
+                    onReselect: { targetTab in
+                        navState.reset(
+                            tab: targetTab,
+                            scrollFavoritesToTop: favoritesReselectScrollToTop
+                        )
+                    }
+                )
             }
             .padding(.bottom, 4)
             .animation(.snappy(duration: 0.28), value: uploadManager.isPillVisible)

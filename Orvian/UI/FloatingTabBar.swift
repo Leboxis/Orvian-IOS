@@ -3,6 +3,8 @@ import SwiftUI
 /// Barre d'onglets flottante translucide à coins arrondis.
 struct FloatingTabBar: View {
     @Binding var selection: AppTab
+    /// Appelé au toucher d'un onglet différent, juste avant sa sélection.
+    var onSelect: ((AppTab) -> Void)? = nil
     var onReselect: ((AppTab) -> Void)? = nil
     @AppStorage("hapticFeedbackEnabled") private var hapticFeedbackEnabled = true
 
@@ -13,6 +15,7 @@ struct FloatingTabBar: View {
                     if selection == tab {
                         onReselect?(tab)
                     } else {
+                        onSelect?(tab)
                         withAnimation(.snappy(duration: 0.25)) {
                             selection = tab
                         }

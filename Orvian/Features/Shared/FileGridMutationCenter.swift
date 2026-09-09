@@ -9,10 +9,14 @@ enum FileGridMutation {
     /// les grilles concernées retirent les cartes immédiatement, sans
     /// rechargement réseau.
     case removal(driveId: Int, fileIds: Set<Int>)
+    /// Fichiers dont l'upload vient d'être confirmé : les vues « récents »
+    /// peuvent les afficher avant que l'index serveur ait convergé.
+    case uploaded(driveId: Int, files: [DriveFile])
 
     var driveId: Int {
         switch self {
-        case let .favorite(driveId, _, _), let .category(driveId, _, _, _), let .removal(driveId, _):
+        case let .favorite(driveId, _, _), let .category(driveId, _, _, _),
+             let .removal(driveId, _), let .uploaded(driveId, _):
             return driveId
         }
     }
