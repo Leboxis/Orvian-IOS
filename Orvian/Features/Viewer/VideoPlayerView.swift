@@ -95,6 +95,10 @@ struct VideoPlayerView: View {
     // Masquage automatique des contrôles après 2.5 secondes
     @State private var showControls = true
     @State private var hideControlsTask: Task<Void, Never>?
+    /// Hauteurs réellement rendues, réutilisées par les zones gestuelles
+    /// transparentes lorsque le chrome est masqué.
+    @State private var topControlsHeight: CGFloat = 44
+    @State private var bottomControlsHeight: CGFloat = 48
 
     // Copie du titre : pastille « Copié » brève après le tap.
     @State private var titleCopied = false
@@ -145,14 +149,22 @@ struct VideoPlayerView: View {
                 .accessibilityAction(named: Text("Reculer de 10 secondes")) { skipTime(by: -10) }
                 .accessibilityAction(named: Text("Avancer de 10 secondes")) { skipTime(by: 10) }
 
+            hiddenControlGestureRegions
+
             VStack(spacing: 0) {
                 topBar
                     .contentShape(Rectangle())
                     .simultaneousGesture(controlRegionGesture)
+                    .onGeometryChange(for: CGFloat.self) { $0.size.height } action: {
+                        topControlsHeight = $0
+                    }
                 Spacer()
                 bottomBar
                     .contentShape(Rectangle())
                     .simultaneousGesture(controlRegionGesture)
+                    .onGeometryChange(for: CGFloat.self) { $0.size.height } action: {
+                        bottomControlsHeight = $0
+                    }
             }
             .opacity(showControls ? 1 : 0)
             .allowsHitTesting(showControls)
@@ -244,6 +256,29 @@ struct VideoPlayerView: View {
         DragGesture(minimumDistance: 0)
             .updating($isTouchingControls) { _, isTouching, _ in
                 isTouching = true
+            }
+    }
+
+    /// Quand les contrôles sont invisibles, ces bandes conservent exactement
+    /// leurs zones réservées. Elles bloquent le swipe du pager et un tap y
+    /// réaffiche le chrome, sans rendre les boutons invisibles actionnables.
+    private var hiddenControlGestureRegions: some View {
+        VStack(spacing: 0) {
+            hiddenControlGestureRegion(height: topControlsHeight)
+            Spacer()
+            hiddenControlGestureRegion(height: bottomControlsHeight)
+        }
+        .allowsHitTesting(!showControls)
+    }
+
+    private func hiddenControlGestureRegion(height: CGFloat) -> some View {
+        Color.clear
+            .frame(height: height)
+            .contentShape(Rectangle())
+            .simultaneousGesture(controlRegionGesture)
+            .onTapGesture {
+                guard !showControls else { return }
+                toggleControls()
             }
     }
 
