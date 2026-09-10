@@ -12,6 +12,8 @@ struct AppLockView: View {
     var autoPromptBiometrics = false
     var onUnlock: () -> Void
 
+    @Environment(\.scenePhase) private var scenePhase
+
     @State private var code = ""
     @State private var shakeTrigger = 0
     @State private var showWrong = false
@@ -62,8 +64,19 @@ struct AppLockView: View {
         }
         .task {
             // Face ID est proposé d'office au retour d'arrière-plan,
-            // mais pas au premier lancement de l'app.
+            // mais pas au premier lancement de l'app. La vue est recréée
+            // pendant que l'app est encore en arrière-plan : dans ce cas
+            // l'évaluation biométrique échouerait, elle est donc reportée
+            // au retour au premier plan via onChange ci-dessous.
             guard autoPromptBiometrics, biometricsAvailable else { return }
+            guard scenePhase == .active else { return }
+            authenticateWithBiometrics()
+        }
+        .onChange(of: scenePhase) { _, phase in
+            // Relance l'invite Face ID à la reprise : couvre le cas où la vue
+            // a été (re)créée en arrière-plan et où le .task ci-dessus a été
+            // ignoré. Pas de boucle : après un refus, la phase reste .active.
+            guard autoPromptBiometrics, phase == .active, biometricsAvailable else { return }
             authenticateWithBiometrics()
         }
     }

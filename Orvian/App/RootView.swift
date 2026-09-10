@@ -14,6 +14,10 @@ struct RootView: View {
     /// proposée automatiquement au retour, jamais au premier lancement.
     @State private var hasGoneBackground = false
 
+    /// Vrai après un premier passage à l'état actif : évite de considérer
+    /// la transition inactive initiale du lancement comme un départ.
+    @State private var hasBeenActive = false
+
     private var isLockRequired: Bool {
         AppLockStore.isConfigured && !isUnlocked
     }
@@ -54,11 +58,22 @@ struct RootView: View {
         }
         .onChange(of: scenePhase) { _, phase in
             // Re-verrouille dès que l'app quitte le premier plan : au retour
-            // (rappel puis reprise), le code ou Face ID est redemandé.
+            // le code ou Face ID est redemandé. On verrouille aussi sur
+            // `.inactive` (sélecteur d'apps / aperçu multitâche) et pas
+            // seulement `.background`, sinon le verrouillage ne se déclenche
+            // pas lors d'un simple passage par le multitâche.
             guard AppLockStore.isConfigured else { return }
-            if phase == .background {
+            switch phase {
+            case .active:
+                hasBeenActive = true
+            case .inactive, .background:
+                // Ignore la phase inactive initiale du lancement : Face ID ne
+                // doit jamais être proposé automatiquement au premier démarrage.
+                guard hasBeenActive else { return }
                 hasGoneBackground = true
                 isUnlocked = false
+            @unknown default:
+                break
             }
         }
     }
