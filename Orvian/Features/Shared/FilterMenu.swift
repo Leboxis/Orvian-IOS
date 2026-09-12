@@ -7,7 +7,10 @@ struct FilterMenu: View {
 
     var body: some View {
         Button {
-            isPresented = true
+            // Bascule explicite : retaper le bouton referme le panneau, et le
+            // tap en dehors reste géré par le système (aucune présentation
+            // imbriquée ne doit l'intercepter, voir `sortSection`).
+            isPresented.toggle()
         } label: {
             Image(systemName: filters.isActive ? "line.3.horizontal.decrease.circle.fill" : "line.3.horizontal.decrease.circle")
         }
@@ -21,10 +24,12 @@ struct FilterMenu: View {
 }
 
 /// Panneau de filtre compact, aligné sur les cartes de l'application.
-/// Le choix du tri est déporté dans un sous-menu afin que le panneau principal
-/// reste court, tandis que les filtres visuels restent accessibles d'un tap.
+/// Le choix du tri est une section dépliable inline : un `Menu` imbriqué dans
+/// le `popover` interceptait le tap extérieur et le panneau restait bloqué
+/// ouvert. Les boutons directs laissent le système refermer au tap dehors.
 private struct FilterPanel: View {
     @Binding var filters: FileFilters
+    @State private var showSortOptions = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -70,32 +75,63 @@ private struct FilterPanel: View {
     }
 
     private var sortSection: some View {
-        Menu {
-            Picker("Trier par", selection: $filters.sort) {
+        VStack(spacing: 0) {
+            Button {
+                withAnimation(.snappy(duration: 0.2)) {
+                    showSortOptions.toggle()
+                }
+            } label: {
+                HStack(spacing: 9) {
+                    Image(systemName: "arrow.up.arrow.down")
+                        .foregroundStyle(.secondary)
+                    Text("Trier par")
+                        .font(.subheadline.weight(.medium))
+                    Spacer()
+                    Text(filters.sort.title)
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                    Image(systemName: showSortOptions ? "chevron.up" : "chevron.down")
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(.tertiary)
+                }
+                .frame(maxWidth: .infinity)
+                .padding(.horizontal, 11)
+                .frame(height: 40)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+
+            if showSortOptions {
+                Divider()
+                    .padding(.horizontal, 11)
                 ForEach(FileFilters.SortMode.allCases) { mode in
-                    Label(mode.title, systemImage: mode.symbol)
-                        .tag(mode)
+                    Button {
+                        filters.sort = mode
+                    } label: {
+                        HStack(spacing: 9) {
+                            Image(systemName: mode.symbol)
+                                .foregroundStyle(.secondary)
+                                .frame(width: 20)
+                            Text(mode.title)
+                                .font(.subheadline)
+                            Spacer()
+                            if filters.sort == mode {
+                                Image(systemName: "checkmark")
+                                    .font(.footnote.weight(.semibold))
+                                    .foregroundStyle(Color.accentColor)
+                            }
+                        }
+                        .frame(maxWidth: .infinity)
+                        .padding(.horizontal, 11)
+                        .frame(height: 36)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
                 }
             }
-        } label: {
-            HStack(spacing: 9) {
-                Image(systemName: "arrow.up.arrow.down")
-                    .foregroundStyle(.secondary)
-                Text("Trier par")
-                    .font(.subheadline.weight(.medium))
-                Spacer()
-                Text(filters.sort.title)
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-                Image(systemName: "chevron.up.chevron.down")
-                    .font(.caption2.weight(.semibold))
-                    .foregroundStyle(.tertiary)
-            }
-            .padding(.horizontal, 11)
-            .frame(height: 40)
-            .background(Color(uiColor: .secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
         }
+        .background(Color(uiColor: .secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
     }
 
     private var directionSection: some View {

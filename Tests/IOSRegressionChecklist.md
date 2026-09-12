@@ -35,6 +35,9 @@ utilisent des secrets factices et des transferts simulés, sans compte kDrive.
   Après reconnexion, les tags et leurs coches apparaissent correctement.
 - Lot d'envois avec un échec : pourcentage tenant compte seulement des progrès
   réussis, puis « Erreur de transfert » à la fin.
+- Panneau de filtres : un tap en dehors du panneau le referme ; retaper le
+  bouton filtre le referme aussi. Déplier « Trier par », choisir un tri, puis
+  taper dehors : le panneau se ferme (aucun menu imbriqué ne doit rester).
 - Vérifier les nouveaux messages en mode clair/sombre et avec une grande
   taille de texte, sans débordement ni commande inaccessible.
 
