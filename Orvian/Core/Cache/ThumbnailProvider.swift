@@ -27,8 +27,7 @@ actor ThumbnailProvider {
     private let throttler = AsyncThrottler(maxConcurrent: 9)
     private var inFlight: [Key: Task<UIImage?, Never>] = [:]
 
-    private var pendingPrefetchKeys: [Key] = []
-    private var pendingPrefetchIsTrashed = false
+    private var pendingPrefetchKeys: [(key: Key, isTrashed: Bool)] = []
     private var prefetchTask: Task<Void, Never>?
     private let maxPendingPrefetch = 6
     /// Les posters de vidéos sont produits de façon asynchrone côté kDrive.
@@ -182,25 +181,26 @@ actor ThumbnailProvider {
 
     /// Préchargement discret avec régulation de concurrence et abandon des requêtes lointaines.
     func prefetch(driveId: Int, fileIds: [Int], isTrashed: Bool = false) {
-        var newestKeys: [Key] = []
+        var newestKeys: [(key: Key, isTrashed: Bool)] = []
         for fileId in fileIds {
             let key = Key(driveId: driveId, fileId: fileId)
             guard inFlight[key] == nil,
                   Self.memory.object(forKey: key.nsString) == nil,
                   !disk.hasEntry(driveId: driveId, fileId: fileId)
             else { continue }
-            if !newestKeys.contains(key) {
-                newestKeys.append(key)
+            if !newestKeys.contains(where: { $0.key == key }) {
+                newestKeys.append((key: key, isTrashed: isTrashed))
             }
         }
 
         // La dernière position visible remplace les anciennes demandes encore
         // en attente. Le téléchargement déjà commencé peut finir, mais aucune
         // longue file de miniatures hors écran ne subsiste.
+        // Chaque clé garde son propre `isTrashed` : un prefetch corbeille suivi
+        // d'un prefetch normal (ou l'inverse) ne réutilise jamais l'ancien endpoint.
         pendingPrefetchKeys = Array(newestKeys.prefix(maxPendingPrefetch))
-        pendingPrefetchIsTrashed = isTrashed
 
-        schedulePrefetchWorker(isTrashed: isTrashed)
+        schedulePrefetchWorker()
     }
 
     /// Annule les téléchargements anticipés en attente. Les miniatures déjà
@@ -211,18 +211,18 @@ actor ThumbnailProvider {
         prefetchTask = nil
     }
 
-    private func schedulePrefetchWorker(isTrashed: Bool) {
+    private func schedulePrefetchWorker() {
         guard prefetchTask == nil else { return }
         prefetchTask = Task { [weak self] in
-            while let nextKey = await self?.popNextPrefetchKey() {
+            while let next = await self?.popNextPrefetchKey() {
                 guard !Task.isCancelled else { break }
-                _ = await self?.thumbnail(driveId: nextKey.driveId, fileId: nextKey.fileId, isTrashed: isTrashed)
+                _ = await self?.thumbnail(driveId: next.key.driveId, fileId: next.key.fileId, isTrashed: next.isTrashed)
             }
             await self?.clearPrefetchTask()
         }
     }
 
-    private func popNextPrefetchKey() -> Key? {
+    private func popNextPrefetchKey() -> (key: Key, isTrashed: Bool)? {
         guard !pendingPrefetchKeys.isEmpty else { return nil }
         return pendingPrefetchKeys.removeFirst()
     }
@@ -230,7 +230,7 @@ actor ThumbnailProvider {
     private func clearPrefetchTask() {
         prefetchTask = nil
         if !pendingPrefetchKeys.isEmpty {
-            schedulePrefetchWorker(isTrashed: pendingPrefetchIsTrashed)
+            schedulePrefetchWorker()
         }
     }
 

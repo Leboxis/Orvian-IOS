@@ -155,13 +155,35 @@ struct ApplyTagsSheet: View {
     }
 
     private func toggle(_ category: Category) {
-        switch state(of: category.id) {
-        case .none, .partial:
-            addIDs.insert(category.id)
-            removeIDs.remove(category.id)
+        let id = category.id
+        switch state(of: id) {
+        case .none:
+            // Bascule réversible : ajout ↔ annulation.
+            if addIDs.contains(id) {
+                addIDs.remove(id)
+            } else {
+                addIDs.insert(id)
+                removeIDs.remove(id)
+            }
         case .all:
-            removeIDs.insert(category.id)
-            addIDs.remove(category.id)
+            // Bascule réversible : retrait ↔ annulation.
+            if removeIDs.contains(id) {
+                removeIDs.remove(id)
+            } else {
+                removeIDs.insert(id)
+                addIDs.remove(id)
+            }
+        case .partial:
+            // Cycle : compléter vers tous → retirer de tous → retour à l'état initial.
+            if addIDs.contains(id) {
+                addIDs.remove(id)
+                removeIDs.insert(id)
+            } else if removeIDs.contains(id) {
+                removeIDs.remove(id)
+            } else {
+                addIDs.insert(id)
+                removeIDs.remove(id)
+            }
         }
     }
 

@@ -523,7 +523,9 @@ private struct TextFileTextView: UIViewRepresentable {
         if textChanged {
             textView.text = text
         }
-        if modeChanged {
+        // `textView.text = ...` rase les attributs `.link` : reposer les liens
+        // après chaque changement de texte, pas seulement au changement de mode.
+        if modeChanged || textChanged {
             configureMode(textView)
         }
 
@@ -541,12 +543,8 @@ private struct TextFileTextView: UIViewRepresentable {
             }
         }
 
-        // Toujours réappliquer les surlignages de recherche (liens + occurrences).
-        // `configureMode` a déjà nettoyé/posé les liens ; on ajoute ensuite les fonds.
-        if !textChanged || textView.textStorage.length == (text as NSString).length {
-            // Si le texte vient de changer, `configureMode` a été appelé, on
-            // doit quand même poser les highlights après.
-        }
+        // Toujours réappliquer les surlignages de recherche après les liens.
+        // `configureMode` a nettoyé/posé les liens ci-dessus ; on ajoute ensuite les fonds.
         applySearchHighlights(to: textView)
         scrollToCurrentSearch(in: textView)
 

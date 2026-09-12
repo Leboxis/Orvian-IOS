@@ -28,7 +28,6 @@ targets:
     sources:
       - path: Orvian
     info:
-      path: Orvian/Info.plist
       properties:
         UIBackgroundModes:
           - audio
