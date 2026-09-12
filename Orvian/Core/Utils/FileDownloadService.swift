@@ -44,6 +44,7 @@ final class FileDownloadService: ObservableObject {
             isDownloading = false
             progress = 0
             downloadingFileName = nil
+            downloadTask = nil
         }
 
         var temporaryURLToClean: URL?
@@ -60,6 +61,7 @@ final class FileDownloadService: ObservableObject {
                 mayRefreshURL: true
             )
             temporaryURLToClean = tempURL
+            try Task.checkCancellation()
 
             let downloadDirectory = FileManager.default.temporaryDirectory
                 .appendingPathComponent("OrvianDownloads", isDirectory: true)
@@ -145,7 +147,7 @@ final class FileDownloadService: ObservableObject {
         let downloadTask = session.downloadTask(with: remoteURL)
         return try await withTaskCancellationHandler {
             try await withCheckedThrowingContinuation { continuation in
-                delegate.continuation = continuation
+                delegate.completion.install(continuation)
                 downloadTask.resume()
             }
         } onCancel: {
@@ -223,7 +225,7 @@ final class FileDownloadService: ObservableObject {
 /// `didCompleteWithError` pour tout échec (annulation comprise).
 private final class DownloadProgressDelegate: NSObject, URLSessionDownloadDelegate, @unchecked Sendable {
     let progress: @Sendable (Double) -> Void
-    var continuation: CheckedContinuation<(URL, URLResponse), Error>?
+    let completion = TransferCompletion<(URL, URLResponse)>()
     private var lastReported = 0.0
 
     init(progress: @escaping @Sendable (Double) -> Void) {
@@ -249,8 +251,6 @@ private final class DownloadProgressDelegate: NSObject, URLSessionDownloadDelega
         downloadTask: URLSessionDownloadTask,
         didFinishDownloadingTo location: URL
     ) {
-        guard let continuation else { return }
-        self.continuation = nil
         // Le système supprime le fichier de `location` dès le retour de ce
         // callback : le déplacer de façon synchrone vers un fichier que l'on
         // contrôle évite que le `moveItem` de l'appelant s'exécute sur un
@@ -261,23 +261,22 @@ private final class DownloadProgressDelegate: NSObject, URLSessionDownloadDelega
         do {
             try FileManager.default.moveItem(at: location, to: safeURL)
             if let response = downloadTask.response {
-                continuation.resume(returning: (safeURL, response))
+                if !completion.finish(.success((safeURL, response))) {
+                    try? FileManager.default.removeItem(at: safeURL)
+                }
             } else {
                 try? FileManager.default.removeItem(at: safeURL)
-                continuation.resume(throwing: APIError.invalidResponse)
+                completion.finish(.failure(APIError.invalidResponse))
             }
         } catch {
-            continuation.resume(throwing: error)
+            completion.finish(.failure(error))
         }
     }
 
     func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
-        // Succès déjà résolu par `didFinishDownloadingTo` (continuation nil) :
-        // ce callback ne traite alors rien. Sinon, tout échec — annulation
-        // comprise — reprend la continuation avec son erreur.
-        guard let continuation else { return }
-        self.continuation = nil
-        continuation.resume(throwing: error ?? APIError.invalidResponse)
+        // Le rendez-vous ignore ce rappel si le succès a déjà été livré.
+        // Une annulation précoce reste mémorisée jusqu'à l'attente de l'appelant.
+        completion.finish(.failure(error ?? APIError.invalidResponse))
     }
 }
 

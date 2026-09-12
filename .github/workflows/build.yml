@@ -66,6 +66,9 @@ jobs:
       - name: Check favorites disk cache
         run: python3 .github/scripts/check_favorites_cache.py
 
+      - name: Check security, transfers and metadata isolation
+        run: python3 .github/scripts/check_ios_regressions.py
+
       - name: Check GIF decoding
         run: |
           swiftc Orvian/Core/Media/GIFImageStore.swift Tests/GIFImageChecks.swift -o /tmp/orvian-gif-checks
@@ -138,4 +141,3 @@ jobs:
           tag_name: v${{ steps.version.outputs.value }}
           files: Orvian-${{ steps.version.outputs.value }}-unsigned.ipa
           generate_release_notes: true
-

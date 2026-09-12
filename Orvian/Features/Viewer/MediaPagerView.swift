@@ -108,6 +108,7 @@ struct MediaPagerView: View {
         guard let viewModel = context.viewModel else { return }
         let visible = context.filters.visible(
             viewModel.items,
+            driveId: context.driveId,
             searchText: context.searchText,
             mediaMetadata: MediaMetadataStore.shared
         )

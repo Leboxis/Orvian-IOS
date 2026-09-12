@@ -74,10 +74,13 @@ final class FavoritesDiskCache {
     private func evictIfNeeded() {
         let files = directory.entries().sorted { $0.date > $1.date }
         var total = 0
-        for (index, file) in files.enumerated() {
-            total += file.size
-            if index >= 20 || total > maximumTotalSize || Date().timeIntervalSince(file.date) >= maximumAge {
+        var kept = 0
+        for file in files {
+            if kept >= 20 || total + file.size > maximumTotalSize || Date().timeIntervalSince(file.date) >= maximumAge {
                 directory.remove(file.url)
+            } else {
+                total += file.size
+                kept += 1
             }
         }
     }

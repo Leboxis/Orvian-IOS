@@ -141,7 +141,7 @@ struct FileFilters: Equatable, Hashable {
     /// Cela garde le tri opérationnel sur les sources qui ne prennent pas
     /// `order_by[]` en charge (notamment les tags et les médias consultés).
     @MainActor
-    func visible(_ items: [DriveFile], searchText: String, mediaMetadata: MediaMetadataStore) -> [DriveFile] {
+    func visible(_ items: [DriveFile], driveId: Int, searchText: String, mediaMetadata: MediaMetadataStore) -> [DriveFile] {
         var result = items
 
         switch media {
@@ -153,14 +153,14 @@ struct FileFilters: Equatable, Hashable {
 
         if let orientation {
             result = result.filter { file in
-                guard file.isVideo, let info = mediaMetadata.info(for: file.id) else { return false }
+                guard file.isVideo, let info = mediaMetadata.info(driveId: driveId, for: file.id) else { return false }
                 return info.orientation == orientation
             }
         }
 
         if highResolutionVideosOnly {
             result = result.filter { file in
-                guard file.isVideo, let info = mediaMetadata.info(for: file.id) else { return false }
+                guard file.isVideo, let info = mediaMetadata.info(driveId: driveId, for: file.id) else { return false }
                 return info.is4KOrAbove
             }
         }
@@ -173,7 +173,7 @@ struct FileFilters: Equatable, Hashable {
             result = result.filter { $0.matchesSearchKeywords(keywords) }
         }
 
-        result = sorted(result, mediaMetadata: mediaMetadata)
+        result = sorted(result, driveId: driveId, mediaMetadata: mediaMetadata)
 
         return result
     }
@@ -181,6 +181,7 @@ struct FileFilters: Equatable, Hashable {
     @MainActor
     private func sorted(
         _ files: [DriveFile],
+        driveId: Int,
         mediaMetadata: MediaMetadataStore
     ) -> [DriveFile] {
         guard sort != .original else { return files }
@@ -198,8 +199,8 @@ struct FileFilters: Equatable, Hashable {
             case .size:
                 return ordered(lhs.size ?? -1, rhs.size ?? -1, lhs: lhs, rhs: rhs)
             case .duration:
-                let lhsDuration = mediaMetadata.info(for: lhs.id)?.duration ?? -1
-                let rhsDuration = mediaMetadata.info(for: rhs.id)?.duration ?? -1
+                let lhsDuration = mediaMetadata.info(driveId: driveId, for: lhs.id)?.duration ?? -1
+                let rhsDuration = mediaMetadata.info(driveId: driveId, for: rhs.id)?.duration ?? -1
                 return ordered(lhsDuration, rhsDuration, lhs: lhs, rhs: rhs)
             }
         }

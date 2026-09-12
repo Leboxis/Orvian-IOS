@@ -811,7 +811,7 @@ private struct VisibleItemsCache {
             return cachedResult
         }
         cachedKey = key
-        cachedResult = key.filters.visible(items, searchText: key.searchText, mediaMetadata: mediaMetadata)
+        cachedResult = key.filters.visible(items, driveId: key.driveId, searchText: key.searchText, mediaMetadata: mediaMetadata)
         return cachedResult
     }
 }

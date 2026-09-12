@@ -25,6 +25,9 @@ struct AppLockSetupSheet: View {
     @State private var firstEntry = ""
     @State private var shakeTrigger = 0
     @State private var errorMessage: String?
+    @State private var isWorking = false
+    @State private var isRecoveringError = false
+    @State private var retryAfter = AppLockStore.retryAfter
 
     private let codeLength = 4
 
@@ -60,6 +63,11 @@ struct AppLockSetupSheet: View {
                             .multilineTextAlignment(.center)
                             .transition(.opacity.combined(with: .move(edge: .top)))
                     }
+                    if stage == .verifyCurrent, retryAfter > 0 {
+                        Text("Réessayez dans \(retryAfter) s")
+                            .font(.footnote).monospacedDigit()
+                            .foregroundStyle(.secondary)
+                    }
                 }
                 .frame(maxWidth: .infinity)
                 .padding(.horizontal, 24)
@@ -71,15 +79,23 @@ struct AppLockSetupSheet: View {
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Annuler") { dismiss() }
+                        .disabled(isWorking)
                 }
             }
             .safeAreaInset(edge: .bottom) {
                 CodeKeypad(onDigit: handleDigit, onDelete: handleDelete)
+                    .disabled(isWorking || isRecoveringError || (stage == .verifyCurrent && retryAfter > 0))
                     .padding(.horizontal, 24)
                     .padding(.bottom, 16)
             }
         }
-        .interactiveDismissDisabled(!code.isEmpty)
+        .interactiveDismissDisabled(isWorking || !code.isEmpty)
+        .task {
+            while !Task.isCancelled {
+                retryAfter = AppLockStore.retryAfter
+                do { try await Task.sleep(for: .seconds(1)) } catch { return }
+            }
+        }
     }
 
     private var navigationTitle: String {
@@ -115,22 +131,29 @@ struct AppLockSetupSheet: View {
     }
 
     private func handleDigit(_ digit: String) {
-        guard code.count < codeLength else { return }
+        guard !isWorking, !isRecoveringError, code.count < codeLength,
+              stage != .verifyCurrent || AppLockStore.retryAfter == 0 else { return }
         AppLockHaptics.keyPress()
         code += digit
         guard code.count == codeLength else { return }
-        evaluate()
+        isWorking = true
+        Task {
+            defer { isWorking = false; retryAfter = AppLockStore.retryAfter }
+            do { try await evaluate() }
+            catch { code = ""; errorMessage = error.localizedDescription }
+        }
     }
 
     private func handleDelete() {
-        guard !code.isEmpty else { return }
+        guard !isWorking, !isRecoveringError, !code.isEmpty else { return }
         code.removeLast()
     }
 
-    private func evaluate() {
+    private func evaluate() async throws {
         switch stage {
         case .verifyCurrent:
-            if AppLockStore.verify(code) {
+            let matches = try await AppLockStore.verify(code)
+            if matches {
                 if flow == .disable {
                     AppLockStore.clear()
                     AppLockHaptics.success()
@@ -152,7 +175,7 @@ struct AppLockSetupSheet: View {
 
         case .confirmNew:
             if code == firstEntry {
-                AppLockStore.save(code)
+                try await AppLockStore.save(code)
                 AppLockHaptics.success()
                 dismiss()
             } else {
@@ -165,12 +188,14 @@ struct AppLockSetupSheet: View {
     }
 
     private func fail(_ message: String, then cleanup: (() -> Void)? = nil) {
+        isRecoveringError = true
         AppLockHaptics.failure()
         withAnimation(.snappy(duration: 0.2)) { errorMessage = message }
         shakeTrigger += 1
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.85) {
             withAnimation(.snappy(duration: 0.2)) { code = "" }
             cleanup?()
+            isRecoveringError = false
         }
         DispatchQueue.main.asyncAfter(deadline: .now() + 2.4) {
             if errorMessage == message { errorMessage = nil }

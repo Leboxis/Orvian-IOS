@@ -37,6 +37,25 @@ struct FavoritesDiskCacheChecks {
         cache.clear()
         let cleared = await cache.snapshot(key: "account-a|drive-1")
         precondition(cleared == nil, "Logout must remove even pending writes")
+        // Une entrée trop grosse ne doit pas empêcher la conservation d'une
+        // petite entrée plus ancienne qui tient encore dans le budget.
+        let capacityDirectory = directory.appendingPathComponent("capacity")
+        let capacityCache = FavoritesDiskCache(directory: capacityDirectory)
+        let now = Date()
+        func seed(_ name: String, bytes: Int, age: TimeInterval) throws -> URL {
+            let url = capacityDirectory.appendingPathComponent(name)
+            try Data(repeating: 0, count: bytes).write(to: url)
+            try FileManager.default.setAttributes([.modificationDate: now.addingTimeInterval(-age)],
+                                                   ofItemAtPath: url.path)
+            return url
+        }
+        for index in 0..<5 { _ = try seed("recent-\(index)", bytes: 1_800_000, age: Double(index + 1)) }
+        let oversized = try seed("does-not-fit", bytes: 1_800_000, age: 10)
+        let small = try seed("small-older", bytes: 100_000, age: 11)
+        capacityCache.store(snapshot, key: "trigger")
+        _ = await capacityCache.snapshot(key: "trigger") // attend aussi l'éviction sur la file série
+        precondition(!FileManager.default.fileExists(atPath: oversized.path))
+        precondition(FileManager.default.fileExists(atPath: small.path), "Keep smaller older entries that fit")
         print("Favorites disk cache checks passed")
     }
 }

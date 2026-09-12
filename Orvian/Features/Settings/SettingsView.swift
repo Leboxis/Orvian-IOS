@@ -34,6 +34,11 @@ struct SettingsView: View {
                     if let drive = session.selectedDrive {
                         driveSummary(drive)
                     }
+                    if session.usesTemporaryCredentials {
+                        Label("Connexion temporaire : le stockage sécurisé est indisponible. Vous devrez vous reconnecter après avoir quitté l’app.", systemImage: "lock.trianglebadge.exclamationmark")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    }
 
                     settingsCard(
                         title: "Affichage",

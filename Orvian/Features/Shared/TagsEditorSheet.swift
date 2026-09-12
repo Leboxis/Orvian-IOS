@@ -18,6 +18,7 @@ struct TagsEditorSheet: View {
     @State private var appliedCategoryIds: Set<Int>
     @State private var isLoading = true
     @State private var errorMessage: String?
+    @State private var loadError: String?
 
     private let service = KDriveService()
     /// Colonnes pilotées par Réglages → Affichage → Colonnes des tags.
@@ -42,6 +43,14 @@ struct TagsEditorSheet: View {
                 if isLoading {
                     ProgressView("Chargement des tags…")
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else if let loadError {
+                    ContentUnavailableView {
+                        Label("Tags indisponibles", systemImage: "wifi.exclamationmark")
+                    } description: {
+                        Text(loadError)
+                    } actions: {
+                        Button("Réessayer") { Task { await load() } }
+                    }
                 } else if categories.isEmpty {
                     ContentUnavailableView {
                         Label("Aucun tag", systemImage: "tag")
@@ -135,28 +144,26 @@ struct TagsEditorSheet: View {
 
     private func load() async {
         isLoading = true
+        loadError = nil
         defer { isLoading = false }
-        async let categoriesTask = loadCategories()
-        // Les listes (`with=is_favorite,categories`) fournissent les coches ;
-        // la fiche individuelle n'est consultée que si elles manquent
-        // (recherche par tag…). L'appelant qui suit déjà les changements
-        // garde la main sur les coches.
-        if initialAppliedIds == nil {
-            if let ids = file.categories {
-                appliedCategoryIds = Set(ids.map(\.categoryId))
-            } else if let info = try? await service.fileInfo(driveId: driveId, fileId: file.id),
-                      let infoCategories = info.categories {
-                appliedCategoryIds = Set(infoCategories.map(\.categoryId))
+        do {
+            try await CategoryLibrary.shared.requireLoaded(for: driveId)
+            // Les listes (`with=is_favorite,categories`) fournissent les coches ;
+            // la fiche individuelle n'est consultée que si elles manquent
+            // (recherche par tag…). L'appelant qui suit déjà les changements
+            // garde la main sur les coches.
+            if initialAppliedIds == nil {
+                if let ids = file.categories {
+                    appliedCategoryIds = Set(ids.map(\.categoryId))
+                } else {
+                    let info = try await service.fileInfo(driveId: driveId, fileId: file.id)
+                    appliedCategoryIds = Set((info.categories ?? []).map(\.categoryId))
+                }
             }
+            categories = Array(CategoryLibrary.shared.categories(for: driveId).values)
+        } catch {
+            loadError = "Impossible de charger les tags : \(error.localizedDescription)"
         }
-        let cats = await categoriesTask
-        categories = cats
-    }
-
-    /// Tags du drive via le cache de session partagé.
-    private func loadCategories() async -> [Category] {
-        await CategoryLibrary.shared.ensureLoaded(for: driveId)
-        return Array(CategoryLibrary.shared.categories(for: driveId).values)
     }
 
     private func toggle(_ category: Category) async {

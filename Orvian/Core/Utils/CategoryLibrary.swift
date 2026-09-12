@@ -56,6 +56,19 @@ final class CategoryLibrary {
         if sessionGeneration == generation { loadingByDrive[driveId] = nil }
     }
 
+    /// Les écrans qui présentent un état vide doivent distinguer une liste
+    /// vide reçue du serveur d'un échec de chargement.
+    func requireLoaded(for driveId: Int) async throws {
+        await ensureLoaded(for: driveId)
+        try Task.checkCancellation()
+        guard hasLoaded(for: driveId) else { throw LoadingError.unavailable }
+    }
+
+    private enum LoadingError: LocalizedError {
+        case unavailable
+        var errorDescription: String? { "Impossible de charger les tags. Vérifiez votre connexion et réessayez." }
+    }
+
     /// Revalide le cache apres une creation, un renommage ou une suppression.
     @discardableResult
     func refresh(for driveId: Int) async throws -> [Category] {
@@ -85,4 +98,3 @@ final class CategoryLibrary {
         categoriesByDrive[driveId] = categories
     }
 }
-

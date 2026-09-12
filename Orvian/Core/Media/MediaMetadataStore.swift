@@ -38,9 +38,9 @@ final class MediaMetadataStore: ObservableObject {
     /// pour se rafraîchir au fur et à mesure que les métadonnées arrivent.
     @Published private(set) var revision = 0
 
-    /// Cache mémoire de session, indexé par identifiant de fichier.
-    private var cache: [Int: Info] = [:]
-    /// Cache disque, indexé `driveId-fileId` (deux drives peuvent partager un
+    /// Cache mémoire isolé par empreinte du jeton, drive et fichier.
+    private var cache: [String: Info] = [:]
+    /// Cache disque, indexé `credential-driveId-fileId` (deux drives peuvent partager un
     /// même identifiant de fichier).
     private var entries: [String: PersistedEntry] = [:]
     private var persistenceLoaded = false
@@ -51,12 +51,16 @@ final class MediaMetadataStore: ObservableObject {
 
     /// Les resolutions en cours sont partagees : une grille qui attend les
     /// metadonnees ne doit pas paginer parce qu'une autre tache les a deja lancees.
-    private var inFlight: [Int: Task<Void, Never>] = [:]
+    private var inFlight: [String: Task<Void, Never>] = [:]
 
-    private init() {}
+    private let storageURL: URL
 
-    func info(for fileId: Int) -> Info? {
-        cache[fileId]
+    init(storageURL: URL? = nil) {
+        self.storageURL = storageURL ?? Self.persistenceURL()
+    }
+
+    func info(driveId: Int, for fileId: Int) -> Info? {
+        cache[persistenceKey(driveId: driveId, fileId: fileId)]
     }
 
     // MARK: - Persistance
@@ -69,13 +73,13 @@ final class MediaMetadataStore: ObservableObject {
     }
 
     private func persistenceKey(driveId: Int, fileId: Int) -> String {
-        "\(driveId)-\(fileId)"
+        "\(TokenStore.credentialFingerprint() ?? "signed-out")-\(driveId)-\(fileId)"
     }
 
     private func ensurePersistenceLoaded() {
         guard !persistenceLoaded else { return }
         persistenceLoaded = true
-        guard let data = try? Data(contentsOf: Self.persistenceURL()),
+        guard let data = try? Data(contentsOf: storageURL),
               let decoded = try? JSONDecoder().decode([String: PersistedEntry].self, from: data)
         else { return }
         entries = decoded
@@ -87,10 +91,11 @@ final class MediaMetadataStore: ObservableObject {
         // fichier partiel ne peut être lu.
         pendingSaveTask?.cancel()
         let snapshot = entries
+        let destination = storageURL
         pendingSaveTask = Task.detached(priority: .utility) {
             try? await Task.sleep(for: .seconds(1))
             guard !Task.isCancelled else { return }
-            Self.write(entries: snapshot, to: Self.persistenceURL())
+            Self.write(entries: snapshot, to: destination)
         }
     }
 
@@ -134,15 +139,17 @@ final class MediaMetadataStore: ObservableObject {
     /// réseau ; seules les vidéos réellement inconnues sont analysées.
     func resolveAll(driveId: Int, items: [DriveFile]) async {
         ensurePersistenceLoaded()
+        let credential = TokenStore.credentialFingerprint()
 
         var pending: [DriveFile] = []
         var promotedAny = false
         for file in items where file.isVideo {
-            guard cache[file.id] == nil else { continue }
+            let key = persistenceKey(driveId: driveId, fileId: file.id)
+            guard cache[key] == nil else { continue }
             if let restored = persistedInfo(driveId: driveId, file: file) {
                 // Promotion mémoire : la grille retrouve l'information via
                 // `info(for:)` sans repasser par le disque à chaque rendu.
-                cache[file.id] = restored
+                cache[key] = restored
                 promotedAny = true
                 continue
             }
@@ -155,6 +162,7 @@ final class MediaMetadataStore: ObservableObject {
         let batch = 8
         var index = 0
         while index < pending.count {
+            guard !Task.isCancelled, credential == TokenStore.credentialFingerprint() else { return }
             let chunk = Array(pending[index..<min(index + batch, pending.count)])
             var resolvedAny = false
             await withTaskGroup(of: Bool.self) { group in
@@ -177,8 +185,9 @@ final class MediaMetadataStore: ObservableObject {
     }
 
     private func resolve(driveId: Int, file: DriveFile) async -> Bool {
-        guard cache[file.id] == nil else { return false }
-        if let task = inFlight[file.id] {
+        let key = persistenceKey(driveId: driveId, fileId: file.id)
+        guard cache[key] == nil else { return false }
+        if let task = inFlight[key] {
             _ = await task.value
             return false
         }
@@ -187,17 +196,18 @@ final class MediaMetadataStore: ObservableObject {
         // en cache) : pas de second AVURLAsset ni de double sondage réseau
         // pour la même vidéo. La durée du moov est assez précise pour le tri.
         let task = Task<Void, Never> { [self] in
-            defer { inFlight.removeValue(forKey: file.id) }
+            defer { inFlight.removeValue(forKey: key) }
             guard let asset = await VideoAssetCache.shared.asset(driveId: driveId, fileId: file.id) else { return }
             guard let duration = try? await asset.load(.duration) else { return }
             let properties = await videoProperties(of: asset)
+            guard !Task.isCancelled, key == persistenceKey(driveId: driveId, fileId: file.id) else { return }
             let info = Info(
                 duration: duration.seconds,
                 orientation: properties.orientation,
                 maximumDimension: properties.maximumDimension
             )
-            cache[file.id] = info
-            entries[persistenceKey(driveId: driveId, fileId: file.id)] = PersistedEntry(
+            cache[key] = info
+            entries[key] = PersistedEntry(
                 info: info,
                 size: file.size,
                 lastModifiedAt: file.lastModifiedAt,
@@ -205,9 +215,9 @@ final class MediaMetadataStore: ObservableObject {
             )
             scheduleSave()
         }
-        inFlight[file.id] = task
+        inFlight[key] = task
         await task.value
-        return cache[file.id] != nil
+        return cache[key] != nil
     }
 
     private func videoProperties(

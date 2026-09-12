@@ -9,7 +9,7 @@ actor MediaURLCache {
     private struct Key: Hashable, Sendable {
         let driveId: Int
         let fileId: Int
-        let credentialFingerprint: Int
+        let credentialFingerprint: String
     }
 
     private var entries: [Key: (url: URL, expiresAt: Date)] = [:]
@@ -37,6 +37,7 @@ actor MediaURLCache {
             guard !Task.isCancelled else { return nil }
             do {
                 let url = try await service.temporaryURL(driveId: driveId, fileId: fileId)
+                guard !Task.isCancelled, key == makeKey(driveId: driveId, fileId: fileId) else { return nil }
                 entries[key] = (url, Date().addingTimeInterval(3300))
                 return url
             } catch {
@@ -123,7 +124,7 @@ actor MediaURLCache {
         Key(
             driveId: driveId,
             fileId: fileId,
-            credentialFingerprint: TokenStore.current()?.hashValue ?? 0
+            credentialFingerprint: TokenStore.credentialFingerprint() ?? "signed-out"
         )
     }
 }

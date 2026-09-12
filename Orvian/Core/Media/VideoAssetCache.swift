@@ -13,7 +13,7 @@ final class VideoAssetCache {
     private struct Key: Hashable {
         let driveId: Int
         let fileId: Int
-        let credentialFingerprint: Int
+        let credentialFingerprint: String
     }
 
     private let maximumEntries = 8
@@ -39,6 +39,7 @@ final class VideoAssetCache {
             ? await MediaURLCache.shared.freshURL(driveId: driveId, fileId: fileId)
             : await MediaURLCache.shared.url(driveId: driveId, fileId: fileId)
         guard let url,
+              !Task.isCancelled, key == makeKey(driveId: driveId, fileId: fileId),
               url.scheme?.lowercased() == "https",
               url.host != nil
         else { return nil }
@@ -67,7 +68,9 @@ final class VideoAssetCache {
                             throw PlaybackPreparationError.notPlayable
                         }
                     } catch {
-                        self.invalidate(driveId: driveId, fileId: fileId)
+                        if key == self.makeKey(driveId: driveId, fileId: fileId) {
+                            self.invalidate(driveId: driveId, fileId: fileId)
+                        }
                     }
                 }
                 self.prefetchTasks[key] = nil
@@ -98,7 +101,7 @@ final class VideoAssetCache {
         Key(
             driveId: driveId,
             fileId: fileId,
-            credentialFingerprint: TokenStore.current()?.hashValue ?? 0
+            credentialFingerprint: TokenStore.credentialFingerprint() ?? "signed-out"
         )
     }
 

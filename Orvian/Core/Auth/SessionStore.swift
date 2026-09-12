@@ -17,6 +17,7 @@ final class SessionStore {
     private(set) var accountId: Int?
     private(set) var selectedDrive: Drive?
     private(set) var signedOutMessage: String?
+    private(set) var usesTemporaryCredentials = false
 
     private let service: KDriveService
     private let defaults = UserDefaults.standard
@@ -39,10 +40,11 @@ final class SessionStore {
 
     /// Au lancement : si un token existe, retrouve compte + drive sélectionné.
     func bootstrap() async {
-        guard TokenStore.current() != nil else {
+        guard let token = TokenStore.current() else {
             phase = .signedOut
             return
         }
+        usesTemporaryCredentials = !TokenStore.save(token)
         signedOutMessage = nil
         phase = .bootstrapping
         do {
@@ -62,7 +64,7 @@ final class SessionStore {
         signedOutMessage = nil
         DirectoryListStore.shared.clear()
         CategoryLibrary.shared.clear()
-        TokenStore.save(token)
+        usesTemporaryCredentials = !TokenStore.save(token)
         phase = .bootstrapping
         do {
             try await loadDrives(preferredDriveId: nil)
@@ -96,6 +98,7 @@ final class SessionStore {
         DirectoryListStore.shared.clear()
         CategoryLibrary.shared.clear()
         TokenStore.clear()
+        usesTemporaryCredentials = false
         defaults.removeObject(forKey: Keys.accountId)
         defaults.removeObject(forKey: Keys.driveId)
         drives = []
@@ -142,4 +145,3 @@ final class SessionStore {
         }
     }
 }
-

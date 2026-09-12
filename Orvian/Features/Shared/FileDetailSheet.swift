@@ -20,6 +20,8 @@ struct FileDetailSheet: View {
     @AppStorage("defaultFolderColor") private var defaultFolderColor = "#4285F5"
     /// Tags réellement appliqués au fichier (source : fiche individuelle).
     @State private var appliedCategories: [Category] = []
+    @State private var isLoadingTags = true
+    @State private var tagsError: String?
     @State private var isFavorite: Bool
     /// Chemin complet depuis la racine du drive, tel que renvoyé par l'API.
     @State private var filePath: String?
@@ -179,6 +181,11 @@ struct FileDetailSheet: View {
             if isTrashed {
                 Text("Restaurer le fichier pour modifier ses tags.")
                     .foregroundStyle(.secondary)
+            } else if isLoadingTags {
+                ProgressView("Chargement des tags…")
+            } else if let tagsError {
+                Text(tagsError).font(.footnote).foregroundStyle(.secondary)
+                Button("Réessayer") { Task { await loadFileInfo() } }
             } else if appliedCategories.isEmpty {
                 Text("Aucun tag")
                     .foregroundStyle(.secondary)
@@ -277,32 +284,35 @@ struct FileDetailSheet: View {
     }
 
     private func loadFileInfo() async {
+        isLoadingTags = true
+        tagsError = nil
+        defer { isLoadingTags = false }
         guard !isTrashed else {
             // Sans réseau inutile : la liste fournit déjà le chemin quand l'API le renvoie.
             filePath = file.path
             return
         }
         filePath = file.path
-        await CategoryLibrary.shared.ensureLoaded(for: driveId)
-        let byId = CategoryLibrary.shared.categories(for: driveId)
-        // Les listes (`with=is_favorite,categories,path`) fournissent déjà les
-        // catégories, le favori et le chemin : la fiche s'affiche sans appel
-        // réseau. Seule la recherche par tag (qui ne renvoie pas les
-        // catégories) déclenche la fiche individuelle.
-        if let categories = file.categories {
-            appliedCategories = categories.compactMap { byId[$0.categoryId] }
-            isFavorite = file.isFavorite == true
-            return
-        }
-        if let info = try? await service.fileInfo(driveId: driveId, fileId: file.id) {
+        do {
+            try await CategoryLibrary.shared.requireLoaded(for: driveId)
+            let byId = CategoryLibrary.shared.categories(for: driveId)
+            // Les listes (`with=is_favorite,categories,path`) fournissent déjà les
+            // catégories, le favori et le chemin : la fiche s'affiche sans appel
+            // réseau. Seule la recherche par tag (qui ne renvoie pas les
+            // catégories) déclenche la fiche individuelle.
+            if let categories = file.categories {
+                appliedCategories = categories.compactMap { byId[$0.categoryId] }
+                isFavorite = file.isFavorite == true
+                return
+            }
+            let info = try await service.fileInfo(driveId: driveId, fileId: file.id)
             appliedCategories = (info.categories ?? []).compactMap { byId[$0.categoryId] }
             isFavorite = info.isFavorite == true
             if let infoPath = info.path, !infoPath.isEmpty {
                 filePath = infoPath
             }
-        } else {
-            // Repli : les catégories éventuellement fournies par la liste.
-            appliedCategories = (file.categories ?? []).compactMap { byId[$0.categoryId] }
+        } catch {
+            tagsError = "Impossible de charger les tags : \(error.localizedDescription)"
         }
     }
 }

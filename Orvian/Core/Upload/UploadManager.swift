@@ -184,7 +184,7 @@ final class UploadManager {
             case .queued: return sum + 0
             case let .inProgress(p): return sum + p
             case .completed: return sum + 1.0
-            case .failed: return sum + 1.0
+            case .failed: return sum
             }
         }
         return total / Double(tasks.count)

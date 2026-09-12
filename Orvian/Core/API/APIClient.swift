@@ -314,7 +314,7 @@ actor APIClient {
         let uploadTask = makeTask()
         return try await withTaskCancellationHandler {
             try await withCheckedThrowingContinuation { continuation in
-                delegate.continuation = continuation
+                delegate.completion.install(continuation)
                 uploadTask.resume()
             }
         } onCancel: {
@@ -435,7 +435,7 @@ actor APIClient {
 /// les octets réellement envoyés par URLSession.
 private final class UploadProgressDelegate: NSObject, URLSessionDataDelegate, @unchecked Sendable {
     let progress: @Sendable (Double) -> Void
-    var continuation: CheckedContinuation<(Data, URLResponse), Error>?
+    let completion = TransferCompletion<(Data, URLResponse)>()
     private var responseData = Data()
 
     init(progress: @escaping @Sendable (Double) -> Void) {
@@ -477,14 +477,12 @@ private final class UploadProgressDelegate: NSObject, URLSessionDataDelegate, @u
     }
 
     func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
-        guard let continuation else { return }
-        self.continuation = nil
         if let error {
-            continuation.resume(throwing: error)
+            completion.finish(.failure(error))
         } else if let response = task.response {
-            continuation.resume(returning: (responseData, response))
+            completion.finish(.success((responseData, response)))
         } else {
-            continuation.resume(throwing: APIError.invalidResponse)
+            completion.finish(.failure(APIError.invalidResponse))
         }
     }
 }

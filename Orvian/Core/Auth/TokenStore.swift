@@ -3,10 +3,10 @@ import CryptoKit
 
 /// Stockage du token API.
 ///
-/// Keychain en priorité ; repli sur UserDefaults si le Keychain est
-/// indisponible (cas rencontré dans certains conteneurs tiers comme
-/// LiveContainer, où l'entitlement keychain manque).
+/// Keychain uniquement sur disque ; session en mémoire si indisponible.
 enum TokenStore {
+    private static let fingerprintLock = NSLock()
+    private static var fingerprintCache: (token: String, hash: String)?
     private static let store = CachedSecureValue(
         service: "com.orvian.app.api-token",
         account: "orvian",
@@ -17,12 +17,16 @@ enum TokenStore {
         store.current()
     }
 
-    static func save(_ token: String) {
+    @discardableResult
+    static func save(_ token: String) -> Bool {
         store.save(token.trimmingCharacters(in: .whitespacesAndNewlines))
     }
 
     static func clear() {
         store.clear()
+        fingerprintLock.lock()
+        fingerprintCache = nil
+        fingerprintLock.unlock()
     }
 
     /// Empreinte non réversible utilisée pour rattacher une réponse 401 au
@@ -30,7 +34,12 @@ enum TokenStore {
     /// ancienne session ne peut ainsi pas déconnecter un nouveau compte.
     static func credentialFingerprint() -> String? {
         guard let token = current() else { return nil }
-        return fingerprint(of: token)
+        fingerprintLock.lock()
+        defer { fingerprintLock.unlock() }
+        if let cached = fingerprintCache, cached.token == token { return cached.hash }
+        let hash = fingerprint(of: token)
+        fingerprintCache = (token, hash)
+        return hash
     }
 
     static func fingerprint(of token: String) -> String {

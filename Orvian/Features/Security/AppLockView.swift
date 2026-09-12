@@ -17,6 +17,8 @@ struct AppLockView: View {
     @State private var showWrong = false
     @State private var isAuthenticating = false
     @State private var biometricsMessage: String?
+    @State private var isCheckingCode = false
+    @State private var retryAfter = AppLockStore.retryAfter
 
     private let codeLength = 4
 
@@ -45,6 +47,12 @@ struct AppLockView: View {
                     .modifier(ShakeEffect(animatableData: CGFloat(shakeTrigger)))
                     .animation(.easeInOut(duration: 0.45), value: shakeTrigger)
 
+                if retryAfter > 0 {
+                    Text("Réessayez dans \(retryAfter) s")
+                        .font(.footnote).monospacedDigit()
+                        .foregroundStyle(.secondary)
+                }
+
                 if showWrong || biometricsMessage != nil {
                     Label(biometricsMessage ?? "Code incorrect", systemImage: "xmark.circle.fill")
                         .font(.footnote.weight(.semibold))
@@ -56,6 +64,7 @@ struct AppLockView: View {
                 Spacer(minLength: 0)
 
                 CodeKeypad(onDigit: handleDigit, onDelete: handleDelete)
+                    .disabled(isCheckingCode || isAuthenticating || showWrong || retryAfter > 0)
                     .padding(.bottom, 24)
             }
             .padding(.horizontal, 24)
@@ -63,8 +72,11 @@ struct AppLockView: View {
         .task {
             // Face ID est proposé d'office au retour d'arrière-plan,
             // mais pas au premier lancement de l'app.
-            guard autoPromptBiometrics, biometricsAvailable else { return }
-            authenticateWithBiometrics()
+            if autoPromptBiometrics, biometricsAvailable { authenticateWithBiometrics() }
+            while !Task.isCancelled {
+                retryAfter = AppLockStore.retryAfter
+                do { try await Task.sleep(for: .seconds(1)) } catch { return }
+            }
         }
     }
 
@@ -92,7 +104,7 @@ struct AppLockView: View {
     /// Authentification biométrique locale : en cas de succès, le code n'est
     /// pas requis. L'échec laisse la saisie du code disponible.
     private func authenticateWithBiometrics() {
-        guard !isAuthenticating else { return }
+        guard !isAuthenticating, !isCheckingCode else { return }
         let context = LAContext()
         var error: NSError?
         guard context.canEvaluatePolicy(.deviceOwnerAuthenticationWithBiometrics, error: &error) else {
@@ -113,6 +125,7 @@ struct AppLockView: View {
             DispatchQueue.main.async {
                 isAuthenticating = false
                 if success {
+                    AppLockStore.resetAttempts()
                     AppLockHaptics.success()
                     onUnlock()
                 } else {
@@ -123,15 +136,30 @@ struct AppLockView: View {
     }
 
     private func handleDigit(_ digit: String) {
-        guard code.count < codeLength else { return }
+        guard !isCheckingCode, !isAuthenticating, !showWrong,
+              AppLockStore.retryAfter == 0, code.count < codeLength else { return }
         AppLockHaptics.keyPress()
         code += digit
         guard code.count == codeLength else { return }
 
-        if AppLockStore.verify(code) {
-            AppLockHaptics.success()
-            onUnlock()
-        } else {
+        isCheckingCode = true
+        let enteredCode = code
+        Task {
+            defer {
+                isCheckingCode = false
+                retryAfter = AppLockStore.retryAfter
+            }
+            do {
+                let matches = try await AppLockStore.verify(enteredCode)
+                if matches {
+                    AppLockHaptics.success()
+                    onUnlock()
+                    return
+                }
+                biometricsMessage = nil
+            } catch {
+                biometricsMessage = error.localizedDescription
+            }
             AppLockHaptics.failure()
             withAnimation(.snappy(duration: 0.2)) { showWrong = true }
             shakeTrigger += 1
@@ -145,7 +173,7 @@ struct AppLockView: View {
     }
 
     private func handleDelete() {
-        guard !code.isEmpty else { return }
+        guard !isCheckingCode, !showWrong, !code.isEmpty else { return }
         code.removeLast()
     }
 }

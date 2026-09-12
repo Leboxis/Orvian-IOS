@@ -1,31 +1,34 @@
 import Foundation
 import Security
 
-/// Accès bas niveau au Keychain, avec repli `UserDefaults` si le Keychain est
-/// indisponible (cas rencontré dans certains conteneurs tiers comme
-/// LiveContainer, où l'entitlement keychain manque).
-///
-/// Un seul emplacement pour le motif « generic password avec repli », utilisé
-/// auparavant indépendamment par `TokenStore` et `AppLockStore`.
+/// Secrets persistés exclusivement dans le Keychain. Les anciens replis sont
+/// migrés puis effacés ; aucun nouveau secret n'est écrit dans UserDefaults.
 enum KeychainSupport {
-    /// Lit une valeur : Keychain en priorité, puis repli `UserDefaults`.
-    static func read(service: String, account: String, fallbackKey: String) -> String? {
-        readKeychain(service: service, account: account)
-            ?? UserDefaults.standard.string(forKey: fallbackKey)
+    struct Access {
+        var read: (String, String) -> String?
+        var write: (String, String, String) -> Bool
+        static let system = Access(read: KeychainSupport.readKeychain, write: KeychainSupport.writeKeychain)
+    }
+    /// Un ancien secret reste utilisable en mémoire pour cette session si sa
+    /// migration échoue, mais sa copie non sécurisée est toujours supprimée.
+    static func read(service: String, account: String, fallbackKey: String,
+                     defaults: UserDefaults = .standard, access: Access = .system) -> String? {
+        if let value = access.read(service, account) {
+            defaults.removeObject(forKey: fallbackKey)
+            return value
+        }
+        guard let legacy = defaults.string(forKey: fallbackKey) else { return nil }
+        _ = write(legacy, service: service, account: account, fallbackKey: fallbackKey, defaults: defaults, access: access)
+        return legacy
     }
 
-    /// Écrit une valeur. Renvoie `true` si le Keychain a accepté l'écriture ;
-    /// sinon la valeur est conservée dans `UserDefaults` et `false` est
-    /// renvoyé. Dans tous les cas, le repli est nettoyé quand le Keychain est
-    /// utilisé.
+    /// Renvoie false si le secret ne peut pas être persisté en sécurité.
     @discardableResult
-    static func write(_ value: String, service: String, account: String, fallbackKey: String) -> Bool {
-        if writeKeychain(value, service: service, account: account) {
-            UserDefaults.standard.removeObject(forKey: fallbackKey)
-            return true
-        }
-        UserDefaults.standard.set(value, forKey: fallbackKey)
-        return false
+    static func write(_ value: String, service: String, account: String, fallbackKey: String,
+                      defaults: UserDefaults = .standard, access: Access = .system) -> Bool {
+        let saved = access.write(value, service, account)
+        defaults.removeObject(forKey: fallbackKey)
+        return saved
     }
 
     /// Supprime la valeur du Keychain et de son repli `UserDefaults`.
@@ -57,11 +60,14 @@ enum KeychainSupport {
     private static func writeKeychain(_ value: String, service: String, account: String) -> Bool {
         let data = Data(value.utf8)
         var query = query(service: service, account: account)
-        let attributes: [String: Any] = [kSecValueData as String: data]
+        let attributes: [String: Any] = [
+            kSecValueData as String: data,
+            kSecAttrAccessible as String: kSecAttrAccessibleWhenUnlockedThisDeviceOnly
+        ]
         var status = SecItemUpdate(query as CFDictionary, attributes as CFDictionary)
         if status == errSecItemNotFound {
             query[kSecValueData as String] = data
-            query[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlock
+            query[kSecAttrAccessible as String] = kSecAttrAccessibleWhenUnlockedThisDeviceOnly
             status = SecItemAdd(query as CFDictionary, nil)
         }
         return status == errSecSuccess
@@ -74,7 +80,7 @@ enum KeychainSupport {
 
 /// Valeur secrète conservée en mémoire après sa première lecture, avec un
 /// accès protégé par verrou. Deux implémentations l'utilisaient séparément
-/// (`TokenStore`, `AppLockStore`) : ce type centralise le motif.
+/// Le jeton peut rester en mémoire si sa persistance sécurisée échoue.
 final class CachedSecureValue: @unchecked Sendable {
     private let service: String
     private let account: String
@@ -100,11 +106,13 @@ final class CachedSecureValue: @unchecked Sendable {
         return value
     }
 
-    func save(_ value: String) {
+    @discardableResult
+    func save(_ value: String) -> Bool {
         lock.lock()
         defer { lock.unlock() }
+        let saved = KeychainSupport.write(value, service: service, account: account, fallbackKey: fallbackKey)
         cached = value
-        KeychainSupport.write(value, service: service, account: account, fallbackKey: fallbackKey)
+        return saved
     }
 
     func clear() {

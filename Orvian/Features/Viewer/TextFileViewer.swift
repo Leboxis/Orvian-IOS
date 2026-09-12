@@ -365,33 +365,17 @@ struct TextFileViewer: View {
             guard let url = await MediaURLCache.shared.url(driveId: driveId, fileId: file.id) else {
                 throw TextFileViewerError.missingTemporaryURL
             }
-            let (bytes, response) = try await URLSession.shared.bytes(from: url)
-            guard let http = response as? HTTPURLResponse else {
-                throw TextFileViewerError.invalidResponse
-            }
-            guard (200..<300).contains(http.statusCode) else {
-                throw TextFileViewerError.http(status: http.statusCode)
-            }
-            if http.expectedContentLength > Int64(Self.maximumEditableBytes) {
-                throw TextFileViewerError.tooLarge(maximumBytes: Self.maximumEditableBytes)
-            }
-
-            var data = Data()
-            if http.expectedContentLength > 0 {
-                data.reserveCapacity(min(Int(http.expectedContentLength), Self.maximumEditableBytes))
-            }
-            for try await byte in bytes {
-                guard data.count < Self.maximumEditableBytes else {
-                    throw TextFileViewerError.tooLarge(maximumBytes: Self.maximumEditableBytes)
+            let data = try await BoundedDataLoader.load(from: url, maximumBytes: Self.maximumEditableBytes)
+            let decoded = try await Task.detached(priority: .userInitiated) {
+                guard let decoded = Self.decode(data) else {
+                    throw TextFileViewerError.unsupportedEncoding
                 }
-                data.append(byte)
-            }
-            guard let decoded = Self.decode(data) else {
-                throw TextFileViewerError.unsupportedEncoding
-            }
-            guard !Self.isBinary(data) else {
-                throw TextFileViewerError.binaryContent
-            }
+                guard !Self.isBinary(data) else {
+                    throw TextFileViewerError.binaryContent
+                }
+                return decoded
+            }.value
+            try Task.checkCancellation()
             let links = await Self.links(in: decoded)
             content = decoded
             draft = decoded
@@ -433,7 +417,7 @@ struct TextFileViewer: View {
 
     /// UTF-8 d'abord, puis Windows-1252 (accentués courants), Latin-1 en
     /// dernier recours : les .txt existants ne sont pas tous en UTF-8.
-    private static func decode(_ data: Data) -> String? {
+    nonisolated private static func decode(_ data: Data) -> String? {
         if data.starts(with: [0xFF, 0xFE]) || data.starts(with: [0xFE, 0xFF]),
            let text = String(data: data, encoding: .utf16) {
             return text
@@ -448,7 +432,7 @@ struct TextFileViewer: View {
     /// faut donc refuser proprement ce qui n'est pas du texte. Échantillon du
     /// début du fichier : un octet nul ou > 5 % d'octets de contrôle (hors
     /// tabulation, saut de ligne…) signent un binaire.
-    private static func isBinary(_ data: Data) -> Bool {
+    nonisolated private static func isBinary(_ data: Data) -> Bool {
         let sample = data.prefix(8_192)
         guard !sample.isEmpty else { return false }
         var controlBytes = 0
