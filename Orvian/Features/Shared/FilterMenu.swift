@@ -1,277 +1,112 @@
 import SwiftUI
 
-/// Bouton et panneau de filtres partagés par toutes les grilles de fichiers.
+/// Bouton et options de filtres partagés par toutes les grilles de fichiers.
+///
+/// Un `Menu` natif plutôt qu'un `popover` personnalisé : le popover ancré
+/// dans la barre de navigation s'est révélé capricieux (ouverture aléatoire
+/// au tap, fermeture au tap extérieur inopérante, probablement aggravée par
+/// la présentation imbriquée du tri). Le menu système s'ouvre à chaque tap
+/// et se referme au tap en dehors, sans état de présentation à gérer.
 struct FilterMenu: View {
     @Binding var filters: FileFilters
-    @State private var isPresented = false
 
     var body: some View {
-        Button {
-            // Bascule explicite : retaper le bouton referme le panneau, et le
-            // tap en dehors reste géré par le système (aucune présentation
-            // imbriquée ne doit l'intercepter, voir `sortSection`).
-            isPresented.toggle()
-        } label: {
-            Image(systemName: filters.isActive ? "line.3.horizontal.decrease.circle.fill" : "line.3.horizontal.decrease.circle")
-        }
-        .popover(isPresented: $isPresented, arrowEdge: .top) {
-            FilterPanel(filters: $filters)
-                .presentationCompactAdaptation(.popover)
-        }
-        .accessibilityLabel("Filtres")
-        .accessibilityHint("Trier et filtrer la liste")
-    }
-}
-
-/// Panneau de filtre compact, aligné sur les cartes de l'application.
-/// Le choix du tri est une section dépliable inline : un `Menu` imbriqué dans
-/// le `popover` interceptait le tap extérieur et le panneau restait bloqué
-/// ouvert. Les boutons directs laissent le système refermer au tap dehors.
-private struct FilterPanel: View {
-    @Binding var filters: FileFilters
-    @State private var showSortOptions = false
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            sortSection
-
-            if filters.sort != .original {
-                directionSection
+        Menu {
+            Picker("Trier par", selection: $filters.sort) {
+                ForEach(FileFilters.SortMode.allCases) { mode in
+                    Label(mode.title, systemImage: mode.symbol)
+                        .tag(mode)
+                }
             }
 
-            iconSection(
-                title: "Orientation vidéo",
-                values: FileFilters.Orientation.allCases,
-                symbol: \.symbol,
-                isSelected: { filters.orientation == $0 },
-                action: toggle
-            )
+            if filters.sort != .original {
+                Picker("Ordre", selection: $filters.direction) {
+                    ForEach(FileFilters.Direction.allCases) { direction in
+                        Label(direction.title, systemImage: direction.symbol)
+                            .tag(direction)
+                    }
+                }
+            }
 
-            videoQualitySection
+            Section("Orientation vidéo") {
+                ForEach(FileFilters.Orientation.allCases) { orientation in
+                    Toggle(isOn: orientationBinding(for: orientation)) {
+                        Label(orientation.title, systemImage: orientation.symbol)
+                    }
+                }
+                Toggle(isOn: highResolutionBinding) {
+                    Label("Vidéos 4K et plus", systemImage: "4k.tv")
+                }
+            }
 
-            iconSection(
-                title: "Afficher",
-                values: FileFilters.MediaFilter.allCases,
-                symbol: \.symbol,
-                isSelected: { filters.media == $0 },
-                action: selectMedia
-            )
+            Section("Afficher") {
+                Picker("Afficher", selection: mediaBinding) {
+                    ForEach(FileFilters.MediaFilter.allCases) { media in
+                        Label(media.title, systemImage: media.symbol)
+                            .tag(media)
+                    }
+                }
+            }
 
             if filters.isActive {
+                Divider()
                 Button(role: .destructive) {
                     filters = FileFilters()
                 } label: {
                     Label("Réinitialiser", systemImage: "arrow.counterclockwise")
-                        .font(.footnote.weight(.medium))
-                        .frame(maxWidth: .infinity)
-                        .frame(height: 34)
                 }
-                .buttonStyle(.plain)
-                .background(.quaternary.opacity(0.55), in: RoundedRectangle(cornerRadius: 11, style: .continuous))
             }
+        } label: {
+            Image(systemName: filters.isActive ? "line.3.horizontal.decrease.circle.fill" : "line.3.horizontal.decrease.circle")
         }
-        .padding(14)
-        .frame(width: 280)
+        .accessibilityLabel("Filtres")
+        .accessibilityHint("Trier et filtrer la liste")
     }
 
-    private var sortSection: some View {
-        VStack(spacing: 0) {
-            Button {
-                withAnimation(.snappy(duration: 0.2)) {
-                    showSortOptions.toggle()
-                }
-            } label: {
-                HStack(spacing: 9) {
-                    Image(systemName: "arrow.up.arrow.down")
-                        .foregroundStyle(.secondary)
-                    Text("Trier par")
-                        .font(.subheadline.weight(.medium))
-                    Spacer()
-                    Text(filters.sort.title)
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                    Image(systemName: showSortOptions ? "chevron.up" : "chevron.down")
-                        .font(.caption2.weight(.semibold))
-                        .foregroundStyle(.tertiary)
-                }
-                .frame(maxWidth: .infinity)
-                .padding(.horizontal, 11)
-                .frame(height: 40)
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-
-            if showSortOptions {
-                Divider()
-                    .padding(.horizontal, 11)
-                ForEach(FileFilters.SortMode.allCases) { mode in
-                    Button {
-                        filters.sort = mode
-                    } label: {
-                        HStack(spacing: 9) {
-                            Image(systemName: mode.symbol)
-                                .foregroundStyle(.secondary)
-                                .frame(width: 20)
-                            Text(mode.title)
-                                .font(.subheadline)
-                            Spacer()
-                            if filters.sort == mode {
-                                Image(systemName: "checkmark")
-                                    .font(.footnote.weight(.semibold))
-                                    .foregroundStyle(Color.accentColor)
-                            }
-                        }
-                        .frame(maxWidth: .infinity)
-                        .padding(.horizontal, 11)
-                        .frame(height: 36)
-                        .contentShape(Rectangle())
+    /// Sélection exclusive : une seule orientation à la fois, retaper la coche
+    /// la retire. Choisir une orientation bascule l'affichage sur les vidéos.
+    private func orientationBinding(for orientation: FileFilters.Orientation) -> Binding<Bool> {
+        Binding(
+            get: { filters.orientation == orientation },
+            set: { isOn in
+                if isOn {
+                    filters.orientation = orientation
+                    if filters.media == .images || filters.media == .other {
+                        filters.media = .videos
                     }
-                    .buttonStyle(.plain)
+                } else if filters.orientation == orientation {
+                    filters.orientation = nil
                 }
             }
-        }
-        .background(Color(uiColor: .secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        )
     }
 
-    private var directionSection: some View {
-        HStack(spacing: 9) {
-            Text("Ordre")
-                .font(.subheadline.weight(.medium))
-                .foregroundStyle(.secondary)
-            Spacer()
-
-            HStack(spacing: 7) {
-                ForEach(FileFilters.Direction.allCases) { direction in
-                    iconButton(
-                        symbol: direction.symbol,
-                        accessibilityLabel: direction.title,
-                        selected: filters.direction == direction
-                    ) {
-                        filters.direction = direction
-                    }
-                }
-            }
-        }
-        .padding(.horizontal, 11)
-        .frame(height: 40)
-        .background(Color(uiColor: .secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-    }
-
-    private var videoQualitySection: some View {
-        VStack(alignment: .leading, spacing: 7) {
-            Text("Qualité vidéo")
-                .font(.footnote.weight(.medium))
-                .foregroundStyle(.secondary)
-
-            Button {
-                filters.highResolutionVideosOnly.toggle()
-                if filters.highResolutionVideosOnly {
+    /// Activer « 4K+ » bascule l'affichage sur les vidéos (même couplage que
+    /// l'ancien panneau).
+    private var highResolutionBinding: Binding<Bool> {
+        Binding(
+            get: { filters.highResolutionVideosOnly },
+            set: { isOn in
+                filters.highResolutionVideosOnly = isOn
+                if isOn {
                     filters.media = .videos
                 }
-            } label: {
-                Text("4K+")
-                    .font(.subheadline.weight(.semibold))
-                    .frame(maxWidth: .infinity)
-                    .frame(height: 36)
-                    .foregroundStyle(filters.highResolutionVideosOnly ? .white : .primary)
-                    .background(
-                        filters.highResolutionVideosOnly ? Color.accentColor : Color(uiColor: .secondarySystemGroupedBackground),
-                        in: RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    )
-                    .overlay {
-                        if !filters.highResolutionVideosOnly {
-                            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                                .strokeBorder(.quaternary, lineWidth: 0.5)
-                        }
-                    }
             }
-            .buttonStyle(.plain)
-            .accessibilityLabel("Vidéos 4K et plus")
-            .accessibilityAddTraits(filters.highResolutionVideosOnly ? .isSelected : [])
-        }
+        )
     }
 
-    private func iconSection<Value: Identifiable>(
-        title: String,
-        values: [Value],
-        symbol: KeyPath<Value, String>,
-        isSelected: @escaping (Value) -> Bool,
-        action: @escaping (Value) -> Void
-    ) -> some View where Value.ID: Hashable {
-        VStack(alignment: .leading, spacing: 7) {
-            Text(title)
-                .font(.footnote.weight(.medium))
-                .foregroundStyle(.secondary)
-
-            HStack(spacing: 8) {
-                ForEach(values) { value in
-                    iconButton(
-                        symbol: value[keyPath: symbol],
-                        accessibilityLabel: accessibilityLabel(for: value),
-                        selected: isSelected(value)
-                    ) {
-                        action(value)
-                    }
+    /// Choisir « Images » ou « Autres » retire les critères vidéo devenus sans
+    /// objet (orientation, 4K+).
+    private var mediaBinding: Binding<FileFilters.MediaFilter> {
+        Binding(
+            get: { filters.media },
+            set: { media in
+                filters.media = media
+                if media == .images || media == .other {
+                    filters.orientation = nil
+                    filters.highResolutionVideosOnly = false
                 }
             }
-        }
-    }
-
-    private func iconButton(
-        symbol: String,
-        accessibilityLabel: String,
-        selected: Bool,
-        action: @escaping () -> Void
-    ) -> some View {
-        Button(action: action) {
-            Image(systemName: symbol)
-                .font(.system(size: 17, weight: .semibold))
-                .frame(width: 40, height: 36)
-                .foregroundStyle(selected ? .white : .primary)
-                .background(
-                    selected ? Color.accentColor : Color(uiColor: .secondarySystemGroupedBackground),
-                    in: RoundedRectangle(cornerRadius: 10, style: .continuous)
-                )
-                .overlay {
-                    if !selected {
-                        RoundedRectangle(cornerRadius: 10, style: .continuous)
-                            .strokeBorder(.quaternary, lineWidth: 0.5)
-                    }
-                }
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel(accessibilityLabel)
-        .accessibilityAddTraits(selected ? .isSelected : [])
-    }
-
-    private func toggle(_ orientation: FileFilters.Orientation) {
-        if filters.orientation == orientation {
-            filters.orientation = nil
-        } else {
-            filters.orientation = orientation
-            if filters.media == .images || filters.media == .other {
-                filters.media = .videos
-            }
-        }
-    }
-
-    private func selectMedia(_ media: FileFilters.MediaFilter) {
-        filters.media = media
-        if media == .images || media == .other {
-            filters.orientation = nil
-            filters.highResolutionVideosOnly = false
-        }
-    }
-
-    private func accessibilityLabel<Value>(for value: Value) -> String {
-        switch value {
-        case let orientation as FileFilters.Orientation:
-            return orientation.title
-        case let media as FileFilters.MediaFilter:
-            return media.title
-        default:
-            return "Filtre"
-        }
+        )
     }
 }

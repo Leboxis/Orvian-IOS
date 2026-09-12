@@ -35,9 +35,10 @@ utilisent des secrets factices et des transferts simulés, sans compte kDrive.
   Après reconnexion, les tags et leurs coches apparaissent correctement.
 - Lot d'envois avec un échec : pourcentage tenant compte seulement des progrès
   réussis, puis « Erreur de transfert » à la fin.
-- Panneau de filtres : un tap en dehors du panneau le referme ; retaper le
-  bouton filtre le referme aussi. Déplier « Trier par », choisir un tri, puis
-  taper dehors : le panneau se ferme (aucun menu imbriqué ne doit rester).
+- Panneau de filtres (menu natif) : chaque tap sur le bouton ouvre le menu ;
+  un tap en dehors le referme. Choisir un tri, une orientation, « 4K+ » ou un
+  mode d'affichage applique le filtre ; « Réinitialiser » réapparaît dès qu'un
+  filtre est actif.
 - Vérifier les nouveaux messages en mode clair/sombre et avec une grande
   taille de texte, sans débordement ni commande inaccessible.
 
