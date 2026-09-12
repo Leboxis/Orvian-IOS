@@ -18,6 +18,7 @@ with tempfile.TemporaryDirectory() as temporary:
         str(root / "Orvian/Models/DriveFile.swift"),
         str(root / "Orvian/Models/Category.swift"),
         str(root / "Orvian/Core/Utils/FileKind.swift"),
+        str(root / "Orvian/Core/Cache/DiskDirectory.swift"),
         str(root / "Orvian/Core/Cache/FavoritesDiskCache.swift"),
         str(root / "Tests/FavoritesDiskCacheChecks.swift"),
         "-o", str(executable),

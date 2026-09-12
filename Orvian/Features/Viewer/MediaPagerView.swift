@@ -34,10 +34,6 @@ struct MediaPagerView: View {
     @State private var tagSheetFile: DriveFile?
     @State private var favoriteErrorMessage: String?
 
-    // Copie du titre : pastille « Copié » brève après le tap.
-    @State private var titleCopied = false
-    @State private var titleCopyResetTask: Task<Void, Never>?
-
     private let service = KDriveService()
 
     init(context: MediaViewerContext) {
@@ -238,7 +234,7 @@ struct MediaPagerView: View {
                         tagButton(for: currentFile)
                         Spacer()
                     }
-                    titleArea(for: currentFile)
+                    MediaTitlePill(name: currentFile.name)
                     HStack(spacing: 8) {
                         Spacer()
                         closeButton
@@ -297,76 +293,22 @@ struct MediaPagerView: View {
 
     // MARK: - Barre du haut (images)
 
-    /// Titre centré, largeur bornée à 40 % de l'écran (20 % de part et
-    /// d'autre du centre) : le tap copie le nom dans le presse-papiers ; la
-    /// pastille « Copié » remplace brièvement le titre comme accusé visuel.
-    private func titleArea(for file: DriveFile) -> some View {
-        VStack(spacing: 1) {
-            Group {
-                if titleCopied {
-                    Label("Copié", systemImage: "doc.on.doc")
-                        .font(.footnote.weight(.medium))
-                } else {
-                    Text(file.name)
-                        .font(.body.weight(.medium))
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.6)
-                }
-            }
-            .foregroundStyle(.white)
-            .padding(.horizontal, 14)
-            .padding(.vertical, 6)
-            .background(.black.opacity(0.25), in: Capsule())
-            .contentShape(Capsule())
-            .onTapGesture {
-                UIPasteboard.general.string = file.name
-                titleCopied = true
-                scheduleTitleCopyReset()
-            }
-        }
-        .padding(.horizontal, UIScreen.main.bounds.width * 0.2)
-        .frame(maxWidth: .infinity)
-    }
-
-    /// Même pastille « Copié » brève que dans les autres visionneuses : le
-    /// drapeau retombe tout seul, sauf si le titre est copié à nouveau avant.
-    private func scheduleTitleCopyReset() {
-        titleCopyResetTask?.cancel()
-        titleCopyResetTask = Task {
-            try? await Task.sleep(for: .seconds(1.5))
-            guard !Task.isCancelled else { return }
-            withAnimation(.easeInOut(duration: 0.2)) {
-                titleCopied = false
-            }
-        }
-    }
-
     /// Même éditeur que le lecteur vidéo (feuille partagée, couleurs visibles).
     private func tagButton(for file: DriveFile) -> some View {
-        Button {
+        MediaTagButton {
             tagSheetFile = file
-        } label: {
-            Image(systemName: "tag")
-                .font(.system(size: 16, weight: .medium))
-                .foregroundStyle(.white)
-                .frame(width: 30, height: 30)
         }
-        .accessibilityLabel("Appliquer un tag")
     }
 
     /// Étoile pleine jaune si favori, identique au lecteur vidéo ; mise à
     /// jour optimiste avec repli en cas d'échec réseau.
     private func favoriteButton(for file: DriveFile) -> some View {
-        Button {
+        MediaFavoriteButton(
+            isFavorite: isFavorite(file),
+            isDisabled: favoriteMutationsInFlight.contains(file.id)
+        ) {
             Task { await toggleFavorite(for: file) }
-        } label: {
-            Image(systemName: isFavorite(file) ? "star.fill" : "star")
-                .font(.system(size: 16, weight: .medium))
-                .foregroundStyle(isFavorite(file) ? .yellow : .white)
-                .frame(width: 30, height: 30)
         }
-        .disabled(favoriteMutationsInFlight.contains(file.id))
-        .accessibilityLabel(isFavorite(file) ? "Retirer des favoris" : "Ajouter aux favoris")
     }
 
     private var closeButton: some View {

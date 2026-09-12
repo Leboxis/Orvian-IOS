@@ -5,7 +5,7 @@ import UIKit
 /// L'éviction est déclenchée sur une limite choisie dans Réglages et purge
 /// les plus anciens fichiers jusqu'à 80 % de cette limite.
 final class DiskImageCache: @unchecked Sendable {
-    private let root: URL
+    private let directory: DiskDirectory
 
     private let lock = NSLock()
     private var estimatedDiskSize: Int = 0
@@ -32,8 +32,7 @@ final class DiskImageCache: @unchecked Sendable {
         let base = directory ?? FileManager.default
             .urls(for: .cachesDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("thumbnails", isDirectory: true)
-        root = base
-        try? FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        self.directory = DiskDirectory(root: base)
     }
 
     /// Suffixe des fichiers créés par les versions antérieures : l'API kDrive
@@ -45,15 +44,11 @@ final class DiskImageCache: @unchecked Sendable {
     /// (`123.jpg`). Les lectures retombent sur l'ancien nom, et une écriture
     /// nettoie le doublon.
     private func url(driveId: Int, fileId: Int) -> URL {
-        root
-            .appendingPathComponent("\(driveId)", isDirectory: true)
-            .appendingPathComponent("\(fileId).jpg")
+        directory.url("\(driveId)/\(fileId).jpg")
     }
 
     private func legacyURL(driveId: Int, fileId: Int) -> URL {
-        root
-            .appendingPathComponent("\(driveId)", isDirectory: true)
-            .appendingPathComponent("\(fileId)-\(Self.legacyPixelsSuffix).jpg")
+        directory.url("\(driveId)/\(fileId)-\(Self.legacyPixelsSuffix).jpg")
     }
 
     // MARK: - Lecture / écriture
@@ -80,8 +75,7 @@ final class DiskImageCache: @unchecked Sendable {
 
     /// Retire un fichier en mettant à jour la taille estimée du cache.
     private func removeFileAndAccount(_ fileURL: URL) {
-        let size = (try? fileURL.resourceValues(forKeys: [.fileSizeKey]))?.fileSize ?? 0
-        guard (try? FileManager.default.removeItem(at: fileURL)) != nil else { return }
+        guard let size = directory.remove(fileURL) else { return }
         lock.lock()
         if isSizeInitialized {
             estimatedDiskSize = max(0, estimatedDiskSize - size)
@@ -102,16 +96,14 @@ final class DiskImageCache: @unchecked Sendable {
         guard !data.isEmpty else { return }
         let fileURL = url(driveId: driveId, fileId: fileId)
         let oldSize = (try? fileURL.resourceValues(forKeys: [.fileSizeKey]))?.fileSize ?? 0
-        try? FileManager.default.createDirectory(at: fileURL.deletingLastPathComponent(), withIntermediateDirectories: true)
-        do {
-            try data.write(to: fileURL, options: .atomic)
-            // L'ancien nom `-<taille>.jpg` devient un doublon : retiré ici,
-            // sa taille est décomptée avant le delta de la nouvelle écriture.
-            removeFileAndAccount(legacyURL(driveId: driveId, fileId: fileId))
-            onFileWritten(deltaSize: data.count - oldSize)
-        } catch {
+        guard directory.write(data, to: fileURL) else {
             // Disque plein ou permissions : on continue sans cache disque pour cette entrée.
+            return
         }
+        // L'ancien nom `-<taille>.jpg` devient un doublon : retiré ici,
+        // sa taille est décomptée avant le delta de la nouvelle écriture.
+        removeFileAndAccount(legacyURL(driveId: driveId, fileId: fileId))
+        onFileWritten(deltaSize: data.count - oldSize)
     }
 
     // MARK: - Maintenance
@@ -123,14 +115,13 @@ final class DiskImageCache: @unchecked Sendable {
         isSizeInitialized = true
         writeCountSinceScan = 0
         purgeGeneration &+= 1
-        try? FileManager.default.removeItem(at: root)
-        try? FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        directory.purge()
     }
 
     func totalSize() -> Int {
         // L'énumération récursive peut être lente : elle ne doit pas bloquer
         // les écritures/évictions concurrentes sous verrou.
-        let size = computeDiskSize()
+        let size = directory.totalByteCount()
         lock.lock()
         estimatedDiskSize = size
         isSizeInitialized = true
@@ -202,7 +193,7 @@ final class DiskImageCache: @unchecked Sendable {
             lock.unlock()
         }
 
-        let size = computeDiskSize()
+        let size = directory.totalByteCount()
 
         var shouldEvict = false
         lock.lock()
@@ -224,41 +215,10 @@ final class DiskImageCache: @unchecked Sendable {
         }
     }
 
-    private func computeDiskSize() -> Int {
-        guard let files = allFiles() else { return 0 }
-        return files.reduce(0) { sum, url in
-            sum + ((try? url.resourceValues(forKeys: [.fileSizeKey]))?.fileSize ?? 0)
-        }
-    }
-
-    private func allFiles() -> [URL]? {
-        var files: [URL] = []
-        guard let enumerator = FileManager.default.enumerator(
-            at: root, includingPropertiesForKeys: [.contentModificationDateKey, .fileSizeKey],
-            options: [.skipsHiddenFiles]
-        ) else { return nil }
-        for case let url as URL in enumerator {
-            if url.hasDirectoryPath { continue }
-            files.append(url)
-        }
-        return files
-    }
-
     /// Éviction FIFO / Oldest-Written-First : supprime les fichiers les plus anciens
     /// jusqu'à revenir sous le seuil bas (lowWaterMark).
     private func evictOldestFiles() {
-        guard let files = allFiles() else {
-            lock.lock()
-            isEvicting = false
-            lock.unlock()
-            return
-        }
-
-        var entries: [(url: URL, date: Date, size: Int)] = files.map { url in
-            let values = try? url.resourceValues(forKeys: [.contentModificationDateKey, .fileSizeKey])
-            return (url, values?.contentModificationDate ?? .distantPast, values?.fileSize ?? 0)
-        }
-
+        var entries = directory.entries()
         var currentTotal = entries.reduce(0) { $0 + $1.size }
         var bytesDeleted = 0
 
@@ -267,9 +227,9 @@ final class DiskImageCache: @unchecked Sendable {
 
             for entry in entries {
                 guard currentTotal > lowWaterMark else { break }
-                if (try? FileManager.default.removeItem(at: entry.url)) != nil {
-                    currentTotal -= entry.size
-                    bytesDeleted += entry.size
+                if let size = directory.remove(entry.url) {
+                    currentTotal -= size
+                    bytesDeleted += size
                 }
             }
         }

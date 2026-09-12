@@ -1,6 +1,5 @@
 import SwiftUI
 import AVFoundation
-import AVKit
 import UIKit
 
 /// Lecteur vidéo personnalisé : les barres (titre + boutons en haut,
@@ -99,10 +98,6 @@ struct VideoPlayerView: View {
     /// transparentes lorsque le chrome est masqué.
     @State private var topControlsHeight: CGFloat = 44
     @State private var bottomControlsHeight: CGFloat = 48
-
-    // Copie du titre : pastille « Copié » brève après le tap.
-    @State private var titleCopied = false
-    @State private var titleCopyResetTask: Task<Void, Never>?
 
     // Rebond visuel du double-tap : pastille « ±10 s » brève du côté tapé.
     @State private var skipFeedback: SkipDirection?
@@ -315,7 +310,7 @@ struct VideoPlayerView: View {
                 favoriteButton
                 Spacer()
             }
-            titleArea
+            MediaTitlePill(name: file.name)
             HStack(spacing: 8) {
                 Spacer()
                 muteButton
@@ -325,45 +320,6 @@ struct VideoPlayerView: View {
         .padding(.horizontal, 0)
         .padding(.top, -4)
         .padding(.bottom, 2)
-    }
-
-    /// Même titre copiable et même accusé visuel que dans la visionneuse
-    /// d'image.
-    private var titleArea: some View {
-        Group {
-            if titleCopied {
-                Label("Copié", systemImage: "doc.on.doc")
-                    .font(.footnote.weight(.medium))
-            } else {
-                Text(file.name)
-                    .font(.body.weight(.medium))
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.6)
-            }
-        }
-        .foregroundStyle(.white)
-        .padding(.horizontal, 14)
-        .padding(.vertical, 6)
-        .background(.black.opacity(0.25), in: Capsule())
-        .contentShape(Capsule())
-        .onTapGesture {
-            UIPasteboard.general.string = file.name
-            titleCopied = true
-            scheduleTitleCopyReset()
-        }
-        .padding(.horizontal, UIScreen.main.bounds.width * 0.2)
-        .frame(maxWidth: .infinity)
-    }
-
-    private func scheduleTitleCopyReset() {
-        titleCopyResetTask?.cancel()
-        titleCopyResetTask = Task {
-            try? await Task.sleep(for: .seconds(1.5))
-            guard !Task.isCancelled else { return }
-            withAnimation(.easeInOut(duration: 0.2)) {
-                titleCopied = false
-            }
-        }
     }
 
     // MARK: - Zone vidéo
@@ -540,16 +496,12 @@ struct VideoPlayerView: View {
     }
 
     private var favoriteButton: some View {
-        Button {
+        MediaFavoriteButton(
+            isFavorite: isFavorite,
+            isDisabled: isFavoriteMutationInProgress
+        ) {
             Task { await toggleFavorite() }
-        } label: {
-            Image(systemName: isFavorite ? "star.fill" : "star")
-                .font(.system(size: 16, weight: .medium))
-                .foregroundStyle(isFavorite ? .yellow : .white)
-                .frame(width: 30, height: 30)
         }
-        .disabled(isFavoriteMutationInProgress)
-        .accessibilityLabel(isFavorite ? "Retirer des favoris" : "Ajouter aux favoris")
     }
 
     private var muteButton: some View {
@@ -617,18 +569,12 @@ struct VideoPlayerView: View {
     /// l'onglet Tag, couleurs visibles, tri par usage). Le Menu natif était
     /// écrasé par UIKit : pastilles de couleur perdues, liste peu maniable.
     private var tagMenu: some View {
-        Button {
+        MediaTagButton {
             resumePlaybackAfterTags = player != nil
                 && (isPlaying || player?.timeControlStatus == .playing)
             player?.pause()
             showTagSheet = true
-        } label: {
-            Image(systemName: "tag")
-                .font(.system(size: 16, weight: .medium))
-                .foregroundStyle(.white)
-                .frame(width: 30, height: 30)
         }
-        .accessibilityLabel("Appliquer un tag")
     }
 
     // MARK: - Transport
@@ -1241,112 +1187,5 @@ struct VideoPlayerView: View {
             get: { errorMessage != nil },
             set: { if !$0 { errorMessage = nil } }
         )
-    }
-}
-
-// MARK: - Vues UIKit embarquées
-
-/// Sens du saut déclenché par le double-tap (pilote la pastille de rebond).
-private enum SkipDirection {
-    case forward
-    case backward
-}
-
-/// Vitesses de lecture proposées par la pastille en bas à droite.
-private enum SpeedOption: Float, CaseIterable, Identifiable {
-    case slow = 0.5
-    case threeQuarters = 0.75
-    case normal = 1.0
-    case oneAndQuarter = 1.25
-    case oneAndHalf = 1.5
-    case double = 2.0
-
-    var id: Float { rawValue }
-    var rate: Float { rawValue }
-
-    var title: String {
-        let value = rawValue
-        if value == value.rounded() { return "\(Int(value))x" }
-        return String(format: "%gx", value).replacingOccurrences(of: ".", with: ",")
-    }
-}
-
-/// Couche de rendu AVPlayerLayer (sans contrôles natifs).
-private struct PlayerLayerView: UIViewRepresentable {
-    let player: AVPlayer
-
-    func makeUIView(context: Context) -> PlayerLayerUIView {
-        let view = PlayerLayerUIView()
-        view.playerLayer.player = player
-        view.playerLayer.videoGravity = .resizeAspect
-        return view
-    }
-
-    func updateUIView(_ uiView: PlayerLayerUIView, context: Context) {}
-
-    final class PlayerLayerUIView: UIView {
-        override class var layerClass: AnyClass { AVPlayerLayer.self }
-        var playerLayer: AVPlayerLayer { layer as! AVPlayerLayer }
-    }
-}
-
-/// Bouton AirPlay natif (AVRoutePickerView), teinté en blanc.
-private struct AirPlayButton: UIViewRepresentable {
-    func makeUIView(context: Context) -> AVRoutePickerView {
-        let view = AVRoutePickerView()
-        view.tintColor = .white
-        view.activeTintColor = .white
-        view.prioritizesVideoDevices = true
-        return view
-    }
-
-    func updateUIView(_ uiView: AVRoutePickerView, context: Context) {}
-}
-
-/// Référence comptée sur la session audio : chaque lecteur actif la retient,
-/// la désactivation ne survient que lorsque le dernier la relâche. Évite
-/// qu'une page voisine du pager (qui vient de détruire son lecteur) ne coupe
-/// la session d'une page encore en lecture. La désactivation notifie les
-/// autres apps pour que leur musique reprenne.
-@MainActor
-private final class AudioSessionKeeper {
-    static let shared = AudioSessionKeeper()
-
-    private var retainCount = 0
-    /// Désactivation différée : une page voisine qui démarre dans la seconde
-    /// annule la libération en retenant la session.
-    private var pendingReleaseTask: Task<Void, Never>?
-
-    private init() {}
-
-    func retain() {
-        pendingReleaseTask?.cancel()
-        pendingReleaseTask = nil
-        if retainCount == 0 {
-            let session = AVAudioSession.sharedInstance()
-            do {
-                try session.setCategory(.playback, mode: .moviePlayback, policy: .longFormVideo)
-                try session.setActive(true)
-            } catch {
-                try? session.setCategory(.playback, mode: .moviePlayback)
-                try? session.setActive(true)
-            }
-        }
-        retainCount += 1
-    }
-
-    func release() {
-        guard retainCount > 0 else { return }
-        retainCount -= 1
-        guard retainCount == 0 else { return }
-        pendingReleaseTask?.cancel()
-        pendingReleaseTask = Task {
-            try? await Task.sleep(for: .seconds(0.5))
-            guard !Task.isCancelled else { return }
-            try? AVAudioSession.sharedInstance().setActive(
-                false,
-                options: [.notifyOthersOnDeactivation]
-            )
-        }
     }
 }
