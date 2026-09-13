@@ -23,11 +23,6 @@ struct FileGridView: View {
     /// Options de tri et de filtrage (bouton filtre de l'Accueil).
     var filters: FileFilters = .init()
 
-    /// Remonte false dès que l'utilisateur défile dans le contenu. La
-    /// révélation (true) est émise par le geste de traction, pas par la
-    /// géométrie : le rebond élastique en haut ne doit pas rouvrir la barre.
-    var onScrolledPastTop: ((Bool) -> Void)?
-
     /// Décalage ajouté en haut du contenu (barre de recherche flottante) pour
     /// que la première rangée ne soit jamais masquée.
     var contentTopInset: CGFloat = 0
@@ -60,7 +55,6 @@ struct FileGridView: View {
     @State private var metadataRevision = 0
     @State private var prefetchTask: Task<Void, Never>?
     @State private var sortReloadTask: Task<Void, Never>?
-    @State private var searchScrollRegion: SearchScrollRegion = .nearTop
     @State private var videoMetadataResolutionCount = 0
     /// Fiche détails demandée par une carte (une seule feuille pour toute la grille).
     @State private var detailRequest: FilePresentation?
@@ -85,39 +79,6 @@ struct FileGridView: View {
 
     var body: some View {
         scrollContent
-            .onScrollGeometryChange(for: ScrollRevealMetrics.self, of: {
-                // Au repos, iOS applique déjà l'inset supérieur au décalage.
-                // Seul un dépassement réel de cette position doit afficher la recherche.
-                let offset = $0.contentOffset.y + $0.contentInsets.top
-                let region: SearchScrollRegion
-                if offset < -8 {
-                    region = .pulledPastTop
-                } else if offset > 24 {
-                    region = .content
-                } else {
-                    region = .nearTop
-                }
-                return ScrollRevealMetrics(region: region, topInset: $0.contentInsets.top)
-            }) { old, new in
-                searchScrollRegion = new.region
-                // L'apparition ou la disparition de la barre modifie l'inset
-                // sans geste de l'utilisateur : l'offset réinterprété dans le
-                // nouvel espace peut franchir les seuils et provoquer un
-                // clignotement (masquée puis aussitôt ré-affichée). Ces
-                // transitions ne déclenchent donc aucun callback ; le prochain
-                // défilement, à inset constant, reprendra la main.
-                guard old.topInset == new.topInset else { return }
-                switch new.region {
-                case .content:
-                    onScrolledPastTop?(false)
-                case .pulledPastTop, .nearTop:
-                    // Le retour élastique en haut après une impulsion produit
-                    // aussi `.pulledPastTop`, sans doigt posé : il ne doit pas
-                    // ré-afficher la barre. La révélation dépend uniquement du
-                    // geste de traction ci-dessous.
-                    break
-                }
-            }
             .background(Color(uiColor: .systemGroupedBackground))
             .task(id: viewModel.source) {
                 await viewModel.loadIfNeeded()
@@ -352,35 +313,10 @@ struct FileGridView: View {
                 .padding(.top, 6 + contentTopInset)
                 .padding(.bottom, 110) // barre flottante
             }
-            // Même un dossier trop court pour défiler peut être tiré vers le
-            // bas : ce geste révèle la recherche sur l'Accueil.
+            // Le rebond permanent permet le pull-to-refresh même quand le
+            // dossier est trop court pour défiler.
             .scrollBounceBehavior(.always, axes: .vertical)
             .scrollIndicators(.hidden)
-            .simultaneousGesture(
-                DragGesture(minimumDistance: 8)
-                    .onChanged { value in
-                        // Seule voie de révélation : une traction doigt posé.
-                        // Fonctionne sur toutes les listes, scrollables ou non
-                        // (dossiers très courts compris), et ignore le rebond
-                        // élastique du scroll qui survient sans contact.
-                        if searchScrollRegion != .content,
-                           value.translation.height > 12,
-                           value.translation.height > abs(value.translation.width) {
-                            onScrolledPastTop?(true)
-                        }
-                        // Masquage symétrique : un dossier trop court pour
-                        // défiler n'atteint jamais la région `.content`, c'est
-                        // donc le geste qui fait disparaître la barre. Le seuil
-                        // (24 pt) est celui du scroll : sur une longue liste,
-                        // la région passe en `.content` au même moment et la
-                        // garde rend ce secours sans effet.
-                        if searchScrollRegion == .nearTop,
-                           value.translation.height < -24,
-                           value.translation.height < -abs(value.translation.width) {
-                            onScrolledPastTop?(false)
-                        }
-                    }
-            )
             .onChange(of: scrollToTopRequest) { oldValue, newValue in
                 guard oldValue != newValue else { return }
                 withAnimation(.snappy(duration: 0.3)) {
@@ -762,22 +698,6 @@ struct FileGridView: View {
         case .search: return "Aucun résultat"
         }
     }
-}
-
-/// Zones stables utilisées pour révéler la recherche sans publier un nouvel
-/// état SwiftUI à chaque point parcouru pendant le défilement.
-private enum SearchScrollRegion: Equatable {
-    case pulledPastTop
-    case nearTop
-    case content
-}
-
-/// Valeur observée par `onScrollGeometryChange` : la région de défilement
-/// accompagnée de l'inset supérieur, afin de distinguer un défilement réel
-/// d'un changement de disposition (barre qui apparaît ou disparaît).
-private struct ScrollRevealMetrics: Equatable {
-    let region: SearchScrollRegion
-    let topInset: CGFloat
 }
 
 /// Clé de mémoïsation du résultat des filtres/tri de la grille : la version

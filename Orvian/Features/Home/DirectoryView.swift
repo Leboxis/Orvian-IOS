@@ -26,7 +26,9 @@ struct DirectoryView: View {
     /// Une task redémarrée après un aller-retour de navigation ne réutilise
     /// les résultats existants que s'ils sont complets.
     @State private var searchResultsReady = false
-    @State private var scrolledPastTop = false
+    /// La barre de recherche n'est plus pilotée par le scroll : seul le
+    /// bouton loupe (et le focus / une recherche active) la révèle.
+    @State private var searchRevealed = false
     @State private var filters = FileFilters()
     @State private var selectionMode = false
     @State private var selectedIDs: Set<Int> = []
@@ -112,7 +114,6 @@ struct DirectoryView: View {
             onVisibleItemsChanged: updateVisibleSelectionItems,
             searchText: searchText,
             filters: filters,
-            onScrolledPastTop: showsSearchBar ? { scrolledPastTop = $0 } : nil,
             allowsPullToRefresh: !showsSearchBar,
             selectionMode: selectionMode,
             selectedIDs: selectedIDs,
@@ -316,9 +317,9 @@ struct DirectoryView: View {
         }
     }
 
-    /// La barre apparaît lors d'un défilé vers le haut ou lorsque la recherche est active.
+    /// La barre apparaît sur demande (bouton loupe) ou lorsque la recherche est active.
     private var searchBarVisible: Bool {
-        alwaysShowSearch || searchFocused || isSearching || scrolledPastTop
+        alwaysShowSearch || searchFocused || isSearching || searchRevealed
     }
 
     /// Applique les effets de disposition uniquement aux écrans qui possèdent
@@ -401,10 +402,10 @@ struct DirectoryView: View {
             if searchFocused || searchBarPresented {
                 searchFocused = false
                 if !alwaysShowSearch {
-                    scrolledPastTop = false
+                    searchRevealed = false
                 }
             } else {
-                scrolledPastTop = true
+                searchRevealed = true
                 // Laisse la pastille apparaître avant de demander le focus.
                 DispatchQueue.main.async {
                     searchFocused = true
@@ -486,9 +487,9 @@ struct DirectoryView: View {
 
     private func startSelection() {
         searchFocused = false
-        // La révélation par scroll est consommée : sans cette remise à zéro,
+        // La révélation manuelle est consommée : sans cette remise à zéro,
         // quitter la sélection ferait ressusciter la barre sans action.
-        scrolledPastTop = false
+        searchRevealed = false
         selectionMode = true
     }
 
