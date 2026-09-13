@@ -23,18 +23,15 @@ struct VideoPlayerView: View {
     @State private var poster: UIImage?
 
     // Transport
-    @State private var isPlaying = false
     @State private var currentTime: Double = 0
     @State private var duration: Double = 0
-    @State private var isScrubbing = false
+    @State private var transport = VideoPlaybackTransport()
+    private var isScrubbing: Bool { transport.isScrubbing }
     /// Une recherche AVPlayer est asynchrone : tant qu'elle n'est pas terminée,
     /// le curseur doit rester sur la position demandée, pas sur l'ancienne
     /// position remontée par l'observateur périodique.
-    @State private var isSeeking = false
+    private var isSeeking: Bool { transport.isSeeking }
     @State private var scrubValue: Double = 0
-    /// Identifie l'intention de seek la plus récente. Un callback retardé d'un
-    /// seek annulé ne peut ainsi jamais écraser une position plus récente.
-    @State private var seekRequestID = 0
     @State private var playbackRate: Float = 1
 
     // Son
@@ -57,28 +54,25 @@ struct VideoPlayerView: View {
     @State private var hasFailedSetup = false
     @State private var timeObserver: Any?
     @State private var endObserver: NSObjectProtocol?
-    @State private var routeChangeObserver: NSObjectProtocol?
     @State private var itemStatusObserver: NSKeyValueObservation?
-    /// Observation du `timeControlStatus` : source unique de vérité pour
-    /// distinguer une vraie pause d'une mise en mémoire tampon (stall).
+    /// Observation du buffering ; l'intention de lecture vit dans transport.
     @State private var timeControlStatusObserver: NSKeyValueObservation?
     /// Vrai pendant qu'AVPlayer attend des données (image figée ≠ pause) :
-    /// l'état `isPlaying` est conservé et un indicateur s'affiche.
+    /// l'intention de lecture est conservée et un indicateur s'affiche.
     @State private var isBuffering = false
     /// Watchdog anti-stall : un `.waiting` qui dépasse ~20 s (lien signé
     /// expiré en cours de lecture, réseau coupé) ne produit jamais `.failed`,
     /// il faut donc le détecter soi-même et relancer.
     @State private var stallWatchdogTask: Task<Void, Never>?
-    /// État de lecture mémorisé au début d'un scrub : le seek relance la
-    /// lecture à l'issue s'il était en cours, au lieu de laisser la vidéo en
-    /// pause après le déplacement du curseur.
-    @State private var wasPlayingBeforeScrub = false
+    /// Conservée pendant les retries, y compris après épuisement du quota.
+    private var recoveryPosition: Double? { transport.recoveryPosition }
     /// Fin de la plage bufferisée (pour la zone grisée du scrubber).
     @State private var bufferedEnd: Double = 0
     /// Anti-débounce des seeks « live » pendant le drag : la vidéo suit le
     /// doigt via des seeks grossiers, au plus un toutes les 100 ms.
     @State private var lastLiveSeekAt = Date.distantPast
     @State private var playbackRetryCount = 0
+    @State private var retryResetPosition: Double = 0
     @State private var isDisappeared = false
     @State private var isExternalPlaybackActive = false
     @State private var videoAreaWidth: CGFloat = 0
@@ -184,30 +178,38 @@ struct VideoPlayerView: View {
             if active {
                 showControls = true
                 scheduleControlsAutoHide(delay: 2.5)
-                // Si le lecteur existe encore (page restée en mémoire), on
-                // reprend simplement la lecture ; sinon le `.task(id:)`
-                // déclenché par le même changement s'occupe de (re)charger.
-                if let player {
-                    if !isPlaying {
-                        player.playImmediately(atRate: playbackRate)
-                        isPlaying = true
-                    }
-                }
+                // `.task(id:)` est l'unique point de reprise de la page.
             } else {
                 // Page quittée : la lecture s'arrête, le lecteur reste prêt.
                 hideControlsTask?.cancel()
-                player?.pause()
-                isPlaying = false
+                pausePlayback()
+                cancelPendingSeek()
+                _ = transport.endScrub()
+                loadGeneration &+= 1
             }
         }
         .onDisappear {
             isDisappeared = true
+            loadGeneration &+= 1
             hideControlsTask?.cancel()
             onControlsInteractionChanged(false)
             teardown()
         }
         .onChange(of: isTouchingControls) { _, isTouching in
             onControlsInteractionChanged(isTouching)
+        }
+        .onReceive(NotificationCenter.default.publisher(for: AVAudioSession.routeChangeNotification)) { notification in
+            let rawReason = notification.userInfo?[AVAudioSessionRouteChangeReasonKey] as? UInt
+            guard !isDisappeared,
+                  rawReason == AVAudioSession.RouteChangeReason.oldDeviceUnavailable.rawValue else { return }
+            // Également actif pendant une récupération, quand player est nil.
+            pausePlayback()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: AVAudioSession.interruptionNotification)) { notification in
+            let rawType = notification.userInfo?[AVAudioSessionInterruptionTypeKey] as? UInt
+            guard !isDisappeared,
+                  rawType == AVAudioSession.InterruptionType.began.rawValue else { return }
+            pausePlayback()
         }
         .alert("Erreur", isPresented: errorBinding) {
             Button("OK") { errorMessage = nil }
@@ -219,10 +221,7 @@ struct VideoPlayerView: View {
             onDismiss: {
                 guard resumePlaybackAfterTags else { return }
                 resumePlaybackAfterTags = false
-                if let player {
-                    player.playImmediately(atRate: playbackRate)
-                    isPlaying = true
-                }
+                requestPlayback()
             }
         ) {
             TagsEditorSheet(
@@ -371,6 +370,7 @@ struct VideoPlayerView: View {
             if hasFailedSetup, !isLoadingVideo {
                 Button {
                     playbackRetryCount = 0
+                    errorMessage = nil
                     Task { await load() }
                 } label: {
                     Label("Réessayer", systemImage: "arrow.clockwise")
@@ -408,7 +408,8 @@ struct VideoPlayerView: View {
                 timeFormatter: { timeText($0) },
                 onDragStarted: beginScrub,
                 onDragChanged: updateScrub(to:),
-                onDragEnded: endScrub(to:)
+                onDragEnded: endScrub(to:),
+                onDragCancelled: cancelScrub
             )
 
             Text(timeText(duration))
@@ -435,23 +436,19 @@ struct VideoPlayerView: View {
     /// prépare la prévisualisation. La vidéo suivra le doigt via des seeks
     /// grossiers throttlés (`updateScrub`).
     private func beginScrub() {
+        guard player != nil, isActive, !isDisappeared, !showTagSheet else { return }
         hideControlsTask?.cancel()
         cancelPendingSeek()
+        transport.clearRecoveryPosition()
         scrubValue = playerTime ?? currentTime
-        // `.waitingToPlayAtSpecifiedRate` compte comme « en lecture » : un
-        // scrub pendant une mise en mémoire tampon relance bien la vidéo.
-        // La mémoire du geste précédent est conservée : son seek de reprise
-        // vient d'être annulé par `cancelPendingSeek`, le lecteur est donc
-        // encore en pause alors que la lecture devait reprendre — sans cela,
-        // un second glissement rapproché terminait en pause toute seule.
-        wasPlayingBeforeScrub = (player?.timeControlStatus != .paused) || wasPlayingBeforeScrub
-        isScrubbing = true
+        transport.beginScrub()
         // Le son cesse pendant le geste : le suivi visuel sous le doigt
         // remplace la lecture (comportement natif).
         player?.pause()
     }
 
     private func updateScrub(to seconds: Double) {
+        guard isScrubbing else { return }
         scrubValue = max(0, seconds)
         scheduleLiveScrubSeek(to: seconds)
     }
@@ -473,10 +470,20 @@ struct VideoPlayerView: View {
     }
 
     private func endScrub(to seconds: Double) {
-        isScrubbing = false
+        guard transport.endScrub() else { return }
         lastLiveSeekAt = .distantPast
         // Seek final précis + reprise conditionnelle (déjà gérés par `seek`).
         seek(to: seconds, precise: true)
+    }
+
+    private func cancelScrub() {
+        guard transport.endScrub() else { return }
+        cancelPendingSeek()
+        lastLiveSeekAt = .distantPast
+        currentTime = playerTime ?? currentTime
+        scrubValue = currentTime
+        resumePlaybackIfRequested()
+        scheduleControlsAutoHide(delay: 2.5)
     }
 
     // MARK: - Boutons
@@ -485,14 +492,14 @@ struct VideoPlayerView: View {
         Button {
             togglePlay()
         } label: {
-            Image(systemName: isPlaying ? "pause.fill" : "play.fill")
+            Image(systemName: transport.wantsPlayback ? "pause.fill" : "play.fill")
                 .font(.system(size: 17, weight: .semibold))
                 .foregroundStyle(.white)
                 .frame(width: 36, height: 36)
                 .background(.white.opacity(0.12), in: Circle())
         }
         .disabled(player == nil)
-        .accessibilityLabel(isPlaying ? "Pause" : "Lecture")
+        .accessibilityLabel(transport.wantsPlayback ? "Pause" : "Lecture")
     }
 
     private var favoriteButton: some View {
@@ -570,9 +577,9 @@ struct VideoPlayerView: View {
     /// écrasé par UIKit : pastilles de couleur perdues, liste peu maniable.
     private var tagMenu: some View {
         MediaTagButton {
-            resumePlaybackAfterTags = player != nil
-                && (isPlaying || player?.timeControlStatus == .playing)
-            player?.pause()
+            let shouldResume = transport.wantsPlayback
+            pausePlayback()
+            resumePlaybackAfterTags = shouldResume
             showTagSheet = true
         }
     }
@@ -592,31 +599,50 @@ struct VideoPlayerView: View {
     private func togglePlay() {
         guard let player else { return }
         scheduleControlsAutoHide(delay: 2.5)
-        if isPlaying {
-            player.pause()
-            isPlaying = false
+        if transport.wantsPlayback {
+            pausePlayback()
         } else {
+            if isSeeking || isScrubbing {
+                requestPlayback()
+                return
+            }
             // Position réelle du lecteur (l'état `currentTime` peut être
             // périmé : sa mise à jour est suspendue contrôles masqués).
             let position = player.currentTime().seconds
             let atEnd = duration.isFinite && duration > 0 && position >= duration - 0.5
             if !atEnd {
-                player.playImmediately(atRate: playbackRate)
-                isPlaying = true
+                requestPlayback()
                 return
             }
             // Reprise après la fin : le retour à zéro doit être effectif
             // AVANT de (re)lancer, sinon playImmediately repart de la fin.
-            currentTime = 0
-            scrubValue = 0
-            player.seek(to: .zero) { [weak player] _ in
-                Task { @MainActor in
-                    guard let player, self.player === player, !isDisappeared else { return }
-                    player.playImmediately(atRate: playbackRate)
-                    isPlaying = true
-                }
-            }
+            transport.play()
+            transport.clearRecoveryPosition()
+            seek(to: 0, precise: true)
         }
+    }
+
+    /// Une pause explicite ne détruit pas la recherche : sa position reste
+    /// valable, mais son callback n'a plus le droit de relancer la lecture.
+    private func pausePlayback() {
+        transport.pause()
+        resumePlaybackAfterTags = false
+        player?.pause()
+        // Le watchdog peut déjà être en train de remplacer le lecteur : le
+        // laisser terminer en pause évite de rester sans lecteur ni erreur.
+        if player != nil { cancelStallWatchdog() }
+    }
+
+    private func requestPlayback() {
+        guard isActive, !isDisappeared, !showTagSheet else { return }
+        transport.play()
+        resumePlaybackIfRequested()
+    }
+
+    private func resumePlaybackIfRequested() {
+        guard transport.wantsPlayback, !isScrubbing, !isSeeking,
+              isActive, !isDisappeared, !showTagSheet, let player else { return }
+        player.playImmediately(atRate: playbackRate)
     }
 
     private func seek(to seconds: Double, precise: Bool = false) {
@@ -627,16 +653,15 @@ struct VideoPlayerView: View {
         // à l'œil tout en rendant la reprise quasi immédiate.
         let tolerance: CMTime = precise
             ? CMTime(seconds: 0.4, preferredTimescale: 600)
-            : .indefinite
+            : .positiveInfinity
         let target: Double
         if duration.isFinite, duration > 0 {
             target = min(max(seconds, 0), duration)
         } else {
             target = max(seconds, 0)
         }
-        seekRequestID &+= 1
-        let requestID = seekRequestID
-        isSeeking = true
+        let requestID = transport.beginSeek()
+        scrubValue = target
         // Un seek antérieur peut encore être en cours après deux relâchements
         // rapides. On le remplace explicitement par la dernière intention.
         player.currentItem?.cancelPendingSeeks()
@@ -647,7 +672,7 @@ struct VideoPlayerView: View {
         ) { [weak player] finished in
             Task { @MainActor in
                 guard let player,
-                      requestID == seekRequestID,
+                      transport.acceptsSeek(requestID),
                       self.player === player,
                       !isDisappeared
                 else { return }
@@ -660,20 +685,17 @@ struct VideoPlayerView: View {
                     currentTime = target
                     scrubValue = target
                 }
-                isSeeking = false
+                let shouldResume = transport.finishSeek(requestID, finished: finished)
+                if finished { transport.clearRecoveryPosition() }
                 scheduleControlsAutoHide(delay: 2.5)
 
-                // Reprise après un scrub : la lecture ne repart que si elle
-                // était active avant le geste, et pas lorsque le curseur a
-                // été relâché sur les dernières frames (la fin déclenchera
-                // l'observateur de fin).
-                let wasPlaying = wasPlayingBeforeScrub
-                wasPlayingBeforeScrub = false
+                // L'intention actuelle prime, même si elle a changé pendant
+                // la recherche. À la fin, le bouton propose de rejouer.
                 let nearEnd = duration.isFinite && duration > 0 && target >= duration - 0.5
-                if finished, wasPlaying, !nearEnd,
-                   player.timeControlStatus != .playing {
-                    player.playImmediately(atRate: playbackRate)
-                    isPlaying = true
+                if nearEnd {
+                    pausePlayback()
+                } else if shouldResume {
+                    resumePlaybackIfRequested()
                 }
             }
         }
@@ -682,15 +704,14 @@ struct VideoPlayerView: View {
     /// Annule une recherche lancée au relâchement précédent et invalide son
     /// callback. Cette opération est aussi exécutée au début d'un nouveau drag.
     private func cancelPendingSeek() {
-        seekRequestID &+= 1
+        transport.cancelSeek()
         player?.currentItem?.cancelPendingSeeks()
-        isSeeking = false
     }
 
     private func setPlaybackRate(_ rate: Float) {
         playbackRate = rate
         player?.defaultRate = rate
-        if isPlaying || player?.timeControlStatus == .playing {
+        if transport.wantsPlayback, !isScrubbing, !isSeeking {
             player?.rate = rate
         }
         scheduleControlsAutoHide(delay: 2.5)
@@ -720,13 +741,11 @@ struct VideoPlayerView: View {
     private func load() async {
         // Retour sur une page encore en mémoire : le lecteur existe, on
         // reprend simplement la lecture.
-        if let player {
-            if !isPlaying {
-                player.playImmediately(atRate: playbackRate)
-                isPlaying = true
-            }
+        if player != nil {
+            requestPlayback()
             return
         }
+        if recoveryPosition == nil { transport.play() }
         isLoadingVideo = true
         hasFailedSetup = false
         loadGeneration += 1
@@ -765,14 +784,15 @@ struct VideoPlayerView: View {
         // page est disparue. Ce n'est pas un échec — on sort sans état d'erreur
         // pour que la prochaine génération de `.task(id:)` recharge sereinement
         // (l'ancienne tâche ne doit jamais créer de lecteur ni alerter).
-        guard !isDisappeared, !Task.isCancelled else { return }
+        guard generation == loadGeneration, isActive,
+              !isDisappeared, !Task.isCancelled else { return }
         guard let asset else {
             hasFailedSetup = true
             errorMessage = "Impossible de préparer cette vidéo. Vérifiez votre connexion puis réessayez."
             return
         }
 
-        startPlayback(asset: asset)
+        startPlayback(asset: asset, at: recoveryPosition)
     }
 
     private func startPlayback(asset: AVURLAsset, at resumePosition: Double? = nil) {
@@ -780,8 +800,7 @@ struct VideoPlayerView: View {
         // (chargement concurrent gagnant la course), ne rien créer du tout.
         guard player == nil else { return }
         cancelPendingSeek()
-        isScrubbing = false
-        wasPlayingBeforeScrub = false
+        transport.reset(preservingPlaybackIntent: true)
         let newItem = AVPlayerItem(asset: asset)
         // Garde ~30 s de vidéo en réserve : sans cette consigne, le tampon
         // aval par défaut se limite à quelques secondes et toute baisse de
@@ -798,7 +817,7 @@ struct VideoPlayerView: View {
         newPlayer.allowsExternalPlayback = true
         newPlayer.usesExternalPlaybackWhileExternalScreenIsActive = true
 
-        guard !isDisappeared, !Task.isCancelled else {
+        guard isActive, !isDisappeared, !Task.isCancelled else {
             newPlayer.pause()
             return
         }
@@ -806,40 +825,29 @@ struct VideoPlayerView: View {
         // `retain` est apparié au `release` du teardown correspondant.
         AudioSessionKeeper.shared.retain()
         player = newPlayer
+        retryResetPosition = resumePosition ?? 0
         addObservers(to: newPlayer)
-        if let resumePosition, resumePosition.isFinite, resumePosition > 0.1 {
-            // Reprise après stall : retour à la position du gel. Tolérance
-            // large : l'image exacte importe peu, la vitesse de reprise si.
+        if let resumePosition, resumePosition.isFinite, resumePosition > 0 {
+            // Même mécanisme que le scrub : une pause ou un nouveau geste
+            // peut préempter la reprise après une erreur réseau.
             currentTime = resumePosition
             scrubValue = resumePosition
-            newPlayer.seek(
-                to: CMTime(seconds: resumePosition, preferredTimescale: 600),
-                toleranceBefore: CMTime(seconds: 1.5, preferredTimescale: 600),
-                toleranceAfter: CMTime(seconds: 1.5, preferredTimescale: 600)
-            ) { [weak newPlayer] _ in
-                Task { @MainActor in
-                    guard let newPlayer, self.player === newPlayer, !isDisappeared else { return }
-                    newPlayer.playImmediately(atRate: playbackRate)
-                    isPlaying = true
-                }
-            }
+            seek(to: resumePosition, precise: true)
         } else {
             currentTime = 0
             scrubValue = 0
             // Pas de seek : la lecture démarre déjà à zéro, un seek à tolérance
             // nulle forcerait une préparation précise avant la première frame.
-            newPlayer.playImmediately(atRate: playbackRate)
-            isPlaying = true
+            transport.clearRecoveryPosition()
+            resumePlaybackIfRequested()
         }
 
         itemStatusObserver = newPlayer.currentItem?.observe(\.status, options: [.new]) { item, _ in
-            // Lecture prête : le quota de tentatives repart de zéro pour
-            // absorber un futur incident (ex. URL signée expirée en cours de
-            // visionnage) au lieu d'hériter des échecs déjà récupérés.
+            // Être prêt ne prouve pas que la reprise fonctionne : le quota
+            // est réinitialisé seulement après une progression réelle.
             if item.status == .readyToPlay {
                 Task { @MainActor in
-                    guard !isDisappeared else { return }
-                    playbackRetryCount = 0
+                    guard self.player?.currentItem === item, !isDisappeared else { return }
                     hasFailedSetup = false
                 }
             }
@@ -864,28 +872,62 @@ struct VideoPlayerView: View {
         // lecture simultanée, avec des observateurs écrasés jamais invalidés.
         guard player?.currentItem === failedItem else { return }
         guard playbackRetryCount < 2 else {
-            isPlaying = false
-            hasFailedSetup = true
-            errorMessage = "Lecture impossible : \(lastError)"
+            failPlayback(message: "Lecture impossible : \(lastError)")
             return
         }
 
         playbackRetryCount += 1
-        isPlaying = false
-        teardown()
-        VideoAssetCache.shared.invalidate(driveId: driveId, fileId: file.id)
+        await recoverPlayback(
+            after: .seconds(playbackRetryCount * 2),
+            failureMessage: "Lecture impossible : \(lastError)"
+        )
+    }
 
+    private func rememberRecoveryPosition() {
+        // Un item de remplacement peut échouer avant d'avoir rejoint la position
+        // initiale : ne pas remplacer celle-ci par son temps de départ (zéro).
+        guard recoveryPosition == nil else { return }
+        let position = isScrubbing || isSeeking ? scrubValue : (playerTime ?? currentTime)
+        transport.rememberRecoveryPosition(position)
+    }
+
+    private func failPlayback(message: String) {
+        rememberRecoveryPosition()
+        teardown(preservingPlaybackIntent: true)
+        hasFailedSetup = true
+        errorMessage = message
+        showControls = true
+    }
+
+    private func recoverPlayback(
+        after delay: Duration,
+        failureMessage: String,
+        fromStallWatchdog: Bool = false
+    ) async {
+        rememberRecoveryPosition()
+        teardown(cancelsStallWatchdog: !fromStallWatchdog, preservingPlaybackIntent: true)
+        loadGeneration &+= 1
+        let generation = loadGeneration
+        isLoadingVideo = true
+        hasFailedSetup = false
+        defer {
+            if generation == loadGeneration { isLoadingVideo = false }
+        }
+        VideoAssetCache.shared.invalidate(driveId: driveId, fileId: file.id)
         do {
-            try await Task.sleep(for: .seconds(playbackRetryCount * 2))
-        } catch {
+            try await Task.sleep(for: delay)
+        } catch { return }
+        guard generation == loadGeneration, isActive,
+              !isDisappeared, !Task.isCancelled else { return }
+        let asset = await VideoAssetCache.shared.asset(driveId: driveId, fileId: file.id)
+        guard generation == loadGeneration, isActive,
+              !isDisappeared, !Task.isCancelled, player == nil else { return }
+        guard let asset else {
+            hasFailedSetup = true
+            errorMessage = failureMessage
             return
         }
-        // Un retour sur la page pendant le sommeil peut avoir relancé un
-        // lecteur sain via `.task(id:)` : il ne doit jamais être écrasé ici.
-        guard !isDisappeared, isActive, player == nil,
-              let asset = await VideoAssetCache.shared.asset(driveId: driveId, fileId: file.id)
-        else { return }
-        startPlayback(asset: asset)
+        startPlayback(asset: asset, at: recoveryPosition)
     }
 
     private func addObservers(to player: AVPlayer) {
@@ -897,6 +939,11 @@ struct VideoPlayerView: View {
             forInterval: CMTime(value: 1, timescale: 8),
             queue: .main
         ) { time in
+            if playbackRetryCount > 0, !isScrubbing, !isSeeking,
+               player.timeControlStatus == .playing,
+               time.seconds.isFinite, time.seconds >= retryResetPosition + 2 {
+                playbackRetryCount = 0
+            }
             let itemDuration = player.currentItem?.duration.seconds ?? 0
             if itemDuration.isFinite, itemDuration > 0,
                abs(duration - itemDuration) > 0.01 {
@@ -919,11 +966,6 @@ struct VideoPlayerView: View {
             } else if bufferedEnd != 0 {
                 bufferedEnd = 0
             }
-            // `isPlaying` n'est PAS déduit ici : `.waitingToPlayAtSpecifiedRate`
-            // (mise en mémoire tampon) n'est pas une pause, et traiter ce cas
-            // comme un arrêt faisait repasser le bouton en « Play » puis
-            // rejouait l'unique seconde bufferisée à chaque tap — boucle de
-            // gel. Le KVO ci-dessous fait foi.
             let externalPlaybackActive = player.isExternalPlaybackActive
             if isExternalPlaybackActive != externalPlaybackActive {
                 isExternalPlaybackActive = externalPlaybackActive
@@ -934,37 +976,16 @@ struct VideoPlayerView: View {
             object: player.currentItem,
             queue: .main
         ) { _ in
-            isPlaying = false
+            if !isScrubbing, !isSeeking { transport.pause() }
         }
-        // Casque/enceinte Bluetooth débranché : pause immédiate, comme les
-        // apps Apple. Le son ne doit jamais basculer sur le haut-parleur.
-        routeChangeObserver = NotificationCenter.default.addObserver(
-            forName: AVAudioSession.routeChangeNotification,
-            object: nil,
-            queue: .main
-        ) { [weak player] notification in
-            guard let player else { return }
-            let reasonRaw = notification.userInfo?[AVAudioSessionRouteChangeReasonKey] as? UInt
-            guard let reason = reasonRaw.flatMap(AVAudioSession.RouteChangeReason.init(rawValue:)),
-                  reason == .oldDeviceUnavailable
-            else { return }
-            Task { @MainActor in
-                guard self.player === player, !isDisappeared else { return }
-                player.pause()
-                isPlaying = false
-            }
-        }
-        // Source unique de vérité lecture/pause/buffering : `.waiting` garde
-        // `isPlaying` tel quel et affiche l'indicateur au lieu de simuler
-        // une pause. Pas d'option `.initial` : l'état de départ est posé par
-        // `startPlayback`, et une tâche retardée ne doit jamais l'écraser.
+        // Les pauses techniques des seeks ne modifient jamais l'intention.
+        // Les pauses utilisateur/système passent par pausePlayback().
         timeControlStatusObserver = player.observe(\.timeControlStatus, options: [.new]) { observedPlayer, _ in
             Task { @MainActor in
                 guard self.player === observedPlayer, !isDisappeared else { return }
                 switch observedPlayer.timeControlStatus {
                 case .playing:
                     isBuffering = false
-                    isPlaying = true
                     cancelStallWatchdog()
                 case .waitingToPlayAtSpecifiedRate:
                     isBuffering = true
@@ -973,7 +994,6 @@ struct VideoPlayerView: View {
                     startStallWatchdog(player: observedPlayer)
                 case .paused:
                     isBuffering = false
-                    isPlaying = false
                     cancelStallWatchdog()
                 @unknown default:
                     break
@@ -999,34 +1019,19 @@ struct VideoPlayerView: View {
                   player.timeControlStatus == .waitingToPlayAtSpecifiedRate,
                   player.currentItem === stalledItem
             else { return }
-            // La position de gel est celle du curseur : le temps n'avance
-            // plus pendant l'attente. La reprise y reviendra.
-            let resumePosition = player.currentTime().seconds
             // Quota partagé avec le retry d'échec : sans lui, un réseau mort
             // ferait tourner la récupération en boucle toutes les 20 s. Le
             // compteur est remis à zéro dès que la lecture repart vraiment.
             guard playbackRetryCount < 2 else {
-                isPlaying = false
-                isBuffering = false
-                teardown()
-                hasFailedSetup = true
-                errorMessage = "Lecture interrompue trop longtemps. Vérifiez votre connexion puis réessayez."
+                failPlayback(message: "Lecture interrompue trop longtemps. Vérifiez votre connexion puis réessayez.")
                 return
             }
             playbackRetryCount += 1
-            isPlaying = false
-            isBuffering = false
-            // Ne pas s'auto-annuler : ce teardown est appelé depuis la tâche
-            // du watchdog elle-même.
-            teardown(cancelsStallWatchdog: false)
-            VideoAssetCache.shared.invalidate(driveId: driveId, fileId: file.id)
-            guard let asset = await VideoAssetCache.shared.asset(driveId: driveId, fileId: file.id)
-            else {
-                hasFailedSetup = true
-                errorMessage = "Lecture interrompue trop longtemps. Vérifiez votre connexion puis réessayez."
-                return
-            }
-            startPlayback(asset: asset, at: resumePosition.isFinite ? resumePosition : nil)
+            await recoverPlayback(
+                after: .zero,
+                failureMessage: "Lecture interrompue trop longtemps. Vérifiez votre connexion puis réessayez.",
+                fromStallWatchdog: true
+            )
         }
     }
 
@@ -1038,13 +1043,15 @@ struct VideoPlayerView: View {
     /// Détruit lecteur et observateurs. `cancelsStallWatchdog` est faux quand
     /// le teardown est déclenché PAR le watchdog (récupération de stall) :
     /// il ne doit pas tuer la tâche de récupération en cours.
-    private func teardown(cancelsStallWatchdog: Bool = true) {
+    private func teardown(cancelsStallWatchdog: Bool = true, preservingPlaybackIntent: Bool = false) {
         cancelPendingSeek()
         if cancelsStallWatchdog {
             cancelStallWatchdog()
         }
-        isScrubbing = false
-        wasPlayingBeforeScrub = false
+        transport.reset(preservingPlaybackIntent: preservingPlaybackIntent)
+        if !preservingPlaybackIntent {
+            resumePlaybackAfterTags = false
+        }
         bufferedEnd = 0
         lastLiveSeekAt = .distantPast
         itemStatusObserver?.invalidate()
@@ -1060,10 +1067,6 @@ struct VideoPlayerView: View {
             NotificationCenter.default.removeObserver(endObserver)
         }
         endObserver = nil
-        if let routeChangeObserver {
-            NotificationCenter.default.removeObserver(routeChangeObserver)
-        }
-        routeChangeObserver = nil
         skipFeedbackResetTask?.cancel()
         skipFeedbackResetTask = nil
         // Une page qui n'a jamais créé de lecteur ne touche pas à la session :
@@ -1115,16 +1118,15 @@ struct VideoPlayerView: View {
     }
 
     private func skipTime(by delta: Double) {
-        guard let player, !isScrubbing, !isSeeking else { return }
+        guard player != nil, !isScrubbing, !isSeeking else { return }
         // Source de vérité : la position réelle du lecteur (l'état peut être
         // périmé quand les contrôles sont masqués).
         let position = playerTime ?? currentTime
         let upperBound = duration.isFinite && duration > 0 ? duration : Double.infinity
         let target = min(max(position + delta, 0), upperBound)
         guard target != position else { return }
-        // `seek` relance la lecture si elle tournait (mémoire
-        // `wasPlayingBeforeScrub`) et reste en pause sinon — comportement natif.
-        wasPlayingBeforeScrub = player.timeControlStatus != .paused
+        transport.clearRecoveryPosition()
+        // Le seek conserve l'intention de lecture/pause courante.
         seek(to: target, precise: false)
         showSkipFeedback(delta < 0 ? .backward : .forward)
     }

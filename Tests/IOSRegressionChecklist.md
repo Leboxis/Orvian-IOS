@@ -42,6 +42,29 @@ utilisent des secrets factices et des transferts simulés, sans compte kDrive.
 - Vérifier les nouveaux messages en mode clair/sombre et avec une grande
   taille de texte, sans débordement ni commande inaccessible.
 
+## Lecture vidéo : gestes, pause et récupération réseau
+
+Les transitions d'intention et l'invalidation des callbacks sont exercées par
+`VideoPlaybackChecks.swift`, via `check_ios_regressions.py` sur le runner macOS.
+Les scénarios suivants nécessitent aussi un iPhone ou un simulateur :
+
+- Pendant la lecture, déplacer la barre puis interrompre le geste par une
+  interruption système. Au retour, le curseur doit suivre la lecture. Répéter
+  avec une vidéo en pause : elle doit rester en pause. Le geste suivant fonctionne.
+- Avec un réseau ralenti, déplacer la barre puis appuyer sur Pause pendant
+  la recherche. La lecture ne reprend pas à son achèvement. Répéter en ouvrant
+  les tags, puis en débranchant le casque : aucun son ne repart derrière la
+  feuille ni sur le haut-parleur. Fermer les tags restaure l'intention antérieure.
+- Après la fin, appuyer sur Lecture puis saisir aussitôt la barre. Le retour
+  à zéro annulé ne doit pas relancer le son pendant le geste. Répéter plusieurs
+  déplacements rapides, en lecture puis en pause.
+- Après plusieurs minutes, provoquer un échec réseau récupérable. La vidéo
+  retrouve sa position et son état lecture/pause ; répéter pendant une recherche.
+- Épuiser les tentatives avec une ressource indisponible : fermer l'alerte,
+  vérifier que Réessayer est visible, rétablir le réseau et relancer.
+- Changer de page ou fermer pendant une récupération : aucune ancienne
+  recherche ne doit redémarrer la vidéo quittée.
+
 ## Limite de validation locale
 
 Les changements ont été préparés sous Windows : la vérification syntaxique

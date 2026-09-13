@@ -16,6 +16,10 @@ def run_check(output, sources):
 
 with tempfile.TemporaryDirectory() as temporary:
     temp = Path(temporary)
+    run_check(temp / "video-playback", [ROOT / path for path in [
+        "Orvian/Features/Viewer/VideoPlaybackTransport.swift",
+        "Tests/VideoPlaybackChecks.swift",
+    ]])
     run_check(temp / "security", [ROOT / path for path in [
         "Orvian/Core/Auth/PINCredential.swift", "Orvian/Core/Auth/KeychainSupport.swift",
         "Orvian/Core/Auth/PINRecordStore.swift",

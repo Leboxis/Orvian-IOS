@@ -17,8 +17,10 @@ struct ScrubberBar: View {
     let onDragStarted: () -> Void
     let onDragChanged: (Double) -> Void
     let onDragEnded: (Double) -> Void
+    let onDragCancelled: () -> Void
 
     @State private var isGestureActive = false
+    @GestureState private var isDragging = false
 
     var body: some View {
         GeometryReader { geo in
@@ -32,6 +34,20 @@ struct ScrubberBar: View {
         }
         .frame(height: 46)
         .animation(.snappy(duration: 0.18), value: isScrubbing)
+        .onChange(of: isDragging) { _, dragging in
+            // GestureState se réinitialise aussi si le système annule le geste,
+            // alors que onEnded n'est appelé qu'en cas de fin normale.
+            if !dragging, isGestureActive {
+                isGestureActive = false
+                onDragCancelled()
+            }
+        }
+        .onDisappear {
+            if isGestureActive {
+                isGestureActive = false
+                onDragCancelled()
+            }
+        }
     }
 
     // MARK: - Piste
@@ -65,6 +81,7 @@ struct ScrubberBar: View {
 
     private func dragGesture(width: CGFloat, duration: Double) -> some Gesture {
         DragGesture(minimumDistance: 0, coordinateSpace: .local)
+            .updating($isDragging) { _, dragging, _ in dragging = true }
             .onChanged { value in
                 if !isGestureActive {
                     isGestureActive = true
