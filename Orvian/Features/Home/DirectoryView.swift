@@ -135,7 +135,7 @@ struct DirectoryView: View {
                                 .padding(.vertical, 10)
                         }
                         .transition(.move(edge: .top).combined(with: .opacity))
-                    } else if !showsSearchBar {
+                    } else {
                         itemCountLabel
                             .padding(.vertical, 10)
                     }
@@ -669,12 +669,20 @@ struct DirectoryView: View {
         }
     }
 
-    /// Bulle compacte indiquant le chemin du dossier.
+    /// Bulle compacte indiquant le chemin du dossier (4 derniers niveaux max).
+    private var displayedCrumbs: [String] {
+        Array(crumbs.suffix(4))
+    }
+
+    private var isBreadcrumbTruncated: Bool {
+        crumbs.count > displayedCrumbs.count
+    }
+
     private var breadcrumb: some View {
         HStack(spacing: 5) {
             Image(systemName: "folder.fill")
                 .font(.system(size: 10, weight: .medium))
-            Text(crumbs.joined(separator: "  ›  "))
+            Text((isBreadcrumbTruncated ? "…  ›  " : "") + displayedCrumbs.joined(separator: "  ›  "))
                 .lineLimit(1)
                 .truncationMode(.head)
         }
