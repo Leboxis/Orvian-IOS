@@ -206,7 +206,6 @@ final class UploadManager {
             newTasks.append(UploadTaskItem(fileName: name, totalBytes: 0, status: .inProgress(progress: 0.05)))
         }
         tasks.append(contentsOf: newTasks)
-        UploadLiveActivityController.shared.sync(tasks: tasks, overallProgress: overallProgress)
 
         let jobID = UUID()
         uploadJobs[jobID] = Task { [weak self] in
@@ -281,7 +280,6 @@ final class UploadManager {
 
         let newTasks = urls.map { UploadTaskItem(fileName: $0.lastPathComponent, totalBytes: 0, status: .inProgress(progress: 0.05)) }
         tasks.append(contentsOf: newTasks)
-        UploadLiveActivityController.shared.sync(tasks: tasks, overallProgress: overallProgress)
 
         let jobID = UUID()
         uploadJobs[jobID] = Task { [weak self] in
@@ -370,7 +368,6 @@ final class UploadManager {
                         // Les 20 premiers pourcents représentent la préparation
                         // locale ; les 80 suivants correspondent aux octets envoyés.
                         self.tasks[currentIndex].status = .inProgress(progress: 0.2 + fraction * 0.8)
-                        UploadLiveActivityController.shared.sync(tasks: self.tasks, overallProgress: self.overallProgress)
                     }
                 }
             )
@@ -397,10 +394,6 @@ final class UploadManager {
             }
         }
 
-        // Succès comme échec : la Live Activity se met à jour ou se termine
-        // s'il ne reste plus aucun upload actif.
-        UploadLiveActivityController.shared.sync(tasks: tasks, overallProgress: overallProgress)
-
         if payload.isTemporary {
             await UploadFileIO.removeTemporaryFile(payload.fileURL)
         }
@@ -418,7 +411,6 @@ final class UploadManager {
         uploadJobs.removeAll()
         tasks.removeAll()
         isPillVisible = false
-        UploadLiveActivityController.shared.end()
     }
 
     func clearCompleted() {
@@ -431,7 +423,6 @@ final class UploadManager {
         if tasks.isEmpty {
             isPillVisible = false
         }
-        UploadLiveActivityController.shared.sync(tasks: tasks, overallProgress: overallProgress)
     }
 
     private func schedulePillAutoDismiss() {
