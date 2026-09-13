@@ -26,7 +26,9 @@ struct DirectoryView: View {
     /// Une task redémarrée après un aller-retour de navigation ne réutilise
     /// les résultats existants que s'ils sont complets.
     @State private var searchResultsReady = false
-    @State private var scrolledPastTop = false
+    @State private var searchRevealed = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var searchOverlayHeight: CGFloat = 88
     @State private var filters = FileFilters()
     @State private var selectionMode = false
     @State private var selectedIDs: Set<Int> = []
@@ -112,7 +114,11 @@ struct DirectoryView: View {
             onVisibleItemsChanged: updateVisibleSelectionItems,
             searchText: searchText,
             filters: filters,
-            onScrolledPastTop: showsSearchBar ? { scrolledPastTop = $0 } : nil,
+            onSearchVisibilityRequested: showsSearchBar && !selectionMode ? { visible in
+                if !visible { searchFocused = false }
+                searchRevealed = visible
+            } : nil,
+            contentTopInset: showsSearchBar ? searchOverlayHeight : 0,
             allowsPullToRefresh: !showsSearchBar,
             selectionMode: selectionMode,
             selectedIDs: selectedIDs,
@@ -121,27 +127,44 @@ struct DirectoryView: View {
         )
         .navigationTitle("")
         .navigationBarTitleDisplayMode(.inline)
+        // La barre flotte : son animation ne change ni l'inset de la
+        // ScrollView ni la position des cartes sous le doigt. Une marge dans
+        // le contenu protège la première rangée, même avec Dynamic Type.
+        .overlay(alignment: .top) {
+            if showsSearchBar {
+                VStack(spacing: 0) {
+                    searchBar
+                    itemCountLabel
+                        .padding(.vertical, 10)
+                }
+                .padding(.top, 8)
+                .onGeometryChange(for: CGFloat.self, of: { $0.size.height }) { height in
+                    if height > 0 { searchOverlayHeight = height }
+                }
+                .opacity(searchBarPresented ? 1 : 0)
+                .offset(y: searchBarPresented || reduceMotion ? 0 : -10)
+                .allowsHitTesting(searchBarPresented)
+                .accessibilityHidden(!searchBarPresented)
+                .animation(
+                    reduceMotion ? .easeOut(duration: 0.15) : .smooth(duration: 0.22),
+                    value: searchBarPresented
+                )
+            }
+        }
         .safeAreaInset(edge: .top, spacing: 0) {
-            if !selectionMode {
+            if showsSearchBar || !selectionMode {
                 VStack(spacing: 8) {
                     breadcrumb
                         .frame(maxWidth: .infinity)
-
-                    if searchBarPresented {
-                        VStack(spacing: 0) {
-                            searchBar
-                            itemCountLabel
-                                .padding(.vertical, 10)
-                        }
-                        .transition(.move(edge: .top).combined(with: .opacity))
-                    } else if !showsSearchBar {
+                    if !showsSearchBar {
                         itemCountLabel
                             .padding(.vertical, 10)
                     }
                 }
                 .padding(.top, 2)
-                .padding(.bottom, searchBarPresented ? 0 : 4)
-                .animation(.snappy(duration: 0.25), value: searchBarPresented)
+                .padding(.bottom, 4)
+                .opacity(selectionMode ? 0 : 1)
+                .accessibilityHidden(selectionMode)
             }
         }
         .toolbar {
@@ -313,15 +336,16 @@ struct DirectoryView: View {
         }
     }
 
-    /// La barre apparaît lors d'un défilé vers le haut ou lorsque la recherche est active.
+    /// Le texte reste conservé lorsque le geste masque la barre : une
+    /// recherche active n'empêche pas de libérer la vue sur les résultats.
     private var searchBarVisible: Bool {
-        alwaysShowSearch || searchFocused || isSearching || scrolledPastTop
+        alwaysShowSearch || searchFocused || searchRevealed
     }
 
     /// Applique les effets de disposition uniquement aux écrans qui possèdent
     /// réellement une barre de recherche.
     private var searchBarPresented: Bool {
-        showsSearchBar && searchBarVisible
+        showsSearchBar && !selectionMode && searchBarVisible
     }
 
     /// Clé du task de recherche : le texte ET la portée. Basculer la
@@ -459,7 +483,7 @@ struct DirectoryView: View {
         searchFocused = false
         // La révélation par scroll est consommée : sans cette remise à zéro,
         // quitter la sélection ferait ressusciter la barre sans action.
-        scrolledPastTop = false
+        searchRevealed = false
         selectionMode = true
     }
 
