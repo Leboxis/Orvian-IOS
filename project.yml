@@ -27,22 +27,43 @@ targets:
     platform: iOS
     sources:
       - path: Orvian
+      - path: OrvianLiveActivity/UploadActivityAttributes.swift
+    dependencies:
+      - target: OrvianUploadActivity
     info:
       path: Orvian/Info.plist
       properties:
         UIBackgroundModes:
           - audio
         NSFaceIDUsageDescription: "Face ID sert à déverrouiller l'app sans saisir votre code."
+        NSSupportsLiveActivities: true
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.orvian.app
         TARGETED_DEVICE_FAMILY: "1,2"
+  OrvianUploadActivity:
+    type: app-extension
+    platform: iOS
+    sources:
+      - path: OrvianLiveActivity
+    info:
+      properties:
+        CFBundleDisplayName: Orvian
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.widgetkit-extension
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.orvian.app.uploadactivity
+        TARGETED_DEVICE_FAMILY: "1,2"
+        APPLICATION_EXTENSION_API_ONLY: "YES"
+        SKIP_INSTALL: "YES"
 
 schemes:
   Orvian:
     build:
       targets:
         Orvian: all
+        OrvianUploadActivity: all
     run:
       config: Debug
     archive:
