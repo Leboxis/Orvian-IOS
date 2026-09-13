@@ -47,6 +47,7 @@ targets:
     sources:
       - path: OrvianLiveActivity
     info:
+      path: OrvianLiveActivity/Info.plist
       properties:
         CFBundleDisplayName: Orvian
         NSExtension:
