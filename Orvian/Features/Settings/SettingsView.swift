@@ -12,6 +12,7 @@ struct SettingsView: View {
     @AppStorage("fileGridColumns") private var fileGridColumns = 3
     @AppStorage("tagGridColumns") private var tagGridColumns = 2
     @AppStorage("alwaysShowSearch") private var alwaysShowSearch = false
+    @AppStorage("showBreadcrumb") private var showBreadcrumb = true
     @AppStorage("foldersFirstInTags") private var foldersFirstInTags = true
     @AppStorage("favoritesReselectScrollToTop") private var favoritesReselectScrollToTop = true
     @AppStorage("prefetchThumbnails") private var prefetchThumbnails = true
@@ -90,6 +91,14 @@ struct SettingsView: View {
                             icon: "magnifyingglass",
                             tint: .teal,
                             isOn: $alwaysShowSearch
+                        )
+                        settingsDivider
+                        settingsToggle(
+                            "Afficher le chemin du dossier",
+                            detail: "Le fil d’Ariane au-dessus du compteur d’éléments.",
+                            icon: "signpost.right.fill",
+                            tint: .gray,
+                            isOn: $showBreadcrumb
                         )
                         settingsDivider
                         settingsColorPicker(

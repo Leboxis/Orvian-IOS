@@ -39,6 +39,7 @@ struct DirectoryView: View {
     @State private var deleteBusy = false
     @State private var showDeleteConfirm = false
     @AppStorage("alwaysShowSearch") private var alwaysShowSearch = false
+    @AppStorage("showBreadcrumb") private var showBreadcrumb = true
     /// Recherche limitée au dossier courant et à tous ses sous-dossiers ;
     /// désactivée, elle couvre tout le drive.
     @AppStorage("searchRestrictedToFolder") private var searchRestrictedToFolder = false
@@ -124,24 +125,24 @@ struct DirectoryView: View {
         .navigationBarTitleDisplayMode(.inline)
         .safeAreaInset(edge: .top, spacing: 0) {
             if !selectionMode {
-                VStack(spacing: 8) {
-                    breadcrumb
-                        .frame(maxWidth: .infinity)
+                VStack(spacing: 6) {
+                    if showBreadcrumb {
+                        breadcrumb
+                            .frame(maxWidth: .infinity)
+                    }
 
                     if searchBarPresented {
-                        VStack(spacing: 0) {
+                        VStack(spacing: 6) {
                             searchBar
                             itemCountLabel
-                                .padding(.vertical, 10)
                         }
                         .transition(.move(edge: .top).combined(with: .opacity))
                     } else {
                         itemCountLabel
-                            .padding(.vertical, 10)
                     }
                 }
-                .padding(.top, 2)
-                .padding(.bottom, searchBarPresented ? 0 : 4)
+                .padding(.top, showBreadcrumb ? 2 : 4)
+                .padding(.bottom, 2)
                 .animation(.snappy(duration: 0.25), value: searchBarPresented)
             }
         }
