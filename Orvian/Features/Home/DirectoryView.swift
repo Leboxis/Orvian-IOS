@@ -218,8 +218,11 @@ struct DirectoryView: View {
                     .accessibilityLabel("Supprimer")
                 }
             } else {
-                ToolbarItem(placement: .topBarLeading) {
+                ToolbarItemGroup(placement: .topBarLeading) {
                     FilterMenu(filters: $filters)
+                    if showsSearchBar {
+                        searchToggleButton
+                    }
                 }
 
                 ToolbarItem(placement: .principal) {
@@ -410,6 +413,33 @@ struct DirectoryView: View {
             : "Recherche sur tout le drive")
         .accessibilityHint("Limite la recherche au dossier actuel et à tous ses sous-dossiers.")
         .accessibilityAddTraits(searchRestrictedToFolder ? [.isSelected] : [])
+    }
+
+    /// Bouton loupe à droite du filtre : révèle la barre de recherche
+    /// (geste équivalent au tirage vers le bas) et y met le focus.
+    /// Un second tap referme (clavier + barre) en conservant le texte,
+    /// comme le geste inverse — l'effacement reste dédié à la croix
+    /// dans la pastille de recherche.
+    private var searchToggleButton: some View {
+        Button {
+            if searchFocused || searchBarPresented {
+                searchFocused = false
+                if !alwaysShowSearch {
+                    searchRevealed = false
+                }
+            } else {
+                searchRevealed = true
+                // Laisse la pastille apparaître avant de demander le focus,
+                // sinon la demande part quand elle est encore non hittable.
+                DispatchQueue.main.async {
+                    searchFocused = true
+                }
+            }
+        } label: {
+            Image(systemName: searchBarPresented ? "magnifyingglass.circle.fill" : "magnifyingglass")
+        }
+        .accessibilityLabel(searchBarPresented ? "Fermer la recherche" : "Ouvrir la recherche")
+        .accessibilityHint("Affiche ou masque la barre de recherche")
     }
 
     /// Bouton dé : ouvre au hasard un fichier parmi les éléments du dossier actuel.
