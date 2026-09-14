@@ -29,6 +29,7 @@ struct AddMenuButton: View {
     @Binding var isBusy: Bool
     @Binding var busyMessage: String
     @Binding var errorMessage: String?
+    let onFolderCreated: () -> Void
     let onDone: ([DriveFile]) -> Void
 
     @State private var showFolderAlert = false
@@ -104,13 +105,13 @@ struct AddMenuButton: View {
     private func createFolder(named name: String) async {
         isBusy = true
         busyMessage = "Création du dossier…"
+        defer { isBusy = false }
         do {
             try await service.createFolder(driveId: driveId, directoryId: directoryId, name: name)
+            onFolderCreated()
         } catch {
             errorMessage = "Dossier non créé : \(message(for: error))"
         }
-        isBusy = false
-        onDone([])
     }
 
     // MARK: - Helpers

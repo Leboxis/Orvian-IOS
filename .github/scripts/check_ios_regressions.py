@@ -27,6 +27,7 @@ with tempfile.TemporaryDirectory() as temporary:
     ]])
     run_check(temp / "transfers", [ROOT / path for path in [
         "Orvian/Core/Utils/TransferCompletion.swift", "Orvian/Core/Utils/BoundedDataLoader.swift",
+        "Orvian/Core/API/APIError.swift", "Orvian/Core/Utils/UploadSafety.swift",
         "Tests/TransferChecks.swift",
     ]])
     lock_storage = temp / "LockStorage.swift"
@@ -70,3 +71,21 @@ enum TokenStore {
 ''', encoding="utf-8")
     run_check(temp / "metadata", [dependencies, ROOT / "Orvian/Core/Media/MediaMetadataStore.swift",
                                    ROOT / "Tests/MediaMetadataChecks.swift"])
+
+    # Exercise actual move handling and cache invalidation without the HTTP client.
+    mutation_dependencies = temp / "MutationDependencies.swift"
+    service = (ROOT / "Orvian/Core/API/KDriveService.swift").read_text(encoding="utf-8")
+    source_type = service[service.index("enum FileSource"):service.index("/// Couche Repository")]
+    cache = (ROOT / "Orvian/Core/Cache/DirectoryListStore.swift").read_text(encoding="utf-8")
+    snapshot_type = cache[cache.index("struct DirectoryListSnapshot"):cache.index("/// Mémoire")]
+    mutation_dependencies.write_text(
+        "import Foundation\n" + source_type + snapshot_type
+        + 'enum TokenStore { static func credentialFingerprint() -> String? { "test-account" } }\n',
+        encoding="utf-8",
+    )
+    run_check(temp / "mutation-safety", [mutation_dependencies, *[ROOT / path for path in [
+        "Orvian/Models/DriveFile.swift", "Orvian/Models/Category.swift",
+        "Orvian/Core/Utils/FileKind.swift",
+        "Orvian/Features/Shared/FileGridMutationCenter.swift",
+        "Tests/MutationSafetyChecks.swift",
+    ]]])

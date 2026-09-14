@@ -31,24 +31,50 @@ enum UploadStatus: Equatable {
     case failed(message: String)
 }
 
-/// Filtre thread-safe des rappels de progression : coalesce les ticks (un
-/// upload chunked peut en produire des milliers) et garantit une progression
-/// monotone. Sans lui, chaque tick engendrait une `Task` indépendante et deux
-/// ticks pouvaient s'appliquer dans le désordre (barre qui recule).
+/// Filtre thread-safe des rappels de progression : coalesce les ticks et
+/// ordonne leur application. Une nouvelle tentative repart de zéro sans qu'un
+/// ancien tick puisse remettre la barre à la valeur précédente.
 private final class UploadProgressFilter: @unchecked Sendable {
+    struct Update: Sendable {
+        let attempt: Int
+        let sequence: Int
+        let fraction: Double
+    }
+
     private let lock = NSLock()
+    private var attempt = 0
+    private var sequence = 0
+    private var lastAppliedSequence = -1
     private var lastReported = 0.0
     /// Pas minimal entre deux mises à jour d'interface (~1 % de la barre).
     private let step = 0.01
 
-    /// Retourne true si ce tick doit être poussé vers l'interface.
-    func shouldReport(_ fraction: Double) -> Bool {
+    func beginAttempt(_ newAttempt: Int) -> Update {
         lock.lock()
         defer { lock.unlock() }
-        guard fraction > lastReported + step || fraction >= 1 else { return false }
+        attempt = newAttempt
+        sequence = 0
+        lastAppliedSequence = -1
+        lastReported = 0
+        return Update(attempt: attempt, sequence: sequence, fraction: 0)
+    }
+
+    func update(_ fraction: Double) -> Update? {
+        lock.lock()
+        defer { lock.unlock() }
+        guard fraction > lastReported + step || fraction >= 1 else { return nil }
         if fraction > lastReported {
             lastReported = fraction
         }
+        sequence += 1
+        return Update(attempt: attempt, sequence: sequence, fraction: fraction)
+    }
+
+    func shouldApply(_ update: Update) -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        guard update.attempt == attempt, update.sequence > lastAppliedSequence else { return false }
+        lastAppliedSequence = update.sequence
         return true
     }
 }
@@ -118,6 +144,14 @@ private enum UploadFileIO {
             try? FileManager.default.removeItem(at: url)
         }.value
     }
+
+    static func removeTemporaryFiles(_ urls: [URL]) async {
+        await Task.detached(priority: .utility) {
+            for url in urls {
+                try? FileManager.default.removeItem(at: url)
+            }
+        }.value
+    }
 }
 
 /// Élément d'upload préparé sur disque (aucun buffer binaire volumineux en mémoire).
@@ -135,6 +169,19 @@ struct UploadPayload: Sendable {
     }
 }
 
+private enum UploadRetrySource {
+    case photo(item: PhotosPickerItem, itemIndex: Int)
+    case document(URL)
+    case payload(UploadPayload)
+}
+
+private struct UploadRetryContext {
+    let driveId: Int
+    let directoryId: Int
+    let onDone: (([DriveFile]) -> Void)?
+    var source: UploadRetrySource
+}
+
 /// Gestionnaire centralisé des uploads avec suivi en temps réel.
 @MainActor
 @Observable
@@ -147,6 +194,7 @@ final class UploadManager {
     private let service = KDriveService()
     private var hidePillTask: Task<Void, Never>?
     private var uploadJobs: [UUID: Task<Void, Never>] = [:]
+    private var retryContexts: [UUID: UploadRetryContext] = [:]
     /// L'API kDrive traite chaque upload de manière indépendante (session
     /// dédiée aux gros fichiers), plusieurs fichiers peuvent donc partir en
     /// parallèle sans verrou côté serveur.
@@ -206,6 +254,14 @@ final class UploadManager {
             newTasks.append(UploadTaskItem(fileName: name, totalBytes: 0, status: .inProgress(progress: 0.05)))
         }
         tasks.append(contentsOf: newTasks)
+        for (index, item) in items.enumerated() {
+            retryContexts[newTasks[index].id] = UploadRetryContext(
+                driveId: driveId,
+                directoryId: directoryId,
+                onDone: onDone,
+                source: .photo(item: item, itemIndex: index)
+            )
+        }
 
         let jobID = UUID()
         uploadJobs[jobID] = Task { [weak self] in
@@ -256,6 +312,12 @@ final class UploadManager {
             payload = await UploadFileIO.writeToTemporaryDirectory(data: data, fileName: realName)
         }
 
+        guard !Task.isCancelled else {
+            if let payload, payload.isTemporary {
+                await UploadFileIO.removeTemporaryFile(payload.fileURL)
+            }
+            return nil
+        }
         guard let payload else {
             if let curIdx = tasks.firstIndex(where: { $0.id == taskId }) {
                 tasks[curIdx].status = .failed(message: "Échec de lecture du média")
@@ -268,6 +330,14 @@ final class UploadManager {
             tasks[curIdx].totalBytes = payload.totalBytes
             tasks[curIdx].status = .inProgress(progress: 0.2)
         }
+        guard var retryContext = retryContexts[taskId] else {
+            if payload.isTemporary {
+                await UploadFileIO.removeTemporaryFile(payload.fileURL)
+            }
+            return nil
+        }
+        retryContext.source = .payload(payload)
+        retryContexts[taskId] = retryContext
         return await uploadSingleFile(taskId: taskId, driveId: driveId, directoryId: directoryId, payload: payload)
     }
 
@@ -280,6 +350,14 @@ final class UploadManager {
 
         let newTasks = urls.map { UploadTaskItem(fileName: $0.lastPathComponent, totalBytes: 0, status: .inProgress(progress: 0.05)) }
         tasks.append(contentsOf: newTasks)
+        for (index, url) in urls.enumerated() {
+            retryContexts[newTasks[index].id] = UploadRetryContext(
+                driveId: driveId,
+                directoryId: directoryId,
+                onDone: onDone,
+                source: .document(url)
+            )
+        }
 
         let jobID = UUID()
         uploadJobs[jobID] = Task { [weak self] in
@@ -319,6 +397,12 @@ final class UploadManager {
 
         let payload = await UploadFileIO.copyToTemporaryDirectory(sourceURL: url, fileName: url.lastPathComponent)
 
+        guard !Task.isCancelled else {
+            if let payload, payload.isTemporary {
+                await UploadFileIO.removeTemporaryFile(payload.fileURL)
+            }
+            return nil
+        }
         guard let payload else {
             if let curIdx = tasks.firstIndex(where: { $0.id == taskId }) {
                 tasks[curIdx].status = .failed(message: "Échec de copie du fichier")
@@ -330,17 +414,27 @@ final class UploadManager {
             tasks[curIdx].totalBytes = payload.totalBytes
             tasks[curIdx].status = .inProgress(progress: 0.2)
         }
+        guard var retryContext = retryContexts[taskId] else {
+            if payload.isTemporary {
+                await UploadFileIO.removeTemporaryFile(payload.fileURL)
+            }
+            return nil
+        }
+        retryContext.source = .payload(payload)
+        retryContexts[taskId] = retryContext
         return await uploadSingleFile(taskId: taskId, driveId: driveId, directoryId: directoryId, payload: payload)
     }
 
     private func uploadSingleFile(taskId: UUID, driveId: Int, directoryId: Int, payload: UploadPayload) async -> DriveFile? {
         guard !Task.isCancelled else {
+            retryContexts.removeValue(forKey: taskId)
             if payload.isTemporary {
                 await UploadFileIO.removeTemporaryFile(payload.fileURL)
             }
             return nil
         }
         guard let index = tasks.firstIndex(where: { $0.id == taskId }) else {
+            retryContexts.removeValue(forKey: taskId)
             if payload.isTemporary {
                 await UploadFileIO.removeTemporaryFile(payload.fileURL)
             }
@@ -358,16 +452,16 @@ final class UploadManager {
                 fileURL: payload.fileURL,
                 fileName: payload.fileName,
                 totalSize: payload.totalBytes,
-                progress: { [weak self] fraction in
-                    guard progressFilter.shouldReport(fraction) else { return }
+                attemptStarted: { [weak self] attempt in
+                    let update = progressFilter.beginAttempt(attempt)
                     Task { @MainActor in
-                        guard let self,
-                              let currentIndex = self.tasks.firstIndex(where: { $0.id == taskId })
-                        else { return }
-                        guard case .inProgress = self.tasks[currentIndex].status else { return }
-                        // Les 20 premiers pourcents représentent la préparation
-                        // locale ; les 80 suivants correspondent aux octets envoyés.
-                        self.tasks[currentIndex].status = .inProgress(progress: 0.2 + fraction * 0.8)
+                        self?.applyProgress(update, filter: progressFilter, taskId: taskId)
+                    }
+                },
+                progress: { [weak self] fraction in
+                    guard let update = progressFilter.update(fraction) else { return }
+                    Task { @MainActor in
+                        self?.applyProgress(update, filter: progressFilter, taskId: taskId)
                     }
                 }
             )
@@ -376,6 +470,7 @@ final class UploadManager {
                 throw CancellationError()
             }
             tasks[currentIndex].status = .completed
+            retryContexts.removeValue(forKey: taskId)
             result = uploadedFile
             if uploadedFile.fileKind.supportsThumbnail {
                 let uploadedFileID = uploadedFile.id
@@ -391,13 +486,102 @@ final class UploadManager {
                let currentIndex = tasks.firstIndex(where: { $0.id == taskId }) {
                 let desc = (error as? APIError)?.errorDescription ?? error.localizedDescription
                 tasks[currentIndex].status = .failed(message: desc)
+                if error is UploadOutcomeUnknown {
+                    // Aucun bouton Réessayer si le premier envoi a pu aboutir.
+                    retryContexts.removeValue(forKey: taskId)
+                }
+            } else {
+                retryContexts.removeValue(forKey: taskId)
             }
         }
 
-        if payload.isTemporary {
+        let shouldRemoveTemporaryFile = result != nil || Task.isCancelled || retryContexts[taskId] == nil
+        if shouldRemoveTemporaryFile && payload.isTemporary {
             await UploadFileIO.removeTemporaryFile(payload.fileURL)
         }
         return result
+    }
+
+    private func applyProgress(_ update: UploadProgressFilter.Update, filter: UploadProgressFilter, taskId: UUID) {
+        guard filter.shouldApply(update),
+              let index = tasks.firstIndex(where: { $0.id == taskId }),
+              case .inProgress = tasks[index].status
+        else { return }
+        // Les 20 premiers pourcents représentent la préparation locale ; les
+        // 80 suivants correspondent aux octets envoyés lors de cette tentative.
+        tasks[index].status = .inProgress(progress: 0.2 + min(max(update.fraction, 0), 1) * 0.8)
+    }
+
+    func canRetry(taskId: UUID) -> Bool {
+        guard retryContexts[taskId] != nil,
+              let task = tasks.first(where: { $0.id == taskId }),
+              case .failed = task.status
+        else { return false }
+        return true
+    }
+
+    func retryUpload(taskId: UUID) {
+        guard canRetry(taskId: taskId),
+              let index = tasks.firstIndex(where: { $0.id == taskId }),
+              let context = retryContexts[taskId]
+        else { return }
+
+        hidePillTask?.cancel()
+        hidePillTask = nil
+        isPillVisible = true
+        tasks[index].status = .queued
+
+        let jobID = UUID()
+        uploadJobs[jobID] = Task { [weak self] in
+            guard let self else { return }
+            defer { self.uploadJobs.removeValue(forKey: jobID) }
+
+            let uploadedFile: DriveFile?
+            switch context.source {
+            case let .photo(item, itemIndex):
+                uploadedFile = await self.prepareAndUploadPhoto(
+                    item: item,
+                    taskId: taskId,
+                    itemIndex: itemIndex,
+                    driveId: context.driveId,
+                    directoryId: context.directoryId
+                )
+            case let .document(url):
+                uploadedFile = await self.prepareAndUploadDocument(
+                    url: url,
+                    taskId: taskId,
+                    driveId: context.driveId,
+                    directoryId: context.directoryId
+                )
+            case let .payload(payload):
+                uploadedFile = await self.uploadSingleFile(
+                    taskId: taskId,
+                    driveId: context.driveId,
+                    directoryId: context.directoryId,
+                    payload: payload
+                )
+            }
+
+            guard !Task.isCancelled else { return }
+            if let uploadedFile {
+                context.onDone?([uploadedFile])
+            }
+            self.schedulePillAutoDismiss()
+        }
+    }
+
+    private func discardRetryContexts(for taskIDs: Set<UUID>) {
+        let urls = taskIDs.compactMap { taskID -> URL? in
+            guard let context = retryContexts.removeValue(forKey: taskID),
+                  case let .payload(payload) = context.source,
+                  payload.isTemporary
+            else { return nil }
+            return payload.fileURL
+        }
+        guard !urls.isEmpty else { return }
+        Task {
+            await UploadFileIO.removeTemporaryFiles(urls)
+        }
     }
 
     /// Utilisé à la déconnexion : aucune tâche d'un ancien compte ne doit
@@ -408,12 +592,20 @@ final class UploadManager {
         for job in uploadJobs.values {
             job.cancel()
         }
+        discardRetryContexts(for: Set(retryContexts.keys))
         uploadJobs.removeAll()
         tasks.removeAll()
         isPillVisible = false
     }
 
     func clearCompleted() {
+        let discardedTaskIDs = Set(tasks.compactMap { task -> UUID? in
+            switch task.status {
+            case .completed, .failed: return task.id
+            case .queued, .inProgress: return nil
+            }
+        })
+        discardRetryContexts(for: discardedTaskIDs)
         tasks.removeAll {
             switch $0.status {
             case .completed, .failed: return true

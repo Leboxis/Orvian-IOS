@@ -16,6 +16,7 @@ struct TagsEditorSheet: View {
     @Environment(\.dismiss) private var dismiss
     @State private var categories: [Category] = []
     @State private var appliedCategoryIds: Set<Int>
+    @State private var pendingCategoryIds: Set<Int> = []
     @State private var isLoading = true
     @State private var errorMessage: String?
     @State private var loadError: String?
@@ -90,9 +91,11 @@ struct TagsEditorSheet: View {
                             .font(.system(size: 16, weight: .medium))
                     }
                     .accessibilityLabel("Fermer")
+                    .disabled(!pendingCategoryIds.isEmpty)
                 }
             }
         }
+        .interactiveDismissDisabled(!pendingCategoryIds.isEmpty)
         .task { await load() }
     }
 
@@ -126,6 +129,7 @@ struct TagsEditorSheet: View {
                 }
         }
         .buttonStyle(.plain)
+        .disabled(pendingCategoryIds.contains(category.id))
     }
 
     /// Même ordre que l'onglet Tag : ordre personnalisé s'il a été défini
@@ -166,7 +170,10 @@ struct TagsEditorSheet: View {
         }
     }
 
+    @MainActor
     private func toggle(_ category: Category) async {
+        guard pendingCategoryIds.insert(category.id).inserted else { return }
+        defer { pendingCategoryIds.remove(category.id) }
         let isApplying = !appliedCategoryIds.contains(category.id)
         if isApplying {
             appliedCategoryIds.insert(category.id)

@@ -128,8 +128,19 @@ struct UploadProgressSheet: View {
                 Image(systemName: "checkmark.circle.fill")
                     .foregroundStyle(.green)
             case .failed:
-                Image(systemName: "exclamationmark.circle.fill")
-                    .foregroundStyle(.orange)
+                if manager.canRetry(taskId: task.id) {
+                    Button {
+                        manager.retryUpload(taskId: task.id)
+                    } label: {
+                        Label("Réessayer", systemImage: "arrow.clockwise")
+                            .font(.caption.weight(.semibold))
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                } else {
+                    Image(systemName: "exclamationmark.circle")
+                        .foregroundStyle(.orange)
+                }
             }
         }
         .padding(.vertical, 2)

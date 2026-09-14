@@ -58,6 +58,9 @@ final class FileGridViewModel {
     /// pagination continue dans le même ordre que la première page.
     private var orderBy: [String] = []
     private var order = "asc"
+    /// Empêche deux taps rapides de lancer des valeurs favorites opposées en
+    /// parallèle pour le même fichier.
+    private var favoriteMutationsInFlight: Set<Int> = []
 
     let source: FileSource
     let driveId: Int
@@ -86,7 +89,29 @@ final class FileGridViewModel {
     /// les endpoints coûteux côté serveur (`last_modified`, ~1 s) ne sont pas
     /// relancés à chaque bascule d'onglet.
     func loadIfNeeded() async {
-        guard !loadedOnce, !isInitialLoading else { return }
+        guard !isInitialLoading, !isReloading else { return }
+        if loadedOnce {
+            // SwiftUI peut conserver le view model alors que l'abonnement au
+            // PassthroughSubject de sa vue est démonté. Vérifier aussi cet état
+            // vivant au remontage, sans invalider les autres sources du drive.
+            let currentSnapshot = DirectoryListSnapshot(
+                items: items,
+                cursor: cursor,
+                hasMore: hasMore,
+                totalItemCount: totalItemCount,
+                orderBy: orderBy,
+                order: order,
+                fetchedAt: fetchedAt
+            )
+            if FileGridMutationCenter.shared.isSnapshotStale(
+                currentSnapshot,
+                source: source,
+                driveId: driveId
+            ) {
+                await reload(forceNetwork: true)
+            }
+            return
+        }
         let restoreGeneration = dataGeneration
         let memorySnapshot = DirectoryListStore.shared.snapshot(
             source: source,
@@ -110,6 +135,17 @@ final class FileGridViewModel {
         guard !Task.isCancelled,
               credentialFingerprint == TokenStore.credentialFingerprint() else { return }
         if let snapshot = memorySnapshot ?? diskSnapshot {
+            // Les onglets hors Home sont démontés et manquent donc les valeurs
+            // du PassthroughSubject. Ne restaurer ni servir 60 s un snapshot
+            // qui ne reflète pas une mutation confirmée pendant leur absence.
+            if FileGridMutationCenter.shared.isSnapshotStale(
+                snapshot,
+                source: source,
+                driveId: driveId
+            ) {
+                await reload(forceNetwork: true)
+                return
+            }
             // L'ordre des affectations importe : `items` en dernier déclenche
             // la resynchronisation du cache avec un état déjà complet.
             orderBy = snapshot.orderBy
@@ -390,26 +426,35 @@ final class FileGridViewModel {
     // MARK: - Favoris
 
     /// Bascule optimiste : l'étoile change immédiatement, retour arrière si l'API refuse.
-    /// Dans l'onglet Favoris, retirer l'étoile retire aussi la carte de la
-    /// grille : la liste reflète alors l'état renvoyé par l'API.
-    func toggleFavorite(_ file: DriveFile) async {
-        guard let index = items.firstIndex(where: { $0.id == file.id }) else { return }
-        let newValue = !(file.isFavorite ?? false)
+    /// Dans l'onglet Favoris, la carte reste présentée pendant la requête puis
+    /// n'est retirée qu'après confirmation du serveur.
+    @discardableResult
+    func toggleFavorite(_ file: DriveFile) async -> Bool {
+        guard !favoriteMutationsInFlight.contains(file.id),
+              let index = items.firstIndex(where: { $0.id == file.id }) else { return false }
+        favoriteMutationsInFlight.insert(file.id)
+        defer { favoriteMutationsInFlight.remove(file.id) }
+        mutationErrorMessage = nil
+        let oldValue = items[index].isFavorite
+        let newValue = !(oldValue ?? false)
         let shouldRemove = source == .favorites && !newValue
-        if shouldRemove {
-            items.remove(at: index)
-        } else {
-            items[index].isFavorite = newValue
-        }
+        items[index].isFavorite = newValue
         do {
             try await service.setFavorite(driveId: driveId, fileId: file.id, favorite: newValue)
-        } catch {
             if shouldRemove {
-                items.insert(file, at: min(index, items.count))
-            } else if let restoredIndex = items.firstIndex(where: { $0.id == file.id }) {
-                items[restoredIndex].isFavorite = file.isFavorite
+                items.removeAll { $0.id == file.id }
+            }
+            FileGridMutationCenter.shared.publish(
+                .favorite(driveId: driveId, fileId: file.id, isFavorite: newValue)
+            )
+            return true
+        } catch {
+            if let restoredIndex = items.firstIndex(where: { $0.id == file.id }),
+               items[restoredIndex].isFavorite == newValue {
+                items[restoredIndex].isFavorite = oldValue
             }
             mutationErrorMessage = "Impossible de modifier le favori : \((error as? APIError)?.errorDescription ?? error.localizedDescription)"
+            return false
         }
     }
 
@@ -420,37 +465,84 @@ final class FileGridViewModel {
     /// immédiatement (éditeur de tags et fiche détail).
     func updateCategories(for file: DriveFile, category: Category, applied: Bool) {
         applyCategoryChange(fileId: file.id, category: category, applied: applied)
+        // TagsEditorSheet exécute addCategory/removeCategory et n'appelle ce
+        // callback qu'après succès : aucune seconde requête n'est lancée ici.
+        FileGridMutationCenter.shared.publish(
+            .category(driveId: driveId, fileId: file.id, category: category, applied: applied)
+        )
     }
 
     /// Applique une mutation deja confirmee par une autre interface, telle que
     /// la visionneuse ou le dossier resté ouvert derrière la recherche, sans
     /// repeter l'appel API.
-    func apply(_ mutation: FileGridMutation) {
+    @discardableResult
+    func apply(_ mutation: FileGridMutation) -> Bool {
+        guard mutation.driveId == driveId else { return false }
         switch mutation {
         case let .favorite(_, fileId, isFavorite):
-            applyFavoriteChange(fileId: fileId, isFavorite: isFavorite)
+            return applyFavoriteChange(fileId: fileId, isFavorite: isFavorite)
         case let .category(_, fileId, category, applied):
-            applyCategoryChange(fileId: fileId, category: category, applied: applied)
+            return applyCategoryChange(fileId: fileId, category: category, applied: applied)
+        case let .rename(_, fileId, name):
+            if let index = items.firstIndex(where: { $0.id == fileId }) {
+                items[index].name = name
+            }
+            // Un renommage peut ajouter ou retirer un résultat de recherche ;
+            // seul le serveur peut recalculer cette appartenance.
+            if case .search = source { return true }
+            return false
+        case let .color(_, fileId, color):
+            if let index = items.firstIndex(where: { $0.id == fileId }) {
+                items[index].color = color
+            }
+            return false
         case let .removal(_, fileIds):
             items.removeAll { fileIds.contains($0.id) }
+            return false
+        case .moved:
+            var updated = items
+            let needsReload = mutation.applyMove(to: &updated, source: source)
+            adjustItemCount(by: updated.count - items.count)
+            if updated != items { items = updated }
+            return needsReload
+        case let .trashed(_, fileIds):
+            if case .trash = source {
+                let existingIds = Set(items.map(\.id))
+                return !fileIds.isSubset(of: existingIds)
+            }
+            items.removeAll { fileIds.contains($0.id) }
+            return false
         case let .uploaded(_, files):
             if case .recents = source {
                 mergeUploaded(files, broadcast: false)
             }
+            return false
         }
     }
 
-    private func applyFavoriteChange(fileId: Int, isFavorite: Bool) {
-        guard let index = items.firstIndex(where: { $0.id == fileId }) else { return }
+    /// Renvoie vrai uniquement si la source Favoris doit récupérer un nouvel
+    /// élément absent de sa page actuelle.
+    private func applyFavoriteChange(fileId: Int, isFavorite: Bool) -> Bool {
+        guard let index = items.firstIndex(where: { $0.id == fileId }) else {
+            return source == .favorites && isFavorite
+        }
         if source == .favorites && !isFavorite {
             items.remove(at: index)
         } else {
             items[index].isFavorite = isFavorite
         }
+        return false
     }
 
-    private func applyCategoryChange(fileId: Int, category: Category, applied: Bool) {
-        guard let index = items.firstIndex(where: { $0.id == fileId }) else { return }
+    /// Renvoie vrai si une source de tag doit récupérer un fichier qui vient
+    /// d'entrer dans la catégorie mais n'est pas présent dans sa page locale.
+    private func applyCategoryChange(fileId: Int, category: Category, applied: Bool) -> Bool {
+        guard let index = items.firstIndex(where: { $0.id == fileId }) else {
+            if case let .category(categoryId) = source {
+                return categoryId == category.id && applied
+            }
+            return false
+        }
         var current = items[index].categories ?? []
         if applied {
             if !current.contains(where: { $0.categoryId == category.id }) {
@@ -466,6 +558,7 @@ final class FileGridViewModel {
            !applied {
             items.remove(at: index)
         }
+        return false
     }
 
     // MARK: - Suppression, renommage & déplacement
@@ -475,6 +568,9 @@ final class FileGridViewModel {
             try await service.trash(driveId: driveId, fileId: file.id)
             adjustItemCount(by: -1)
             items.removeAll { $0.id == file.id }
+            FileGridMutationCenter.shared.publish(
+                .trashed(driveId: driveId, fileIds: [file.id])
+            )
         } catch {
             mutationErrorMessage = "Suppression impossible : \((error as? APIError)?.errorDescription ?? error.localizedDescription)"
         }
@@ -545,7 +641,7 @@ final class FileGridViewModel {
         // Les grilles ouvertes du même drive (ex. recherche au-dessus du
         // dossier) retirent les cartes confirmées sans rechargement réseau.
         if !trashedIDs.isEmpty {
-            FileGridMutationCenter.shared.publish(.removal(driveId: driveId, fileIds: trashedIDs))
+            FileGridMutationCenter.shared.publish(.trashed(driveId: driveId, fileIds: trashedIDs))
         }
         reportPartialFailure(
             total: ids.count,
@@ -563,6 +659,9 @@ final class FileGridViewModel {
         items[index].name = name
         do {
             try await service.rename(driveId: driveId, fileId: file.id, name: name)
+            FileGridMutationCenter.shared.publish(
+                .rename(driveId: driveId, fileId: file.id, name: name)
+            )
         } catch {
             if let restoredIndex = items.firstIndex(where: { $0.id == file.id }),
                items[restoredIndex].name == name {
@@ -580,6 +679,9 @@ final class FileGridViewModel {
         items[index].color = color
         do {
             try await service.setFolderColor(driveId: driveId, fileId: file.id, color: color)
+            FileGridMutationCenter.shared.publish(
+                .color(driveId: driveId, fileId: file.id, color: color)
+            )
         } catch {
             if let restoredIndex = items.firstIndex(where: { $0.id == file.id }),
                items[restoredIndex].color == color {
@@ -589,8 +691,8 @@ final class FileGridViewModel {
         }
     }
 
-    /// Déplace tous les éléments demandés. Les réussites disparaissent
-    /// immédiatement de la grille ; les éventuels échecs restent affichés.
+    /// Déplace tous les éléments demandés. Seul le dossier quitté retire
+    /// les réussites ; les listes de favoris et de tags les conservent.
     @discardableResult
     func move(ids: Set<Int>, to destinationDirectoryId: Int) async -> Set<Int> {
         mutationErrorMessage = nil
@@ -600,12 +702,13 @@ final class FileGridViewModel {
         let (movedIDs, firstError) = await performConcurrently(ids: ids) { id in
             try await service.move(driveId: driveId, fileId: id, destinationDirectoryId: destination)
         }
-        adjustItemCount(by: -movedIDs.count)
-        items.removeAll { movedIDs.contains($0.id) }
-        // Les autres grilles ouvertes du même drive (ex. recherche au-dessus
-        // du dossier déplacé) retirent les cartes confirmées sans rechargement.
         if !movedIDs.isEmpty {
-            FileGridMutationCenter.shared.publish(.removal(driveId: driveId, fileIds: movedIDs))
+            let mutation = FileGridMutation.moved(
+                driveId: driveId, fileIds: movedIDs, destinationDirectoryId: destination
+            )
+            let needsReload = apply(mutation)
+            FileGridMutationCenter.shared.publish(mutation)
+            if needsReload { await reload(forceNetwork: true) }
         }
         reportPartialFailure(
             total: ids.count,

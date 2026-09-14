@@ -56,6 +56,40 @@ struct SecurityChecks {
         let reopened = PINRecordStore(defaults: defaults, access: denied)
         precondition(reopened.current() == first, "A derived PIN must survive relaunch without Keychain")
         precondition(defaults.string(forKey: "orvian.applock.fallback")!.hasPrefix(PINCredential.prefix))
+
+        // Contrôle statique : UIKit empêche d'exécuter le cache iOS dans ce
+        // binaire macOS, mais la CI verrouille tout de même ses invariants de sécurité.
+        let root = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let thumbnailProvider = try String(
+            contentsOf: root.appendingPathComponent("Orvian/Core/Cache/ThumbnailProvider.swift"),
+            encoding: .utf8
+        )
+        let diskImageCache = try String(
+            contentsOf: root.appendingPathComponent("Orvian/Core/Cache/DiskImageCache.swift"),
+            encoding: .utf8
+        )
+        precondition(
+            thumbnailProvider.contains("let credentialFingerprint: String") &&
+            thumbnailProvider.contains("let isTrashed: Bool") &&
+            thumbnailProvider.contains("cachedMemoryThumbnail(driveId: Int, fileId: Int, isTrashed: Bool)"),
+            "Thumbnail memory, in-flight, failures and sync lookup must share the scoped key"
+        )
+        precondition(
+            thumbnailProvider.contains("private var inFlight: [Key:") &&
+            thumbnailProvider.contains("private var recentFailures: [Key:") &&
+            thumbnailProvider.contains("private var pendingPrefetchKeys: [Key]") &&
+            thumbnailProvider.contains("Self.isCurrentCredential(key)"),
+            "Prefetch and late responses must remain bound to their captured credential"
+        )
+        precondition(
+            diskImageCache.contains("SHA256.hash(data: Data(credentialFingerprint.utf8))") &&
+            diskImageCache.contains("let state = isTrashed ? \"trash\" : \"normal\"") &&
+            diskImageCache.components(separatedBy: "removeUnnamespacedLegacyEntries()").count >= 3 &&
+            !diskImageCache.contains("legacyURL"),
+            "Disk thumbnails must use a safe account/state namespace and reject legacy paths"
+        )
         print("Security checks passed")
     }
 }

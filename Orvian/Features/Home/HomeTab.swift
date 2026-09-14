@@ -58,6 +58,7 @@ struct HomeTab: View {
                     path.append(folder)
                 }
             )
+            .id(root.id)
             .navigationDestination(for: DriveFile.self) { directory in
                 let index = path.firstIndex(where: { $0.id == directory.id })
                 let crumbs = [root.name] + (index.map { Array(path[...$0].map(\.name)) } ?? [directory.name])
@@ -90,16 +91,45 @@ struct HomeTab: View {
             startDirectoryIsFresh = false
             return
         }
-        guard let page = try? await service.page(.directory(1), driveId: driveId, cursor: nil),
-              let resolved = page.data?.first(where: \.isDirectory)
-        else { return }
+        guard let current = startDirectory else { return }
+
+        let resolved: DriveFile
+        if current.id == 1 {
+            // La racine technique n'est qu'un repli de session après un échec
+            // initial : retenter la résolution normale au lieu de la verrouiller.
+            guard let page = try? await service.page(
+                .directory(1), driveId: driveId, cursor: nil, forceNetwork: true
+            ),
+                  let directory = page.data?.first(where: \.isDirectory)
+            else { return }
+            resolved = directory
+        } else {
+            do {
+                // La première page est limitée à 60 éléments. Interroger l'ID
+                // verrouillé évite de le remplacer quand un autre dossier passe
+                // simplement avant lui dans l'ordre alphabétique.
+                let directory = try await service.fileInfo(driveId: driveId, fileId: current.id)
+                guard directory.isDirectory else { return }
+                resolved = directory
+            } catch let APIError.http(status, _, _) where status == 404 || status == 410 {
+                guard let page = try? await service.page(
+                    .directory(1), driveId: driveId, cursor: nil, forceNetwork: true
+                ),
+                      let directory = page.data?.first(where: \.isDirectory)
+                else { return }
+                resolved = directory
+            } catch {
+                // Une panne réseau ou serveur ne prouve pas que le dossier a
+                // disparu : conserver le verrou et la pile actuels.
+                return
+            }
+        }
         guard !Task.isCancelled else { return }
 
-        // Le dossier mémorisé n'est plus le premier du drive : repartir de la
-        // nouvelle racine pour ne pas laisser l'utilisateur dans un sous-arbre
-        // disparu. Un simple renommage (même identifiant) ne touche pas à la
-        // pile, seul le nom affiché est rafraîchi.
-        if resolved.id != startDirectory?.id {
+        // Seule la disparition confirmée de l'ancienne racine autorise son
+        // remplacement et la remise à zéro de la pile. Un renommage conserve
+        // l'identité de navigation tout en rafraîchissant les métadonnées.
+        if resolved.id != current.id {
             path.removeAll()
         }
         startDirectory = resolved

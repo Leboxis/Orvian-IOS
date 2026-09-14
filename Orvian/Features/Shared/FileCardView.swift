@@ -281,7 +281,11 @@ struct FileCardView: View {
             return
         }
         // Accès mémoire synchrone immédiat (zéro délai, zéro animation superflue)
-        if let cached = ThumbnailProvider.shared.cachedMemoryThumbnail(driveId: driveId, fileId: file.id) {
+        if let cached = ThumbnailProvider.shared.cachedMemoryThumbnail(
+            driveId: driveId,
+            fileId: file.id,
+            isTrashed: isTrashed
+        ) {
             thumbnail = cached
             thumbnailLoaded = true
             return

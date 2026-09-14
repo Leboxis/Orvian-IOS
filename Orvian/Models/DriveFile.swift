@@ -19,8 +19,8 @@ struct DriveFile: Codable, Identifiable, Hashable {
     /// nom affiché qui peut masquer l'extension.
     let fileExtension: String?
     var isFavorite: Bool?
-    let parentId: Int?
-    let path: String?
+    var parentId: Int?
+    var path: String?
     /// Couleur hexadécimale (#rrggbb) des dossiers, définie côté kDrive.
     var color: String?
     /// Catégories (tags) du fichier — renvoyées uniquement avec `with=categories`.

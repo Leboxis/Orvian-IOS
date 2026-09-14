@@ -25,6 +25,7 @@ extension KDriveService {
     /// Infomaniak recommande une session à partir de 100 Mo. Une petite marge
     /// évite qu'un fichier proche de la limite soit refusé par un intermédiaire.
     private static let directUploadLimit = 95 * 1_024 * 1_024
+    private static let directUploadMaximumAttempts = 3
     private static let uploadChunkSize = 20 * 1_024 * 1_024
     private static let uploadChunkMaximumAttempts = 3
 
@@ -112,6 +113,7 @@ extension KDriveService {
         fileURL: URL,
         fileName: String,
         totalSize: Int,
+        attemptStarted: @escaping @Sendable (Int) -> Void,
         progress: @escaping @Sendable (Double) -> Void
     ) async throws -> DriveFile {
         let lastModifiedAt = Self.modificationTimestamp(for: fileURL)
@@ -127,20 +129,39 @@ extension KDriveService {
             )
         }
 
-        return try await api.uploadFile(
-            .upload(
-                driveId: driveId,
-                directoryId: directoryId,
-                fileName: fileName,
-                totalSize: totalSize,
-                lastModifiedAt: lastModifiedAt
-            ),
-            fileURL: fileURL,
-            // L'endpoint reçoit le fichier comme corps binaire brut. Le type
-            // réel reste transmis à kDrive via le nom et son extension.
-            contentType: "application/octet-stream",
-            progress: progress
-        )
+        var lastError: Error = APIError.invalidResponse
+        for attempt in 1...Self.directUploadMaximumAttempts {
+            try Task.checkCancellation()
+            attemptStarted(attempt)
+            do {
+                return try await api.uploadFile(
+                    .upload(
+                        driveId: driveId,
+                        directoryId: directoryId,
+                        fileName: fileName,
+                        totalSize: totalSize,
+                        lastModifiedAt: lastModifiedAt
+                    ),
+                    fileURL: fileURL,
+                    // L'endpoint reçoit le fichier comme corps binaire brut. Le type
+                    // réel reste transmis à kDrive via le nom et son extension.
+                    contentType: "application/octet-stream",
+                    progress: progress
+                )
+            } catch {
+                lastError = error
+                try Task.checkCancellation()
+                guard attempt < Self.directUploadMaximumAttempts,
+                      UploadSafety.mayRetryDirectUpload(error)
+                else {
+                    if UploadSafety.outcomeMayBeUnknown(error) { throw UploadOutcomeUnknown() }
+                    throw error
+                }
+                let delaySeconds = Int64(1 << (attempt - 1))
+                try await Task.sleep(for: .seconds(delaySeconds))
+            }
+        }
+        throw lastError
     }
 
     /// Les fichiers d'au moins 95 Mo suivent le protocole de session recommandé
@@ -177,6 +198,7 @@ extension KDriveService {
               APIClient.isTrustedUploadURL(uploadURL)
         else { throw APIError.invalidResponse }
 
+        var finishRequested = false
         do {
             let reader = try UploadChunkReader(url: fileURL)
             for number in 1...totalChunks {
@@ -201,6 +223,7 @@ extension KDriveService {
                 )
             }
 
+            finishRequested = true
             let finished = try await api.postDecoded(
                 DataResponse<FinishedUpload>.self,
                 .finishUploadSession(driveId: driveId, token: token),
@@ -212,6 +235,10 @@ extension KDriveService {
             progress(1)
             return file
         } catch {
+            // Une clôture acceptée peut avoir créé le fichier malgré une réponse perdue.
+            if finishRequested && UploadSafety.outcomeMayBeUnknown(error) {
+                throw UploadOutcomeUnknown()
+            }
             try? await api.sendEmpty(
                 .cancelUploadSession(driveId: driveId, token: token),
                 method: "DELETE"

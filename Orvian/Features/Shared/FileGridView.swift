@@ -55,6 +55,7 @@ struct FileGridView: View {
     @State private var metadataRevision = 0
     @State private var prefetchTask: Task<Void, Never>?
     @State private var sortReloadTask: Task<Void, Never>?
+    @State private var mutationReloadTask: Task<Void, Never>?
     @State private var videoMetadataResolutionCount = 0
     /// Fiche détails demandée par une carte (une seule feuille pour toute la grille).
     @State private var detailRequest: FilePresentation?
@@ -111,7 +112,9 @@ struct FileGridView: View {
             }
             .onReceive(FileGridMutationCenter.shared.mutations) { mutation in
                 guard mutation.driveId == viewModel.driveId else { return }
-                viewModel.apply(mutation)
+                if viewModel.apply(mutation) {
+                    scheduleMutationReload()
+                }
             }
             .onReceive(mediaMetadata.$revision) { newRev in
                 if needsVideoMetadata {
@@ -123,6 +126,8 @@ struct FileGridView: View {
                 prefetchTask = nil
                 sortReloadTask?.cancel()
                 sortReloadTask = nil
+                mutationReloadTask?.cancel()
+                mutationReloadTask = nil
             }
             .alert("Action impossible", isPresented: mutationErrorBinding) {
                 Button("OK", role: .cancel) {}
@@ -135,7 +140,7 @@ struct FileGridView: View {
                     driveId: viewModel.driveId,
                     isTrashed: viewModel.source == .trash,
                     onOpen: { open(request: request) },
-                    onToggleFavorite: { Task { await viewModel.toggleFavorite(request.file) } },
+                    onToggleFavorite: { await viewModel.toggleFavorite(request.file) },
                     onDelete: { Task { await viewModel.trash(request.file) } },
                     onRename: { newName in
                         Task { await viewModel.rename(request.file, name: newName) }
@@ -274,6 +279,22 @@ struct FileGridView: View {
             get: { viewModel.mutationErrorMessage != nil },
             set: { if !$0 { viewModel.clearMutationError() } }
         )
+    }
+
+    /// Une mutation peut faire entrer un élément absent dans Favoris, Tag ou
+    /// Corbeille. Regrouper les publications rapprochées évite une rafale de
+    /// rechargements de liste, sans jamais répéter l'API de mutation.
+    private func scheduleMutationReload() {
+        mutationReloadTask?.cancel()
+        mutationReloadTask = Task {
+            do {
+                try await Task.sleep(for: .milliseconds(120))
+            } catch {
+                return
+            }
+            guard !Task.isCancelled else { return }
+            await viewModel.reload(forceNetwork: true)
+        }
     }
 
     /// Relance la résolution des métadonnées vidéo quand le contenu change :

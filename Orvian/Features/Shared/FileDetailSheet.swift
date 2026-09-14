@@ -11,7 +11,7 @@ struct FileDetailSheet: View {
     /// favori/tags et la miniature passe par l'endpoint trash.
     var isTrashed = false
     let onOpen: () -> Void
-    let onToggleFavorite: (() -> Void)?
+    let onToggleFavorite: (() async -> Bool)?
     let onDelete: (() -> Void)?
     let onRename: ((String) -> Void)?
     let onMove: (() -> Void)?
@@ -22,7 +22,7 @@ struct FileDetailSheet: View {
     @State private var appliedCategories: [Category] = []
     @State private var isLoadingTags = true
     @State private var tagsError: String?
-    @State private var isFavorite: Bool
+    @State private var isFavoriteMutationInProgress = false
     /// Chemin complet depuis la racine du drive, tel que renvoyé par l'API.
     @State private var filePath: String?
     @State private var showDeleteConfirm = false
@@ -36,7 +36,7 @@ struct FileDetailSheet: View {
         driveId: Int,
         isTrashed: Bool = false,
         onOpen: @escaping () -> Void,
-        onToggleFavorite: (() -> Void)?,
+        onToggleFavorite: (() async -> Bool)?,
         onDelete: (() -> Void)?,
         onRename: ((String) -> Void)?,
         onMove: (() -> Void)?
@@ -49,7 +49,6 @@ struct FileDetailSheet: View {
         self.onDelete = onDelete
         self.onRename = onRename
         self.onMove = onMove
-        _isFavorite = State(initialValue: file.isFavorite == true)
     }
 
     var body: some View {
@@ -76,13 +75,13 @@ struct FileDetailSheet: View {
                     ToolbarItemGroup(placement: .topBarTrailing) {
                         if onToggleFavorite != nil {
                             Button {
-                                isFavorite.toggle()
-                                onToggleFavorite?()
+                                toggleFavorite()
                             } label: {
-                                Image(systemName: isFavorite ? "star.fill" : "star")
-                                    .foregroundStyle(isFavorite ? .yellow : Color.accentColor)
+                                Image(systemName: file.isFavorite == true ? "star.fill" : "star")
+                                    .foregroundStyle(file.isFavorite == true ? .yellow : Color.accentColor)
                             }
-                            .accessibilityLabel(isFavorite ? "Retirer des favoris" : "Ajouter aux favoris")
+                            .disabled(isFavoriteMutationInProgress)
+                            .accessibilityLabel(file.isFavorite == true ? "Retirer des favoris" : "Ajouter aux favoris")
                         }
 
                         if onDelete != nil {
@@ -163,16 +162,25 @@ struct FileDetailSheet: View {
 
     private var favoriteRow: some View {
         Button {
-            isFavorite.toggle()
-            onToggleFavorite?()
+            toggleFavorite()
         } label: {
             HStack {
                 Text("Favori")
                     .foregroundStyle(.primary)
                 Spacer()
-                Image(systemName: isFavorite ? "star.fill" : "star")
-                    .foregroundStyle(isFavorite ? .yellow : .secondary)
+                Image(systemName: file.isFavorite == true ? "star.fill" : "star")
+                    .foregroundStyle(file.isFavorite == true ? .yellow : .secondary)
             }
+        }
+        .disabled(isFavoriteMutationInProgress || onToggleFavorite == nil)
+    }
+
+    private func toggleFavorite() {
+        guard !isFavoriteMutationInProgress, let onToggleFavorite else { return }
+        isFavoriteMutationInProgress = true
+        Task {
+            _ = await onToggleFavorite()
+            isFavoriteMutationInProgress = false
         }
     }
 
@@ -302,12 +310,10 @@ struct FileDetailSheet: View {
             // catégories) déclenche la fiche individuelle.
             if let categories = file.categories {
                 appliedCategories = categories.compactMap { byId[$0.categoryId] }
-                isFavorite = file.isFavorite == true
                 return
             }
             let info = try await service.fileInfo(driveId: driveId, fileId: file.id)
             appliedCategories = (info.categories ?? []).compactMap { byId[$0.categoryId] }
-            isFavorite = info.isFavorite == true
             if let infoPath = info.path, !infoPath.isEmpty {
                 filePath = infoPath
             }

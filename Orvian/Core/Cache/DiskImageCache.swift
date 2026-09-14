@@ -1,10 +1,12 @@
 import UIKit
+import CryptoKit
 
 /// Cache disque des miniatures (`Library/Caches`), thread-safe avec éviction FIFO (Oldest-Written-First) en arrière-plan.
 ///
 /// L'éviction est déclenchée sur une limite choisie dans Réglages et purge
 /// les plus anciens fichiers jusqu'à 80 % de cette limite.
 final class DiskImageCache: @unchecked Sendable {
+    private static let formatDirectory = "v2"
     private let directory: DiskDirectory
 
     private let lock = NSLock()
@@ -33,42 +35,80 @@ final class DiskImageCache: @unchecked Sendable {
             .urls(for: .cachesDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("thumbnails", isDirectory: true)
         self.directory = DiskDirectory(root: base)
+        removeUnnamespacedLegacyEntries()
     }
 
-    /// Suffixe des fichiers créés par les versions antérieures : l'API kDrive
-    /// ignore la taille demandée, un seul bucket existait en pratique.
-    private static let legacyPixelsSuffix = 360
-
-    /// Les fichiers historiques portaient un suffixe de taille (`123-360.jpg`)
-    /// que l'API kDrive ignore : l'identifiant seul suffit désormais
-    /// (`123.jpg`). Les lectures retombent sur l'ancien nom, et une écriture
-    /// nettoie le doublon.
-    private func url(driveId: Int, fileId: Int) -> URL {
-        directory.url("\(driveId)/\(fileId).jpg")
+    /// Le fingerprint est déjà non réversible aujourd'hui, mais le re-hasher
+    /// ici garantit qu'aucune évolution de sa source ne place un secret brut
+    /// ou un composant de chemin arbitraire dans le nom d'un fichier.
+    private func credentialNamespace(_ credentialFingerprint: String) -> String {
+        SHA256.hash(data: Data(credentialFingerprint.utf8))
+            .map { String(format: "%02x", $0) }
+            .joined()
     }
 
-    private func legacyURL(driveId: Int, fileId: Int) -> URL {
-        directory.url("\(driveId)/\(fileId)-\(Self.legacyPixelsSuffix).jpg")
+    private func url(
+        credentialFingerprint: String,
+        driveId: Int,
+        fileId: Int,
+        isTrashed: Bool
+    ) -> URL {
+        let namespace = credentialNamespace(credentialFingerprint)
+        let state = isTrashed ? "trash" : "normal"
+        return directory.url("\(Self.formatDirectory)/\(namespace)/\(state)/\(driveId)/\(fileId).image")
+    }
+
+    /// Les anciens chemins `<drive>/<file>.jpg` et `-360.jpg` ne permettaient
+    /// d'identifier ni le compte ni l'état corbeille. Ils sont supprimés au
+    /// lieu d'être migrés vers un namespace qui serait nécessairement ambigu.
+    private func removeUnnamespacedLegacyEntries() {
+        let marker = directory.url("\(Self.formatDirectory)/.legacy-cleanup-complete")
+        guard !FileManager.default.fileExists(atPath: marker.path) else { return }
+
+        let namespacedRoot = directory.url(Self.formatDirectory).standardizedFileURL.path + "/"
+        var cleanupSucceeded = true
+        for entry in directory.entries() where !entry.url.standardizedFileURL.path.hasPrefix(namespacedRoot) {
+            if directory.remove(entry.url) == nil {
+                cleanupSucceeded = false
+            }
+        }
+        if cleanupSucceeded {
+            _ = directory.write(Data(), to: marker)
+        }
     }
 
     // MARK: - Lecture / écriture
 
-    func hasEntry(driveId: Int, fileId: Int) -> Bool {
+    func hasEntry(
+        credentialFingerprint: String,
+        driveId: Int,
+        fileId: Int,
+        isTrashed: Bool
+    ) -> Bool {
         // Les anciens marqueurs `.none` ne sont plus pris en compte : un 404
         // juste après un upload pouvait être temporaire et ne doit jamais
         // condamner définitivement la miniature sur les versions suivantes.
-        return FileManager.default.fileExists(atPath: url(driveId: driveId, fileId: fileId).path)
-            || FileManager.default.fileExists(atPath: legacyURL(driveId: driveId, fileId: fileId).path)
+        FileManager.default.fileExists(atPath: url(
+            credentialFingerprint: credentialFingerprint,
+            driveId: driveId,
+            fileId: fileId,
+            isTrashed: isTrashed
+        ).path)
     }
 
-    func loadImage(driveId: Int, fileId: Int) -> UIImage? {
-        let fileURL = url(driveId: driveId, fileId: fileId)
-        guard let data = try? Data(contentsOf: fileURL, options: .mappedIfSafe) else {
-            // Tombée de compatibilité : ancien fichier `-<taille>.jpg`.
-            guard let legacyData = try? Data(contentsOf: legacyURL(driveId: driveId, fileId: fileId), options: .mappedIfSafe) else { return nil }
-            guard !legacyData.isEmpty, let legacyImage = UIImage(data: legacyData) else { return nil }
-            return legacyImage.preparingForDisplay() ?? legacyImage
-        }
+    func loadImage(
+        credentialFingerprint: String,
+        driveId: Int,
+        fileId: Int,
+        isTrashed: Bool
+    ) -> UIImage? {
+        let fileURL = url(
+            credentialFingerprint: credentialFingerprint,
+            driveId: driveId,
+            fileId: fileId,
+            isTrashed: isTrashed
+        )
+        guard let data = try? Data(contentsOf: fileURL, options: .mappedIfSafe) else { return nil }
         guard !data.isEmpty, let image = UIImage(data: data) else { return nil }
         return image.preparingForDisplay() ?? image
     }
@@ -85,24 +125,41 @@ final class DiskImageCache: @unchecked Sendable {
 
     /// Retire une entrée illisible afin qu'elle ne bloque jamais un nouveau
     /// téléchargement de miniature valide.
-    func removeEntry(driveId: Int, fileId: Int) {
-        removeFileAndAccount(url(driveId: driveId, fileId: fileId))
-        removeFileAndAccount(legacyURL(driveId: driveId, fileId: fileId))
+    func removeEntry(
+        credentialFingerprint: String,
+        driveId: Int,
+        fileId: Int,
+        isTrashed: Bool
+    ) {
+        removeFileAndAccount(url(
+            credentialFingerprint: credentialFingerprint,
+            driveId: driveId,
+            fileId: fileId,
+            isTrashed: isTrashed
+        ))
     }
 
     /// Enregistre directement les données brutes reçues du réseau (JPEG, PNG, WebP...) sans ré-encodage CPU.
     /// Utilise Data.write(options: .atomic) pour garantir qu'aucun fichier incomplet ne peut être lu.
-    func store(data: Data, driveId: Int, fileId: Int) {
+    func store(
+        data: Data,
+        credentialFingerprint: String,
+        driveId: Int,
+        fileId: Int,
+        isTrashed: Bool
+    ) {
         guard !data.isEmpty else { return }
-        let fileURL = url(driveId: driveId, fileId: fileId)
+        let fileURL = url(
+            credentialFingerprint: credentialFingerprint,
+            driveId: driveId,
+            fileId: fileId,
+            isTrashed: isTrashed
+        )
         let oldSize = (try? fileURL.resourceValues(forKeys: [.fileSizeKey]))?.fileSize ?? 0
         guard directory.write(data, to: fileURL) else {
             // Disque plein ou permissions : on continue sans cache disque pour cette entrée.
             return
         }
-        // L'ancien nom `-<taille>.jpg` devient un doublon : retiré ici,
-        // sa taille est décomptée avant le delta de la nouvelle écriture.
-        removeFileAndAccount(legacyURL(driveId: driveId, fileId: fileId))
         onFileWritten(deltaSize: data.count - oldSize)
     }
 

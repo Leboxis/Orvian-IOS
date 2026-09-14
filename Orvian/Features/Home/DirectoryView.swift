@@ -32,7 +32,7 @@ struct DirectoryView: View {
     @State private var filters = FileFilters()
     @State private var selectionMode = false
     @State private var selectedIDs: Set<Int> = []
-    @State private var visibleSelectionItems: [DriveFile] = []
+    @State private var visibleItemsReport: VisibleItemsReport?
     @State private var pendingMove: MoveRequest?
     @State private var pendingTags: TagRequest?
     @State private var moveBusy = false
@@ -60,6 +60,22 @@ struct DirectoryView: View {
     private struct TagRequest: Identifiable {
         let id = UUID()
         let files: [DriveFile]
+    }
+
+    /// Associe le callback de la grille aux données qui l'ont produit. Un
+    /// callback tardif d'une recherche ou d'un filtre précédent ne peut ainsi
+    /// ni fausser le compteur ni modifier la sélection courante.
+    private struct VisibleItemsContext: Equatable {
+        let viewModelID: ObjectIdentifier
+        let source: FileSource
+        let itemsRevision: Int
+        let filters: FileFilters
+        let searchText: String
+    }
+
+    private struct VisibleItemsReport {
+        let context: VisibleItemsContext
+        let items: [DriveFile]
     }
 
     init(
@@ -93,7 +109,29 @@ struct DirectoryView: View {
         return viewModel
     }
 
+    private var currentVisibleItemsContext: VisibleItemsContext {
+        let effectiveSearchText: String
+        if case .search = activeViewModel.source {
+            effectiveSearchText = ""
+        } else {
+            effectiveSearchText = searchText
+        }
+        return VisibleItemsContext(
+            viewModelID: ObjectIdentifier(activeViewModel),
+            source: activeViewModel.source,
+            itemsRevision: activeViewModel.itemsRevision,
+            filters: filters,
+            searchText: effectiveSearchText
+        )
+    }
+
+    private var visibleSelectionItems: [DriveFile] {
+        guard visibleItemsReport?.context == currentVisibleItemsContext else { return [] }
+        return visibleItemsReport?.items ?? []
+    }
+
     var body: some View {
+        let visibleItemsContext = currentVisibleItemsContext
         FileGridView(
             viewModel: activeViewModel,
             onOpenDirectory: { folder in
@@ -112,7 +150,9 @@ struct DirectoryView: View {
                     viewModel: activeViewModel
                 )
             },
-            onVisibleItemsChanged: updateVisibleSelectionItems,
+            onVisibleItemsChanged: { items in
+                updateVisibleSelectionItems(items, context: visibleItemsContext)
+            },
             searchText: searchText,
             filters: filters,
             allowsPullToRefresh: !showsSearchBar,
@@ -543,8 +583,9 @@ struct DirectoryView: View {
         }
     }
 
-    private func updateVisibleSelectionItems(_ items: [DriveFile]) {
-        visibleSelectionItems = items
+    private func updateVisibleSelectionItems(_ items: [DriveFile], context: VisibleItemsContext) {
+        guard context == currentVisibleItemsContext else { return }
+        visibleItemsReport = VisibleItemsReport(context: context, items: items)
         if selectionMode {
             selectedIDs.formIntersection(Set(items.map(\.id)))
         }
@@ -591,11 +632,14 @@ struct DirectoryView: View {
         let movingViewModel = activeViewModel
         let movedIDs = await movingViewModel.move(ids: ids, to: destination.id)
 
-        // La diffusion `.removal` couvre les grilles à l'écoute ; quand le
+        // La diffusion `.moved` couvre les grilles à l'écoute ; quand le
         // déplacement part de la recherche, la vue du dossier n'écoute pas
         // pendant ce temps : la mutation lui est appliquée directement.
         if !movedIDs.isEmpty, movingViewModel !== viewModel {
-            viewModel.apply(FileGridMutation.removal(driveId: driveId, fileIds: movedIDs))
+            let needsReload = viewModel.apply(.moved(
+                driveId: driveId, fileIds: movedIDs, destinationDirectoryId: destination.id
+            ))
+            if needsReload { await viewModel.reload(forceNetwork: true) }
         }
 
         selectedIDs.subtract(movedIDs)
@@ -642,6 +686,9 @@ struct DirectoryView: View {
             isBusy: $addBusy,
             busyMessage: $busyMessage,
             errorMessage: $addError,
+            onFolderCreated: {
+                Task { await refreshAfterFolderCreation() }
+            },
             onDone: { uploadedFiles in
                 Task { await refreshAfterImport(uploadedFiles) }
             }
@@ -667,6 +714,15 @@ struct DirectoryView: View {
         viewModel.mergeUploaded(uploadedFiles)
         if isSearching {
             await searchViewModel?.reload()
+        }
+    }
+
+    /// La création ne renvoie pas le nouveau dossier : seule une relecture
+    /// réseau forcée peut confirmer et afficher la liste mise à jour.
+    private func refreshAfterFolderCreation() async {
+        await viewModel.reload(forceNetwork: true)
+        if isSearching {
+            await searchViewModel?.reload(forceNetwork: true)
         }
     }
 
@@ -699,15 +755,12 @@ struct DirectoryView: View {
         .accessibilityLabel("Chemin : " + crumbs.joined(separator: ", "))
     }
 
-    /// Le nombre d'éléments est volontairement séparé du fil d'Ariane et
-    /// placé entre la recherche et le début de la grille. On préfère le total
-    /// annoncé par le serveur (vraie quantité du dossier, même avant que la
-    /// pagination ait tout chargé) et on retombe sur les éléments chargés
-    /// lorsque l'API ne fournit pas de total.
+    /// Sans filtre, le total serveur reste la quantité exacte du dossier. Avec
+    /// une recherche ou un filtre local, le callback de la grille fournit le
+    /// nombre réellement visible ; « partiel » signale les pages restantes.
     private var itemCountLabel: some View {
-        let total = activeViewModel.totalItemCount
-        let count = total ?? activeViewModel.items.count
-        return Text("\(count) élément\(count > 1 ? "s" : "")")
+        let text = itemCountText
+        return Text(text)
             .font(.caption.weight(.medium))
             .foregroundStyle(.secondary)
             .padding(.horizontal, 11)
@@ -716,6 +769,57 @@ struct DirectoryView: View {
             .overlay {
                 Capsule().strokeBorder(.quaternary.opacity(0.5), lineWidth: 0.5)
             }
-            .accessibilityLabel("\(count) élément\(count > 1 ? "s" : "") dans ce dossier")
+            .accessibilityLabel(usesVisibleItemCount ? text : "\(text) dans ce dossier")
+    }
+
+    private var usesVisibleItemCount: Bool {
+        isSearching || hasCountFiltering
+    }
+
+    private var hasCountFiltering: Bool {
+        filters.orientation != nil
+            || filters.highResolutionVideosOnly
+            || filters.media != .all
+    }
+
+    private var reportedVisibleItemCount: Int? {
+        guard visibleItemsReport?.context == currentVisibleItemsContext else { return nil }
+        return visibleItemsReport?.items.count
+    }
+
+    private var displayedItemCount: Int? {
+        guard activeViewModel.itemsRevision > 0, !activeViewModel.isInitialLoading else { return nil }
+        if isSearching, case .search = activeViewModel.source, !searchResultsReady {
+            return nil
+        }
+        if usesVisibleItemCount {
+            return reportedVisibleItemCount
+        }
+        return activeViewModel.totalItemCount
+            ?? reportedVisibleItemCount
+            ?? activeViewModel.items.count
+    }
+
+    private var itemCountText: String {
+        guard let count = displayedItemCount else {
+            if isSearching { return "Recherche…" }
+            return hasCountFiltering ? "Filtrage…" : "Chargement…"
+        }
+        let plural = count > 1
+        if isSearching {
+            let text = "\(count) résultat\(plural ? "s" : "")\(hasCountFiltering ? " visible\(plural ? "s" : "")" : "")"
+            return displayedCountIsPartial ? text + " (partiel)" : text
+        }
+        if usesVisibleItemCount {
+            let text = "\(count) élément\(plural ? "s" : "") visible\(plural ? "s" : "")"
+            return displayedCountIsPartial ? text + " (partiel)" : text
+        }
+        let text = "\(count) élément\(plural ? "s" : "")"
+        return displayedCountIsPartial ? text + " (partiel)" : text
+    }
+
+    private var displayedCountIsPartial: Bool {
+        activeViewModel.hasMore
+            && (usesVisibleItemCount || activeViewModel.totalItemCount == nil)
     }
 }

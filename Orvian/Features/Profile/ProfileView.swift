@@ -200,7 +200,11 @@ private struct ProfileThumbnailCard: View {
                         RoundedRectangle(cornerRadius: 10, style: .continuous)
                             .fill(.quaternary.opacity(0.35))
 
-                        if let thumb = ThumbnailProvider.shared.cachedMemoryThumbnail(driveId: driveId, fileId: file.id) {
+                        if let thumb = ThumbnailProvider.shared.cachedMemoryThumbnail(
+                            driveId: driveId,
+                            fileId: file.id,
+                            isTrashed: false
+                        ) {
                             Image(uiImage: thumb)
                                 .resizable()
                                 .scaledToFill()

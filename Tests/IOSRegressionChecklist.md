@@ -12,6 +12,18 @@ utilisent des secrets factices et des transferts simulés, sans compte kDrive.
 
 ## Parcours à vérifier sur iPhone / simulateur
 
+- Import : simuler une confirmation perdue après réception du fichier. Aucun
+  second envoi automatique ni bouton Réessayer ; le message demande de vérifier
+  le dossier kDrive. Vérifier aussi la clôture d'un fichier de plus de 95 Mio.
+  Un refus 429 peut être retenté, avec au maximum trois tentatives automatiques.
+- Déplacer un favori portant un tag : il reste dans Favoris, dans le tag et
+  dans les récents. Il quitte uniquement son ancien dossier. Ouvrir le dossier
+  de destination avant puis après le déplacement : le fichier doit apparaître.
+  Répéter depuis une recherche limitée à un dossier et avec un échec partiel.
+- Avec un réseau ralenti, appuyer plusieurs fois sur le même tag : un seul
+  changement est envoyé à la fois. Les autres tags restent utilisables. La
+  fermeture attend les changements en cours ; un échec rétablit la coche.
+
 - Installation existante : le PIN continue à déverrouiller ; sa première
   vérification réussie remplace l'ancienne empreinte par PBKDF2 salé.
 - Keychain indisponible (LiveContainer) : le jeton n'est jamais réécrit dans

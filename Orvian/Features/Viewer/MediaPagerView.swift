@@ -9,6 +9,7 @@ struct MediaPagerView: View {
     let context: MediaViewerContext
 
     @Environment(\.dismiss) private var dismiss
+    @AppStorage("prefetchOnWiFiOnly") private var prefetchOnWiFiOnly = false
     /// Média affiché : identifié par son ID (et non par un index) pour rester
     /// stable quand la liste se réordonne ou s'allonge pendant la pagination.
     @State private var selectedFileID: Int
@@ -161,16 +162,17 @@ struct MediaPagerView: View {
         files.first { $0.id == selectedFileID }
     }
 
-    /// Pages dont la haute résolution doit être chargée : la page courante et
-    /// la suivante (préchargement N+1). Les autres pages ne déclenchent aucun
-    /// téléchargement : ouvrir un album de centaines de médias ne lance plus
-    /// qu'un ou deux téléchargements pleine résolution au lieu de tous.
+    /// La page courante est toujours chargée. La suivante (préchargement N+1)
+    /// respecte la même préférence réseau que la grille ; les autres pages ne
+    /// déclenchent aucun téléchargement pleine résolution.
     private var hiresPreloadIDs: Set<Int> {
         guard let selectedIndex = files.firstIndex(where: { $0.id == selectedFileID }) else {
             return []
         }
         var ids = [files[selectedIndex].id]
-        if selectedIndex + 1 < files.count {
+        let allowsNextPagePrefetch = !prefetchOnWiFiOnly
+            || NetworkMonitor.shared.allowsBackgroundPrefetch
+        if allowsNextPagePrefetch, selectedIndex + 1 < files.count {
             ids.append(files[selectedIndex + 1].id)
         }
         return Set(ids)
