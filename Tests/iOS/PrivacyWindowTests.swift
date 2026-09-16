@@ -87,6 +87,15 @@ final class PrivacyWindowTests: XCTestCase {
         NotificationCenter.default.post(name: UIScene.didActivateNotification, object: scene)
         try await settle()
         let shield = try XCTUnwrap(scene.windows.first { !$0.isHidden && $0.windowLevel > .alert })
+        // La transition de présentation plein écran peut encore se régler quand
+        // le bouclier devient clé : on l'attend (plutôt qu'un unique contrôle
+        // après 250 ms). Si le bouclier ne devient jamais clé, le test échoue
+        // quand même au bout du délai — le signal est conservé.
+        var keyWindowAttempts = 0
+        while !shield.isKeyWindow, keyWindowAttempts < 20 {
+            try await Task.sleep(for: .milliseconds(100))
+            keyWindowAttempts += 1
+        }
         XCTAssertTrue(shield.isKeyWindow)
         XCTAssertTrue(owner.accessibilityElementsHidden)
         XCTAssertTrue(host.presentedViewController === photo)
