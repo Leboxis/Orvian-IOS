@@ -1,11 +1,80 @@
 import SwiftUI
 import UIKit
+import Combine
 
-/// Fenêtre de protection au-dessus des présentations SwiftUI/UIKit. L'arbre
-/// principal reste vivant, mais n'est ni touchable ni parcourable par VoiceOver.
-struct AppPrivacyWindow<Content: View>: UIViewRepresentable {
-    let isVisible: Bool
-    @ViewBuilder let content: () -> Content
+/// État de verrouillage indépendant du rendu : UIKit peut suspendre une vue
+/// masquée par une présentation plein écran, mais pas les événements de scène.
+@MainActor
+final class AppPrivacyState: ObservableObject {
+    struct Snapshot {
+        var phase: ScenePhase = .active
+        var isUnlocked = false
+        var hasPresentedContent = false
+        var hasGoneBackground = false
+        var generation = 0
+    }
+    @Published private(set) var snapshot = Snapshot()
+    private let isLockConfigured: () -> Bool
+
+    init(isLockConfigured: @escaping () -> Bool = { AppLockStore.isConfigured }) {
+        self.isLockConfigured = isLockConfigured
+    }
+
+    func requiresLock(_ snapshot: Snapshot) -> Bool {
+        isLockConfigured() && !snapshot.isUnlocked
+    }
+
+    func transition(to phase: ScenePhase) {
+        guard phase != snapshot.phase else { return }
+        var next = snapshot
+        next.phase = phase
+        if phase == .background {
+            FavoritesDiskCache.shared.flushPending()
+            next.hasGoneBackground = true
+            if isLockConfigured() {
+                next.isUnlocked = false
+                next.generation &+= 1
+            }
+        }
+        snapshot = next
+    }
+
+    func contentDidAppear() {
+        guard !snapshot.hasPresentedContent, !requiresLock(snapshot) else { return }
+        snapshot.hasPresentedContent = true
+    }
+
+    /// Appelé seulement après validation du PIN ou de la biométrie. Un retour
+    /// tardif d'une ancienne tentative ne peut pas déverrouiller la suivante.
+    func unlock(generation: Int) {
+        guard snapshot.phase == .active, snapshot.generation == generation else { return }
+        var next = snapshot
+        next.isUnlocked = true
+        next.hasPresentedContent = true
+        snapshot = next
+    }
+}
+
+private struct LockPresentation: View {
+    @ObservedObject var state: AppPrivacyState
+    var body: some View {
+        let snapshot = state.snapshot
+        ZStack {
+            Color(uiColor: .systemGroupedBackground).ignoresSafeArea()
+            if state.requiresLock(snapshot) {
+                AppLockView(autoPromptBiometrics: snapshot.hasGoneBackground) {
+                    state.unlock(generation: snapshot.generation)
+                }
+            }
+        }
+        .environment(\.scenePhase, snapshot.phase)
+    }
+}
+
+/// Une fenêtre au-dessus des présentations SwiftUI/UIKit. Sa mise à jour
+/// s'abonne à l'état, sans attendre updateUIView d'un écran devenu invisible.
+struct AppPrivacyWindow: UIViewRepresentable {
+    let state: AppPrivacyState
 
     func makeUIView(context: Context) -> AttachmentView {
         let view = AttachmentView()
@@ -17,15 +86,13 @@ struct AppPrivacyWindow<Content: View>: UIViewRepresentable {
     }
 
     func updateUIView(_ view: AttachmentView, context: Context) {
-        context.coordinator.content = content()
-        context.coordinator.isVisible = isVisible
         context.coordinator.attach(to: view.window)
     }
 
-    func makeCoordinator() -> Coordinator { Coordinator() }
+    func makeCoordinator() -> Coordinator { Coordinator(state: state) }
 
     static func dismantleUIView(_ view: AttachmentView, coordinator: Coordinator) {
-        coordinator.hide()
+        coordinator.stop()
     }
 
     final class AttachmentView: UIView {
@@ -37,44 +104,76 @@ struct AppPrivacyWindow<Content: View>: UIViewRepresentable {
     }
 
     final class Coordinator {
-        var content: Content?
-        var isVisible = false
+        private let state: AppPrivacyState
         private weak var owner: UIWindow?
+        private weak var scene: UIWindowScene?
         private var shield: UIWindow?
-        private var host: UIHostingController<Content>?
+        private var subscription: AnyCancellable?
+        private var observers: [NSObjectProtocol] = []
         private var previousAccessibilityHidden = false
 
+        init(state: AppPrivacyState) {
+            self.state = state
+            subscription = state.$snapshot.sink { [weak self] snapshot in
+                self?.render(snapshot)
+            }
+        }
+
         func attach(to window: UIWindow?) {
-            // Une présentation .fullScreen retire temporairement la vue
-            // d'attache de sa fenêtre. Le propriétaire mémorisé reste valide.
-            guard let owner = window ?? owner,
-                  let scene = owner.windowScene, let content else { return }
+            guard let owner = window ?? owner, let scene = owner.windowScene else { return }
             self.owner = owner
-            guard isVisible else { hide(); return }
-            if let host { host.rootView = content; return }
+            if self.scene !== scene {
+                observers.forEach { NotificationCenter.default.removeObserver($0) }
+                observers.removeAll()
+                self.scene = scene
+                for (name, phase) in [(UIScene.willDeactivateNotification, ScenePhase.inactive),
+                                      (UIScene.didEnterBackgroundNotification, .background),
+                                      (UIScene.didActivateNotification, .active)] {
+                    observers.append(NotificationCenter.default.addObserver(forName: name, object: scene, queue: .main) { [weak state] _ in
+                        MainActor.assumeIsolated { state?.transition(to: phase) }
+                    })
+                }
+                switch scene.activationState {
+                case .foregroundActive: state.transition(to: .active)
+                case .background: state.transition(to: .background)
+                default: state.transition(to: .inactive)
+                }
+            }
+            render(state.snapshot)
+        }
+
+        private func render(_ snapshot: AppPrivacyState.Snapshot) {
+            guard let owner, let scene else { return }
+            guard state.requiresLock(snapshot) || snapshot.phase != .active else { hide(); return }
+            guard shield == nil else { return }
             previousAccessibilityHidden = owner.accessibilityElementsHidden
             owner.accessibilityElementsHidden = true
-            let host = UIHostingController(rootView: content)
+            let host = UIHostingController(rootView: LockPresentation(state: state))
             host.view.backgroundColor = .systemGroupedBackground
             host.view.accessibilityViewIsModal = true
             let window = UIWindow(windowScene: scene)
             window.windowLevel = .alert + 1
             window.rootViewController = host
-            self.host = host
             shield = window
             window.makeKeyAndVisible()
             UIAccessibility.post(notification: .screenChanged, argument: nil)
         }
 
-        func hide() {
+        private func hide() {
             guard let shield else { return }
             shield.isHidden = true
             shield.rootViewController = nil
             self.shield = nil
-            host = nil
             owner?.accessibilityElementsHidden = previousAccessibilityHidden
             owner?.makeKey()
             UIAccessibility.post(notification: .screenChanged, argument: nil)
+        }
+
+        func stop() {
+            observers.forEach { NotificationCenter.default.removeObserver($0) }
+            observers.removeAll()
+            subscription = nil
+            hide()
         }
     }
 }

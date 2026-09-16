@@ -5,26 +5,14 @@ import SwiftUI
 struct RootView: View {
     let session: SessionStore
 
-    @Environment(\.scenePhase) private var scenePhase
-
-    /// Déverrouillage en mémoire : repasse par le code à chaque ouverture.
-    @State private var isUnlocked = false
-    @State private var hasPresentedContent = false
-    @State private var lockGeneration = 0
-
-    /// Vrai dès que l'app a quitté le premier plan : la biométrie est alors
-    /// proposée automatiquement au retour, jamais au premier lancement.
-    @State private var hasGoneBackground = false
-
-    private var isLockRequired: Bool {
-        AppLockStore.isConfigured && !isUnlocked
-    }
+    @StateObject private var privacy = AppPrivacyState()
 
     var body: some View {
-        let unlockGeneration = lockGeneration
+        let snapshot = privacy.snapshot
+        let isLockRequired = privacy.requiresLock(snapshot)
         ZStack {
             Color(uiColor: .systemGroupedBackground).ignoresSafeArea()
-            if hasPresentedContent || !isLockRequired {
+            if snapshot.hasPresentedContent || !isLockRequired {
                 switch session.phase {
                 case .signedOut:
                     TokenSetupView(session: session)
@@ -47,40 +35,14 @@ struct RootView: View {
                 }
             }
         }
-        .onAppear {
-            if !isLockRequired { hasPresentedContent = true }
-        }
-        .allowsHitTesting(!isLockRequired && scenePhase == .active)
-        .accessibilityHidden(isLockRequired || scenePhase != .active)
-        .background {
-            AppPrivacyWindow(isVisible: isLockRequired || scenePhase != .active) {
-                ZStack {
-                    Color(uiColor: .systemGroupedBackground).ignoresSafeArea()
-                    if isLockRequired {
-                        AppLockView(autoPromptBiometrics: hasGoneBackground) {
-                            guard scenePhase == .active, unlockGeneration == lockGeneration else { return }
-                            hasPresentedContent = true
-                            isUnlocked = true
-                        }
-                    }
-                }
-                .environment(\.scenePhase, scenePhase)
-            }
-        }
+        .onAppear { privacy.contentDidAppear() }
+        .allowsHitTesting(!isLockRequired && snapshot.phase == .active)
+        .accessibilityHidden(isLockRequired || snapshot.phase != .active)
+        .background { AppPrivacyWindow(state: privacy) }
         .onReceive(NotificationCenter.default.publisher(for: .apiUnauthorized)) { notification in
             session.handleUnauthorized(credentialFingerprint: notification.object as? String)
         }
-        .onChange(of: scenePhase) { _, phase in
-            // Re-verrouille dès que l'app quitte le premier plan : au retour
-            // (rappel puis reprise), le code ou Face ID est redemandé.
-            if phase == .background { FavoritesDiskCache.shared.flushPending() }
-            guard AppLockStore.isConfigured else { return }
-            if phase == .background {
-                lockGeneration &+= 1
-                hasGoneBackground = true
-                isUnlocked = false
-            }
-        }
+
     }
 }
 

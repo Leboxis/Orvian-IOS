@@ -5,7 +5,6 @@ import SwiftUI
 @MainActor
 final class PrivacyWindowTests: XCTestCase {
     final class State: ObservableObject {
-        @Published var locked = false
         var mounts = 0
     }
 
@@ -20,18 +19,28 @@ final class PrivacyWindowTests: XCTestCase {
 
     struct Fixture: View {
         @ObservedObject var state: State
+        let privacy: AppPrivacyState
         var body: some View {
             RetainedContent(state: state)
                 .background {
-                    AppPrivacyWindow(isVisible: state.locked) {
-                        Color.black.overlay(Text("Verrouillé").foregroundStyle(.white))
-                    }
+                    AppPrivacyWindow(state: privacy)
                 }
         }
     }
 
     private func settle() async throws {
         try await Task.sleep(for: .milliseconds(250))
+    }
+
+    func testOldUnlockCannotBypassANewBackgroundLock() {
+        let privacy = AppPrivacyState(isLockConfigured: { true })
+        let oldGeneration = privacy.snapshot.generation
+        privacy.transition(to: .background)
+        privacy.transition(to: .active)
+        privacy.unlock(generation: oldGeneration)
+        XCTAssertTrue(privacy.requiresLock(privacy.snapshot))
+        privacy.unlock(generation: privacy.snapshot.generation)
+        XCTAssertFalse(privacy.requiresLock(privacy.snapshot))
     }
 
     func testColdStartBuildsLockWindowBeforePrivateContent() async throws {
@@ -58,7 +67,9 @@ final class PrivacyWindowTests: XCTestCase {
         let original = scene.windows.first(where: \.isKeyWindow)
         let owner = UIWindow(windowScene: scene)
         let state = State()
-        let host = UIHostingController(rootView: Fixture(state: state))
+        let privacy = AppPrivacyState(isLockConfigured: { true })
+        privacy.unlock(generation: privacy.snapshot.generation)
+        let host = UIHostingController(rootView: Fixture(state: state, privacy: privacy))
         owner.rootViewController = host
         owner.makeKeyAndVisible()
         defer {
@@ -72,7 +83,8 @@ final class PrivacyWindowTests: XCTestCase {
         host.present(photo, animated: false)
         try await settle()
 
-        state.locked = true
+        privacy.transition(to: .background)
+        privacy.transition(to: .active)
         try await settle()
         let shield = try XCTUnwrap(scene.windows.first { !$0.isHidden && $0.windowLevel > .alert })
         XCTAssertTrue(shield.isKeyWindow)
@@ -80,7 +92,7 @@ final class PrivacyWindowTests: XCTestCase {
         XCTAssertTrue(host.presentedViewController === photo)
         let mounts = state.mounts
 
-        state.locked = false
+        privacy.unlock(generation: privacy.snapshot.generation)
         try await settle()
         XCTAssertTrue(shield.isHidden)
         XCTAssertTrue(owner.isKeyWindow)
