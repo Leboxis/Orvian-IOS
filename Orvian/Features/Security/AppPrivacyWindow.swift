@@ -169,6 +169,18 @@ struct AppPrivacyWindow: UIViewRepresentable {
 
         private func render(_ snapshot: AppPrivacyState.Snapshot) {
             guard let owner, let scene else { return }
+            if !state.requiresLock(snapshot), shield != nil {
+                // L'écran vient de se déverrouiller alors qu'un bouclier est
+                // visible : le masquer aussitôt, même scène inactive. Le
+                // succès Face ID arrive avant la réactivation (le dialogue
+                // système désactive la scène) ; attendre `.active` laisserait
+                // un bouclier vide — noir en mode sombre — affiché pendant la
+                // fermeture du dialogue. Quand aucun bouclier n'est visible,
+                // on passe ci-dessous : le rideau de confidentialité pour
+                // scène inactive (aperçu du sélecteur…) est préservé.
+                hide()
+                return
+            }
             guard state.requiresLock(snapshot) || snapshot.phase != .active else { hide(); return }
             guard shield == nil else { return }
             previousAccessibilityHidden = owner.accessibilityElementsHidden

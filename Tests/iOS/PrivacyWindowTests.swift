@@ -63,6 +63,54 @@ final class PrivacyWindowTests: XCTestCase {
         XCTAssertTrue(privacy.requiresLock(privacy.snapshot))
     }
 
+    func testBiometricUnlockWhileInactiveHidesShieldAtOnce() async throws {
+        // Le succès Face ID arrive scène encore inactive (le dialogue
+        // système désactive la scène, la réactivation suit). Le bouclier
+        // doit disparaître aussitôt, sans laisser un écran vide/noir en
+        // attendant la réactivation.
+        let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+        let original = scene.windows.first(where: \.isKeyWindow)
+        let owner = UIWindow(windowScene: scene)
+        let state = State()
+        let privacy = AppPrivacyState(isLockConfigured: { true })
+        privacy.unlock(generation: privacy.snapshot.generation)
+        owner.rootViewController = UIHostingController(rootView: Fixture(state: state, privacy: privacy))
+        owner.makeKeyAndVisible()
+        defer {
+            owner.isHidden = true
+            owner.rootViewController = nil
+            original?.makeKey()
+        }
+        try await settle()
+
+        NotificationCenter.default.post(name: UIScene.didEnterBackgroundNotification, object: scene)
+        try await settle()
+        let shield = try XCTUnwrap(scene.keyWindow)
+        XCTAssertTrue(!shield.isHidden && shield.windowLevel > .alert)
+        XCTAssertTrue(shield !== owner)
+
+        // Retour au premier plan puis dialogue Face ID : l'écran reste
+        // verrouillé et couvert dans les deux phases.
+        NotificationCenter.default.post(name: UIScene.didActivateNotification, object: scene)
+        try await settle()
+        XCTAssertFalse(shield.isHidden)
+        NotificationCenter.default.post(name: UIScene.willDeactivateNotification, object: scene)
+        try await settle()
+        XCTAssertFalse(shield.isHidden)
+
+        // Succès biométrique scène inactive : le bouclier se masque
+        // immédiatement et rend la clé, avant même la réactivation.
+        privacy.unlockAfterBiometrics()
+        try await settle()
+        XCTAssertTrue(shield.isHidden)
+        XCTAssertTrue(owner.isKeyWindow)
+
+        // La réactivation qui suit ne fait rien réapparaître.
+        NotificationCenter.default.post(name: UIScene.didActivateNotification, object: scene)
+        try await settle()
+        XCTAssertTrue(shield.isHidden)
+    }
+
     func testColdStartBuildsLockWindowBeforePrivateContent() async throws {
         try await AppLockStore.save("1234")
         defer { AppLockStore.clear() }
