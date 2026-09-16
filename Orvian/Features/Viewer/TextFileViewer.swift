@@ -40,6 +40,7 @@ struct TextFileViewer: View {
     /// Incrémenté à chaque modification de la requête ou du document : rend
     /// obsolète tout balayage lancé avant la dernière frappe.
     @State private var searchGeneration = 0
+    @State private var searchTask: Task<Void, Never>?
     @FocusState private var isSearchFieldFocused: Bool
 
     private let service = KDriveService()
@@ -174,13 +175,16 @@ struct TextFileViewer: View {
             }
         }
         .onChange(of: isSearching) { _, newValue in
+            scheduleSearchUpdate()
             if newValue {
-                scheduleSearchUpdate()
                 isSearchFieldFocused = true
-            } else {
-                searchRanges = []
-                currentSearchIndex = nil
             }
+        }
+        .onDisappear {
+            cancelSearch()
+        }
+        .onAppear {
+            if isSearching { scheduleSearchUpdate() }
         }
     }
 
@@ -271,48 +275,34 @@ struct TextFileViewer: View {
     /// un balayage par frappe, puis exécuté hors du MainActor. Toute frappe
     /// ultérieure invalide le résultat via `searchGeneration`.
     private func scheduleSearchUpdate() {
+        cancelSearch()
         let query = searchQuery
-        guard !query.isEmpty else {
+        guard isSearching, !query.isEmpty else {
             searchRanges = []
             currentSearchIndex = nil
             return
         }
-        searchGeneration &+= 1
         let generation = searchGeneration
         let document = draft
-        Task { @MainActor in
-            try? await Task.sleep(for: .milliseconds(200))
+        searchTask = Task { @MainActor [self] in
+            do {
+                try await Task.sleep(for: .milliseconds(200))
+            } catch { return }
             guard !Task.isCancelled, generation == searchGeneration else { return }
-            let ranges = await Self.search(query: query, in: document)
-            guard !Task.isCancelled, generation == searchGeneration else { return }
+            let ranges = await TextSearch.ranges(query: query, in: document)
+            guard !Task.isCancelled, generation == searchGeneration,
+                  isSearching, searchQuery == query, draft == document else { return }
             applySearch(ranges: ranges)
+            searchTask = nil
         }
     }
 
-    /// Balayage hors du MainActor : jusqu'à `maximumSearchMatches` occurrences
-    /// sur un document de plusieurs Mo ne doivent plus geler la saisie.
-    nonisolated private static func search(query: String, in document: String) async -> [NSRange] {
-        await Task.detached(priority: .userInitiated) {
-            let nsDocument = document as NSString
-            var ranges: [NSRange] = []
-            var searchRange = NSRange(location: 0, length: nsDocument.length)
-            let options: NSString.CompareOptions = [.caseInsensitive, .diacriticInsensitive]
-            while searchRange.location < nsDocument.length {
-                let found = nsDocument.range(of: query, options: options, range: searchRange)
-                if found.location == NSNotFound { break }
-                ranges.append(found)
-                if ranges.count >= maximumSearchMatches { break }
-                let nextLocation = found.location + max(found.length, 1)
-                if nextLocation >= nsDocument.length { break }
-                searchRange = NSRange(location: nextLocation, length: nsDocument.length - nextLocation)
-            }
-            return ranges
-        }.value
+    /// Invalide aussi les résultats déjà calculés mais pas encore affichés.
+    private func cancelSearch() {
+        searchGeneration &+= 1
+        searchTask?.cancel()
+        searchTask = nil
     }
-
-    /// Limite pour éviter de figer l'UI sur un document de 5 Mo avec une
-    /// requête très courte (ex. « e » → dizaines de milliers d'occurrences).
-    private static let maximumSearchMatches = 2_000
 
     /// Applique le résultat du balayage : même règle de conservation de la
     /// position courante que l'ancien balayage synchrone.

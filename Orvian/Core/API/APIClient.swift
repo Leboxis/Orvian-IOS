@@ -222,7 +222,7 @@ actor APIClient {
     /// Envoie un morceau vers l'URL dédiée renvoyée par `upload/session/start`.
     /// Cette URL reste contrôlée : seuls les hôtes Infomaniak autorisés peuvent
     /// recevoir l'en-tête Bearer de l'utilisateur. Le morceau est lu depuis un
-    /// fichier temporaire : aucun corps binaire ne transite par la RAM.
+    /// fichier temporaire, sans charger le morceau entier en RAM.
     func uploadFile(
         to url: URL,
         fileURL: URL,
@@ -241,8 +241,8 @@ actor APIClient {
 
     /// Transfert réel d'un upload : la tâche est créée suspendue, enregistrée
     /// auprès du délégué partagé, puis démarrée. La session est partagée (la
-    /// connexion keep-alive est réutilisée d'un transfert à l'autre au lieu
-    /// d'une session — donc d'une poignée de main TLS — par morceau).
+    /// réutilisation des connexions est possible d'un transfert à l'autre,
+    /// sans recréer une session pour chaque morceau).
     /// L'annulation ne touche que la tâche, jamais la session : `task.cancel()`
     /// est toujours sûr, même sur une `Task` Swift déjà annulée à l'entrée
     /// (l'ancien code appelait `invalidateAndCancel()` avant la création de la
@@ -384,10 +384,9 @@ actor APIClient {
 }
 
 /// Session d'upload partagée par tous les transferts : chaque morceau (comme
-/// chaque fichier envoyé en direct) réutilise la connexion keep-alive de son
-/// hôte au lieu d'ouvrir une session — donc de négocier TLS — de plus. Un
-/// envoi découpé de 1 Go évite ainsi une cinquantaine de poignées de main
-/// (~100-300 ms chacune). Elle n'est jamais invalidée : elle vit pendant
+/// chaque fichier envoyé en direct) peut réutiliser les connexions de son
+/// hôte. Le gain dépend du réseau et du serveur ; le nombre de négociations
+/// TLS évitées n'est pas mesuré ici. Elle n'est jamais invalidée : elle vit pendant
 /// toute la durée du processus.
 private let uploadSession: URLSession = {
     let configuration = URLSessionConfiguration.default

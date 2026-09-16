@@ -16,6 +16,47 @@ def run_check(output, sources):
 
 with tempfile.TemporaryDirectory() as temporary:
     temp = Path(temporary)
+    # Compile real production code, not a Python model of its concurrency.
+    # Same-file extensions can pause at private snapshot/publication boundaries.
+    perf_checks = temp / "PerfChecks.swift"
+    perf_checks.write_text(
+        (ROOT / "Orvian/Core/Utils/Perf.swift").read_text(encoding="utf-8")
+        + "\n" + (ROOT / "Tests/PerfChecks.swift").read_text(encoding="utf-8"),
+        encoding="utf-8",
+    )
+    run_check(temp / "perf", [perf_checks])
+    run_check(temp / "text-search", [ROOT / path for path in [
+        "Orvian/Features/Viewer/TextSearch.swift", "Tests/TextSearchChecks.swift",
+    ]])
+    # UIKit is unavailable on the macOS command-line target. Exercise the
+    # view's actual methods with plain state; Xcode still compiles the full UI.
+    viewer = (ROOT / "Orvian/Features/Viewer/TextFileViewer.swift").read_text(encoding="utf-8")
+    search_methods = viewer[viewer.index("    private func scheduleSearchUpdate()"):
+                            viewer.index("    private func goToNext()")]
+    lifecycle_checks = temp / "TextSearchLifecycleChecks.swift"
+    lifecycle_checks.write_text('''import Foundation
+@MainActor final class TextFileViewer {
+    var isSearching = false
+    var searchQuery = ""
+    var draft = ""
+    var searchRanges: [NSRange] = []
+    var currentSearchIndex: Int?
+    var searchGeneration = 0
+    var searchTask: Task<Void, Never>?
+''' + search_methods + "\n}\n"
+        + (ROOT / "Tests/TextSearchLifecycleChecks.swift").read_text(encoding="utf-8"),
+        encoding="utf-8",
+    )
+    run_check(temp / "text-search-lifecycle", [lifecycle_checks,
+              ROOT / "Orvian/Features/Viewer/TextSearch.swift"])
+    upload_source = (ROOT / "Orvian/Core/API/KDriveService+Upload.swift").read_text(encoding="utf-8")
+    chunk_checks = temp / "UploadChunkChecks.swift"
+    chunk_checks.write_text(
+        upload_source[:upload_source.index("/// Création de dossiers, upload simple")]
+        + "\n" + (ROOT / "Tests/UploadChunkChecks.swift").read_text(encoding="utf-8"),
+        encoding="utf-8",
+    )
+    run_check(temp / "upload-chunks", [chunk_checks])
     run_check(temp / "video-playback", [ROOT / path for path in [
         "Orvian/Features/Viewer/VideoPlaybackTransport.swift",
         "Tests/VideoPlaybackChecks.swift",

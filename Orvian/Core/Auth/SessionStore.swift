@@ -119,14 +119,6 @@ final class SessionStore {
         defaults.set(drive.id, forKey: Keys.driveId)
     }
 
-    /// Retourne l'état d'interface du drive sélectionné, en le créant au besoin.
-    /// Appelé depuis les points où le drive change (hors rendu) ; la lecture
-    /// par l'interface ne crée donc rien.
-    func mainShell(for drive: Drive) -> MainTabShellState {
-        refreshMainShell(for: drive)
-        return mainShell ?? MainTabShellState(driveId: drive.id)
-    }
-
     /// Un changement de drive reconstruit l'état d'interface, comme le
     /// `.id(drive.id)` de `RootView` reconstruit les onglets.
     private func refreshMainShell(for drive: Drive) {

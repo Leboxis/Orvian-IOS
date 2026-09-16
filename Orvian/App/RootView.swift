@@ -40,8 +40,9 @@ struct RootView: View {
                         session.signOut()
                     }
                 case .signedIn:
-                    if let drive = session.selectedDrive {
-                        MainTabView(drive: drive, session: session, shell: session.mainShell(for: drive))
+                    if let drive = session.selectedDrive,
+                       let shell = session.mainShell, shell.driveId == drive.id {
+                        MainTabView(drive: drive, session: session, shell: shell)
                             .id(drive.id) // changer de drive reconstruit les onglets
                     } else {
                         BootSplash()
@@ -58,6 +59,7 @@ struct RootView: View {
             guard AppLockStore.isConfigured else { return }
             if phase == .background {
                 hasGoneBackground = true
+                session.mainShell?.router.dismissAll()
                 isUnlocked = false
             }
         }

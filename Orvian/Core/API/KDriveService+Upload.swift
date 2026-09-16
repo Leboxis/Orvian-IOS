@@ -1,8 +1,8 @@
 import CryptoKit
 import Foundation
 
-/// Un morceau prêt à l'envoi : son fichier temporaire (le corps binaire n'est
-/// jamais détenu en RAM), sa taille et son empreinte SHA-256 calculée pendant
+/// Un morceau prêt à l'envoi : son fichier temporaire (sans charger le morceau
+/// entier en RAM), sa taille et son empreinte SHA-256 calculée pendant
 /// l'écriture.
 struct ChunkPayload {
     let url: URL
@@ -29,7 +29,14 @@ private actor UploadChunkReader {
     func next(maxLength: Int) throws -> ChunkPayload? {
         let chunkURL = FileManager.default.temporaryDirectory
             .appendingPathComponent("orvian-chunk-\(UUID().uuidString)")
-        FileManager.default.createFile(atPath: chunkURL.path, contents: nil)
+        var keepPayload = false
+        defer {
+            if !keepPayload { try? FileManager.default.removeItem(at: chunkURL) }
+        }
+        try Task.checkCancellation()
+        guard FileManager.default.createFile(atPath: chunkURL.path, contents: nil) else {
+            throw CocoaError(.fileWriteUnknown)
+        }
         let output = try FileHandle(forWritingTo: chunkURL)
         defer { try? output.close() }
 
@@ -37,16 +44,19 @@ private actor UploadChunkReader {
         var written = 0
         let blockSize = 1 << 20
         while written < maxLength {
+            try Task.checkCancellation()
             let block = try handle.read(upToCount: min(blockSize, maxLength - written)) ?? Data()
             if block.isEmpty { break }
             digest.update(data: block)
             try output.write(contentsOf: block)
             written += block.count
         }
-        guard written > 0 else {
-            try? FileManager.default.removeItem(at: chunkURL)
-            return nil
-        }
+        guard written > 0 else { return nil }
+        // Fermer avec propagation d'erreur avant de transférer la propriété
+        // du fichier à l'appelant. Le defer nettoie tout échec intermédiaire.
+        try output.close()
+        try Task.checkCancellation()
+        keepPayload = true
         return ChunkPayload(
             url: chunkURL,
             size: written,

@@ -16,6 +16,8 @@ struct MediaPagerView: View {
     /// Médias affichés : instantané de la grille, complété par les pages
     /// suivantes chargées depuis la vue-modèle d'origine.
     @State private var files: [DriveFile]
+    /// Inclut la résolution des métadonnées, même sans page réseau suivante.
+    @State private var mediaLoadsInFlight = 0
     /// Déplacement vertical du pager lors d'un geste de fermeture sur une image.
     @State private var dismissOffset: CGFloat = 0
     /// Les pages conservent leur zoom quand elles restent en mémoire. Cet
@@ -80,14 +82,48 @@ struct MediaPagerView: View {
             // le vertical sans priver son pager interne du swipe horizontal.
             .simultaneousGesture(imageDismissGesture)
 
+            if files.isEmpty {
+                if mediaLoadsInFlight > 0 {
+                    ProgressView("Chargement des médias…")
+                        .tint(.white)
+                        .foregroundStyle(.white)
+                } else if hasUnresolvedFilteredMedia {
+                    ContentUnavailableView {
+                        Label("Médias indisponibles", systemImage: "photo.on.rectangle")
+                    } description: {
+                        Text("Réessayez pour afficher les médias correspondant à cette sélection.")
+                    } actions: {
+                        Button("Réessayer") {
+                            Task { await loadMoreMediaIfNeeded(around: selectedFileID) }
+                        }
+                    }
+                    .environment(\.colorScheme, .dark)
+                } else if let errorMessage = context.viewModel?.errorMessage {
+                    ContentUnavailableView(
+                        "Chargement interrompu",
+                        systemImage: "exclamationmark.triangle",
+                        description: Text(errorMessage)
+                    )
+                    .environment(\.colorScheme, .dark)
+                } else {
+                    ContentUnavailableView(
+                        "Aucun média",
+                        systemImage: "photo.on.rectangle",
+                        description: Text("Aucun média disponible ne correspond à cette sélection.")
+                    )
+                    .environment(\.colorScheme, .dark)
+                }
+            }
+
             overlay
         }
         .statusBarHidden(false)
         .persistentSystemOverlays(.hidden)
-        .task {
+        .task(id: context.viewModel?.itemsRevision) {
             // `onChange` ne s'exécute pas à l'ouverture. Sans ce chargement,
             // ouvrir directement le dernier média rendait le swipe suivant
             // impossible alors que le serveur possédait encore des pages.
+            refreshFiles()
             await loadMoreMediaIfNeeded(around: selectedFileID)
         }
         .onChange(of: selectedFileID) { _, newID in
@@ -99,12 +135,6 @@ struct MediaPagerView: View {
             if index >= files.count - 2 {
                 Task { await loadMoreMediaIfNeeded(around: newID) }
             }
-        }
-        .onChange(of: context.viewModel?.items) { _, _ in
-            refreshFiles()
-            // Si la page reçue ne contenait aucun média visible, continuer
-            // depuis le même élément au lieu de laisser le pager en impasse.
-            Task { await loadMoreMediaIfNeeded(around: selectedFileID) }
         }
     }
 
@@ -120,12 +150,14 @@ struct MediaPagerView: View {
         )
         let media = visible.filter { $0.isImage || $0.isVideo }
         guard media.map(\.id) != files.map(\.id) else { return }
-        // Ne jamais se retrouver sans page : un filtre dépendant de
-        // métadonnées pas encore résolues (orientation, 4K+) peut renvoyer une
-        // liste vide. La liste précédente reste affichée plutôt qu'un écran
-        // noir où aucun bouton de fermeture n'existerait.
-        guard !media.isEmpty else { return }
+        // Une suppression ou un filtre peut réellement vider la liste.
+        // Afficher l'attente ou l'état vide avec fermeture, jamais d'anciens
+        // fichiers qui ne figurent plus dans la sélection.
         files = media
+        let ids = Set(media.map(\.id))
+        zoomedImageIDs.formIntersection(ids)
+        controlInteractionFileIDs.formIntersection(ids)
+        if let tagSheetFile, !ids.contains(tagSheetFile.id) { self.tagSheetFile = nil }
         if !files.contains(where: { $0.id == selectedFileID }) {
             selectedFileID = files.first?.id ?? 0
         }
@@ -136,20 +168,29 @@ struct MediaPagerView: View {
     /// les filtres : dans ce cas, on poursuit tant que la pagination progresse.
     private func loadMoreMediaIfNeeded(around fileID: Int) async {
         guard let viewModel = context.viewModel else { return }
+        mediaLoadsInFlight += 1
+        defer { mediaLoadsInFlight -= 1 }
+
+        // Les métadonnées manquantes doivent aussi être résolues quand la
+        // dernière page réseau a déjà été chargée.
+        await resolveVideoMetadataIfNeeded(for: viewModel)
+        guard !Task.isCancelled else { return }
+        refreshFiles()
 
         while !Task.isCancelled,
               viewModel.hasMore {
-            await resolveVideoMetadataIfNeeded(for: viewModel)
-            guard !Task.isCancelled,
-                  let index = files.firstIndex(where: { $0.id == fileID }),
-                  index >= files.count - 2
-            else { return }
+            if !files.isEmpty {
+                guard let index = files.firstIndex(where: { $0.id == fileID }),
+                      index >= files.count - 2 else { return }
+            }
 
             let previousItemCount = viewModel.items.count
             await viewModel.loadMoreIfNeeded()
             guard !Task.isCancelled, viewModel.errorMessage == nil else { return }
 
             await resolveVideoMetadataIfNeeded(for: viewModel)
+            guard !Task.isCancelled else { return }
+            refreshFiles()
 
             // Protection contre une API qui renverrait la même page sans
             // avancer : évite une boucle réseau infinie dans la visionneuse.
@@ -170,6 +211,24 @@ struct MediaPagerView: View {
 
     private var currentFile: DriveFile? {
         files.first { $0.id == selectedFileID }
+    }
+
+    /// Après un échec de résolution, une vidéo encore inconnue ne prouve pas
+    /// que la sélection est vide. Seuls les filtres indépendants des métadonnées
+    /// permettent de décider quels fichiers restent candidats.
+    private var hasUnresolvedFilteredMedia: Bool {
+        guard let viewModel = context.viewModel,
+              context.filters.orientation != nil || context.filters.highResolutionVideosOnly else { return false }
+        var filters = context.filters
+        filters.orientation = nil
+        filters.highResolutionVideosOnly = false
+        let candidates = filters.visible(
+            viewModel.items, driveId: context.driveId,
+            searchText: context.searchText, mediaMetadata: MediaMetadataStore.shared
+        )
+        return candidates.contains {
+            $0.isVideo && MediaMetadataStore.shared.info(driveId: context.driveId, for: $0.id) == nil
+        }
     }
 
     /// La page courante est toujours chargée. La suivante (préchargement N+1)

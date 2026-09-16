@@ -35,6 +35,12 @@ final class ViewerRouter {
         self.driveId = driveId
     }
 
+    /// Le verrouillage conserve la navigation, mais aucune présentation.
+    func dismissAll() {
+        mediaContext = nil
+        textFile = nil
+    }
+
     func open(
         _ file: DriveFile,
         siblings: [DriveFile],

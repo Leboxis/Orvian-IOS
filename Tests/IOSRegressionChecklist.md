@@ -81,3 +81,39 @@ Les scénarios suivants nécessitent aussi un iPhone ou un simulateur :
 
 Les changements ont été préparés sous Windows : la vérification syntaxique
 ne remplace pas la compilation Xcode, les tests Swift et les essais ci-dessus.
+
+## Navigation, recherche et publications réseau
+
+Les contrôles ajoutés à `check_ios_regressions.py` compilent le code Swift de
+production : publications de `Perf` (dont un reset entre capture et affichage),
+recherche Unicode et annulation, préparation/nettoyage des morceaux d'upload.
+La planification de recherche est aussi exercée avec les méthodes réelles de
+la vue dans un état de test sans UIKit ; les événements SwiftUI restent à
+vérifier sur appareil. Ces tests sont préparés pour la CI et ne sont pas
+considérés comme exécutés sur Windows.
+
+- Texte : saisir puis effacer avant 200 ms ; fermer la recherche pendant un
+  balayage ; changer rapidement de mot ; modifier le document. Aucun ancien
+  surlignage ne revient. Répéter en lecture et en édition, puis ouvrir un lien
+  Safari et revenir. La recherche active doit fonctionner au retour.
+- Diagnostic réseau : remettre les compteurs à zéro pendant une rafale ; les
+  anciennes requêtes ne réapparaissent pas. Les nouvelles restent comptées.
+- Code configuré : ouvrir un dossier depuis chaque onglet, puis une image,
+  une vidéo ou un texte. Passer en arrière-plan et déverrouiller : même onglet
+  et pile, aucune visionneuse rouverte. Déconnexion ou changement de drive :
+  aucun ancien chemin restauré. Le scroll n'est pas garanti après verrouillage.
+- Galerie : retirer tous les médias de la source pendant qu'elle est ouverte.
+  L'état « Aucun média » et Fermer restent disponibles. Avec un filtre 4K ou
+  orientation et des métadonnées non résolues : attente puis médias ou état
+  vide, y compris lorsque toutes les pages réseau sont déjà chargées.
+  Une résolution en échec doit proposer Réessayer, pas affirmer que la sélection
+  est vide. Couper puis rétablir le réseau pour vérifier la récupération.
+- Upload : fichier de plus de 95 Mio, annulation pendant la préparation et
+  pendant le transfert, manque d'espace disque, puis nouvel essai. Vérifier
+  aussi que l'annulation d'un envoi n'interrompt pas les autres.
+- Pastilles : sans transfert, vérifier la disposition ; pendant un transfert,
+  atteindre la dernière rangée et le bouton « + ». Répéter en mode clair/sombre,
+  avec texte agrandi et sur une galerie de plusieurs centaines de médias.
+
+La session d'upload partagée permet la réutilisation des connexions. Aucun
+nombre de négociations TLS évitées ni gain de durée n'est garanti sans mesure.

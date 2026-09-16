@@ -1,4 +1,5 @@
 import Foundation
+import Combine
 import os
 
 /// Mesure de performance réseau : chaque requête de l'`APIClient` est
@@ -11,10 +12,10 @@ import os
 /// (capacité bornée), rien n'est écrit sur disque.
 ///
 /// `Perf` n'est **volontairement pas** isolé au MainActor : enregistrer une
-/// requête ne doit jamais faire attendre l'appelant (miniatures comprises).
+/// requête ne nécessite pas de passage sur le MainActor (miniatures comprises).
 /// Les compteurs vivent sous verrou et le résumé affiché est reconstruit hors
 /// du MainActor **au plus une fois par `publishInterval`** (publication
-/// groupée) : l'écran de diagnostic ne coûte donc plus rien au défilement.
+/// groupée), ce qui réduit les mises à jour de l'écran de diagnostic.
 final class Perf: ObservableObject, @unchecked Sendable {
     static let shared = Perf()
 
@@ -83,15 +84,15 @@ final class Perf: ObservableObject, @unchecked Sendable {
     /// qu'une seule reconstruction du résumé.
     private let publishInterval = Duration.milliseconds(400)
     private var publishTask: Task<Void, Never>?
+    private var needsPublish = false
     /// Incrémenté à chaque réinitialisation : une publication en vol devient
     /// obsolète et ne peut plus écraser le résumé vide.
     private var publishGeneration = 0
 
     private init() {}
 
-    /// Enregistre une requête sans bloquer l'appelant : aucun saut de thread,
-    /// aucune allocation de tableau. Le résumé est reconstruit au plus une fois
-    /// par `publishInterval`, en arrière-plan.
+    /// Enregistre une requête sous un verrou bref, sans attendre le MainActor.
+    /// Le résumé est reconstruit en arrière-plan, avec publications groupées.
     func record(method: String, path: String, status: Int, durationMs: Int, bytes: Int, fromCache: Bool = false) {
         let entry = Entry(
             date: Date(),
@@ -110,6 +111,7 @@ final class Perf: ObservableObject, @unchecked Sendable {
         requestCount += 1
         if entry.isThumbnail { thumbnailCount += 1 }
         if fromCache { cachedCount += 1 }
+        needsPublish = true
         lock.unlock()
         schedulePublish()
     }
@@ -125,48 +127,60 @@ final class Perf: ObservableObject, @unchecked Sendable {
         publishGeneration &+= 1
         publishTask?.cancel()
         publishTask = nil
+        needsPublish = false
         lock.unlock()
         summary = Summary()
     }
 
     private func schedulePublish() {
         lock.lock()
-        guard publishTask == nil else {
+        guard publishTask == nil, needsPublish else {
             lock.unlock()
             return
         }
-        publishGeneration &+= 1
         let generation = publishGeneration
         let interval = publishInterval
-        publishTask = Task { [weak self] in
-            try? await Task.sleep(for: interval)
-            guard let self, self.claimPublish(generation) else { return }
-            let snapshot = self.makeSummary()
-            await MainActor.run { self.summary = snapshot }
+        publishTask = Task.detached(priority: .utility) { [weak self] in
+            do {
+                try await Task.sleep(for: interval)
+            } catch { return }
+            guard let self, let snapshot = self.makeSummary(generation: generation) else { return }
+            await self.publish(snapshot, generation: generation)
         }
         lock.unlock()
     }
 
-    /// Libère le créneau de publication si cette tâche est bien la plus
-    /// récente. Renvoie `false` si une réinitialisation (ou une publication
-    /// plus récente) l'a rendue obsolète : elle ne doit alors ni publier, ni
-    /// libérer le créneau d'une autre.
-    private func claimPublish(_ generation: Int) -> Bool {
+    /// La validation et l'affectation sont sur le même acteur que reset() :
+    /// aucune réinitialisation ne peut s'intercaler entre les deux.
+    @MainActor
+    private func publish(_ snapshot: Summary, generation: Int) {
         lock.lock()
-        defer { lock.unlock() }
-        guard publishGeneration == generation else { return false }
+        guard publishGeneration == generation else {
+            lock.unlock()
+            return
+        }
         publishTask = nil
-        return true
+        lock.unlock()
+        summary = snapshot
+        // Les requêtes reçues pendant le calcul ou l'attente du MainActor
+        // restent marquées et auront leur propre publication, même si le
+        // trafic s'arrête maintenant.
+        schedulePublish()
     }
 
     /// Construit le résumé à partir du journal : exécuté dans la tâche de
     /// publication, donc jamais sur le MainActor.
-    private func makeSummary() -> Summary {
+    private func makeSummary(generation: Int) -> Summary? {
         lock.lock()
+        guard publishGeneration == generation else {
+            lock.unlock()
+            return nil
+        }
         let entries = allEntries
         let total = requestCount
         let thumbnails = thumbnailCount
         let cached = cachedCount
+        needsPublish = false
         lock.unlock()
 
         // Les miniatures (par dizaines par grille) noieraient la liste :

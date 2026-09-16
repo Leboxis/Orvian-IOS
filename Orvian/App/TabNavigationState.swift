@@ -53,8 +53,9 @@ final class TabNavigationState {
 /// l'utilisateur repartait de l'Accueil. Cet objet, possédé par la session
 /// (donc hors de l'arbre démonté), conserve l'onglet courant, les piles de
 /// navigation et le routeur de visionneuse pour les restituer au retour.
-/// Les grilles, elles, se reconstituent depuis le cache mémoire des listes
-/// (aucun squelette ni aller-retour si l'entrée est encore fraîche).
+/// Les présentations du routeur sont vidées au verrouillage. Les grilles
+/// peuvent restaurer un cache mémoire encore valide ; leur état local et leur
+/// position de défilement ne sont pas conservés par cet objet.
 @MainActor
 @Observable
 final class MainTabShellState {
