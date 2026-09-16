@@ -28,12 +28,14 @@ struct UploadChunkChecks {
         let afterEOF = try chunkFiles()
         precondition(afterEOF == before, "EOF must not leave an empty chunk")
 
-        // On macOS opening a directory succeeds, but reading its bytes fails.
-        // This exercises cleanup after the chunk output was already created.
-        let unreadable = try UploadChunkReader(url: root)
+        // Close a valid input before reading. Opening a directory is not a
+        // portable failure fixture: some Foundation versions reject it during
+        // initialization, before next() can exercise output cleanup.
+        let unreadable = try UploadChunkReader(url: source)
+        try await unreadable.closeInputForCheck()
         do {
             _ = try await unreadable.next(maxLength: 1 << 20)
-            preconditionFailure("Reading a directory must fail")
+            preconditionFailure("Reading a closed input must fail")
         } catch {}
         let afterFailure = try chunkFiles()
         precondition(afterFailure == before, "A read error must remove its partial output")
@@ -58,5 +60,13 @@ struct UploadChunkChecks {
             _ = try await task.value
             preconditionFailure("A cancelled chunk read must throw")
         } catch is CancellationError {} catch { preconditionFailure("Unexpected error: \(error)") }
+    }
+}
+
+// Same-file access to the real reader's handle keeps fault injection confined
+// to the test executable; no test-only API is added to the app.
+extension UploadChunkReader {
+    fileprivate func closeInputForCheck() throws {
+        try handle.close()
     }
 }
