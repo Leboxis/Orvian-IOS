@@ -9,11 +9,16 @@ import os
 /// directement dans l'app : Profil → Réseau (dernières requêtes, durées,
 /// codes HTTP, moyennes par endpoint). Le journal reste en mémoire
 /// (capacité bornée), rien n'est écrit sur disque.
-@MainActor
-final class Perf: ObservableObject {
+///
+/// `Perf` n'est **volontairement pas** isolé au MainActor : enregistrer une
+/// requête ne doit jamais faire attendre l'appelant (miniatures comprises).
+/// Les compteurs vivent sous verrou et le résumé affiché est reconstruit hors
+/// du MainActor **au plus une fois par `publishInterval`** (publication
+/// groupée) : l'écran de diagnostic ne coûte donc plus rien au défilement.
+final class Perf: ObservableObject, @unchecked Sendable {
     static let shared = Perf()
 
-    struct Entry: Identifiable, Equatable {
+    struct Entry: Identifiable, Equatable, Sendable {
         let id = UUID()
         /// Date de fin de la requête.
         let date: Date
@@ -44,13 +49,49 @@ final class Perf: ObservableObject {
         var isThumbnail: Bool { path.contains("/thumbnail") }
     }
 
-    /// Journal borné : les 400 dernières requêtes, miniatures exclues.
-    @Published private(set) var entries: [Entry] = []
+    /// Durées moyennes par endpoint (résumé publié vers l'interface).
+    struct EndpointStat: Sendable {
+        var name: String
+        var count: Int
+        var averageMs: Int
+        var maxMs: Int
+    }
+
+    /// Photographie immuable du journal, prête à afficher.
+    struct Summary: Sendable {
+        var entries: [Entry] = []
+        var statsByEndpoint: [EndpointStat] = []
+        var averageMs: Int = 0
+        var totalRequests: Int = 0
+        var thumbnailRequests: Int = 0
+        var cachedRequests: Int = 0
+    }
+
+    /// Dernier résumé publié : l'interface lit celui-ci, jamais les compteurs
+    /// vivants, et n'est donc plus reconstruite au rythme des requêtes.
+    @Published private(set) var summary = Summary()
+
+    private let lock = NSLock()
+    /// Journal borné : les 400 dernières requêtes, miniatures comprises (elles
+    /// comptent dans les statistiques même si la liste les exclut).
     private var allEntries: [Entry] = []
+    private var requestCount = 0
+    private var thumbnailCount = 0
+    private var cachedCount = 0
     private let capacity = 400
+    /// Regroupe les publications : une rafale de miniatures ne provoque plus
+    /// qu'une seule reconstruction du résumé.
+    private let publishInterval = Duration.milliseconds(400)
+    private var publishTask: Task<Void, Never>?
+    /// Incrémenté à chaque réinitialisation : une publication en vol devient
+    /// obsolète et ne peut plus écraser le résumé vide.
+    private var publishGeneration = 0
 
     private init() {}
 
+    /// Enregistre une requête sans bloquer l'appelant : aucun saut de thread,
+    /// aucune allocation de tableau. Le résumé est reconstruit au plus une fois
+    /// par `publishInterval`, en arrière-plan.
     func record(method: String, path: String, status: Int, durationMs: Int, bytes: Int, fromCache: Bool = false) {
         let entry = Entry(
             date: Date(),
@@ -61,48 +102,114 @@ final class Perf: ObservableObject {
             bytes: bytes,
             fromCache: fromCache
         )
+        lock.lock()
         allEntries.append(entry)
         if allEntries.count > capacity {
             allEntries.removeFirst(allEntries.count - capacity)
         }
-        // Les miniatures (par dizaines par grille) noieraient le journal :
-        // elles comptent dans les statistiques mais ne sont pas listées.
-        entries = allEntries.filter { !$0.isThumbnail }
+        requestCount += 1
+        if entry.isThumbnail { thumbnailCount += 1 }
+        if fromCache { cachedCount += 1 }
+        lock.unlock()
+        schedulePublish()
     }
 
+    /// Vide le journal (bouton « Réinitialiser » de l'écran de diagnostic).
+    @MainActor
     func reset() {
-        allEntries = []
-        entries = []
+        lock.lock()
+        allEntries.removeAll()
+        requestCount = 0
+        thumbnailCount = 0
+        cachedCount = 0
+        publishGeneration &+= 1
+        publishTask?.cancel()
+        publishTask = nil
+        lock.unlock()
+        summary = Summary()
     }
 
-    // MARK: - Statistiques
+    private func schedulePublish() {
+        lock.lock()
+        guard publishTask == nil else {
+            lock.unlock()
+            return
+        }
+        publishGeneration &+= 1
+        let generation = publishGeneration
+        let interval = publishInterval
+        publishTask = Task { [weak self] in
+            try? await Task.sleep(for: interval)
+            guard let self, self.claimPublish(generation) else { return }
+            let snapshot = self.makeSummary()
+            await MainActor.run { self.summary = snapshot }
+        }
+        lock.unlock()
+    }
+
+    /// Libère le créneau de publication si cette tâche est bien la plus
+    /// récente. Renvoie `false` si une réinitialisation (ou une publication
+    /// plus récente) l'a rendue obsolète : elle ne doit alors ni publier, ni
+    /// libérer le créneau d'une autre.
+    private func claimPublish(_ generation: Int) -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        guard publishGeneration == generation else { return false }
+        publishTask = nil
+        return true
+    }
+
+    /// Construit le résumé à partir du journal : exécuté dans la tâche de
+    /// publication, donc jamais sur le MainActor.
+    private func makeSummary() -> Summary {
+        lock.lock()
+        let entries = allEntries
+        let total = requestCount
+        let thumbnails = thumbnailCount
+        let cached = cachedCount
+        lock.unlock()
+
+        // Les miniatures (par dizaines par grille) noieraient la liste :
+        // elles comptent dans les statistiques mais ne sont pas listées.
+        let listed = entries.filter { !$0.isThumbnail }
+        let average = listed.isEmpty ? 0 : listed.map(\.durationMs).reduce(0, +) / listed.count
+        let stats = Dictionary(grouping: entries) { $0.endpointName }
+            .map { name, list -> EndpointStat in
+                let durations = list.map(\.durationMs)
+                return EndpointStat(
+                    name: name,
+                    count: list.count,
+                    averageMs: durations.reduce(0, +) / max(durations.count, 1),
+                    maxMs: durations.max() ?? 0
+                )
+            }
+            .sorted { $0.count != $1.count ? $0.count > $1.count : $0.averageMs > $1.averageMs }
+
+        return Summary(
+            entries: listed,
+            statsByEndpoint: stats,
+            averageMs: average,
+            totalRequests: total,
+            thumbnailRequests: thumbnails,
+            cachedRequests: cached
+        )
+    }
+
+    // MARK: - Statistiques (lues par l'écran de diagnostic)
+
+    /// Requêtes récentes, miniatures exclues (elles noieraient la liste).
+    var entries: [Entry] { summary.entries }
 
     /// Nombre d'appels et durées moyennes par endpoint, pour repérer
     /// celui qui pèse (ex. `count` lent, `files` rechargé trop souvent).
-    var statsByEndpoint: [(name: String, count: Int, averageMs: Int, maxMs: Int)] {
-        let groups = Dictionary(grouping: allEntries) { $0.endpointName }
-        return groups.map { name, list in
-            let durations = list.map(\.durationMs)
-            return (
-                name: name,
-                count: list.count,
-                averageMs: durations.reduce(0, +) / max(durations.count, 1),
-                maxMs: durations.max() ?? 0
-            )
-        }
-        .sorted { $0.count != $1.count ? $0.count > $1.count : $0.averageMs > $1.averageMs }
-    }
+    var statsByEndpoint: [EndpointStat] { summary.statsByEndpoint }
 
     /// Durée moyenne des requêtes, miniatures exclues.
-    var averageMs: Int {
-        let main = allEntries.filter { !$0.isThumbnail }
-        guard !main.isEmpty else { return 0 }
-        return main.map(\.durationMs).reduce(0, +) / main.count
-    }
+    var averageMs: Int { summary.averageMs }
 
-    var totalRequests: Int { allEntries.count }
-    var thumbnailRequests: Int { allEntries.filter(\.isThumbnail).count }
-    var cachedRequests: Int { allEntries.filter(\.fromCache).count }
+    var totalRequests: Int { summary.totalRequests }
+    var thumbnailRequests: Int { summary.thumbnailRequests }
+    var cachedRequests: Int { summary.cachedRequests }
 }
 
 /// Chronomètre un appel réseau : signpost + journal. Le bloc `operation`
@@ -121,7 +228,7 @@ enum PerfTimer {
     }
 
     /// Signposts System Trace (visibles dans Instruments sur un Mac),
-    /// isolés du `@MainActor` de `Perf` : l'actor les lit directement.
+    /// isolés de l'isolation de `Perf` : l'actor les lit directement.
     private static let signposter = OSSignposter(
         subsystem: "com.orvian.perf",
         category: "network"
@@ -142,7 +249,7 @@ enum PerfTimer {
             let (value, status, bytes, fromCache) = try await operation()
             let elapsed = Int(((CFAbsoluteTimeGetCurrent() - start) * 1000).rounded())
             signposter.endInterval("request", state)
-            await Perf.shared.record(
+            Perf.shared.record(
                 method: method,
                 path: path,
                 status: status,
@@ -154,7 +261,7 @@ enum PerfTimer {
         } catch {
             let elapsed = Int(((CFAbsoluteTimeGetCurrent() - start) * 1000).rounded())
             signposter.endInterval("request", state)
-            await Perf.shared.record(
+            Perf.shared.record(
                 method: method,
                 path: path,
                 status: 0,

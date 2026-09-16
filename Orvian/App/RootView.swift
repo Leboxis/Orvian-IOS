@@ -41,7 +41,7 @@ struct RootView: View {
                     }
                 case .signedIn:
                     if let drive = session.selectedDrive {
-                        MainTabView(drive: drive, session: session)
+                        MainTabView(drive: drive, session: session, shell: session.mainShell(for: drive))
                             .id(drive.id) // changer de drive reconstruit les onglets
                     } else {
                         BootSplash()

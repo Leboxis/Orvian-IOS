@@ -7,52 +7,57 @@ import SwiftUI
 /// position de scroll survivent aux changements d'onglet. Les autres onglets
 /// sont recréés à chaque visite (leur pile de navigation vit dans
 /// `TabNavigationState`), ce qui limite la mémoire consommée.
+///
+/// L'onglet courant, les piles et le routeur vivent dans `shell`
+/// (`MainTabShellState`), possédé par la session : `RootView` démonte cette
+/// vue au verrouillage, mais l'état de navigation est restitué au retour.
 struct MainTabView: View {
     let drive: Drive
     let session: SessionStore
 
-    @State private var tab: AppTab = .home
-    @State private var router: ViewerRouter
-    @State private var navState = TabNavigationState()
+    /// État d'interface possédé par la session : il survit au verrouillage.
+    /// L'arbre des onglets est démonté puis remonté quand un code est
+    /// configuré, mais cet objet reste le même — l'utilisateur retrouve son
+    /// onglet et ses piles de navigation au lieu de repartir de l'Accueil.
+    let shell: MainTabShellState
     @State private var showUploadSheet = false
+    /// Hauteur mesurée des pastilles superposées à la barre d'onglets (bandeau
+    /// de téléchargement + pilule d'upload). Zéro quand rien n'est affiché : la
+    /// barre et les grilles gardent alors exactement leur apparence actuelle.
+    @State private var overlayChromeHeight: CGFloat = 0
     @StateObject private var downloadService = FileDownloadService.shared
     @AppStorage("favoritesReselectScrollToTop") private var favoritesReselectScrollToTop = true
 
     private let uploadManager = UploadManager.shared
 
-    init(drive: Drive, session: SessionStore) {
+    init(drive: Drive, session: SessionStore, shell: MainTabShellState) {
         self.drive = drive
         self.session = session
-        _router = State(initialValue: ViewerRouter(driveId: drive.id))
+        self.shell = shell
     }
 
     var body: some View {
+        // Pattern @Observable : donne accès aux bindings `$shell.tab`,
+        // `$shell.router.mediaContext`, `$shell.navState.homePath`…
+        @Bindable var shell = shell
         ZStack(alignment: .bottom) {
             tabs
-
-            VStack(spacing: 8) {
-                if downloadService.isDownloading {
-                    DownloadProgressBanner(service: downloadService) {
-                        downloadService.cancelDownload()
-                    }
-                    .transition(.asymmetric(
-                        insertion: .move(edge: .bottom).combined(with: .opacity),
-                        removal: .opacity.combined(with: .scale(scale: 0.9))
-                    ))
+                // Réserve exactement la place des pastilles flottant au-dessus
+                // de la barre : sans cela, elles recouvraient le bouton « + »
+                // et la dernière rangée des grilles, dont les marges basses
+                // sont calibrées pour la barre seule. Mesurée (et non
+                // devinée) : elle suit la taille réelle du texte (Dynamic
+                // Type) et s'anime avec l'apparition des pastilles.
+                .safeAreaInset(edge: .bottom, spacing: 0) {
+                    Color.clear.frame(height: max(0, overlayChromeHeight))
+                        .animation(.snappy(duration: 0.28), value: overlayChromeHeight)
                 }
 
-                if uploadManager.isPillVisible {
-                    UploadProgressPill(manager: uploadManager) {
-                        showUploadSheet = true
-                    }
-                    .transition(.asymmetric(
-                        insertion: .move(edge: .bottom).combined(with: .opacity),
-                        removal: .opacity.combined(with: .scale(scale: 0.9))
-                    ))
-                }
+            VStack(spacing: 0) {
+                overlayChrome
 
                 FloatingTabBar(
-                    selection: $tab,
+                    selection: $shell.tab,
                     onSelect: { targetTab in
                         guard targetTab == .profile else { return }
                         // Démarre au clic, avant que ProfileView soit montée.
@@ -62,7 +67,7 @@ struct MainTabView: View {
                         }
                     },
                     onReselect: { targetTab in
-                        navState.reset(
+                        shell.navState.reset(
                             tab: targetTab,
                             scrollFavoritesToTop: favoritesReselectScrollToTop
                         )
@@ -78,10 +83,10 @@ struct MainTabView: View {
         .sheet(isPresented: $showUploadSheet) {
             UploadProgressSheet(manager: uploadManager)
         }
-        .fullScreenCover(item: $router.mediaContext) { context in
+        .fullScreenCover(item: $shell.router.mediaContext) { context in
             MediaPagerView(context: context)
         }
-        .fullScreenCover(item: $router.textFile) { file in
+        .fullScreenCover(item: $shell.router.textFile) { file in
             TextFileViewer(file: file, driveId: drive.id)
         }
         .alert("Téléchargement impossible", isPresented: downloadErrorBinding) {
@@ -93,41 +98,43 @@ struct MainTabView: View {
 
     @ViewBuilder
     private var tabs: some View {
+        // Même pattern que `body` : bindings vers l'état persistant.
+        @Bindable var shell = shell
         ZStack {
             tabPane(.settings) {
-                SettingsView(session: session, path: $navState.settingsPath)
+                SettingsView(session: session, path: $shell.navState.settingsPath)
             }
             tabPane(.tag) {
                 TagsView(
                     driveId: drive.id,
-                    router: router,
-                    path: $navState.tagsPath,
-                    trail: $navState.tagsTrail
+                    router: shell.router,
+                    path: $shell.navState.tagsPath,
+                    trail: $shell.navState.tagsTrail
                 )
             }
             tabPane(.home) {
                 HomeTab(
                     driveId: drive.id,
-                    router: router,
-                    isSelected: tab == .home,
-                    path: $navState.homePath
+                    router: shell.router,
+                    isSelected: shell.tab == .home,
+                    path: $shell.navState.homePath
                 )
             }
             tabPane(.favorites) {
                 FavoritesView(
                     driveId: drive.id,
-                    router: router,
-                    path: $navState.favoritesPath,
-                    scrollToTopRequest: navState.favoritesScrollToTopRequest
+                    router: shell.router,
+                    path: $shell.navState.favoritesPath,
+                    scrollToTopRequest: shell.navState.favoritesScrollToTopRequest
                 )
             }
             tabPane(.profile) {
                 ProfileView(
                     session: session,
-                    router: router,
-                    path: $navState.profilePath,
-                    isSelected: tab == .profile,
-                    refreshRequest: navState.profileRefreshRequest
+                    router: shell.router,
+                    path: $shell.navState.profilePath,
+                    isSelected: shell.tab == .profile,
+                    refreshRequest: shell.navState.profileRefreshRequest
                 )
             }
         }
@@ -138,15 +145,54 @@ struct MainTabView: View {
         // Seul l'Accueil reste monté en permanence (état de scroll et données
         // conservés) ; les autres onglets ne sont montés que lorsqu'ils sont
         // sélectionnés, ce qui libère leurs vues à chaque changement d'onglet.
-        if target == .home || target == tab {
+        if target == .home || target == shell.tab {
             content()
-                .opacity(tab == target ? 1 : 0)
-                .allowsHitTesting(tab == target)
-                .accessibilityHidden(tab != target)
+                .opacity(shell.tab == target ? 1 : 0)
+                .allowsHitTesting(shell.tab == target)
+                .accessibilityHidden(shell.tab != target)
         } else {
             Color.clear
                 .allowsHitTesting(false)
                 .accessibilityHidden(true)
+        }
+    }
+
+    /// Bandeau de téléchargement et pilule d'upload, empilés au-dessus de la
+    /// barre d'onglets. Regroupés pour être mesurés d'un seul coup : leur
+    /// hauteur alimente l'inset réservé aux onglets. Le vide de 8 points
+    /// jusqu'à la barre fait partie de la mesure ; sans pastille, le groupe
+    /// est vide (hauteur nulle) et ne décale donc rien.
+    @ViewBuilder
+    private var overlayChrome: some View {
+        VStack(spacing: 0) {
+            if downloadService.isDownloading {
+                DownloadProgressBanner(service: downloadService) {
+                    downloadService.cancelDownload()
+                }
+                .transition(.asymmetric(
+                    insertion: .move(edge: .bottom).combined(with: .opacity),
+                    removal: .opacity.combined(with: .scale(scale: 0.9))
+                ))
+            }
+
+            if uploadManager.isPillVisible {
+                UploadProgressPill(manager: uploadManager) {
+                    showUploadSheet = true
+                }
+                .transition(.asymmetric(
+                    insertion: .move(edge: .bottom).combined(with: .opacity),
+                    removal: .opacity.combined(with: .scale(scale: 0.9))
+                ))
+            }
+
+            if downloadService.isDownloading || uploadManager.isPillVisible {
+                Color.clear.frame(height: 8)
+            }
+        }
+        .onGeometryChange(for: CGFloat.self) { proxy in
+            proxy.size.height
+        } action: { height in
+            overlayChromeHeight = height
         }
     }
 

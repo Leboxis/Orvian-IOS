@@ -18,6 +18,10 @@ final class SessionStore {
     private(set) var selectedDrive: Drive?
     private(set) var signedOutMessage: String?
     private(set) var usesTemporaryCredentials = false
+    /// État d'interface qui survit au verrouillage de l'app (voir
+    /// `MainTabShellState`). Créé au moment où un drive est sélectionné —
+    /// jamais pendant un rendu — et jeté à la déconnexion.
+    private(set) var mainShell: MainTabShellState?
 
     private let service: KDriveService
     private let defaults = UserDefaults.standard
@@ -104,13 +108,30 @@ final class SessionStore {
         drives = []
         selectedDrive = nil
         accountId = nil
+        mainShell = nil
         signedOutMessage = message
         phase = .signedOut
     }
 
     func selectDrive(_ drive: Drive) {
         selectedDrive = drive
+        refreshMainShell(for: drive)
         defaults.set(drive.id, forKey: Keys.driveId)
+    }
+
+    /// Retourne l'état d'interface du drive sélectionné, en le créant au besoin.
+    /// Appelé depuis les points où le drive change (hors rendu) ; la lecture
+    /// par l'interface ne crée donc rien.
+    func mainShell(for drive: Drive) -> MainTabShellState {
+        refreshMainShell(for: drive)
+        return mainShell ?? MainTabShellState(driveId: drive.id)
+    }
+
+    /// Un changement de drive reconstruit l'état d'interface, comme le
+    /// `.id(drive.id)` de `RootView` reconstruit les onglets.
+    private func refreshMainShell(for drive: Drive) {
+        guard mainShell?.driveId != drive.id else { return }
+        mainShell = MainTabShellState(driveId: drive.id)
     }
 
     /// Force le rechargement des drives (onglet Plus).
@@ -141,6 +162,7 @@ final class SessionStore {
             selectedDrive = list.first
         }
         if let selectedDrive {
+            refreshMainShell(for: selectedDrive)
             defaults.set(selectedDrive.id, forKey: Keys.driveId)
         }
     }

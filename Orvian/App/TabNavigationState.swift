@@ -43,3 +43,33 @@ final class TabNavigationState {
         }
     }
 }
+
+/// État d'interface de l'écran d'onglets qui **survit au verrouillage**.
+///
+/// `RootView` démonte `MainTabView` dès qu'un code est configuré et que l'app
+/// passe en arrière-plan : aucun contenu ne traîne derrière l'écran de
+/// verrouillage, et aucune feuille/visionneuse ne peut rester présentée par-
+/// dessus. Contrepartie : tout était reconstruit au déverrouillage et
+/// l'utilisateur repartait de l'Accueil. Cet objet, possédé par la session
+/// (donc hors de l'arbre démonté), conserve l'onglet courant, les piles de
+/// navigation et le routeur de visionneuse pour les restituer au retour.
+/// Les grilles, elles, se reconstituent depuis le cache mémoire des listes
+/// (aucun squelette ni aller-retour si l'entrée est encore fraîche).
+@MainActor
+@Observable
+final class MainTabShellState {
+    let driveId: Int
+    /// Onglet courant. `var` (et non `let`) pour permettre les bindings
+    /// `$shell.tab` dans `MainTabView`.
+    var tab: AppTab = .home
+    /// Routeur des visionneuses plein écran. Recréé par drive ; `var` pour les
+    /// bindings `$shell.router.mediaContext`.
+    var router: ViewerRouter
+    /// Piles de navigation des cinq onglets. `var` pour les mêmes raisons.
+    var navState = TabNavigationState()
+
+    init(driveId: Int) {
+        self.driveId = driveId
+        self.router = ViewerRouter(driveId: driveId)
+    }
+}

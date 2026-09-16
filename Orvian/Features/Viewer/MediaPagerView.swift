@@ -47,6 +47,11 @@ struct MediaPagerView: View {
     }
 
     var body: some View {
+        // Calculé une fois par rendu : évaluée dans le `ForEach`, cette
+        // propriété relançait un balayage complet de la liste **par page** —
+        // soit O(n²) à chaque frame du geste de fermeture, qui réévalue ce
+        // corps à chaque déplacement du doigt.
+        let preloadIDs = hiresPreloadIDs
         ZStack {
             Color.black.ignoresSafeArea()
 
@@ -56,7 +61,7 @@ struct MediaPagerView: View {
                         file: file,
                         driveId: context.driveId,
                         isActive: selectedFileID == file.id,
-                        hiresRequested: hiresPreloadIDs.contains(file.id),
+                        hiresRequested: preloadIDs.contains(file.id),
                         onImageZoomChanged: { isZoomed in
                             setImageZoomed(isZoomed, fileID: file.id)
                         },
@@ -115,6 +120,11 @@ struct MediaPagerView: View {
         )
         let media = visible.filter { $0.isImage || $0.isVideo }
         guard media.map(\.id) != files.map(\.id) else { return }
+        // Ne jamais se retrouver sans page : un filtre dépendant de
+        // métadonnées pas encore résolues (orientation, 4K+) peut renvoyer une
+        // liste vide. La liste précédente reste affichée plutôt qu'un écran
+        // noir où aucun bouton de fermeture n'existerait.
+        guard !media.isEmpty else { return }
         files = media
         if !files.contains(where: { $0.id == selectedFileID }) {
             selectedFileID = files.first?.id ?? 0
@@ -242,6 +252,17 @@ struct MediaPagerView: View {
                         Spacer()
                         closeButton
                     }
+                }
+                .padding(.horizontal, 14)
+                .padding(.top, 6)
+            } else if files.isEmpty {
+                // Aucune page (liste momentanément vide) : la barre ci-dessus
+                // n'existerait pas et la fermeture au swipe vertical n'est
+                // disponible que sur les images. Sans ce bouton, la visionneuse
+                // serait un écran noir sans aucun moyen d'en sortir.
+                HStack {
+                    Spacer()
+                    closeButton
                 }
                 .padding(.horizontal, 14)
                 .padding(.top, 6)

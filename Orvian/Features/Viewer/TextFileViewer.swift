@@ -37,6 +37,9 @@ struct TextFileViewer: View {
     @State private var searchQuery = ""
     @State private var searchRanges: [NSRange] = []
     @State private var currentSearchIndex: Int?
+    /// Incrémenté à chaque modification de la requête ou du document : rend
+    /// obsolète tout balayage lancé avant la dernière frappe.
+    @State private var searchGeneration = 0
     @FocusState private var isSearchFieldFocused: Bool
 
     private let service = KDriveService()
@@ -163,16 +166,16 @@ struct TextFileViewer: View {
             Text("Le brouillon n’a pas encore été enregistré dans kDrive.")
         }
         .onChange(of: searchQuery) { _, _ in
-            updateSearchResults()
+            scheduleSearchUpdate()
         }
         .onChange(of: draft) { _, _ in
             if isSearching {
-                updateSearchResults()
+                scheduleSearchUpdate()
             }
         }
         .onChange(of: isSearching) { _, newValue in
             if newValue {
-                updateSearchResults()
+                scheduleSearchUpdate()
                 isSearchFieldFocused = true
             } else {
                 searchRanges = []
@@ -264,37 +267,65 @@ struct TextFileViewer: View {
         return "\(idx + 1) / \(searchRanges.count)"
     }
 
-    private func updateSearchResults() {
+    /// Planifie un balayage de recherche : décalé de 200 ms pour ne pas lancer
+    /// un balayage par frappe, puis exécuté hors du MainActor. Toute frappe
+    /// ultérieure invalide le résultat via `searchGeneration`.
+    private func scheduleSearchUpdate() {
         let query = searchQuery
         guard !query.isEmpty else {
             searchRanges = []
             currentSearchIndex = nil
             return
         }
+        searchGeneration &+= 1
+        let generation = searchGeneration
+        let document = draft
+        Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(200))
+            guard !Task.isCancelled, generation == searchGeneration else { return }
+            let ranges = await Self.search(query: query, in: document)
+            guard !Task.isCancelled, generation == searchGeneration else { return }
+            applySearch(ranges: ranges)
+        }
+    }
+
+    /// Balayage hors du MainActor : jusqu'à `maximumSearchMatches` occurrences
+    /// sur un document de plusieurs Mo ne doivent plus geler la saisie.
+    nonisolated private static func search(query: String, in document: String) async -> [NSRange] {
+        await Task.detached(priority: .userInitiated) {
+            let nsDocument = document as NSString
+            var ranges: [NSRange] = []
+            var searchRange = NSRange(location: 0, length: nsDocument.length)
+            let options: NSString.CompareOptions = [.caseInsensitive, .diacriticInsensitive]
+            while searchRange.location < nsDocument.length {
+                let found = nsDocument.range(of: query, options: options, range: searchRange)
+                if found.location == NSNotFound { break }
+                ranges.append(found)
+                if ranges.count >= maximumSearchMatches { break }
+                let nextLocation = found.location + max(found.length, 1)
+                if nextLocation >= nsDocument.length { break }
+                searchRange = NSRange(location: nextLocation, length: nsDocument.length - nextLocation)
+            }
+            return ranges
+        }.value
+    }
+
+    /// Limite pour éviter de figer l'UI sur un document de 5 Mo avec une
+    /// requête très courte (ex. « e » → dizaines de milliers d'occurrences).
+    private static let maximumSearchMatches = 2_000
+
+    /// Applique le résultat du balayage : même règle de conservation de la
+    /// position courante que l'ancien balayage synchrone.
+    private func applySearch(ranges: [NSRange]) {
         let previousIndex = currentSearchIndex
         let previousCount = searchRanges.count
-        let nsDraft = draft as NSString
-        var ranges: [NSRange] = []
-        var searchRange = NSRange(location: 0, length: nsDraft.length)
-        let options: NSString.CompareOptions = [.caseInsensitive, .diacriticInsensitive]
-        // Limite pour éviter de figer l'UI sur un document de 5 Mo avec une
-        // requête très courte (ex. "e" → dizaines de milliers d'occurrences).
-        let maxMatches = 2000
-        while searchRange.location < nsDraft.length {
-            let found = nsDraft.range(of: query, options: options, range: searchRange)
-            if found.location == NSNotFound { break }
-            ranges.append(found)
-            if ranges.count >= maxMatches { break }
-            let nextLocation = found.location + max(found.length, 1)
-            if nextLocation >= nsDraft.length { break }
-            searchRange = NSRange(location: nextLocation, length: nsDraft.length - nextLocation)
-        }
         searchRanges = ranges
         if ranges.isEmpty {
             currentSearchIndex = nil
-        } else if let idx = previousIndex, idx < ranges.count, previousCount == ranges.count || draft.count == 0 {
+        } else if let index = previousIndex, index < ranges.count,
+                  previousCount == ranges.count || draft.isEmpty {
             // Conserve la position si possible.
-            currentSearchIndex = idx
+            currentSearchIndex = index
         } else {
             currentSearchIndex = 0
         }
@@ -381,7 +412,7 @@ struct TextFileViewer: View {
             draft = decoded
             detectedLinks = links
             if isSearching {
-                updateSearchResults()
+                scheduleSearchUpdate()
             }
         } catch {
             loadError = (error as? APIError)?.errorDescription ?? error.localizedDescription
@@ -508,7 +539,7 @@ private struct TextFileTextView: UIViewRepresentable {
         textView.delegate = context.coordinator
         textView.text = text
         configureMode(textView)
-        applySearchHighlights(to: textView)
+        applySearchHighlights(to: textView, coordinator: context.coordinator)
         return textView
     }
 
@@ -521,6 +552,9 @@ private struct TextFileTextView: UIViewRepresentable {
         let selection = textView.selectedRange
 
         if textChanged {
+            // `textView.text = ...` réinitialise tous les attributs (liens et
+            // surlignages) : la prochaine passe doit donc tout redessiner.
+            context.coordinator.highlightedCount = 0
             textView.text = text
         }
         // `textView.text = ...` rase les attributs `.link` : reposer les liens
@@ -543,9 +577,11 @@ private struct TextFileTextView: UIViewRepresentable {
             }
         }
 
-        // Toujours réappliquer les surlignages de recherche après les liens.
-        // `configureMode` a nettoyé/posé les liens ci-dessus ; on ajoute ensuite les fonds.
-        applySearchHighlights(to: textView)
+        // Réapplique les surlignages de recherche après les liens, mais
+        // uniquement s'il y a quelque chose à dessiner **ou** à nettoyer :
+        // auparavant, le retrait des attributs balayait l'intégralité du
+        // document à chaque mise à jour SwiftUI, même sans recherche active.
+        applySearchHighlights(to: textView, coordinator: context.coordinator)
         scrollToCurrentSearch(in: textView)
 
         if let pasteRequest,
@@ -576,21 +612,24 @@ private struct TextFileTextView: UIViewRepresentable {
         textView.isEditable = isEditing
     }
 
-    private func applySearchHighlights(to textView: UITextView) {
+    private func applySearchHighlights(to textView: UITextView, coordinator: Coordinator) {
         let fullRange = NSRange(location: 0, length: textView.textStorage.length)
         guard fullRange.length > 0 else { return }
+        // Rien à dessiner et rien à nettoyer : ne pas reparcourir le document.
+        guard !searchRanges.isEmpty || coordinator.highlightedCount > 0 else { return }
         // Nettoie les anciens surlignages.
         textView.textStorage.removeAttribute(.backgroundColor, range: fullRange)
 
-        guard !searchRanges.isEmpty else { return }
-
+        var drawn = 0
         for (index, range) in searchRanges.enumerated() where range.location != NSNotFound && NSMaxRange(range) <= fullRange.length {
             let isCurrent = index == currentSearchIndex
             let color: UIColor = isCurrent
                 ? UIColor.systemOrange.withAlphaComponent(0.45)
                 : UIColor.systemYellow.withAlphaComponent(0.45)
             textView.textStorage.addAttribute(.backgroundColor, value: color, range: range)
+            drawn += 1
         }
+        coordinator.highlightedCount = drawn
     }
 
     private func scrollToCurrentSearch(in textView: UITextView) {
@@ -616,6 +655,9 @@ private struct TextFileTextView: UIViewRepresentable {
     final class Coordinator: NSObject, UITextViewDelegate {
         var parent: TextFileTextView
         var lastPasteRequestID: UUID?
+        /// Nombre de surlignages posés lors de la dernière passe : il décide
+        /// si le retrait des attributs doit balayer à nouveau le document.
+        var highlightedCount = 0
 
         init(parent: TextFileTextView) {
             self.parent = parent

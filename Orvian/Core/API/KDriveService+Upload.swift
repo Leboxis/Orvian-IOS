@@ -1,6 +1,15 @@
 import CryptoKit
 import Foundation
 
+/// Un morceau prêt à l'envoi : son fichier temporaire (le corps binaire n'est
+/// jamais détenu en RAM), sa taille et son empreinte SHA-256 calculée pendant
+/// l'écriture.
+struct ChunkPayload {
+    let url: URL
+    let size: Int
+    let sha256: String
+}
+
 /// Lecture séquentielle hors du MainActor pour les uploads découpés.
 private actor UploadChunkReader {
     private let handle: FileHandle
@@ -13,10 +22,36 @@ private actor UploadChunkReader {
         try? handle.close()
     }
 
-    func next(maxLength: Int) throws -> (data: Data, sha256: String) {
-        let data = try handle.read(upToCount: maxLength) ?? Data()
-        let digest = SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
-        return (data, digest)
+    /// Lit le morceau suivant en l'écrivant directement dans un fichier
+    /// temporaire : la mémoire réservée est celle d'un bloc de copie (1 Mo),
+    /// pas celle du morceau entier — et encore moins de sa copie interne
+    /// `URLSession`. Renvoie `nil` à la fin du fichier.
+    func next(maxLength: Int) throws -> ChunkPayload? {
+        let chunkURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("orvian-chunk-\(UUID().uuidString)")
+        FileManager.default.createFile(atPath: chunkURL.path, contents: nil)
+        let output = try FileHandle(forWritingTo: chunkURL)
+        defer { try? output.close() }
+
+        var digest = SHA256()
+        var written = 0
+        let blockSize = 1 << 20
+        while written < maxLength {
+            let block = try handle.read(upToCount: min(blockSize, maxLength - written)) ?? Data()
+            if block.isEmpty { break }
+            digest.update(data: block)
+            try output.write(contentsOf: block)
+            written += block.count
+        }
+        guard written > 0 else {
+            try? FileManager.default.removeItem(at: chunkURL)
+            return nil
+        }
+        return ChunkPayload(
+            url: chunkURL,
+            size: written,
+            sha256: digest.finalize().map { String(format: "%02x", $0) }.joined()
+        )
     }
 }
 
@@ -203,20 +238,26 @@ extension KDriveService {
             let reader = try UploadChunkReader(url: fileURL)
             for number in 1...totalChunks {
                 try Task.checkCancellation()
-                let chunk = try await reader.next(maxLength: Self.uploadChunkSize)
-                guard !chunk.data.isEmpty else { throw APIError.invalidResponse }
+                guard let chunk = try await reader.next(maxLength: Self.uploadChunkSize) else {
+                    // Fin de fichier avant le nombre de morceaux attendu.
+                    throw APIError.invalidResponse
+                }
+                // Le morceau vit dans un fichier temporaire : supprimé à la
+                // sortie de l'itération (succès, échec ou annulation). Un
+                // réessai du même numéro relit ce même fichier.
+                defer { try? FileManager.default.removeItem(at: chunk.url) }
                 let chunkURL = try Self.chunkURL(
                     from: uploadURL,
                     driveId: driveId,
                     token: token,
                     number: number,
-                    size: chunk.data.count,
+                    size: chunk.size,
                     hash: chunk.sha256
                 )
 
                 try await uploadChunk(
                     to: chunkURL,
-                    data: chunk.data,
+                    payload: chunk,
                     number: number,
                     totalChunks: totalChunks,
                     progress: progress
@@ -253,7 +294,7 @@ extension KDriveService {
     /// faisait échouer les fichiers dépassant la limite d'upload direct.
     private func uploadChunk(
         to url: URL,
-        data: Data,
+        payload: ChunkPayload,
         number: Int,
         totalChunks: Int,
         progress: @escaping @Sendable (Double) -> Void
@@ -265,9 +306,9 @@ extension KDriveService {
             do {
                 // `upload_url` est l'hôte désigné par Infomaniak pour les
                 // morceaux ; il ne faut pas les envoyer à api.infomaniak.com.
-                let responseData = try await api.uploadData(
+                let responseData = try await api.uploadFile(
                     to: url,
-                    data: data,
+                    fileURL: payload.url,
                     contentType: "application/octet-stream",
                     progress: { chunkProgress in
                         let completedChunks = Double(number - 1)
@@ -279,7 +320,7 @@ extension KDriveService {
                       let chunk = response.data,
                       chunk.status == "ok",
                       chunk.number == nil || chunk.number == number,
-                      chunk.size == nil || chunk.size == data.count
+                      chunk.size == nil || chunk.size == payload.size
                 else { throw APIError.invalidResponse }
                 return
             } catch {

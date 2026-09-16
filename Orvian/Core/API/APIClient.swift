@@ -198,127 +198,79 @@ actor APIClient {
         request.timeoutInterval = 300
         request.setValue(contentType, forHTTPHeaderField: "Content-Type")
 
+        let (data, response) = try await transferUpload(request: request, fileURL: fileURL, progress: progress)
+        try Self.check(response: response, data: data, credentialFingerprint: credentialFingerprint)
         do {
-            let delegate = UploadProgressDelegate(progress: progress)
-            let delegateQueue = OperationQueue()
-            delegateQueue.maxConcurrentOperationCount = 1
-            let uploadSession = URLSession(
-                configuration: .default,
-                delegate: delegate,
-                delegateQueue: delegateQueue
-            )
-            defer { uploadSession.finishTasksAndInvalidate() }
-
-            let (data, response) = try await Self.uploadWithProgress(uploadSession: uploadSession, delegate: delegate) {
-                // La tâche est créée et démarrée AVANT d'enregistrer le
-                // handler d'annulation : si la Task Swift était déjà annulée
-                // à l'entrée, l'ancien code appelait `invalidateAndCancel()`
-                // avant la création de la tâche, et `resume()` sur une session
-                // invalidée levait une exception fatale. Annuler la tâche,
-                // elle, est toujours sûr.
-                uploadSession.uploadTask(with: request, fromFile: fileURL)
+            let envelope = try JSONDecoder.api.decode(DataResponse<DriveFile>.self, from: data)
+            guard envelope.result == nil
+                    || envelope.result == "success"
+                    || envelope.result == "asynchronous"
+            else {
+                throw APIError.invalidResponse
             }
-            try Self.check(response: response, data: data, credentialFingerprint: credentialFingerprint)
-            do {
-                let envelope = try JSONDecoder.api.decode(DataResponse<DriveFile>.self, from: data)
-                guard envelope.result == nil
-                        || envelope.result == "success"
-                        || envelope.result == "asynchronous"
-                else {
-                    throw APIError.invalidResponse
-                }
-                guard let uploadedFile = envelope.data else {
-                    throw APIError.invalidResponse
-                }
-                return uploadedFile
-            } catch let error as APIError {
-                throw error
-            } catch {
-                throw APIError.decoding(error, raw: data)
+            guard let uploadedFile = envelope.data else {
+                throw APIError.invalidResponse
             }
+            return uploadedFile
+        } catch let error as APIError {
+            throw error
         } catch {
-            if error is APIError {
-                throw error
-            }
-            throw APIError.network(error)
+            throw APIError.decoding(error, raw: data)
         }
-    }
-
-    /// Envoie un morceau binaire d'une session avec une progression réelle.
-    func uploadData(
-        _ endpoint: Endpoint,
-        data: Data,
-        contentType: String,
-        progress: @escaping @Sendable (Double) -> Void
-    ) async throws -> Data {
-        var request = try request(for: endpoint, method: "POST")
-        return try await uploadData(request: &request, data: data, contentType: contentType, progress: progress)
     }
 
     /// Envoie un morceau vers l'URL dédiée renvoyée par `upload/session/start`.
     /// Cette URL reste contrôlée : seuls les hôtes Infomaniak autorisés peuvent
-    /// recevoir l'en-tête Bearer de l'utilisateur.
-    func uploadData(
+    /// recevoir l'en-tête Bearer de l'utilisateur. Le morceau est lu depuis un
+    /// fichier temporaire : aucun corps binaire ne transite par la RAM.
+    func uploadFile(
         to url: URL,
-        data: Data,
+        fileURL: URL,
         contentType: String,
         progress: @escaping @Sendable (Double) -> Void
     ) async throws -> Data {
         var request = try uploadRequest(for: url, method: "POST")
-        return try await uploadData(request: &request, data: data, contentType: contentType, progress: progress)
-    }
-
-    private func uploadData(
-        request: inout URLRequest,
-        data: Data,
-        contentType: String,
-        progress: @escaping @Sendable (Double) -> Void
-    ) async throws -> Data {
         request.timeoutInterval = 300
         request.setValue(contentType, forHTTPHeaderField: "Content-Type")
         let credentialFingerprint = Self.credentialFingerprint(for: request)
 
-        do {
-            let delegate = UploadProgressDelegate(progress: progress)
-            let delegateQueue = OperationQueue()
-            delegateQueue.maxConcurrentOperationCount = 1
-            let uploadSession = URLSession(
-                configuration: .default,
-                delegate: delegate,
-                delegateQueue: delegateQueue
-            )
-            defer { uploadSession.finishTasksAndInvalidate() }
+        let (data, response) = try await transferUpload(request: request, fileURL: fileURL, progress: progress)
+        try Self.check(response: response, data: data, credentialFingerprint: credentialFingerprint)
+        return data
+    }
 
-            let (responseData, response) = try await Self.uploadWithProgress(uploadSession: uploadSession, delegate: delegate) {
-                // Même garde que `uploadFile` : créer la tâche avant tout
-                // `invalidateAndCancel` potentiel (voir le commentaire ici-haut).
-                uploadSession.uploadTask(with: request, from: data)
+    /// Transfert réel d'un upload : la tâche est créée suspendue, enregistrée
+    /// auprès du délégué partagé, puis démarrée. La session est partagée (la
+    /// connexion keep-alive est réutilisée d'un transfert à l'autre au lieu
+    /// d'une session — donc d'une poignée de main TLS — par morceau).
+    /// L'annulation ne touche que la tâche, jamais la session : `task.cancel()`
+    /// est toujours sûr, même sur une `Task` Swift déjà annulée à l'entrée
+    /// (l'ancien code appelait `invalidateAndCancel()` avant la création de la
+    /// tâche, et `resume()` sur une session invalidée levait une exception).
+    private func transferUpload(
+        request: URLRequest,
+        fileURL: URL,
+        progress: @escaping @Sendable (Double) -> Void
+    ) async throws -> (Data, URLResponse) {
+        let task = uploadSession.uploadTask(with: request, fromFile: fileURL)
+        let completion = UploadTransferMultiplexer.shared.register(
+            taskIdentifier: task.taskIdentifier,
+            progress: progress
+        )
+        defer { UploadTransferMultiplexer.shared.remove(taskIdentifier: task.taskIdentifier) }
+
+        do {
+            return try await withTaskCancellationHandler {
+                try await withCheckedThrowingContinuation { continuation in
+                    completion.install(continuation)
+                    task.resume()
+                }
+            } onCancel: {
+                task.cancel()
             }
-            try Self.check(response: response, data: responseData, credentialFingerprint: credentialFingerprint)
-            return responseData
         } catch {
             if error is APIError { throw error }
             throw APIError.network(error)
-        }
-    }
-
-    /// Crée la tâche d'upload, démarre-la, puis seul le handler d'annulation
-    /// suspend la tâche elle-même (jamais la session avant sa création) :
-    /// une Task Swift déjà annulée à l'entrée ne peut plus provoquer
-    /// l'exception « Task created in a session that has been invalidated ».
-    private static func uploadWithProgress(
-        uploadSession: URLSession,
-        delegate: UploadProgressDelegate,
-        makeTask: () -> URLSessionTask
-    ) async throws -> (Data, URLResponse) {
-        let uploadTask = makeTask()
-        return try await withTaskCancellationHandler {
-            try await withCheckedThrowingContinuation { continuation in
-                delegate.completion.install(continuation)
-                uploadTask.resume()
-            }
-        } onCancel: {
-            uploadTask.cancel()
         }
     }
 
@@ -431,15 +383,63 @@ actor APIClient {
     }
 }
 
-/// Délégué isolé par transfert : il collecte la petite réponse JSON et remonte
-/// les octets réellement envoyés par URLSession.
-private final class UploadProgressDelegate: NSObject, URLSessionDataDelegate, @unchecked Sendable {
-    let progress: @Sendable (Double) -> Void
-    let completion = TransferCompletion<(Data, URLResponse)>()
-    private var responseData = Data()
+/// Session d'upload partagée par tous les transferts : chaque morceau (comme
+/// chaque fichier envoyé en direct) réutilise la connexion keep-alive de son
+/// hôte au lieu d'ouvrir une session — donc de négocier TLS — de plus. Un
+/// envoi découpé de 1 Go évite ainsi une cinquantaine de poignées de main
+/// (~100-300 ms chacune). Elle n'est jamais invalidée : elle vit pendant
+/// toute la durée du processus.
+private let uploadSession: URLSession = {
+    let configuration = URLSessionConfiguration.default
+    // Autant de connexions que d'envois simultanés (`UploadManager`), ni plus
+    // ni moins : une tâche supplémentaire attendrait une connexion libre.
+    configuration.httpMaximumConnectionsPerHost = 4
+    configuration.urlCache = nil
+    configuration.requestCachePolicy = .reloadIgnoringLocalCacheData
+    return URLSession(
+        configuration: configuration,
+        delegate: UploadTransferMultiplexer.shared,
+        // File série : les rappels du délégué s'exécutent l'un après l'autre.
+        delegateQueue: nil
+    )
+}()
 
-    init(progress: @escaping @Sendable (Double) -> Void) {
-        self.progress = progress
+/// Délégué unique de la session d'upload partagée : il route la progression et
+/// la fin de chaque transfert vers son appelant, identifié par
+/// `taskIdentifier`. Les tâches sont créées suspendues, enregistrées, puis
+/// démarrées : aucun événement de session ne peut arriver avant
+/// l'enregistrement.
+private final class UploadTransferMultiplexer: NSObject, URLSessionDataDelegate, @unchecked Sendable {
+    static let shared = UploadTransferMultiplexer()
+
+    private struct Transfer {
+        let progress: @Sendable (Double) -> Void
+        let completion = TransferCompletion<(Data, URLResponse)>()
+        var responseData = Data()
+    }
+
+    private let lock = NSLock()
+    private var transfers: [Int: Transfer] = [:]
+
+    /// Enregistre une tâche avant son démarrage et renvoie le rendez-vous sur
+    /// lequel l'appelant installera sa continuation.
+    func register(
+        taskIdentifier: Int,
+        progress: @escaping @Sendable (Double) -> Void
+    ) -> TransferCompletion<(Data, URLResponse)> {
+        let transfer = Transfer(progress: progress)
+        let completion = transfer.completion
+        lock.lock()
+        transfers[taskIdentifier] = transfer
+        lock.unlock()
+        return completion
+    }
+
+    /// Oublie la tâche (réussite, échec ou annulation de l'appelant).
+    func remove(taskIdentifier: Int) {
+        lock.lock()
+        transfers.removeValue(forKey: taskIdentifier)
+        lock.unlock()
     }
 
     func urlSession(
@@ -451,11 +451,16 @@ private final class UploadProgressDelegate: NSObject, URLSessionDataDelegate, @u
     ) {
         guard totalBytesExpectedToSend > 0 else { return }
         let fraction = Double(totalBytesSent) / Double(totalBytesExpectedToSend)
-        progress(min(max(fraction, 0), 1))
+        lock.lock()
+        let progress = transfers[task.taskIdentifier]?.progress
+        lock.unlock()
+        progress?(min(max(fraction, 0), 1))
     }
 
     func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive data: Data) {
-        responseData.append(data)
+        lock.lock()
+        transfers[dataTask.taskIdentifier]?.responseData.append(data)
+        lock.unlock()
     }
 
     /// Empêche qu'une redirection ne transforme une URL d'upload validée en
@@ -477,12 +482,16 @@ private final class UploadProgressDelegate: NSObject, URLSessionDataDelegate, @u
     }
 
     func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
+        lock.lock()
+        let transfer = transfers.removeValue(forKey: task.taskIdentifier)
+        lock.unlock()
+
         if let error {
-            completion.finish(.failure(error))
+            transfer?.completion.finish(.failure(error))
         } else if let response = task.response {
-            completion.finish(.success((responseData, response)))
+            transfer?.completion.finish(.success((transfer?.responseData ?? Data(), response)))
         } else {
-            completion.finish(.failure(APIError.invalidResponse))
+            transfer?.completion.finish(.failure(APIError.invalidResponse))
         }
     }
 }
