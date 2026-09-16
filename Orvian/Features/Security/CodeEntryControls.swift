@@ -63,7 +63,11 @@ struct CodeKeypad: View {
                     .font(.system(size: 21, weight: .medium))
                     .foregroundStyle(.primary)
                     .frame(width: 76, height: 64)
-                    .background(.background, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+                    .background(Color(uiColor: .secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 18, style: .continuous)
+                            .strokeBorder(.primary.opacity(0.18), lineWidth: 1)
+                    }
             }
             .buttonStyle(KeypadButtonStyle())
             .accessibilityLabel("Supprimer le dernier chiffre")
@@ -73,7 +77,11 @@ struct CodeKeypad: View {
                     .font(.system(size: 26, weight: .medium))
                     .foregroundStyle(.primary)
                     .frame(width: 76, height: 64)
-                    .background(.background, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+                    .background(Color(uiColor: .secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 18, style: .continuous)
+                            .strokeBorder(.primary.opacity(0.18), lineWidth: 1)
+                    }
             }
             .buttonStyle(KeypadButtonStyle())
             .accessibilityLabel("Chiffre \(key)")

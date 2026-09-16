@@ -87,6 +87,7 @@ final class CachedSecureValue: @unchecked Sendable {
     private let fallbackKey: String
     private let lock = NSLock()
     private var cached: String?
+    private var hasLoaded = false
 
     init(service: String, account: String, fallbackKey: String) {
         self.service = service
@@ -98,12 +99,10 @@ final class CachedSecureValue: @unchecked Sendable {
     func current() -> String? {
         lock.lock()
         defer { lock.unlock() }
-        if let cached { return cached }
-        guard let value = KeychainSupport.read(service: service, account: account, fallbackKey: fallbackKey) else {
-            return nil
-        }
-        cached = value
-        return value
+        if hasLoaded { return cached }
+        cached = KeychainSupport.read(service: service, account: account, fallbackKey: fallbackKey)
+        hasLoaded = true
+        return cached
     }
 
     @discardableResult
@@ -112,6 +111,7 @@ final class CachedSecureValue: @unchecked Sendable {
         defer { lock.unlock() }
         let saved = KeychainSupport.write(value, service: service, account: account, fallbackKey: fallbackKey)
         cached = value
+        hasLoaded = true
         return saved
     }
 
@@ -119,6 +119,7 @@ final class CachedSecureValue: @unchecked Sendable {
         lock.lock()
         defer { lock.unlock() }
         cached = nil
+        hasLoaded = true
         KeychainSupport.delete(service: service, account: account, fallbackKey: fallbackKey)
     }
 }

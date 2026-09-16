@@ -12,7 +12,7 @@ final class SessionStore {
         case error(String)
     }
 
-    private(set) var phase: Phase = .signedOut
+    private(set) var phase: Phase = .bootstrapping
     private(set) var drives: [Drive] = []
     private(set) var accountId: Int?
     private(set) var selectedDrive: Drive?
@@ -23,6 +23,7 @@ final class SessionStore {
     /// jamais pendant un rendu — et jeté à la déconnexion.
     private(set) var mainShell: MainTabShellState?
 
+    private var sessionGeneration = 0
     private let service: KDriveService
     private let defaults = UserDefaults.standard
 
@@ -44,6 +45,9 @@ final class SessionStore {
 
     /// Au lancement : si un token existe, retrouve compte + drive sélectionné.
     func bootstrap() async {
+        let generation = sessionGeneration
+        await TokenStore.prepare()
+        guard !Task.isCancelled, generation == sessionGeneration else { return }
         guard let token = TokenStore.current() else {
             phase = .signedOut
             return
@@ -65,6 +69,8 @@ final class SessionStore {
 
     /// Connexion avec un token collé par l'utilisateur.
     func signIn(token: String) async throws {
+        sessionGeneration &+= 1
+        discardMediaLinks()
         signedOutMessage = nil
         DirectoryListStore.shared.clear()
         CategoryLibrary.shared.clear()
@@ -96,6 +102,8 @@ final class SessionStore {
     }
 
     private func clearSession(message: String?) {
+        sessionGeneration &+= 1
+        discardMediaLinks()
         // Annuler avant d'effacer le token afin que les URLSession actives
         // cessent d'envoyer des octets avec les anciennes autorisations.
         UploadManager.shared.cancelAllAndClear()
@@ -111,6 +119,11 @@ final class SessionStore {
         mainShell = nil
         signedOutMessage = message
         phase = .signedOut
+    }
+
+    private func discardMediaLinks() {
+        guard let credential = TokenStore.credentialFingerprint() else { return }
+        Task { await MediaURLCache.shared.clear(credentialFingerprint: credential) }
     }
 
     func selectDrive(_ drive: Drive) {

@@ -9,6 +9,7 @@ struct RootView: View {
 
     /// Déverrouillage en mémoire : repasse par le code à chaque ouverture.
     @State private var isUnlocked = false
+    @State private var hasPresentedContent = false
 
     /// Vrai dès que l'app a quitté le premier plan : la biométrie est alors
     /// proposée automatiquement au retour, jamais au premier lancement.
@@ -20,14 +21,7 @@ struct RootView: View {
 
     var body: some View {
         Group {
-            if isLockRequired {
-                // Le contenu de l'app n'est pas construit avant le code.
-                AppLockView(autoPromptBiometrics: hasGoneBackground) {
-                    withAnimation(.snappy(duration: 0.25)) {
-                        isUnlocked = true
-                    }
-                }
-            } else {
+            if hasPresentedContent || !isLockRequired {
                 switch session.phase {
                 case .signedOut:
                     TokenSetupView(session: session)
@@ -50,16 +44,35 @@ struct RootView: View {
                 }
             }
         }
+        .onAppear {
+            if !isLockRequired { hasPresentedContent = true }
+        }
+        .allowsHitTesting(!isLockRequired && scenePhase == .active)
+        .accessibilityHidden(isLockRequired || scenePhase != .active)
+        .background {
+            AppPrivacyWindow(isVisible: isLockRequired || scenePhase != .active) {
+                ZStack {
+                    Color(uiColor: .systemGroupedBackground).ignoresSafeArea()
+                    if isLockRequired {
+                        AppLockView(autoPromptBiometrics: hasGoneBackground) {
+                            guard scenePhase == .active else { return }
+                            hasPresentedContent = true
+                            isUnlocked = true
+                        }
+                    }
+                }
+            }
+        }
         .onReceive(NotificationCenter.default.publisher(for: .apiUnauthorized)) { notification in
             session.handleUnauthorized(credentialFingerprint: notification.object as? String)
         }
         .onChange(of: scenePhase) { _, phase in
             // Re-verrouille dès que l'app quitte le premier plan : au retour
             // (rappel puis reprise), le code ou Face ID est redemandé.
+            if phase == .background { FavoritesDiskCache.shared.flushPending() }
             guard AppLockStore.isConfigured else { return }
             if phase == .background {
                 hasGoneBackground = true
-                session.mainShell?.router.dismissAll()
                 isUnlocked = false
             }
         }

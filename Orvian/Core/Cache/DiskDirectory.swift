@@ -6,6 +6,7 @@ struct DiskEntry {
     let url: URL
     let size: Int
     let date: Date
+    let generation: Int
 }
 
 /// Répertoire de cache sur disque : création, écriture atomique, suppression
@@ -15,7 +16,9 @@ struct DiskEntry {
 /// `FavoritesDiskCache` pour les listes persistées) partageaient ce même
 /// socle, recopié de part et d'autre. Ce type en est désormais l'unique
 /// implémentation ; chaque cache conserve en propre sa politique d'éviction.
-final class DiskDirectory {
+final class DiskDirectory: @unchecked Sendable {
+    private let mutationLock = NSRecursiveLock()
+    private var generation = 0
     let root: URL
 
     init(root: URL) {
@@ -41,6 +44,8 @@ final class DiskDirectory {
     /// `false` si l'écriture a échoué (disque plein, permissions...).
     @discardableResult
     func write(_ data: Data, to url: URL, options: Data.WritingOptions = .atomic) -> Bool {
+        mutationLock.lock()
+        defer { mutationLock.unlock() }
         try? FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
         return (try? data.write(to: url, options: options)) != nil
     }
@@ -48,7 +53,10 @@ final class DiskDirectory {
     /// Supprime un fichier. Renvoie sa taille s'il a bien été supprimé,
     /// `nil` sinon (fichier absent ou suppression refusée).
     @discardableResult
-    func remove(_ url: URL) -> Int? {
+    func remove(_ url: URL, expectedGeneration: Int? = nil) -> Int? {
+        mutationLock.lock()
+        defer { mutationLock.unlock() }
+        if let expectedGeneration, expectedGeneration != generation { return nil }
         let size = (try? url.resourceValues(forKeys: [.fileSizeKey]))?.fileSize ?? 0
         guard (try? FileManager.default.removeItem(at: url)) != nil else { return nil }
         return size
@@ -56,6 +64,9 @@ final class DiskDirectory {
 
     /// Liste récursive des fichiers du répertoire, avec taille et date.
     func entries() -> [DiskEntry] {
+        mutationLock.lock()
+        let scannedGeneration = generation
+        mutationLock.unlock()
         guard let enumerator = FileManager.default.enumerator(
             at: root,
             includingPropertiesForKeys: [.contentModificationDateKey, .fileSizeKey],
@@ -69,7 +80,8 @@ final class DiskDirectory {
             result.append(DiskEntry(
                 url: url,
                 size: values?.fileSize ?? 0,
-                date: values?.contentModificationDate ?? .distantPast
+                date: values?.contentModificationDate ?? .distantPast,
+                generation: scannedGeneration
             ))
         }
         return result
@@ -79,9 +91,26 @@ final class DiskDirectory {
         entries().reduce(0) { $0 + $1.size }
     }
 
-    /// Supprime tout le contenu et recrée la racine vide.
+    /// Renomme seulement le dossier sous verrou ; le grand ménage ne bloque
+    /// ni les écritures du nouveau cache ni l'acteur des miniatures.
     func purge() {
-        try? FileManager.default.removeItem(at: root)
-        createIfNeeded()
+        mutationLock.lock()
+        let discarded = root.deletingLastPathComponent()
+            .appendingPathComponent(".orvian-purge-\(UUID().uuidString)")
+        do {
+            if FileManager.default.fileExists(atPath: root.path) {
+                try FileManager.default.moveItem(at: root, to: discarded)
+            }
+            generation &+= 1
+            createIfNeeded()
+            mutationLock.unlock()
+            DispatchQueue.global(qos: .utility).async {
+                try? FileManager.default.removeItem(at: discarded)
+            }
+        } catch {
+            mutationLock.unlock()
+            // Une purge refusée laisse le cache intact ; aucun effacement
+            // récursif de repli sur le thread appelant.
+        }
     }
 }

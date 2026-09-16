@@ -17,6 +17,16 @@ enum TagOrderStore {
         defaults.set(ids, forKey: key(driveId: driveId))
     }
 
+    static func sorted(_ categories: [Category], order: [Int]?) -> [Category] {
+        guard let order, !order.isEmpty else { return categories }
+        let rank = Dictionary(order.enumerated().map { ($1, $0) }, uniquingKeysWith: { first, _ in first })
+        return categories.sorted {
+            let lhs = rank[$0.id] ?? Int.max
+            let rhs = rank[$1.id] ?? Int.max
+            return lhs != rhs ? lhs < rhs : $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending
+        }
+    }
+
     private static func key(driveId: Int) -> String {
         "tag-order-\(driveId)"
     }

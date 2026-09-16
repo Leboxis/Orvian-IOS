@@ -15,6 +15,7 @@ struct TagsView: View {
     @Binding var trail: [String]
 
     @State private var categories: [Category] = []
+    @State private var orderedCategories: [Category] = []
     @State private var isLoading = false
     /// Évite d'afficher provisoirement « (0) » avant la première réponse API.
     @State private var hasLoadedCategories = false
@@ -94,6 +95,8 @@ struct TagsView: View {
                     )
                 }
         }
+        .onChange(of: categories, initial: true) { _, _ in updateOrder() }
+        .onChange(of: customOrder) { _, _ in updateOrder() }
         .onChange(of: path.count) { _, newCount in
             if trail.count > newCount {
                 trail.removeLast(trail.count - newCount)
@@ -172,17 +175,6 @@ struct TagsView: View {
     /// Ordre d'affichage : ordre personnalisé si l'utilisateur l'a défini
     /// (bouton crayon), sinon l'ordre renvoyé par le serveur. Les tags créés
     /// après un réarrangement sont ajoutés à la fin.
-    private var orderedCategories: [Category] {
-        guard let customOrder, !customOrder.isEmpty else { return categories }
-        let rank = Dictionary(customOrder.enumerated().map { ($1, $0) }, uniquingKeysWith: { first, _ in first })
-        return categories.sorted { lhs, rhs in
-            let l = rank[lhs.id] ?? Int.max
-            let r = rank[rhs.id] ?? Int.max
-            if l != r { return l < r }
-            return lhs.name.localizedCaseInsensitiveCompare(rhs.name) == .orderedAscending
-        }
-    }
-
     private var grid: some View {
         ScrollView {
             LazyVGrid(columns: gridColumns, spacing: DS.gridSpacing) {
@@ -277,6 +269,15 @@ struct TagsView: View {
             RoundedRectangle(cornerRadius: 16, style: .continuous)
                 .strokeBorder(Color.accentColor.opacity(0.6), lineWidth: 1.5)
         }
+        .accessibilityElement(children: .combine)
+        .accessibilityActions {
+            if orderedCategories.first?.id != category.id {
+                Button("Monter") { moveCategory(category, by: -1) }
+            }
+            if orderedCategories.last?.id != category.id {
+                Button("Descendre") { moveCategory(category, by: 1) }
+            }
+        }
         .opacity(draggedCategory?.id == category.id ? 0.55 : 1)
         .onDrag {
             draggedCategory = category
@@ -288,6 +289,16 @@ struct TagsView: View {
             move: reorderCategory,
             finish: { draggedCategory = nil }
         ))
+    }
+
+    private func updateOrder() {
+        orderedCategories = TagOrderStore.sorted(categories, order: customOrder)
+    }
+
+    private func moveCategory(_ category: Category, by delta: Int) {
+        guard let index = orderedCategories.firstIndex(where: { $0.id == category.id }),
+              orderedCategories.indices.contains(index + delta) else { return }
+        reorderCategory(category, to: orderedCategories[index + delta])
     }
 
     /// Déplace `source` à la position de `target` dans l'ordre affiché, avec
@@ -303,6 +314,7 @@ struct TagsView: View {
                 fromOffsets: IndexSet(integer: fromIndex),
                 toOffset: toIndex > fromIndex ? toIndex + 1 : toIndex
             )
+            orderedCategories = ordered
             customOrder = ordered.map(\.id)
         }
         TagOrderStore.save(ordered.map(\.id), driveId: driveId)

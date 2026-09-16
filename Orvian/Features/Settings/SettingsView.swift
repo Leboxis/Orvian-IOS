@@ -17,7 +17,7 @@ struct SettingsView: View {
     @AppStorage("favoritesReselectScrollToTop") private var favoritesReselectScrollToTop = true
     @AppStorage("prefetchThumbnails") private var prefetchThumbnails = true
     @AppStorage("prefetchVideoURLs") private var prefetchVideoURLs = true
-    @AppStorage("prefetchOnWiFiOnly") private var prefetchOnWiFiOnly = false
+    @AppStorage("prefetchOnWiFiOnly") private var prefetchOnWiFiOnly = true
     @AppStorage("thumbnailCacheLimitMB") private var thumbnailCacheLimitMB = 250
     @AppStorage("hapticFeedbackEnabled") private var hapticFeedbackEnabled = true
     @AppStorage("defaultFolderColor") private var defaultFolderColor = "#4285F5"

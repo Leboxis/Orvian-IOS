@@ -49,7 +49,7 @@ struct FileGridView: View {
     private let mediaMetadata = MediaMetadataStore.shared
     @AppStorage("prefetchThumbnails") private var prefetchThumbnails = true
     @AppStorage("prefetchVideoURLs") private var prefetchVideoURLs = true
-    @AppStorage("prefetchOnWiFiOnly") private var prefetchOnWiFiOnly = false
+    @AppStorage("prefetchOnWiFiOnly") private var prefetchOnWiFiOnly = true
     @AppStorage("fileGridColumns") private var fileGridColumns = 3
     @AppStorage("foldersFirstInTags") private var foldersFirstInTags = true
     @State private var metadataRevision = 0

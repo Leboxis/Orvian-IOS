@@ -19,6 +19,8 @@ struct VideoPlayerView: View {
 
     @Environment(\.dismiss) private var dismiss
     @Environment(\.layoutDirection) private var layoutDirection
+    @Environment(\.accessibilityVoiceOverEnabled) private var voiceOverEnabled
+    @Environment(\.scenePhase) private var scenePhase
     @State private var player: AVPlayer?
     @State private var poster: UIImage?
 
@@ -35,7 +37,7 @@ struct VideoPlayerView: View {
     @State private var playbackRate: Float = 1
 
     // Son
-    @State private var isMuted = false
+    @AppStorage("videoMuted") private var isMuted = false
 
     // Favori
     @State private var isFavorite: Bool
@@ -157,6 +159,7 @@ struct VideoPlayerView: View {
             }
             .opacity(showControls ? 1 : 0)
             .allowsHitTesting(showControls)
+            .accessibilityHidden(!showControls)
             .animation(.easeInOut(duration: 0.25), value: showControls)
         }
         .onAppear {
@@ -194,6 +197,17 @@ struct VideoPlayerView: View {
             hideControlsTask?.cancel()
             onControlsInteractionChanged(false)
             teardown()
+        }
+        .onChange(of: isMuted) { _, muted in player?.isMuted = muted }
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .background { pausePlayback() }
+        }
+        .onChange(of: voiceOverEnabled) { _, enabled in
+            if enabled { showControls = true }
+            scheduleControlsAutoHide()
+        }
+        .onChange(of: showControls) { _, _ in
+            if let player { updateTimeObserver(for: player) }
         }
         .onChange(of: isTouchingControls) { _, isTouching in
             onControlsInteractionChanged(isTouching)
@@ -278,6 +292,7 @@ struct VideoPlayerView: View {
 
     private func scheduleControlsAutoHide(delay: Double = 2.5) {
         hideControlsTask?.cancel()
+        guard !voiceOverEnabled else { return }
         hideControlsTask = Task {
             try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
             guard !Task.isCancelled else { return }
@@ -290,6 +305,7 @@ struct VideoPlayerView: View {
     }
 
     private func toggleControls() {
+        guard !voiceOverEnabled else { showControls = true; return }
         withAnimation(.easeInOut(duration: 0.25)) {
             showControls.toggle()
         }
@@ -930,13 +946,12 @@ struct VideoPlayerView: View {
         startPlayback(asset: asset, at: recoveryPosition)
     }
 
-    private func addObservers(to player: AVPlayer) {
+    private func updateTimeObserver(for player: AVPlayer) {
+        if let timeObserver { player.removeTimeObserver(timeObserver) }
         timeObserver = player.addPeriodicTimeObserver(
-            // Huit mises à jour par seconde : visuellement identiques à 30
-            // pour un curseur de progression, mais avec trois fois moins de
-            // rendus SwiftUI pendant la lecture. Les mises à jour restent
-            // suspendues quand les contrôles sont invisibles.
-            forInterval: CMTime(value: 1, timescale: 8),
+            // Le chrome suit à 8 Hz quand il est visible. Caché, seul le
+            // suivi opérationnel (récupération/AirPlay) reste actif à 1 Hz.
+            forInterval: CMTime(value: 1, timescale: showControls ? 8 : 1),
             queue: .main
         ) { time in
             if playbackRetryCount > 0, !isScrubbing, !isSeeking,
@@ -944,6 +959,11 @@ struct VideoPlayerView: View {
                time.seconds.isFinite, time.seconds >= retryResetPosition + 2 {
                 playbackRetryCount = 0
             }
+            let externalPlaybackActive = player.isExternalPlaybackActive
+            if isExternalPlaybackActive != externalPlaybackActive {
+                isExternalPlaybackActive = externalPlaybackActive
+            }
+            guard showControls else { return }
             let itemDuration = player.currentItem?.duration.seconds ?? 0
             if itemDuration.isFinite, itemDuration > 0,
                abs(duration - itemDuration) > 0.01 {
@@ -966,11 +986,11 @@ struct VideoPlayerView: View {
             } else if bufferedEnd != 0 {
                 bufferedEnd = 0
             }
-            let externalPlaybackActive = player.isExternalPlaybackActive
-            if isExternalPlaybackActive != externalPlaybackActive {
-                isExternalPlaybackActive = externalPlaybackActive
-            }
         }
+    }
+
+    private func addObservers(to player: AVPlayer) {
+        updateTimeObserver(for: player)
         endObserver = NotificationCenter.default.addObserver(
             forName: .AVPlayerItemDidPlayToEndTime,
             object: player.currentItem,

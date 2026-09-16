@@ -61,12 +61,13 @@ struct TagsEditorSheet: View {
                 } else {
                     ScrollView {
                         LazyVGrid(columns: editorColumns, spacing: DS.gridSpacing) {
-                            ForEach(orderedCategories) { category in
+                            ForEach(categories) { category in
                                 tagCell(category)
                             }
                         }
                         .padding(.horizontal, DS.gridMargin)
                         .padding(.top, 6)
+                        .padding(.bottom, 12)
                         if let errorMessage {
                             Text(errorMessage)
                                 .font(.footnote)
@@ -75,7 +76,7 @@ struct TagsEditorSheet: View {
                                 .padding(.horizontal, 16)
                                 .padding(.bottom, 12)
                         }
-                        Color.clear.frame(height: 100)
+
                     }
                     .background(Color(uiColor: .systemGroupedBackground))
                 }
@@ -132,20 +133,6 @@ struct TagsEditorSheet: View {
         .disabled(pendingCategoryIds.contains(category.id))
     }
 
-    /// Même ordre que l'onglet Tag : ordre personnalisé s'il a été défini
-    /// (bouton crayon de l'onglet), sinon l'ordre du serveur. Les tags
-    /// inconnus de cet ordre sont ajoutés à la fin.
-    private var orderedCategories: [Category] {
-        guard let order = TagOrderStore.order(for: driveId) else { return categories }
-        let rank = Dictionary(order.enumerated().map { ($1, $0) }, uniquingKeysWith: { first, _ in first })
-        return categories.sorted { lhs, rhs in
-            let l = rank[lhs.id] ?? Int.max
-            let r = rank[rhs.id] ?? Int.max
-            if l != r { return l < r }
-            return lhs.name.localizedCaseInsensitiveCompare(rhs.name) == .orderedAscending
-        }
-    }
-
     private func load() async {
         isLoading = true
         loadError = nil
@@ -164,7 +151,7 @@ struct TagsEditorSheet: View {
                     appliedCategoryIds = Set((info.categories ?? []).map(\.categoryId))
                 }
             }
-            categories = Array(CategoryLibrary.shared.categories(for: driveId).values)
+            categories = TagOrderStore.sorted(CategoryLibrary.shared.categoryList(for: driveId), order: TagOrderStore.order(for: driveId))
         } catch {
             loadError = "Impossible de charger les tags : \(error.localizedDescription)"
         }

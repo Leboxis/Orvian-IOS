@@ -11,6 +11,7 @@ struct MediaTitlePill: View {
     /// (0,2 = 20 % de chaque côté, comme les barres historiques).
     let sideInsetFraction: CGFloat = 0.2
 
+    @State private var availableWidth: CGFloat = 0
     @State private var copied = false
     @State private var resetTask: Task<Void, Never>?
 
@@ -44,8 +45,9 @@ struct MediaTitlePill: View {
         .onDisappear {
             resetTask?.cancel()
         }
-        .padding(.horizontal, UIScreen.main.bounds.width * sideInsetFraction)
+        .padding(.horizontal, availableWidth * sideInsetFraction)
         .frame(maxWidth: .infinity)
+        .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { availableWidth = $0 }
     }
 
     private func scheduleReset() {

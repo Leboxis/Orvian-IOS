@@ -8,17 +8,13 @@ import SwiftUI
 /// sont recréés à chaque visite (leur pile de navigation vit dans
 /// `TabNavigationState`), ce qui limite la mémoire consommée.
 ///
-/// L'onglet courant, les piles et le routeur vivent dans `shell`
-/// (`MainTabShellState`), possédé par la session : `RootView` démonte cette
-/// vue au verrouillage, mais l'état de navigation est restitué au retour.
+/// Le verrouillage couvre cet arbre sans le démonter. Les présentations,
+/// positions de défilement et piles survivent au passage en arrière-plan.
 struct MainTabView: View {
     let drive: Drive
     let session: SessionStore
 
-    /// État d'interface possédé par la session : il survit au verrouillage.
-    /// L'arbre des onglets est démonté puis remonté quand un code est
-    /// configuré, mais cet objet reste le même — l'utilisateur retrouve son
-    /// onglet et ses piles de navigation au lieu de repartir de l'Accueil.
+    /// Navigation possédée par la session, remplacée au changement de drive.
     let shell: MainTabShellState
     @State private var showUploadSheet = false
     /// Hauteur mesurée des pastilles superposées à la barre d'onglets (bandeau

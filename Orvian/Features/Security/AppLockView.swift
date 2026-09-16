@@ -6,12 +6,13 @@ import LocalAuthentication
 /// Un tap sur le monogramme lance la biométrie (Face ID / Touch ID / Optic ID)
 /// sans avoir à saisir le code ; elle est aussi présentée automatiquement au
 /// retour d'arrière-plan (`autoPromptBiometrics`), jamais au premier lancement.
-/// Tant que le déverrouillage n'a pas eu lieu, le contenu de l'app n'est pas
-/// construit.
+/// Au premier lancement, le contenu attend le déverrouillage ; aux retours
+/// suivants, il reste conservé derrière la fenêtre de protection.
 struct AppLockView: View {
     var autoPromptBiometrics = false
     var onUnlock: () -> Void
 
+    @Environment(\.scenePhase) private var scenePhase
     @State private var code = ""
     @State private var shakeTrigger = 0
     @State private var showWrong = false
@@ -43,10 +44,15 @@ struct AppLockView: View {
                 .scrollBounceBehavior(.basedOnSize)
             }
         }
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .active, autoPromptBiometrics, biometricsAvailable {
+                authenticateWithBiometrics()
+            }
+        }
         .task {
             // Face ID est proposé d'office au retour d'arrière-plan,
             // mais pas au premier lancement de l'app.
-            if autoPromptBiometrics, biometricsAvailable { authenticateWithBiometrics() }
+            if scenePhase == .active, autoPromptBiometrics, biometricsAvailable { authenticateWithBiometrics() }
             while !Task.isCancelled {
                 retryAfter = AppLockStore.retryAfter
                 do { try await Task.sleep(for: .seconds(1)) } catch { return }
@@ -148,7 +154,7 @@ struct AppLockView: View {
     /// Authentification biométrique locale : en cas de succès, le code n'est
     /// pas requis. L'échec laisse la saisie du code disponible.
     private func authenticateWithBiometrics() {
-        guard !isAuthenticating, !isCheckingCode else { return }
+        guard scenePhase == .active, !isAuthenticating, !isCheckingCode else { return }
         let context = LAContext()
         var error: NSError?
         guard context.canEvaluatePolicy(.deviceOwnerAuthenticationWithBiometrics, error: &error) else {

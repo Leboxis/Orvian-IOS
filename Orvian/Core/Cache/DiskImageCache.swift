@@ -68,7 +68,7 @@ final class DiskImageCache: @unchecked Sendable {
         let namespacedRoot = directory.url(Self.formatDirectory).standardizedFileURL.path + "/"
         var cleanupSucceeded = true
         for entry in directory.entries() where !entry.url.standardizedFileURL.path.hasPrefix(namespacedRoot) {
-            if directory.remove(entry.url) == nil {
+            if directory.remove(entry.url, expectedGeneration: entry.generation) == nil {
                 cleanupSucceeded = false
             }
         }
@@ -284,7 +284,7 @@ final class DiskImageCache: @unchecked Sendable {
 
             for entry in entries {
                 guard currentTotal > lowWaterMark else { break }
-                if let size = directory.remove(entry.url) {
+                if let size = directory.remove(entry.url, expectedGeneration: entry.generation) {
                     currentTotal -= size
                     bytesDeleted += size
                 }

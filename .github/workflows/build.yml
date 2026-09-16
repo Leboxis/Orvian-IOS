@@ -63,6 +63,9 @@ jobs:
           path.write_text(updated, encoding="utf-8")
           PY
 
+      - name: Check concurrency and bounded caches
+        run: python3 .github/scripts/check_concurrency.py
+
       - name: Check favorites disk cache
         run: python3 .github/scripts/check_favorites_cache.py
 

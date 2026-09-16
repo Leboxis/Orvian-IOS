@@ -14,6 +14,7 @@ final class RecentUploadsLoader {
 
     private struct InFlight {
         let id: UUID
+        let requiresNetwork: Bool
         /// Une lecture forcée peut satisfaire tous les appelants. L'inverse
         /// est faux : un geste manuel ne doit pas rejoindre une revalidation
         /// ordinaire susceptible d'utiliser le cache HTTP.
@@ -74,6 +75,7 @@ final class RecentUploadsLoader {
             inFlight.task.cancel()
         }
 
+        let credential = TokenStore.credentialFingerprint()
         let requestID = UUID()
         let requestStartedAt = Date().timeIntervalSince1970
         let task = Task { [service] in
@@ -86,6 +88,7 @@ final class RecentUploadsLoader {
             ),
                   !Task.isCancelled
             else { return cached }
+            guard !Task.isCancelled, credential == TokenStore.credentialFingerprint() else { return nil }
             let serverFiles = (page.data ?? []).filter { !$0.isDirectory }
             // Si un upload s'est terminé pendant l'aller-retour, une réponse
             // d'index encore en retard ne doit pas faire disparaître sa carte.

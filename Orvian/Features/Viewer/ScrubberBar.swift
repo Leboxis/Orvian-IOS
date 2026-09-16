@@ -33,6 +33,25 @@ struct ScrubberBar: View {
                 .gesture(dragGesture(width: width, duration: safeDuration))
         }
         .frame(height: 46)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Position de lecture")
+        .accessibilityValue(duration.isFinite && duration > 0
+            ? "\(timeFormatter(position.isFinite ? max(0, position) : 0)) sur \(timeFormatter(duration))"
+            : "Durée indisponible")
+        .accessibilityHint("Balayez vers le haut ou le bas pour avancer ou reculer de dix secondes")
+        .accessibilityAdjustableAction { direction in
+            guard duration.isFinite, duration > 0 else { return }
+            let delta: Double
+            switch direction {
+            case .increment: delta = 10
+            case .decrement: delta = -10
+            @unknown default: return
+            }
+            let target = min(duration, max(0, (position.isFinite ? position : 0) + delta))
+            onDragStarted()
+            onDragChanged(target)
+            onDragEnded(target)
+        }
         .animation(.snappy(duration: 0.18), value: isScrubbing)
         .onChange(of: isDragging) { _, dragging in
             // GestureState se réinitialise aussi si le système annule le geste,
