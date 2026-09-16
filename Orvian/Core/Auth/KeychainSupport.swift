@@ -99,10 +99,24 @@ final class CachedSecureValue: @unchecked Sendable {
     func current() -> String? {
         lock.lock()
         defer { lock.unlock() }
-        if hasLoaded { return cached }
+        loadIfNeeded()
+        return cached
+    }
+
+    private func loadIfNeeded() {
+        guard !hasLoaded else { return }
         cached = KeychainSupport.read(service: service, account: account, fallbackKey: fallbackKey)
         hasLoaded = true
-        return cached
+    }
+
+    /// Lecture et vérification de persistance sous une seule section critique :
+    /// clear() ne peut pas s'intercaler puis être annulé par une ancienne valeur.
+    func prepare() -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        loadIfNeeded()
+        guard let cached else { return true }
+        return KeychainSupport.write(cached, service: service, account: account, fallbackKey: fallbackKey)
     }
 
     @discardableResult

@@ -29,8 +29,8 @@ func mapBounded<T: Sendable, R: Sendable>(
             results[index] = result
             if nextIndex < items.count {
                 let index = nextIndex
-            let item = items[index]
-            group.addTask { (index, await operation(item)) }
+                let item = items[index]
+                group.addTask { (index, await operation(item)) }
                 nextIndex += 1
             }
         }

@@ -14,7 +14,6 @@ final class RecentUploadsLoader {
 
     private struct InFlight {
         let id: UUID
-        let requiresNetwork: Bool
         /// Une lecture forcée peut satisfaire tous les appelants. L'inverse
         /// est faux : un geste manuel ne doit pas rejoindre une revalidation
         /// ordinaire susceptible d'utiliser le cache HTTP.
@@ -30,6 +29,7 @@ final class RecentUploadsLoader {
 
     /// Retourne le cache mémoire ou disque sans attendre le réseau.
     func cachedSnapshot(driveId: Int) async -> DirectoryListSnapshot? {
+        let credential = TokenStore.credentialFingerprint()
         if let memory = DirectoryListStore.shared.snapshot(
             source: Self.source, driveId: driveId, orderBy: [], order: "asc"
         ) {
@@ -37,7 +37,7 @@ final class RecentUploadsLoader {
         }
         guard let disk = await DirectoryListStore.shared.diskSnapshot(
             source: Self.source, driveId: driveId, orderBy: [], order: "asc"
-        ) else { return nil }
+        ), credential == TokenStore.credentialFingerprint(), !Task.isCancelled else { return nil }
         DirectoryListStore.shared.store(
             source: Self.source,
             driveId: driveId,
@@ -87,7 +87,7 @@ final class RecentUploadsLoader {
                 forceNetwork: forcesNetwork
             ),
                   !Task.isCancelled
-            else { return cached }
+            else { return credential == TokenStore.credentialFingerprint() && !Task.isCancelled ? cached : nil }
             guard !Task.isCancelled, credential == TokenStore.credentialFingerprint() else { return nil }
             let serverFiles = (page.data ?? []).filter { !$0.isDirectory }
             // Si un upload s'est terminé pendant l'aller-retour, une réponse
@@ -138,6 +138,12 @@ final class RecentUploadsLoader {
             inFlightByDrive[driveId] = nil
         }
         return result
+    }
+
+    func clear() {
+        inFlightByDrive.values.forEach { $0.task.cancel() }
+        inFlightByDrive.removeAll()
+        restoredFromDisk.removeAll()
     }
 
     func prefetch(driveId: Int) async {

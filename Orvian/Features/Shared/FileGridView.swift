@@ -54,6 +54,8 @@ struct FileGridView: View {
     @AppStorage("foldersFirstInTags") private var foldersFirstInTags = true
     @State private var metadataRevision = 0
     @State private var prefetchTask: Task<Void, Never>?
+    @State private var paginationTask: Task<Void, Never>?
+    @State private var paginationRequestID: UUID?
     @State private var sortReloadTask: Task<Void, Never>?
     @State private var mutationReloadTask: Task<Void, Never>?
     @State private var videoMetadataResolutionCount = 0
@@ -122,6 +124,9 @@ struct FileGridView: View {
                 }
             }
             .onDisappear {
+                paginationTask?.cancel()
+                paginationTask = nil
+                paginationRequestID = nil
                 prefetchTask?.cancel()
                 prefetchTask = nil
                 sortReloadTask?.cancel()
@@ -458,7 +463,7 @@ struct FileGridView: View {
                 Text(message)
             } actions: {
                 Button("Réessayer") {
-                    Task { await loadMoreAfterMetadataResolution() }
+                    requestMoreFiles()
                 }
                 .buttonStyle(.borderedProminent)
             }
@@ -513,6 +518,21 @@ struct FileGridView: View {
         videoMetadataResolutionCount += 1
         defer { videoMetadataResolutionCount -= 1 }
         await mediaMetadata.resolveAll(driveId: viewModel.driveId, items: items)
+    }
+
+    private func requestMoreFiles() {
+        guard paginationTask == nil else { return }
+        let requestID = UUID()
+        paginationRequestID = requestID
+        paginationTask = Task {
+            defer {
+                if paginationRequestID == requestID {
+                    paginationTask = nil
+                    paginationRequestID = nil
+                }
+            }
+            await loadMoreAfterMetadataResolution()
+        }
     }
 
     private func loadMoreAfterMetadataResolution() async {
@@ -576,7 +596,7 @@ struct FileGridView: View {
 
     private var retryRow: some View {
         Button {
-            Task { await loadMoreAfterMetadataResolution() }
+            requestMoreFiles()
         } label: {
             Label("Réessayer", systemImage: "arrow.clockwise")
                 .font(.footnote)
@@ -627,7 +647,7 @@ struct FileGridView: View {
     /// travail prévu pour les cartes déjà dépassées.
     private func appeared(file: DriveFile, index: Int, in siblings: [DriveFile]) {
         if index >= siblings.count - 6 {
-            Task { await loadMoreAfterMetadataResolution() }
+            requestMoreFiles()
         }
 
         let ahead = siblings.dropFirst(index + 1).prefix(3)

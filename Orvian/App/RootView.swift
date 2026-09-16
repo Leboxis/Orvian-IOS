@@ -61,6 +61,7 @@ struct RootView: View {
                         }
                     }
                 }
+                .environment(\.scenePhase, scenePhase)
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: .apiUnauthorized)) { notification in

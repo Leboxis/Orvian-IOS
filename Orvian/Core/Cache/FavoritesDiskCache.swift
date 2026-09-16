@@ -4,7 +4,7 @@ import CryptoKit
 /// Cache disque historique des favoris, également réutilisé pour le petit
 /// aperçu des fichiers récents. Les I/O et le codage JSON restent hors du
 /// thread principal. La file série ordonne aussi écritures et purge de logout.
-final class FavoritesDiskCache {
+final class FavoritesDiskCache: @unchecked Sendable {
     static let shared = FavoritesDiskCache()
 
     private let queue = DispatchQueue(label: "com.orvian.favorites-cache", qos: .utility)

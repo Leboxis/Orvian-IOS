@@ -46,19 +46,21 @@ final class SessionStore {
     /// Au lancement : si un token existe, retrouve compte + drive sélectionné.
     func bootstrap() async {
         let generation = sessionGeneration
-        await TokenStore.prepare()
+        let persisted = await TokenStore.prepare()
         guard !Task.isCancelled, generation == sessionGeneration else { return }
-        guard let token = TokenStore.current() else {
+        guard TokenStore.current() != nil else {
             phase = .signedOut
             return
         }
-        usesTemporaryCredentials = !TokenStore.save(token)
+        usesTemporaryCredentials = !persisted
         signedOutMessage = nil
         phase = .bootstrapping
         do {
             try await loadDrives(preferredDriveId: defaults.object(forKey: Keys.driveId) as? Int)
+            guard generation == sessionGeneration else { return }
             phase = .signedIn
         } catch {
+            guard generation == sessionGeneration, !(error is CancellationError) else { return }
             if error is APIError, (error as? APIError)?.isUnauthorized == true {
                 clearSession(message: Self.expiredSessionMessage)
             } else {
@@ -70,6 +72,7 @@ final class SessionStore {
     /// Connexion avec un token collé par l'utilisateur.
     func signIn(token: String) async throws {
         sessionGeneration &+= 1
+        let generation = sessionGeneration
         discardMediaLinks()
         signedOutMessage = nil
         DirectoryListStore.shared.clear()
@@ -83,6 +86,7 @@ final class SessionStore {
             }
             phase = .signedIn
         } catch {
+            guard generation == sessionGeneration else { throw CancellationError() }
             clearSession(message: nil)
             throw error
         }
@@ -122,6 +126,7 @@ final class SessionStore {
     }
 
     private func discardMediaLinks() {
+        RecentUploadsLoader.shared.clear()
         guard let credential = TokenStore.credentialFingerprint() else { return }
         Task { await MediaURLCache.shared.clear(credentialFingerprint: credential) }
     }
@@ -147,13 +152,16 @@ final class SessionStore {
     // MARK: - Internes
 
     private func loadDrives(preferredDriveId: Int?) async throws {
+        let generation = sessionGeneration
         if let stored = defaults.object(forKey: Keys.accountId) as? Int,
            let list = try? await service.drives(accountId: stored), !list.isEmpty {
+            guard !Task.isCancelled, generation == sessionGeneration else { throw CancellationError() }
             apply(list, accountId: stored, preferredDriveId: preferredDriveId)
             return
         }
 
         let (accountId, list) = try await service.discoverDrives()
+        guard !Task.isCancelled, generation == sessionGeneration else { throw CancellationError() }
         defaults.set(accountId, forKey: Keys.accountId)
         apply(list, accountId: accountId, preferredDriveId: preferredDriveId)
     }

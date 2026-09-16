@@ -14,9 +14,9 @@ enum TokenStore {
     )
 
     /// Chauffe le cache sécurisé avant de construire les écrans connectés.
-    static func prepare() async {
+    static func prepare() async -> Bool {
         await Task.detached(priority: .userInitiated) {
-            _ = store.current()
+            store.prepare()
         }.value
     }
 

@@ -14,7 +14,7 @@ enum ResponseDecoder {
         try Task.checkCancellation()
         let result: T = try await withCheckedThrowingContinuation { continuation in
             queue.addOperation {
-                do { continuation.resume(returning: try JSONDecoder().decode(type, from: data)) }
+                do { continuation.resume(returning: try JSONDecoder().decode(T.self, from: data)) }
                 catch { continuation.resume(throwing: APIError.decoding(error, raw: Data(data.prefix(16_384)))) }
             }
         }
