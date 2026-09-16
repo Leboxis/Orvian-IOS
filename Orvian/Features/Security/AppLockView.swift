@@ -26,48 +26,22 @@ struct AppLockView: View {
         ZStack {
             Color(uiColor: .systemGroupedBackground).ignoresSafeArea()
 
-            VStack(spacing: 24) {
-                Spacer(minLength: 24)
-
-                AppMark()
-                    .font(.system(size: 40, weight: .bold))
-                    .onTapGesture(perform: authenticateWithBiometrics)
-                    .accessibilityLabel(biometricsAvailable ? "Déverrouiller avec \(biometryName)" : "Logo Orvian")
-                    .accessibilityHint(biometricsAvailable ? "Lance l'authentification biométrique" : "")
-
-                VStack(spacing: 6) {
-                    Text("Orvian verrouillé")
-                        .font(.title2.bold())
-                    Text("Entrez votre code pour accéder à l'app")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
+            GeometryReader { proxy in
+                ScrollView(.vertical) {
+                    if proxy.size.width > proxy.size.height {
+                        landscapeContent
+                            .padding(.horizontal, 24)
+                            .padding(.vertical, 16)
+                            .frame(maxWidth: .infinity, minHeight: proxy.size.height)
+                    } else {
+                        portraitContent
+                            .padding(.horizontal, 20)
+                            .frame(maxWidth: .infinity, minHeight: proxy.size.height)
+                    }
                 }
-
-                CodeDots(filledCount: code.count, length: codeLength, isError: showWrong)
-                    .modifier(ShakeEffect(animatableData: CGFloat(shakeTrigger)))
-                    .animation(.easeInOut(duration: 0.45), value: shakeTrigger)
-
-                if retryAfter > 0 {
-                    Text("Réessayez dans \(retryAfter) s")
-                        .font(.footnote).monospacedDigit()
-                        .foregroundStyle(.secondary)
-                }
-
-                if showWrong || biometricsMessage != nil {
-                    Label(biometricsMessage ?? "Code incorrect", systemImage: "xmark.circle.fill")
-                        .font(.footnote.weight(.semibold))
-                        .foregroundStyle(showWrong ? .red : .secondary)
-                        .transition(.opacity.combined(with: .move(edge: .top)))
-                }
-
-                Spacer()
-                Spacer(minLength: 0)
-
-                CodeKeypad(onDigit: handleDigit, onDelete: handleDelete)
-                    .disabled(isCheckingCode || isAuthenticating || showWrong || retryAfter > 0)
-                    .padding(.bottom, 24)
+                .scrollIndicators(.hidden)
+                .scrollBounceBehavior(.basedOnSize)
             }
-            .padding(.horizontal, 24)
         }
         .task {
             // Face ID est proposé d'office au retour d'arrière-plan,
@@ -78,6 +52,76 @@ struct AppLockView: View {
                 do { try await Task.sleep(for: .seconds(1)) } catch { return }
             }
         }
+    }
+
+    /// En portrait, conserve la composition historique. Le `ScrollView`
+    /// parent ne bouge que si une petite hauteur ou Dynamic Type l'exige.
+    private var portraitContent: some View {
+        VStack(spacing: 24) {
+            Spacer(minLength: 24)
+            lockIdentity
+            Spacer(minLength: 16)
+            keypad
+                .padding(.bottom, 24)
+        }
+    }
+
+    /// En paysage, place le pavé à côté de l'identité plutôt que sous
+    /// celle-ci. Les quatre rangées restent ainsi visibles sur une faible
+    /// hauteur ; le défilement reste un filet de sécurité pour le texte agrandi.
+    private var landscapeContent: some View {
+        HStack(spacing: 24) {
+            lockIdentity
+                .frame(maxWidth: .infinity)
+            keypad
+        }
+    }
+
+    private var lockIdentity: some View {
+        VStack(spacing: 20) {
+            AppMark()
+                .font(.system(size: 40, weight: .bold))
+                .onTapGesture(perform: authenticateWithBiometrics)
+                .accessibilityLabel(biometricsAvailable ? "Déverrouiller avec \(biometryName)" : "Logo Orvian")
+                .accessibilityHint(biometricsAvailable ? "Lance l'authentification biométrique" : "")
+
+            VStack(spacing: 6) {
+                Text("Orvian verrouillé")
+                    .font(.title2.bold())
+                Text("Entrez votre code pour accéder à l'app")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+            }
+            .multilineTextAlignment(.center)
+
+            CodeDots(filledCount: code.count, length: codeLength, isError: showWrong)
+                .modifier(ShakeEffect(animatableData: CGFloat(shakeTrigger)))
+                .animation(.easeInOut(duration: 0.45), value: shakeTrigger)
+
+            statusMessage
+        }
+    }
+
+    @ViewBuilder
+    private var statusMessage: some View {
+        if retryAfter > 0 {
+            Text("Réessayez dans \(retryAfter) s")
+                .font(.footnote).monospacedDigit()
+                .foregroundStyle(.secondary)
+        }
+
+        if showWrong || biometricsMessage != nil {
+            Label(biometricsMessage ?? "Code incorrect", systemImage: "xmark.circle.fill")
+                .font(.footnote.weight(.semibold))
+                .foregroundStyle(showWrong ? .red : .secondary)
+                .multilineTextAlignment(.center)
+                .transition(.opacity.combined(with: .move(edge: .top)))
+        }
+    }
+
+    private var keypad: some View {
+        CodeKeypad(onDigit: handleDigit, onDelete: handleDelete)
+            .disabled(isCheckingCode || isAuthenticating || showWrong || retryAfter > 0)
     }
 
     // MARK: - Biométrie

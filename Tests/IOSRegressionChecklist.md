@@ -12,6 +12,12 @@ utilisent des secrets factices et des transferts simulés, sans compte kDrive.
 
 ## Parcours à vérifier sur iPhone / simulateur
 
+- Verrouillage par code : en portrait puis en paysage, toutes les touches
+  restent visibles et utilisables. Répéter avec Dynamic Type au maximum ; si
+  le contenu dépasse, il doit défiler sans réduire les cibles tactiles.
+- Profil : ouvrir l'onglet pendant son préchargement puis retoucher Profil.
+  La seconde action doit lancer une nouvelle lecture serveur forcée et son
+  résultat doit rester affiché même si la première requête termine plus tard.
 - Import : simuler une confirmation perdue après réception du fichier. Aucun
   second envoi automatique ni bouton Réessayer ; le message demande de vérifier
   le dossier kDrive. Vérifier aussi la clôture d'un fichier de plus de 95 Mio.
