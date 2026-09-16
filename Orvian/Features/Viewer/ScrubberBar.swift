@@ -89,8 +89,11 @@ struct ScrubberBar: View {
                 .frame(width: max(width * positionRatio, barHeight), height: barHeight)
             Circle()
                 .fill(.white)
+                // Pas d'ombre : elle force une passe de rendu hors écran à chaque
+                // frame (4x/s en lecture, 60 Hz en drag) pour un pouce déjà
+                // contrasté sur fond sombre. L'anneau fin garde le relief.
+                .overlay(Circle().stroke(.black.opacity(0.25), lineWidth: 0.5))
                 .frame(width: thumbSize, height: thumbSize)
-                .shadow(color: .black.opacity(0.35), radius: 2, y: 1)
                 .offset(x: min(max(width * positionRatio - thumbSize / 2, 0), max(width - thumbSize, 0)))
         }
         .frame(width: width, alignment: .leading)

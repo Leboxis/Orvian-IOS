@@ -27,4 +27,17 @@ final class NetworkMonitor: @unchecked Sendable {
         defer { lock.unlock() }
         return currentPath?.usesInterfaceType(.wifi) ?? false
     }
+
+    /// Vrai uniquement quand on SAIT que la connexion n'est pas du Wi-Fi.
+    /// Tant que l'état est inconnu (premières secondes après l'ouverture),
+    /// on suppose le Wi-Fi : la première vidéo ne doit pas être pénalisée
+    /// par une petite réserve alors qu'on est en réalité sur Wi-Fi.
+    /// (Le préchargement anticipé, lui, reste bloqué tant que ce n'est pas
+    /// confirmé — ne pas confondre prudence sur l'anticipé et qualité du direct.)
+    var isKnownNonWiFi: Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        guard let path = currentPath else { return false }
+        return !path.usesInterfaceType(.wifi)
+    }
 }
