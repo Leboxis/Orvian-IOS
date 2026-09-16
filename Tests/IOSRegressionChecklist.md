@@ -153,6 +153,8 @@ nombre de négociations TLS évitées ni gain de durée n'est garanti sans mesur
 
 Automatisation : `check_concurrency.py` vérifie le partage/annulation des
 requêtes, la fenêtre glissante, les générations de purge, le décodage, la
-capacité et l’expiration des URLs. `OrvianTests` exécute sur simulateur la
-protection d’une présentation plein écran et la disposition compacte du pavé.
-Les captures clair/sombre sont conservées dans le résultat XCTest.
+capacité et l’expiration des URLs. `OrvianTests` (dont `PrivacyWindowTests`)
+reste jouable en local via Xcode sur simulateur : protection d’une
+présentation plein écran et disposition compacte du pavé, avec captures
+clair/sombre dans le résultat XCTest. La CI ne l’exécute plus (retirée pour
+la durée des runs) : ces parcours sont à vérifier à la main.
