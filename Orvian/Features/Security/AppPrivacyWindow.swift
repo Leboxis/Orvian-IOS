@@ -14,9 +14,9 @@ final class AppPrivacyState: ObservableObject {
         var generation = 0
     }
     @Published private(set) var snapshot = Snapshot()
-    private let isLockConfigured: () -> Bool
+    private let isLockConfigured: @MainActor () -> Bool
 
-    init(isLockConfigured: @escaping () -> Bool = { AppLockStore.isConfigured }) {
+    init(isLockConfigured: @escaping @MainActor () -> Bool = { AppLockStore.isConfigured }) {
         self.isLockConfigured = isLockConfigured
     }
 
@@ -73,6 +73,7 @@ private struct LockPresentation: View {
 
 /// Une fenêtre au-dessus des présentations SwiftUI/UIKit. Sa mise à jour
 /// s'abonne à l'état, sans attendre updateUIView d'un écran devenu invisible.
+@MainActor
 struct AppPrivacyWindow: UIViewRepresentable {
     let state: AppPrivacyState
 
@@ -103,6 +104,7 @@ struct AppPrivacyWindow: UIViewRepresentable {
         }
     }
 
+    @MainActor
     final class Coordinator {
         private let state: AppPrivacyState
         private weak var owner: UIWindow?

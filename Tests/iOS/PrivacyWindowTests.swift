@@ -32,7 +32,7 @@ final class PrivacyWindowTests: XCTestCase {
         try await Task.sleep(for: .milliseconds(250))
     }
 
-    func testOldUnlockCannotBypassANewBackgroundLock() {
+    func testOldUnlockCannotBypassANewBackgroundLock() async {
         let privacy = AppPrivacyState(isLockConfigured: { true })
         let oldGeneration = privacy.snapshot.generation
         privacy.transition(to: .background)
@@ -83,8 +83,8 @@ final class PrivacyWindowTests: XCTestCase {
         host.present(photo, animated: false)
         try await settle()
 
-        privacy.transition(to: .background)
-        privacy.transition(to: .active)
+        NotificationCenter.default.post(name: UIScene.didEnterBackgroundNotification, object: scene)
+        NotificationCenter.default.post(name: UIScene.didActivateNotification, object: scene)
         try await settle()
         let shield = try XCTUnwrap(scene.windows.first { !$0.isHidden && $0.windowLevel > .alert })
         XCTAssertTrue(shield.isKeyWindow)
