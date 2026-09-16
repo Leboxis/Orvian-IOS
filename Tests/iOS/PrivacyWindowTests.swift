@@ -83,20 +83,21 @@ final class PrivacyWindowTests: XCTestCase {
         host.present(photo, animated: false)
         try await settle()
 
+        // D'abord l'arrière-plan seul : le bouclier doit déjà couvrir la photo
+        // et détenir la clé. L'activation suit ensuite (le déverrouillage
+        // exige la phase active). Deux raisons à cet ordre : la vraie app hôte
+        // partage la scène et, à l'activation, elle masque son propre bouclier
+        // puis redonne la clé à sa fenêtre — ce qui volerait la clé du bouclier
+        // du test si on contrôlait après les deux notifications d'un coup.
+        // Et on lit la fenêtre clé plutôt que la première fenêtre d'alerte :
+        // l'hôte crée lui aussi un bouclier visible à l'arrière-plan, le dernier
+        // `makeKey` (celui du test, observateur enregistré après celui de
+        // l'app) désigne le nôtre sans ambiguïté d'ordre du tableau.
         NotificationCenter.default.post(name: UIScene.didEnterBackgroundNotification, object: scene)
-        NotificationCenter.default.post(name: UIScene.didActivateNotification, object: scene)
         try await settle()
-        let shield = try XCTUnwrap(scene.windows.first { !$0.isHidden && $0.windowLevel > .alert })
-        // La transition de présentation plein écran peut encore se régler quand
-        // le bouclier devient clé : on l'attend (plutôt qu'un unique contrôle
-        // après 250 ms). Si le bouclier ne devient jamais clé, le test échoue
-        // quand même au bout du délai — le signal est conservé.
-        var keyWindowAttempts = 0
-        while !shield.isKeyWindow, keyWindowAttempts < 20 {
-            try await Task.sleep(for: .milliseconds(100))
-            keyWindowAttempts += 1
-        }
-        XCTAssertTrue(shield.isKeyWindow)
+        let shield = try XCTUnwrap(scene.keyWindow)
+        XCTAssertTrue(!shield.isHidden && shield.windowLevel > .alert)
+        XCTAssertTrue(shield !== owner)
         XCTAssertTrue(owner.accessibilityElementsHidden)
         XCTAssertTrue(host.presentedViewController === photo)
         let protectedImage = UIGraphicsImageRenderer(bounds: shield.bounds).image { _ in
@@ -108,6 +109,8 @@ final class PrivacyWindowTests: XCTestCase {
         add(protectedAttachment)
         let mounts = state.mounts
 
+        NotificationCenter.default.post(name: UIScene.didActivateNotification, object: scene)
+        try await settle()
         privacy.unlock(generation: privacy.snapshot.generation)
         try await settle()
         XCTAssertTrue(shield.isHidden)
