@@ -28,11 +28,31 @@ jobs:
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         shell: bash
         run: |
+          # Règle de numérotation : patch +1 à chaque push, minor +1 tous les
+          # 10 pushes (compteur = commits mainline hors releases auto du bot).
           LATEST_TAG=$(git tag --list 'v[0-9]*' --sort=-version:refname | head -n 1)
           if [[ -z "$LATEST_TAG" ]]; then
-            NEXT_VERSION="0.1.0"
+            NEXT_VERSION="0.9.0"
           elif [[ "$LATEST_TAG" =~ ^v([0-9]+)\.([0-9]+)\.([0-9]+)$ ]]; then
-            NEXT_VERSION="${BASH_REMATCH[1]}.${BASH_REMATCH[2]}.$((BASH_REMATCH[3] + 1))"
+            MAJOR="${BASH_REMATCH[1]}"
+            MINOR="${BASH_REMATCH[2]}"
+            PATCH="${BASH_REMATCH[3]}"
+            if [[ "$MAJOR" -eq 0 && "$MINOR" -lt 9 ]]; then
+              NEXT_VERSION="0.9.0"
+            else
+              BASE_TAG=$(git tag --list 'v[0-9]*.[0-9]*.0' --sort=-version:refname | head -n 1)
+              PUSHES=$(git rev-list --count --first-parent "${BASE_TAG}..HEAD" --invert-grep --grep="^Release Orvian ")
+              if [[ "$PUSHES" -gt 0 && $((PUSHES % 10)) -eq 0 ]]; then
+                if [[ "$BASE_TAG" =~ ^v([0-9]+)\.([0-9]+)\.0$ ]]; then
+                  NEXT_VERSION="${BASH_REMATCH[1]}.$((BASH_REMATCH[2] + 1)).0"
+                else
+                  echo "Tag de base invalide : $BASE_TAG" >&2
+                  exit 1
+                fi
+              else
+                NEXT_VERSION="${MAJOR}.${MINOR}.$((PATCH + 1))"
+              fi
+            fi
           else
             echo "Version de tag invalide : $LATEST_TAG" >&2
             exit 1

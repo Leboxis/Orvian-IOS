@@ -70,7 +70,7 @@ Le dépôt ne contient **pas** de `.xcodeproj` : il est généré par [XcodeGen]
 
 1. Poussez ce dépôt sur GitHub
 2. Chaque push sur `main` produit un artefact **IPA non signé** (onglet Actions du repo)
-3. Chaque push sur `main` crée aussi automatiquement la prochaine version, sa **Release** et met à jour la source LiveContainer
+3. Chaque push sur `main` crée aussi automatiquement la prochaine version, sa **Release** et met à jour la source LiveContainer. Numérotation : patch +1 à chaque push (`0.9.3` → `0.9.4`), minor +1 tous les 10 pushes (`0.9.9` → `0.10.0`). Série actuelle : `0.9.x`.
 4. Téléchargez l'IPA sur l'iPhone → partagez-le vers **LiveContainer** → importez
 
 **En local (macOS)** :
