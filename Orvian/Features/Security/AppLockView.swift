@@ -10,6 +10,10 @@ import LocalAuthentication
 /// suivants, il reste conservé derrière la fenêtre de protection.
 struct AppLockView: View {
     var autoPromptBiometrics = false
+    /// Succès biométrique uniquement (le code utilise `onUnlock`). Séparé car
+    /// Face ID prend 1 à 3 s : un jeton capturé au lancement de l'invite peut
+    /// être périmé à son retour. Par défaut, repli sur `onUnlock`.
+    var onBiometricUnlock: (() -> Void)?
     var onUnlock: () -> Void
 
     @Environment(\.scenePhase) private var scenePhase
@@ -193,7 +197,7 @@ struct AppLockView: View {
         context.evaluatePolicy(
             .deviceOwnerAuthenticationWithBiometrics,
             localizedReason: "Déverrouiller Orvian"
-        ) { success, _ in
+        ) { success, error in
             DispatchQueue.main.async {
                 guard generation == authenticationGeneration else { return }
                 authenticationContext = nil
@@ -201,9 +205,21 @@ struct AppLockView: View {
                 if success {
                     AppLockStore.resetAttempts()
                     AppLockHaptics.success()
-                    onUnlock()
+                    (onBiometricUnlock ?? onUnlock)()
                 } else {
                     AppLockHaptics.failure()
+                    // Un échec biométrique était silencieux : l'utilisateur
+                    // voyait Face ID réussir son animation sans comprendre
+                    // pourquoi l'app restait verrouillée (verrouillage Face ID
+                    // après trop d'essais, annulation…). On l'affiche.
+                    withAnimation(.snappy(duration: 0.2)) {
+                        biometricsMessage = (error as? LAError)?.localizedDescription
+                            ?? error?.localizedDescription
+                            ?? "Échec de Face ID : utilisez votre code."
+                    }
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 2.4) {
+                        withAnimation(.snappy(duration: 0.2)) { biometricsMessage = nil }
+                    }
                 }
             }
         }

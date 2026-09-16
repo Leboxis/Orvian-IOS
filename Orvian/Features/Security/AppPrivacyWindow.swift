@@ -53,6 +53,20 @@ final class AppPrivacyState: ObservableObject {
         next.hasPresentedContent = true
         snapshot = next
     }
+
+    /// Succès biométrique : AppLockView invalide déjà toute invite d'une
+    /// session précédente (arrière-plan ou disparition annule le contexte LA,
+    /// qui ne rappelle alors jamais). Seule une invite de la session courante
+    /// peut donc aboutir ici : la génération courante fait foi, sans jeton
+    /// capturé au lancement de l'invite qui pourrait être périmé (Face ID
+    /// prend 1 à 3 s, le code ~0,3 s). Le code garde `unlock(generation:)`.
+    func unlockAfterBiometrics() {
+        guard snapshot.phase == .active else { return }
+        var next = snapshot
+        next.isUnlocked = true
+        next.hasPresentedContent = true
+        snapshot = next
+    }
 }
 
 private struct LockPresentation: View {
@@ -62,7 +76,10 @@ private struct LockPresentation: View {
         ZStack {
             Color(uiColor: .systemGroupedBackground).ignoresSafeArea()
             if state.requiresLock(snapshot) {
-                AppLockView(autoPromptBiometrics: snapshot.hasGoneBackground) {
+                AppLockView(
+                    autoPromptBiometrics: snapshot.hasGoneBackground,
+                    onBiometricUnlock: { state.unlockAfterBiometrics() }
+                ) {
                     state.unlock(generation: snapshot.generation)
                 }
             }
