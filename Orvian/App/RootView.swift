@@ -20,7 +20,8 @@ struct RootView: View {
     }
 
     var body: some View {
-        Group {
+        ZStack {
+            Color(uiColor: .systemGroupedBackground).ignoresSafeArea()
             if hasPresentedContent || !isLockRequired {
                 switch session.phase {
                 case .signedOut:

@@ -954,6 +954,7 @@ struct VideoPlayerView: View {
             forInterval: CMTime(value: 1, timescale: showControls ? 8 : 1),
             queue: .main
         ) { time in
+            guard self.player === player, !isDisappeared else { return }
             if playbackRetryCount > 0, !isScrubbing, !isSeeking,
                player.timeControlStatus == .playing,
                time.seconds.isFinite, time.seconds >= retryResetPosition + 2 {

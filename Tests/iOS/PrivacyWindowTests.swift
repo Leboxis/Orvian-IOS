@@ -34,6 +34,25 @@ final class PrivacyWindowTests: XCTestCase {
         try await Task.sleep(for: .milliseconds(250))
     }
 
+    func testColdStartBuildsLockWindowBeforePrivateContent() async throws {
+        try await AppLockStore.save("1234")
+        defer { AppLockStore.clear() }
+        let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+        let original = scene.windows.first(where: \.isKeyWindow)
+        let owner = UIWindow(windowScene: scene)
+        owner.rootViewController = UIHostingController(rootView:
+            RootView(session: SessionStore()).environment(\.scenePhase, .active))
+        owner.makeKeyAndVisible()
+        defer {
+            owner.isHidden = true
+            owner.rootViewController = nil
+            original?.makeKey()
+        }
+        try await settle()
+        XCTAssertNotNil(scene.windows.first { !$0.isHidden && $0.windowLevel > .alert })
+        XCTAssertTrue(owner.accessibilityElementsHidden)
+    }
+
     func testShieldCoversPresentedMediaAndPreservesContent() async throws {
         let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
         let original = scene.windows.first(where: \.isKeyWindow)

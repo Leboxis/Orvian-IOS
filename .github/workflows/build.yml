@@ -105,6 +105,21 @@ jobs:
             -parallel-testing-enabled NO -resultBundlePath TestResults.xcresult \
             CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO
 
+      - name: Export simulator screenshots
+        if: always()
+        run: |
+          if [ -d TestResults.xcresult ]; then
+            xcrun xcresulttool export attachments --path TestResults.xcresult --output-path simulator-captures
+          fi
+
+      - name: Upload simulator screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: simulator-captures
+          path: simulator-captures
+          if-no-files-found: ignore
+
       - name: Upload simulator test results
         if: always()
         uses: actions/upload-artifact@v4
