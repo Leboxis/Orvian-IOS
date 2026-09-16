@@ -60,15 +60,18 @@ final class AppPrivacyState: ObservableObject {
     /// peut donc aboutir ici : la génération courante fait foi, sans jeton
     /// capturé au lancement de l'invite qui pourrait être périmé (Face ID
     /// prend 1 à 3 s, le code ~0,3 s). Le code garde `unlock(generation:)`.
-    /// Retourne un diagnostic affiché par l'écran (TODO temporaire).
-    @discardableResult
-    func unlockAfterBiometrics() -> String {
-        guard snapshot.phase == .active else { return "refusé: phase=\(snapshot.phase)" }
+    ///
+    /// Le succès arrive pendant que la scène est encore inactive : le
+    /// dialogue système Face ID désactive la scène, et la réactivation suit
+    /// le retour du callback. Exiger `.active` refusait donc à tort ces
+    /// succès légitimes (« refusé: phase=inactive »). Seul `.background`
+    /// reste refusé (l'arrière-plan ré-arme le verrouillage).
+    func unlockAfterBiometrics() {
+        guard snapshot.phase != .background else { return }
         var next = snapshot
         next.isUnlocked = true
         next.hasPresentedContent = true
         snapshot = next
-        return "ok"
     }
 }
 

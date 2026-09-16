@@ -43,6 +43,26 @@ final class PrivacyWindowTests: XCTestCase {
         XCTAssertFalse(privacy.requiresLock(privacy.snapshot))
     }
 
+    func testBiometricUnlockAcceptedWhileSceneInactive() async {
+        // Le dialogue système Face ID désactive la scène : le succès arrive
+        // pendant que la phase est encore .inactive, avant la réactivation.
+        let privacy = AppPrivacyState(isLockConfigured: { true })
+        privacy.transition(to: .background)
+        XCTAssertTrue(privacy.requiresLock(privacy.snapshot))
+        privacy.transition(to: .inactive)
+        privacy.unlockAfterBiometrics()
+        XCTAssertFalse(privacy.requiresLock(privacy.snapshot))
+    }
+
+    func testBiometricUnlockRefusedInBackground() async {
+        // L'arrière-plan ré-arme le verrouillage : aucun succès biométrique
+        // ne peut déverrouiller depuis cet état.
+        let privacy = AppPrivacyState(isLockConfigured: { true })
+        privacy.transition(to: .background)
+        privacy.unlockAfterBiometrics()
+        XCTAssertTrue(privacy.requiresLock(privacy.snapshot))
+    }
+
     func testColdStartBuildsLockWindowBeforePrivateContent() async throws {
         try await AppLockStore.save("1234")
         defer { AppLockStore.clear() }
