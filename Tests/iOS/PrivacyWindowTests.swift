@@ -90,6 +90,13 @@ final class PrivacyWindowTests: XCTestCase {
         XCTAssertTrue(shield.isKeyWindow)
         XCTAssertTrue(owner.accessibilityElementsHidden)
         XCTAssertTrue(host.presentedViewController === photo)
+        let protectedImage = UIGraphicsImageRenderer(bounds: shield.bounds).image { _ in
+            shield.drawHierarchy(in: shield.bounds, afterScreenUpdates: true)
+        }
+        let protectedAttachment = XCTAttachment(image: protectedImage)
+        protectedAttachment.name = "Verrouillage-au-dessus-photo"
+        protectedAttachment.lifetime = .keepAlways
+        add(protectedAttachment)
         let mounts = state.mounts
 
         privacy.unlock(generation: privacy.snapshot.generation)
