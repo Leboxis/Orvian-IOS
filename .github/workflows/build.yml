@@ -63,6 +63,9 @@ jobs:
           path.write_text(updated, encoding="utf-8")
           PY
 
+      - name: Check concurrency and bounded caches
+        run: python3 .github/scripts/check_concurrency.py
+
       - name: Check favorites disk cache
         run: python3 .github/scripts/check_favorites_cache.py
 
@@ -93,6 +96,38 @@ jobs:
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGN_IDENTITY="" \
             clean build
+
+      - name: Check privacy window and adaptive lock on simulator
+        timeout-minutes: 15
+        run: |
+          DEVICE_ID=$(xcrun simctl list devices available -j | python3 -c 'import json,sys; devices=json.load(sys.stdin)["devices"]; print(next(d["udid"] for group in devices.values() for d in group if d["name"].startswith("iPhone")))')
+          xcodebuild test -project Orvian.xcodeproj -scheme Orvian \
+            -destination "platform=iOS Simulator,id=$DEVICE_ID" \
+            -parallel-testing-enabled NO -resultBundlePath TestResults.xcresult \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO
+
+      - name: Export simulator screenshots
+        if: always()
+        run: |
+          if [ -d TestResults.xcresult ]; then
+            xcrun xcresulttool export attachments --path TestResults.xcresult --output-path simulator-captures
+          fi
+
+      - name: Upload simulator screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: simulator-captures
+          path: simulator-captures
+          if-no-files-found: ignore
+
+      - name: Upload simulator test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: simulator-tests
+          path: TestResults.xcresult
+          if-no-files-found: ignore
 
       - name: Package IPA
         run: |

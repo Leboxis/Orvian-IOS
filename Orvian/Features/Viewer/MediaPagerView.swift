@@ -9,7 +9,7 @@ struct MediaPagerView: View {
     let context: MediaViewerContext
 
     @Environment(\.dismiss) private var dismiss
-    @AppStorage("prefetchOnWiFiOnly") private var prefetchOnWiFiOnly = false
+    @AppStorage("prefetchOnWiFiOnly") private var prefetchOnWiFiOnly = true
     /// Média affiché : identifié par son ID (et non par un index) pour rester
     /// stable quand la liste se réordonne ou s'allonge pendant la pagination.
     @State private var selectedFileID: Int

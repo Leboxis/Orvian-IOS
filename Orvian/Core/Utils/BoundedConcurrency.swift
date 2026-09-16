@@ -6,16 +6,9 @@ import Foundation
 /// pas trop » (uploads en lots, mutations de sélection, application de tags)
 /// auparavant recopié à cinq endroits.
 ///
-/// Sémantique conservée :
-/// - découpage par lots de `concurrency` : le lot suivant démarre quand le
-///   lot courant est terminé (pas de fenêtre glissante) ;
-/// - les résultats suivent l'ordre d'entrée, quel que soit l'ordre
-///   d'achèvement des tâches ;
-/// - l'annulation n'interrompt pas la fonction : chaque `operation` gère
-///   `Task.isCancelled` à sa façon (souvent en renvoyant nil), et l'appelant
-///   peut consulter `Task.isCancelled` après l'appel.
-///
-/// - Returns: un résultat par élément, dans l'ordre d'entrée.
+/// Une place libérée accueille immédiatement l'élément suivant. Les résultats
+/// conservent l'ordre d'entrée. Comme auparavant, chaque opération reçoit
+/// l'annulation et produit son résultat (un résultat par élément).
 func mapBounded<T: Sendable, R: Sendable>(
     _ items: [T],
     concurrency: Int,
@@ -24,21 +17,23 @@ func mapBounded<T: Sendable, R: Sendable>(
     guard !items.isEmpty, concurrency > 0 else { return [] }
 
     var results = [R?](repeating: nil, count: items.count)
-    var start = 0
-    while start < items.count {
-        let end = min(start + concurrency, items.count)
-        await withTaskGroup(of: (Int, R).self) { group in
-            for index in start..<end {
+    await withTaskGroup(of: (Int, R).self) { group in
+        var nextIndex = 0
+        while nextIndex < min(concurrency, items.count) {
+            let index = nextIndex
+            let item = items[index]
+            group.addTask { (index, await operation(item)) }
+            nextIndex += 1
+        }
+        while let (index, result) = await group.next() {
+            results[index] = result
+            if nextIndex < items.count {
+                let index = nextIndex
                 let item = items[index]
-                group.addTask {
-                    return (index, await operation(item))
-                }
-            }
-            for await (index, result) in group {
-                results[index] = result
+                group.addTask { (index, await operation(item)) }
+                nextIndex += 1
             }
         }
-        start = end
     }
     return results.compactMap { $0 }
 }

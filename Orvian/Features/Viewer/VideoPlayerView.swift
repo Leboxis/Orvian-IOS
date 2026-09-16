@@ -19,6 +19,8 @@ struct VideoPlayerView: View {
 
     @Environment(\.dismiss) private var dismiss
     @Environment(\.layoutDirection) private var layoutDirection
+    @Environment(\.accessibilityVoiceOverEnabled) private var voiceOverEnabled
+    @Environment(\.scenePhase) private var scenePhase
     @State private var player: AVPlayer?
     @State private var poster: UIImage?
 
@@ -35,7 +37,7 @@ struct VideoPlayerView: View {
     @State private var playbackRate: Float = 1
 
     // Son
-    @State private var isMuted = false
+    @AppStorage("videoMuted") private var isMuted = false
 
     // Favori
     @State private var isFavorite: Bool
@@ -70,7 +72,8 @@ struct VideoPlayerView: View {
     @State private var bufferedEnd: Double = 0
     /// Anti-débounce des seeks « live » pendant le drag : la vidéo suit le
     /// doigt via des seeks grossiers, au plus un toutes les 100 ms.
-    @State private var lastLiveSeekAt = Date.distantPast
+    /// Référence (pas de reconstruction de vue à chaque acceptation).
+    @State private var liveSeekThrottle = LiveSeekThrottle()
     @State private var playbackRetryCount = 0
     @State private var retryResetPosition: Double = 0
     @State private var isDisappeared = false
@@ -157,6 +160,7 @@ struct VideoPlayerView: View {
             }
             .opacity(showControls ? 1 : 0)
             .allowsHitTesting(showControls)
+            .accessibilityHidden(!showControls)
             .animation(.easeInOut(duration: 0.25), value: showControls)
         }
         .onAppear {
@@ -194,6 +198,17 @@ struct VideoPlayerView: View {
             hideControlsTask?.cancel()
             onControlsInteractionChanged(false)
             teardown()
+        }
+        .onChange(of: isMuted) { _, muted in player?.isMuted = muted }
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .background { pausePlayback() }
+        }
+        .onChange(of: voiceOverEnabled) { _, enabled in
+            if enabled { showControls = true }
+            scheduleControlsAutoHide()
+        }
+        .onChange(of: showControls) { _, _ in
+            if let player { updateTimeObserver(for: player) }
         }
         .onChange(of: isTouchingControls) { _, isTouching in
             onControlsInteractionChanged(isTouching)
@@ -278,6 +293,7 @@ struct VideoPlayerView: View {
 
     private func scheduleControlsAutoHide(delay: Double = 2.5) {
         hideControlsTask?.cancel()
+        guard !voiceOverEnabled else { return }
         hideControlsTask = Task {
             try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
             guard !Task.isCancelled else { return }
@@ -290,6 +306,7 @@ struct VideoPlayerView: View {
     }
 
     private func toggleControls() {
+        guard !voiceOverEnabled else { showControls = true; return }
         withAnimation(.easeInOut(duration: 0.25)) {
             showControls.toggle()
         }
@@ -459,9 +476,12 @@ struct VideoPlayerView: View {
     private func scheduleLiveScrubSeek(to seconds: Double) {
         guard let player else { return }
         let now = Date()
-        guard now.timeIntervalSince(lastLiveSeekAt) >= 0.1 else { return }
-        lastLiveSeekAt = now
+        guard liveSeekThrottle.shouldSeek(now: now) else { return }
+        liveSeekThrottle.accept(now)
         let target = CMTime(seconds: max(0, seconds), preferredTimescale: 600)
+        // Ne garde que la dernière intention : sans cette annulation, ~10 seeks/s
+        // s'accumulent pendant le drag et le décodeur rejoue des keyframes dépassées.
+        player.currentItem?.cancelPendingSeeks()
         player.seek(
             to: target,
             toleranceBefore: CMTime(seconds: 1.5, preferredTimescale: 600),
@@ -471,7 +491,7 @@ struct VideoPlayerView: View {
 
     private func endScrub(to seconds: Double) {
         guard transport.endScrub() else { return }
-        lastLiveSeekAt = .distantPast
+        liveSeekThrottle.reset()
         // Seek final précis + reprise conditionnelle (déjà gérés par `seek`).
         seek(to: seconds, precise: true)
     }
@@ -479,7 +499,7 @@ struct VideoPlayerView: View {
     private func cancelScrub() {
         guard transport.endScrub() else { return }
         cancelPendingSeek()
-        lastLiveSeekAt = .distantPast
+        liveSeekThrottle.reset()
         currentTime = playerTime ?? currentTime
         scrubValue = currentTime
         resumePlaybackIfRequested()
@@ -634,13 +654,13 @@ struct VideoPlayerView: View {
     }
 
     private func requestPlayback() {
-        guard isActive, !isDisappeared, !showTagSheet else { return }
+        guard scenePhase == .active, isActive, !isDisappeared, !showTagSheet else { return }
         transport.play()
         resumePlaybackIfRequested()
     }
 
     private func resumePlaybackIfRequested() {
-        guard transport.wantsPlayback, !isScrubbing, !isSeeking,
+        guard scenePhase == .active, transport.wantsPlayback, !isScrubbing, !isSeeking,
               isActive, !isDisappeared, !showTagSheet, let player else { return }
         player.playImmediately(atRate: playbackRate)
     }
@@ -745,7 +765,7 @@ struct VideoPlayerView: View {
             requestPlayback()
             return
         }
-        if recoveryPosition == nil { transport.play() }
+        if recoveryPosition == nil, scenePhase == .active { transport.play() }
         isLoadingVideo = true
         hasFailedSetup = false
         loadGeneration += 1
@@ -776,6 +796,11 @@ struct VideoPlayerView: View {
             }
         }
 
+        // La vidéo active est prioritaire : les préchargements de miniatures
+        // (jusqu'à 8 téléchargements simultanés) partagent la session réseau
+        // et retardent le `moov` + les premiers segments. Le poster direct
+        // (cache mémoire/disque) n'est pas concerné, ni les URL vidéo (2 max).
+        await ThumbnailProvider.shared.cancelPrefetch()
         // La ressource authentifiée peut déjà avoir été préparée juste avant
         // le tap. Le poster ne retarde jamais le lecteur.
         let asset = await VideoAssetCache.shared.asset(driveId: driveId, fileId: file.id)
@@ -802,10 +827,13 @@ struct VideoPlayerView: View {
         cancelPendingSeek()
         transport.reset(preservingPlaybackIntent: true)
         let newItem = AVPlayerItem(asset: asset)
-        // Garde ~30 s de vidéo en réserve : sans cette consigne, le tampon
-        // aval par défaut se limite à quelques secondes et toute baisse de
-        // débit provoque un gel (« 1 s puis stop ») au redémarrage suivant.
-        newItem.preferredForwardBufferDuration = 30
+        // Réserve aval adaptative : 10 s seulement quand on SAIT qu'on n'est
+        // pas sur Wi-Fi. Trente secondes de 4K pèsent lourd en mémoire et en
+        // données ; sur une connexion contrainte, c'est le tampon lui-même qui
+        // affame le démarrage et évince les miniatures. En cas de doute
+        // (état réseau pas encore connu à l'ouverture), on suppose le Wi-Fi
+        // pour ne pas brider la première vidéo.
+        newItem.preferredForwardBufferDuration = NetworkMonitor.shared.isKnownNonWiFi ? 10 : 30
         let newPlayer = AVPlayer(playerItem: newItem)
         // Démarrage immédiat dès les premières frames disponibles : avec
         // playImmediately, attendre le buffer « sûr » ajoute jusqu'à ~2 s
@@ -919,6 +947,9 @@ struct VideoPlayerView: View {
         } catch { return }
         guard generation == loadGeneration, isActive,
               !isDisappeared, !Task.isCancelled else { return }
+        // Même priorité qu'au chargement initial : la récupération après stall
+        // a besoin de toute la bande passante pour refaire son tampon.
+        await ThumbnailProvider.shared.cancelPrefetch()
         let asset = await VideoAssetCache.shared.asset(driveId: driveId, fileId: file.id)
         guard generation == loadGeneration, isActive,
               !isDisappeared, !Task.isCancelled, player == nil else { return }
@@ -930,20 +961,27 @@ struct VideoPlayerView: View {
         startPlayback(asset: asset, at: recoveryPosition)
     }
 
-    private func addObservers(to player: AVPlayer) {
+    private func updateTimeObserver(for player: AVPlayer) {
+        if let timeObserver { player.removeTimeObserver(timeObserver) }
         timeObserver = player.addPeriodicTimeObserver(
-            // Huit mises à jour par seconde : visuellement identiques à 30
-            // pour un curseur de progression, mais avec trois fois moins de
-            // rendus SwiftUI pendant la lecture. Les mises à jour restent
-            // suspendues quand les contrôles sont invisibles.
-            forInterval: CMTime(value: 1, timescale: 8),
+            // Le chrome suit à 4 Hz quand il est visible : un label à la seconde
+            // près et une barre de progression n'ont pas besoin de 8 images/s,
+            // et chaque tick reconstruit la vue sur le main. Caché, seul le
+            // suivi opérationnel (récupération/AirPlay) reste actif à 1 Hz.
+            forInterval: CMTime(value: 1, timescale: showControls ? 4 : 1),
             queue: .main
         ) { time in
+            guard self.player === player, !isDisappeared else { return }
             if playbackRetryCount > 0, !isScrubbing, !isSeeking,
                player.timeControlStatus == .playing,
                time.seconds.isFinite, time.seconds >= retryResetPosition + 2 {
                 playbackRetryCount = 0
             }
+            let externalPlaybackActive = player.isExternalPlaybackActive
+            if isExternalPlaybackActive != externalPlaybackActive {
+                isExternalPlaybackActive = externalPlaybackActive
+            }
+            guard showControls else { return }
             let itemDuration = player.currentItem?.duration.seconds ?? 0
             if itemDuration.isFinite, itemDuration > 0,
                abs(duration - itemDuration) > 0.01 {
@@ -966,11 +1004,11 @@ struct VideoPlayerView: View {
             } else if bufferedEnd != 0 {
                 bufferedEnd = 0
             }
-            let externalPlaybackActive = player.isExternalPlaybackActive
-            if isExternalPlaybackActive != externalPlaybackActive {
-                isExternalPlaybackActive = externalPlaybackActive
-            }
         }
+    }
+
+    private func addObservers(to player: AVPlayer) {
+        updateTimeObserver(for: player)
         endObserver = NotificationCenter.default.addObserver(
             forName: .AVPlayerItemDidPlayToEndTime,
             object: player.currentItem,
@@ -987,6 +1025,13 @@ struct VideoPlayerView: View {
                 case .playing:
                     isBuffering = false
                     cancelStallWatchdog()
+                    // Le démarrage rapide (`automaticallyWaits = false`) a rempli
+                    // son rôle dès la première image : on rebascule en mode stable
+                    // pour la suite, sinon chaque creux de débit fige au lieu
+                    // d'attendre un tampon sûr — puis finit en watchdog 20 s.
+                    if !observedPlayer.automaticallyWaitsToMinimizeStalling {
+                        observedPlayer.automaticallyWaitsToMinimizeStalling = true
+                    }
                 case .waitingToPlayAtSpecifiedRate:
                     isBuffering = true
                     // Un tampon qui ne se remplit pas ne lèvera jamais
@@ -1053,7 +1098,7 @@ struct VideoPlayerView: View {
             resumePlaybackAfterTags = false
         }
         bufferedEnd = 0
-        lastLiveSeekAt = .distantPast
+        liveSeekThrottle.reset()
         itemStatusObserver?.invalidate()
         itemStatusObserver = nil
         timeControlStatusObserver?.invalidate()

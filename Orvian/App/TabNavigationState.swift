@@ -46,16 +46,10 @@ final class TabNavigationState {
 
 /// État d'interface de l'écran d'onglets qui **survit au verrouillage**.
 ///
-/// `RootView` démonte `MainTabView` dès qu'un code est configuré et que l'app
-/// passe en arrière-plan : aucun contenu ne traîne derrière l'écran de
-/// verrouillage, et aucune feuille/visionneuse ne peut rester présentée par-
-/// dessus. Contrepartie : tout était reconstruit au déverrouillage et
-/// l'utilisateur repartait de l'Accueil. Cet objet, possédé par la session
-/// (donc hors de l'arbre démonté), conserve l'onglet courant, les piles de
-/// navigation et le routeur de visionneuse pour les restituer au retour.
-/// Les présentations du routeur sont vidées au verrouillage. Les grilles
-/// peuvent restaurer un cache mémoire encore valide ; leur état local et leur
-/// position de défilement ne sont pas conservés par cet objet.
+/// La session possède l'onglet, les piles et le routeur. Au verrouillage,
+/// `AppPrivacyWindow` masque aussi les présentations plein écran sans détruire
+/// cet état ni les vues montées. Le défilement et les états locaux restent
+/// dans ces vues ; un changement de compte ou de drive remplace le shell.
 @MainActor
 @Observable
 final class MainTabShellState {

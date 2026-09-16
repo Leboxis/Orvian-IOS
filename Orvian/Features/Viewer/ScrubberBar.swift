@@ -33,6 +33,25 @@ struct ScrubberBar: View {
                 .gesture(dragGesture(width: width, duration: safeDuration))
         }
         .frame(height: 46)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Position de lecture")
+        .accessibilityValue(duration.isFinite && duration > 0
+            ? "\(timeFormatter(position.isFinite ? max(0, position) : 0)) sur \(timeFormatter(duration))"
+            : "Durée indisponible")
+        .accessibilityHint("Balayez vers le haut ou le bas pour avancer ou reculer de dix secondes")
+        .accessibilityAdjustableAction { direction in
+            guard duration.isFinite, duration > 0 else { return }
+            let delta: Double
+            switch direction {
+            case .increment: delta = 10
+            case .decrement: delta = -10
+            @unknown default: return
+            }
+            let target = min(duration, max(0, (position.isFinite ? position : 0) + delta))
+            onDragStarted()
+            onDragChanged(target)
+            onDragEnded(target)
+        }
         .animation(.snappy(duration: 0.18), value: isScrubbing)
         .onChange(of: isDragging) { _, dragging in
             // GestureState se réinitialise aussi si le système annule le geste,
@@ -70,8 +89,11 @@ struct ScrubberBar: View {
                 .frame(width: max(width * positionRatio, barHeight), height: barHeight)
             Circle()
                 .fill(.white)
+                // Pas d'ombre : elle force une passe de rendu hors écran à chaque
+                // frame (4x/s en lecture, 60 Hz en drag) pour un pouce déjà
+                // contrasté sur fond sombre. L'anneau fin garde le relief.
+                .overlay(Circle().stroke(.black.opacity(0.25), lineWidth: 0.5))
                 .frame(width: thumbSize, height: thumbSize)
-                .shadow(color: .black.opacity(0.35), radius: 2, y: 1)
                 .offset(x: min(max(width * positionRatio - thumbSize / 2, 0), max(width - thumbSize, 0)))
         }
         .frame(width: width, alignment: .leading)

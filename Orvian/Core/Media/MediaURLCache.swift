@@ -12,8 +12,14 @@ actor MediaURLCache {
         let credentialFingerprint: String
     }
 
-    private var entries: [Key: (url: URL, expiresAt: Date)] = [:]
-    private var inFlight: [Key: Task<URL?, Never>] = [:]
+    private struct Entry {
+        let url: URL
+        let expiresAt: Date
+        var lastAccess: Date
+    }
+    private let maximumEntries = 256
+    private var entries: [Key: Entry] = [:]
+    private var inFlight: [Key: (id: UUID, task: Task<URL?, Never>)] = [:]
     private var pendingPrefetchKeys: [Key] = []
     private var prefetchWorker: Task<Void, Never>?
     private let maxConcurrentPrefetch = 2
@@ -25,26 +31,34 @@ actor MediaURLCache {
 
     func url(driveId: Int, fileId: Int) async -> URL? {
         let key = makeKey(driveId: driveId, fileId: fileId)
+        removeExpiredEntries()
         if let entry = entries[key], entry.expiresAt > Date().addingTimeInterval(30) {
+            entries[key]?.lastAccess = Date()
             return entry.url
         }
         entries[key] = nil
         if let task = inFlight[key] {
-            return await task.value
+            return await task.task.value
         }
+        let requestID = UUID()
         let task = Task<URL?, Never> { [self] in
-            defer { inFlight[key] = nil }
+            defer { if inFlight[key]?.id == requestID { inFlight[key] = nil } }
             guard !Task.isCancelled else { return nil }
             do {
                 let url = try await service.temporaryURL(driveId: driveId, fileId: fileId)
                 guard !Task.isCancelled, key == makeKey(driveId: driveId, fileId: fileId) else { return nil }
-                entries[key] = (url, Date().addingTimeInterval(3300))
+                entries[key] = Entry(url: url, expiresAt: Date().addingTimeInterval(3300), lastAccess: Date())
+                removeExpiredEntries()
+                if entries.count > maximumEntries,
+                   let oldest = entries.min(by: { $0.value.lastAccess < $1.value.lastAccess })?.key {
+                    entries[oldest] = nil
+                }
                 return url
             } catch {
                 return nil
             }
         }
-        inFlight[key] = task
+        inFlight[key] = (requestID, task)
         return await task.value
     }
 
@@ -62,14 +76,30 @@ actor MediaURLCache {
     func invalidate(driveId: Int, fileId: Int) {
         let key = makeKey(driveId: driveId, fileId: fileId)
         entries[key] = nil
-        inFlight[key]?.cancel()
+        inFlight[key]?.task.cancel()
         inFlight[key] = nil
+    }
+
+    /// Le nettoyage ne modifie jamais les URL déjà détenues par un lecteur.
+    private func removeExpiredEntries() {
+        let minimumExpiry = Date().addingTimeInterval(30)
+        entries = entries.filter { $0.value.expiresAt > minimumExpiry }
+    }
+
+    /// Ciblé sur l'ancien compte : un nettoyage différé ne purge pas le nouveau.
+    func clear(credentialFingerprint: String) {
+        entries = entries.filter { $0.key.credentialFingerprint != credentialFingerprint }
+        pendingPrefetchKeys.removeAll { $0.credentialFingerprint == credentialFingerprint }
+        for key in Array(inFlight.keys) where key.credentialFingerprint == credentialFingerprint {
+            inFlight.removeValue(forKey: key)?.task.cancel()
+        }
     }
 
     /// Pré-résolution régulée pour que le tap sur une vidéo démarre plus vite.
     /// La dernière position visible remplace les anciennes demandes en attente,
     /// avec deux appels réseau simultanés au maximum.
     func prefetch(driveId: Int, fileIds: [Int]) {
+        removeExpiredEntries()
         let minimumExpiry = Date().addingTimeInterval(30)
         pendingPrefetchKeys = fileIds
             .map { makeKey(driveId: driveId, fileId: $0) }

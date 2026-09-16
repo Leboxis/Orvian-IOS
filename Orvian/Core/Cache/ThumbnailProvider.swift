@@ -3,7 +3,7 @@ import UIKit
 /// Pipeline de miniatures : mémoire → disque → réseau avec concurrence bornée.
 ///
 /// - dédoublonne les requêtes en vol (une seule par compte, état et fichier) ;
-/// - régule la concurrence réseau (max 9 téléchargements simultanés sans bloquer de thread) ;
+/// - régule la concurrence réseau (max 8 téléchargements simultanés sans bloquer de thread) ;
 /// - priorise les cellules visibles sur le préchargement ;
 /// - purge les requêtes de préchargement obsolètes lors d'un défilement rapide ;
 /// - ne mémorise pas une absence immédiate (un 404 ou une réponse vide peut
@@ -24,7 +24,7 @@ actor ThumbnailProvider {
 
     private let disk: DiskImageCache
     private let service: KDriveService
-    private let throttler = AsyncThrottler(maxConcurrent: 9)
+    private let throttler = AsyncThrottler(maxConcurrent: 8)
     private var inFlight: [Key: Task<UIImage?, Never>] = [:]
 
     private var pendingPrefetchKeys: [Key] = []

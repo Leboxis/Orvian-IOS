@@ -22,6 +22,21 @@ struct ApplyTagsSheet: View {
     let files: [DriveFile]
     let onDone: ([TagChange]) async -> Void
 
+    private let initialTagCounts: [Int: Int]
+
+    init(driveId: Int, files: [DriveFile], onDone: @escaping ([TagChange]) async -> Void) {
+        self.driveId = driveId
+        self.files = files
+        self.onDone = onDone
+        var counts: [Int: Int] = [:]
+        for file in files {
+            for id in Set((file.categories ?? []).map(\.categoryId)) {
+                counts[id, default: 0] += 1
+            }
+        }
+        initialTagCounts = counts
+    }
+
     @Environment(\.dismiss) private var dismiss
     @State private var categories: [Category] = []
     @State private var addIDs: Set<Int> = []
@@ -142,9 +157,7 @@ struct ApplyTagsSheet: View {
     /// Nombre d'éléments sélectionnés portant déjà ce tag (les listes kDrive
     /// renvoient `categories` avec `with=is_favorite,categories`).
     private func countHaving(_ categoryId: Int) -> Int {
-        files.count { file in
-            (file.categories ?? []).contains { $0.categoryId == categoryId }
-        }
+        initialTagCounts[categoryId, default: 0]
     }
 
     private func state(of categoryId: Int) -> TagState {

@@ -13,6 +13,29 @@ enum SkipDirection {
     case backward
 }
 
+/// Anti-débounce des seeks « live » pendant le scrub : la vidéo suit le doigt
+/// via des seeks grossiers, au plus un toutes les 100 ms.
+///
+/// Classe (sémantique référence) volontairement : stocké dans un `@State` de
+/// la vue, la mutation de `lastSeekAt` ne reconstruit PAS la vue — contrairement
+/// à un `Date` en `@State` qui réévaluait tout le lecteur 10 fois/s en plein geste.
+final class LiveSeekThrottle {
+    var lastSeekAt = Date.distantPast
+
+    /// Vrai si `interval` s'est écoulé depuis le dernier seek accepté.
+    func shouldSeek(now: Date, interval: TimeInterval = 0.1) -> Bool {
+        now.timeIntervalSince(lastSeekAt) >= interval
+    }
+
+    func accept(_ date: Date) {
+        lastSeekAt = date
+    }
+
+    func reset() {
+        lastSeekAt = .distantPast
+    }
+}
+
 /// Vitesses de lecture proposées par la pastille en bas à droite.
 enum SpeedOption: Float, CaseIterable, Identifiable {
     case slow = 0.5

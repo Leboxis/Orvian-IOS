@@ -13,6 +13,13 @@ enum TokenStore {
         fallbackKey: "orvian.api-token.fallback"
     )
 
+    /// Chauffe le cache sécurisé avant de construire les écrans connectés.
+    static func prepare() async -> Bool {
+        await Task.detached(priority: .userInitiated) {
+            store.prepare()
+        }.value
+    }
+
     static func current() -> String? {
         store.current()
     }

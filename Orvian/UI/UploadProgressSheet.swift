@@ -93,16 +93,13 @@ struct UploadProgressSheet: View {
                     .lineLimit(1)
                     .truncationMode(.middle)
 
-                Text(ByteFormatter.format(task.totalBytes))
+                Text(task.totalBytes > 0 ? ByteFormatter.format(task.totalBytes) : "Préparation…")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
 
                 if case let .inProgress(progress) = task.status {
                     ProgressView(value: progress)
                         .tint(Color.accentColor)
-                    Text("\(Int(progress * 100)) %")
-                        .font(.caption2.monospacedDigit())
-                        .foregroundStyle(.secondary)
                 }
 
                 if case let .failed(message) = task.status {

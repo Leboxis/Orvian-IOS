@@ -68,6 +68,9 @@ struct AppLockSetupSheet: View {
                             .font(.footnote).monospacedDigit()
                             .foregroundStyle(.secondary)
                     }
+                    CodeKeypad(onDigit: handleDigit, onDelete: handleDelete)
+                        .disabled(isWorking || isRecoveringError || (stage == .verifyCurrent && retryAfter > 0))
+                        .padding(.bottom, 16)
                 }
                 .frame(maxWidth: .infinity)
                 .padding(.horizontal, 24)
@@ -82,12 +85,7 @@ struct AppLockSetupSheet: View {
                         .disabled(isWorking)
                 }
             }
-            .safeAreaInset(edge: .bottom) {
-                CodeKeypad(onDigit: handleDigit, onDelete: handleDelete)
-                    .disabled(isWorking || isRecoveringError || (stage == .verifyCurrent && retryAfter > 0))
-                    .padding(.horizontal, 24)
-                    .padding(.bottom, 16)
-            }
+
         }
         .interactiveDismissDisabled(isWorking || !code.isEmpty)
         .task {

@@ -38,6 +38,19 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: com.orvian.app
         TARGETED_DEVICE_FAMILY: "1,2"
 
+  OrvianTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources:
+      - path: Tests/iOS
+    dependencies:
+      - target: Orvian
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.orvian.tests
+        TEST_HOST: "$(BUILT_PRODUCTS_DIR)/Orvian.app/Orvian"
+        BUNDLE_LOADER: "$(TEST_HOST)"
+
 schemes:
   Orvian:
     build:
@@ -45,5 +58,9 @@ schemes:
         Orvian: all
     run:
       config: Debug
+    test:
+      config: Debug
+      targets:
+        - OrvianTests
     archive:
       config: Release

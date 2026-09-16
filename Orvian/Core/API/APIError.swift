@@ -97,7 +97,7 @@ enum APIError: LocalizedError {
     /// liste (`data[0].name` et sa clé `categories`) pour diagnostiquer les
     /// écarts de schéma entre les endpoints.
     private static func firstElementSnippet(of raw: Data?) -> String? {
-        guard let raw,
+        guard let raw, raw.count <= 16_384,
               let object = try? JSONSerialization.jsonObject(with: raw) as? [String: Any],
               let data = object["data"]
         else { return nil }

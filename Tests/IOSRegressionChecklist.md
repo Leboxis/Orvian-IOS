@@ -123,3 +123,36 @@ considérés comme exécutés sur Windows.
 
 La session d'upload partagée permet la réutilisation des connexions. Aucun
 nombre de négociations TLS évitées ni gain de durée n'est garanti sans mesure.
+
+## Suite de l’audit — septembre 2026
+
+- Points 20 (cadence GIF) et 21 (optimisations/nettoyage de grille) exclus à la demande de l’utilisateur.
+- Retour après verrouillage : ouvrir un dossier, défiler, ouvrir une photo ou
+  un document, puis quitter l’app. La fenêtre de code doit masquer aussi les
+  feuilles et visionneuses, le sélecteur d’apps et VoiceOver. Après le code,
+  retrouver la présentation et la position ; aucune vidéo ne redémarre sous le verrou.
+- PIN : portrait/paysage, clair/sombre, Dynamic Type accessibilité, erreur et
+  délai après essais incorrects. Le zéro et Effacer restent accessibles en
+  défilant, dans le verrouillage comme dans la configuration.
+- Vidéo : VoiceOver conserve les contrôles ; la progression annonce la durée
+  et s’ajuste par dix secondes. Passer à la vidéo suivante conserve le muet.
+  Sans VoiceOver, masquer/afficher conserve une progression exacte et AirPlay.
+- Fenêtre iPad étroite : le titre reste dans la largeur de la fenêtre.
+- Ancienne installation : choix de préchargement conservé. Préférence absente :
+  préchargement limité au Wi-Fi, lecture explicite toujours disponible en mobile.
+- Tags : sélection de centaines de fichiers, ordre stable lors des coches,
+  Monter/Descendre dans les actions VoiceOver du mode de réarrangement.
+- Purger les miniatures pendant le défilement et les écritures de nouveaux
+  fichiers : les nouveaux fichiers restent utilisables, aucune ancienne éviction
+  ne les efface. Vérifier la taille après le ménage.
+- Actualiser les récents pendant une vérification de fond : une vraie lecture
+  réseau suit cette vérification. Déconnexion au même moment : pas de retour
+  de la liste ni d’URLs de l’ancien compte.
+- Un lot avec une grosse vidéo et plusieurs petits fichiers réutilise les
+  places libérées ; annuler le lot puis relancer un fichier reste possible.
+
+Automatisation : `check_concurrency.py` vérifie le partage/annulation des
+requêtes, la fenêtre glissante, les générations de purge, le décodage, la
+capacité et l’expiration des URLs. `OrvianTests` exécute sur simulateur la
+protection d’une présentation plein écran et la disposition compacte du pavé.
+Les captures clair/sombre sont conservées dans le résultat XCTest.

@@ -19,7 +19,7 @@ actor APIClient {
     /// politique de cache, URL complète). Une même ressource demandée par
     /// deux vues en même temps ne part qu'une fois sur le réseau ; les
     /// appelants suivants attendent la réponse de la première.
-    private var inFlightGETs: [String: Task<Data, Error>] = [:]
+    private let sharedGETs = SharedRequests<String, Data>()
 
     /// Session dédiée à l'API au lieu de `URLSession.shared` :
     /// - cache URLCache propre à Orvian, dimensionné pour que la revalidation
@@ -27,12 +27,8 @@ actor APIClient {
     ///   partagés avec tout le téléphone, évince les réponses de listes
     ///   paginées et force leur re-téléchargement complet au retour dans un
     ///   dossier déjà consulté ;
-    /// - `httpMaximumConnectionsPerHost` aligné sur le throttler de
-    ///   miniatures (9 requêtes simultanées) : à 6 connexions par défaut,
-    ///   3 d'entre elles patientaient dans une file TCP.
-    /// Les uploads ne passent PAS par cette session (sessions dédiées créées
-    /// à la volée) ; les miniatures non plus (`reloadIgnoringLocalCacheData`
-    /// + cache disque propre à `ThumbnailProvider`).
+    /// - huit connexions par hôte, comme le régulateur de miniatures.
+    /// Les uploads utilisent une autre session partagée.
     init(session: URLSession = URLSession(configuration: APIClient.apiConfiguration)) {
         self.session = session
     }
@@ -60,9 +56,8 @@ actor APIClient {
     ///
     /// Les GET identiques lancés en parallèle sont dédoublonnés (coalescing) :
     /// la requête part une seule fois et chaque appelant reçoit la même
-    /// réponse. Une requête coalescée n'est pas annulable individuellement —
-    /// elle continue pour servir les appelants restants — et son résultat est
-    /// réconcilié par les gardes de génération des vue-modèles.
+    /// réponse. Chaque appelant peut annuler son attente ; le réseau est
+    /// annulé dès que plus aucun appelant n'en a besoin.
     func data(
         _ endpoint: Endpoint,
         method: String = "GET",
@@ -87,23 +82,13 @@ actor APIClient {
     private func coalescedData(for request: URLRequest, measuredPath: String) async throws -> Data {
         let fingerprint = Self.credentialFingerprint(for: request)
         let key = "\(fingerprint ?? "anon")|\(request.cachePolicy.rawValue)|\(request.url?.absoluteString ?? measuredPath)"
-        if let existing = inFlightGETs[key] {
-            return try await existing.value
-        }
-        let task = Task {
+        return try await sharedGETs.value(for: key) { [self] in
             let (data, response, _) = try await self.transmit(
-                request: request,
-                measuredMethod: "GET",
-                measuredPath: measuredPath
+                request: request, measuredMethod: "GET", measuredPath: measuredPath
             )
             try Self.check(response: response, data: data, credentialFingerprint: fingerprint)
             return data
         }
-        inFlightGETs[key] = task
-        // L'initiateur libère la clé dès sa propre réponse : un appel suivant
-        // repart sur une vraie transaction au lieu d'écouter indéfiniment.
-        defer { inFlightGETs[key] = nil }
-        return try await task.value
     }
 
     /// Requête authentifiée décodée en JSON.
@@ -114,9 +99,11 @@ actor APIClient {
     ) async throws -> T {
         let data = try await self.data(endpoint, cachePolicy: cachePolicy)
         do {
-            return try JSONDecoder.api.decode(T.self, from: data)
+            return try await ResponseDecoder.decode(T.self, from: data)
         } catch {
-            throw APIError.decoding(error, raw: data)
+            if error is CancellationError { throw error }
+            if let apiError = error as? APIError { throw apiError }
+            throw APIError.decoding(error, raw: Data(data.prefix(16_384)))
         }
     }
 
@@ -165,9 +152,11 @@ actor APIClient {
         )
         try Self.check(response: response, data: data, credentialFingerprint: Self.credentialFingerprint(for: request))
         do {
-            return try JSONDecoder.api.decode(T.self, from: data)
+            return try await ResponseDecoder.decode(T.self, from: data)
         } catch {
-            throw APIError.decoding(error, raw: data)
+            if error is CancellationError { throw error }
+            if let apiError = error as? APIError { throw apiError }
+            throw APIError.decoding(error, raw: Data(data.prefix(16_384)))
         }
     }
 
@@ -201,7 +190,7 @@ actor APIClient {
         let (data, response) = try await transferUpload(request: request, fileURL: fileURL, progress: progress)
         try Self.check(response: response, data: data, credentialFingerprint: credentialFingerprint)
         do {
-            let envelope = try JSONDecoder.api.decode(DataResponse<DriveFile>.self, from: data)
+            let envelope = try await ResponseDecoder.decode(DataResponse<DriveFile>.self, from: data)
             guard envelope.result == nil
                     || envelope.result == "success"
                     || envelope.result == "asynchronous"
@@ -215,7 +204,9 @@ actor APIClient {
         } catch let error as APIError {
             throw error
         } catch {
-            throw APIError.decoding(error, raw: data)
+            if error is CancellationError { throw error }
+            if let apiError = error as? APIError { throw apiError }
+            throw APIError.decoding(error, raw: Data(data.prefix(16_384)))
         }
     }
 
@@ -378,7 +369,7 @@ actor APIClient {
     }
 
     private static func decodeError(data: Data) -> (code: String?, description: String?)? {
-        guard let envelope = try? JSONDecoder.api.decode(ErrorEnvelope.self, from: data) else { return nil }
+        guard data.count <= 16_384, let envelope = try? JSONDecoder.api.decode(ErrorEnvelope.self, from: data) else { return nil }
         return (envelope.error?.code, envelope.error?.description)
     }
 }

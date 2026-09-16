@@ -159,7 +159,10 @@ final class MediaMetadataStore: ObservableObject {
             revision += 1
         }
 
-        let batch = 8
+        // Lots de 4 (et non 8) : chaque résolution lit le `moov` via le réseau.
+        // Huit sondages parallèles affament le lecteur actif quand le pager
+        // s'ouvre avec un tri durée ou un filtre 4K pendant une lecture.
+        let batch = 4
         var index = 0
         while index < pending.count {
             guard !Task.isCancelled, credential == TokenStore.credentialFingerprint() else { return }
