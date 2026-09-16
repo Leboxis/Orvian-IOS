@@ -12,8 +12,9 @@ struct AppLockView: View {
     var autoPromptBiometrics = false
     /// Succès biométrique uniquement (le code utilise `onUnlock`). Séparé car
     /// Face ID prend 1 à 3 s : un jeton capturé au lancement de l'invite peut
-    /// être périmé à son retour. Par défaut, repli sur `onUnlock`.
-    var onBiometricUnlock: (() -> Void)?
+    /// être périmé à son retour. Retourne un diagnostic affiché à l'écran
+    /// (TODO temporaire). Par défaut, repli sur `onUnlock`.
+    var onBiometricUnlock: (() -> String)?
     var onUnlock: () -> Void
 
     @Environment(\.scenePhase) private var scenePhase
@@ -205,12 +206,14 @@ struct AppLockView: View {
                 if success {
                     AppLockStore.resetAttempts()
                     AppLockHaptics.success()
-                    // TODO diagnostic temporaire : si ce message reste affiché
-                    // sans ouvrir l'app, le succès arrive bien mais le
-                    // déverrouillage est refusé ; s'il n'apparaît jamais, le
-                    // retour Face ID ne parvient pas jusqu'ici.
-                    biometricsMessage = "Face ID OK, ouverture…"
-                    (onBiometricUnlock ?? onUnlock)()
+                    // TODO diagnostic temporaire : le message affiché dit si le
+                    // déverrouillage a abouti ou quel garde l'a refusé.
+                    if let onBiometricUnlock {
+                        biometricsMessage = "Face ID : \(onBiometricUnlock())"
+                    } else {
+                        biometricsMessage = "Face ID OK, ouverture…"
+                        onUnlock()
+                    }
                 } else {
                     AppLockHaptics.failure()
                     // Un échec biométrique était silencieux : l'utilisateur

@@ -60,12 +60,15 @@ final class AppPrivacyState: ObservableObject {
     /// peut donc aboutir ici : la génération courante fait foi, sans jeton
     /// capturé au lancement de l'invite qui pourrait être périmé (Face ID
     /// prend 1 à 3 s, le code ~0,3 s). Le code garde `unlock(generation:)`.
-    func unlockAfterBiometrics() {
-        guard snapshot.phase == .active else { return }
+    /// Retourne un diagnostic affiché par l'écran (TODO temporaire).
+    @discardableResult
+    func unlockAfterBiometrics() -> String {
+        guard snapshot.phase == .active else { return "refusé: phase=\(snapshot.phase)" }
         var next = snapshot
         next.isUnlocked = true
         next.hasPresentedContent = true
         snapshot = next
+        return "ok"
     }
 }
 
