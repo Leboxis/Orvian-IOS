@@ -205,6 +205,11 @@ struct AppLockView: View {
                 if success {
                     AppLockStore.resetAttempts()
                     AppLockHaptics.success()
+                    // TODO diagnostic temporaire : si ce message reste affiché
+                    // sans ouvrir l'app, le succès arrive bien mais le
+                    // déverrouillage est refusé ; s'il n'apparaît jamais, le
+                    // retour Face ID ne parvient pas jusqu'ici.
+                    biometricsMessage = "Face ID OK, ouverture…"
                     (onBiometricUnlock ?? onUnlock)()
                 } else {
                     AppLockHaptics.failure()
