@@ -10,6 +10,7 @@ struct RootView: View {
     /// Déverrouillage en mémoire : repasse par le code à chaque ouverture.
     @State private var isUnlocked = false
     @State private var hasPresentedContent = false
+    @State private var lockGeneration = 0
 
     /// Vrai dès que l'app a quitté le premier plan : la biométrie est alors
     /// proposée automatiquement au retour, jamais au premier lancement.
@@ -20,6 +21,7 @@ struct RootView: View {
     }
 
     var body: some View {
+        let unlockGeneration = lockGeneration
         ZStack {
             Color(uiColor: .systemGroupedBackground).ignoresSafeArea()
             if hasPresentedContent || !isLockRequired {
@@ -56,7 +58,7 @@ struct RootView: View {
                     Color(uiColor: .systemGroupedBackground).ignoresSafeArea()
                     if isLockRequired {
                         AppLockView(autoPromptBiometrics: hasGoneBackground) {
-                            guard scenePhase == .active else { return }
+                            guard scenePhase == .active, unlockGeneration == lockGeneration else { return }
                             hasPresentedContent = true
                             isUnlocked = true
                         }
@@ -74,6 +76,7 @@ struct RootView: View {
             if phase == .background { FavoritesDiskCache.shared.flushPending() }
             guard AppLockStore.isConfigured else { return }
             if phase == .background {
+                lockGeneration &+= 1
                 hasGoneBackground = true
                 isUnlocked = false
             }

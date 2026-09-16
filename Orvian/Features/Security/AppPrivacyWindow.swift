@@ -44,8 +44,11 @@ struct AppPrivacyWindow<Content: View>: UIViewRepresentable {
         private var host: UIHostingController<Content>?
         private var previousAccessibilityHidden = false
 
-        func attach(to owner: UIWindow?) {
-            guard let owner, let scene = owner.windowScene, let content else { return }
+        func attach(to window: UIWindow?) {
+            // Une présentation .fullScreen retire temporairement la vue
+            // d'attache de sa fenêtre. Le propriétaire mémorisé reste valide.
+            guard let owner = window ?? owner,
+                  let scene = owner.windowScene, let content else { return }
             self.owner = owner
             guard isVisible else { hide(); return }
             if let host { host.rootView = content; return }

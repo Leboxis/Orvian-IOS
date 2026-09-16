@@ -17,6 +17,9 @@ struct AppLockView: View {
     @State private var shakeTrigger = 0
     @State private var showWrong = false
     @State private var isAuthenticating = false
+    @State private var didAutoPrompt = false
+    @State private var authenticationGeneration = 0
+    @State private var authenticationContext: LAContext?
     @State private var biometricsMessage: String?
     @State private var isCheckingCode = false
     @State private var retryAfter = AppLockStore.retryAfter
@@ -45,14 +48,18 @@ struct AppLockView: View {
             }
         }
         .onChange(of: scenePhase) { _, phase in
-            if phase == .active, autoPromptBiometrics, biometricsAvailable {
-                authenticateWithBiometrics()
+            if phase == .background {
+                cancelBiometrics()
+                didAutoPrompt = false
+            } else if phase == .active {
+                promptBiometricsIfNeeded()
             }
         }
+        .onDisappear { cancelBiometrics() }
         .task {
             // Face ID est proposé d'office au retour d'arrière-plan,
             // mais pas au premier lancement de l'app.
-            if scenePhase == .active, autoPromptBiometrics, biometricsAvailable { authenticateWithBiometrics() }
+            promptBiometricsIfNeeded()
             while !Task.isCancelled {
                 retryAfter = AppLockStore.retryAfter
                 do { try await Task.sleep(for: .seconds(1)) } catch { return }
@@ -151,6 +158,19 @@ struct AppLockView: View {
         }
     }
 
+    private func promptBiometricsIfNeeded() {
+        guard autoPromptBiometrics, !didAutoPrompt, scenePhase == .active, biometricsAvailable else { return }
+        didAutoPrompt = true
+        authenticateWithBiometrics()
+    }
+
+    private func cancelBiometrics() {
+        authenticationGeneration &+= 1
+        authenticationContext?.invalidate()
+        authenticationContext = nil
+        isAuthenticating = false
+    }
+
     /// Authentification biométrique locale : en cas de succès, le code n'est
     /// pas requis. L'échec laisse la saisie du code disponible.
     private func authenticateWithBiometrics() {
@@ -168,11 +188,15 @@ struct AppLockView: View {
         }
 
         isAuthenticating = true
+        authenticationContext = context
+        let generation = authenticationGeneration
         context.evaluatePolicy(
             .deviceOwnerAuthenticationWithBiometrics,
             localizedReason: "Déverrouiller Orvian"
         ) { success, _ in
             DispatchQueue.main.async {
+                guard generation == authenticationGeneration else { return }
+                authenticationContext = nil
                 isAuthenticating = false
                 if success {
                     AppLockStore.resetAttempts()

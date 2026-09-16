@@ -650,13 +650,13 @@ struct VideoPlayerView: View {
     }
 
     private func requestPlayback() {
-        guard isActive, !isDisappeared, !showTagSheet else { return }
+        guard scenePhase == .active, isActive, !isDisappeared, !showTagSheet else { return }
         transport.play()
         resumePlaybackIfRequested()
     }
 
     private func resumePlaybackIfRequested() {
-        guard transport.wantsPlayback, !isScrubbing, !isSeeking,
+        guard scenePhase == .active, transport.wantsPlayback, !isScrubbing, !isSeeking,
               isActive, !isDisappeared, !showTagSheet, let player else { return }
         player.playImmediately(atRate: playbackRate)
     }
@@ -761,7 +761,7 @@ struct VideoPlayerView: View {
             requestPlayback()
             return
         }
-        if recoveryPosition == nil { transport.play() }
+        if recoveryPosition == nil, scenePhase == .active { transport.play() }
         isLoadingVideo = true
         hasFailedSetup = false
         loadGeneration += 1
