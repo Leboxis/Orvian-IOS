@@ -53,13 +53,20 @@ struct FileDetailSheet: View {
 
     var body: some View {
         NavigationStack {
-            List {
-                previewSection
-                infoSection
-                tagsSection
-                openSection
+            ScrollView {
+                VStack(spacing: 24) {
+                    previewSection
+                    openSection
+                    infoSection
+                    tagsSection
+                    actionsSection
+                }
+                .padding(20)
+                .frame(maxWidth: 640)
+                .frame(maxWidth: .infinity)
             }
-            .navigationTitle(file.name)
+            .background(Color(uiColor: .systemGroupedBackground))
+            .navigationTitle("Détails")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
@@ -71,29 +78,7 @@ struct FileDetailSheet: View {
                     }
                     .accessibilityLabel("Fermer")
                 }
-                if !isTrashed {
-                    ToolbarItemGroup(placement: .topBarTrailing) {
-                        if onToggleFavorite != nil {
-                            Button {
-                                toggleFavorite()
-                            } label: {
-                                Image(systemName: file.isFavorite == true ? "star.fill" : "star")
-                                    .foregroundStyle(file.isFavorite == true ? .yellow : Color.accentColor)
-                            }
-                            .disabled(isFavoriteMutationInProgress)
-                            .accessibilityLabel(file.isFavorite == true ? "Retirer des favoris" : "Ajouter aux favoris")
-                        }
 
-                        if onDelete != nil {
-                            Button(role: .destructive) {
-                                showDeleteConfirm = true
-                            } label: {
-                                Image(systemName: "trash")
-                            }
-                            .accessibilityLabel("Supprimer")
-                        }
-                    }
-                }
             }
             .alert("Supprimer", isPresented: $showDeleteConfirm) {
                 Button("Supprimer", role: .destructive) { onDelete?() }
@@ -117,46 +102,65 @@ struct FileDetailSheet: View {
     }
 
     private var previewSection: some View {
-        Section {
-            HStack {
-                Spacer()
-                thumbnailPreview
-                    .frame(width: 80, height: 80)
-                Spacer()
+        VStack(spacing: 16) {
+            thumbnailPreview
+                .frame(width: 120, height: 120)
+                .shadow(color: previewTint.opacity(0.16), radius: 16, y: 8)
+                .accessibilityHidden(true)
+
+            Text(file.name)
+                .font(.title2.weight(.bold))
+                .multilineTextAlignment(.center)
+                .lineLimit(nil)
+                .fixedSize(horizontal: false, vertical: true)
+                .textSelection(.enabled)
+                .frame(maxWidth: .infinity)
+                .accessibilityAddTraits(.isHeader)
+
+            Text(file.fileKind.label)
+                .font(.subheadline.weight(.medium))
+                .foregroundStyle(previewTint)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 6)
+                .background(previewTint.opacity(0.10), in: Capsule())
+
+            if isTrashed {
+                Label("Dans la corbeille", systemImage: "trash")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
             }
-            .listRowBackground(Color.clear)
+        }
+        .padding(20)
+        .frame(maxWidth: .infinity)
+        .background {
+            RoundedRectangle(cornerRadius: DS.cardRadius, style: .continuous)
+                .fill(Color(uiColor: .secondarySystemGroupedBackground))
+                .overlay {
+                    RoundedRectangle(cornerRadius: DS.cardRadius, style: .continuous)
+                        .fill(LinearGradient(
+                            colors: [previewTint.opacity(0.10), .clear],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        ))
+                }
         }
     }
 
     private var infoSection: some View {
-        Section("Informations") {
-            labeledRow("Type", file.isDirectory ? "Dossier" : file.fileKind.label)
+        detailSection("Informations", symbol: "info.circle") {
+            labeledRow("Type", file.fileKind.label, symbol: file.fileKind.symbolName)
             if let size = file.size, !file.isDirectory {
-                labeledRow("Taille", ByteFormatter.string(fromBytes: size))
+                Divider()
+                labeledRow("Taille", ByteFormatter.string(fromBytes: size), symbol: "internaldrive")
             }
-            if let filePath, !filePath.isEmpty {
-                locationRow(filePath)
+            if let path = filePath ?? file.path, !path.isEmpty {
+                Divider()
+                labeledRow("Emplacement", path, symbol: "folder")
             }
-            labeledRow("Ajouté", dateText(file.addedAt))
-            labeledRow("Modifié", dateText(file.lastModifiedAt))
-            if !file.isDirectory, !isTrashed {
-                favoriteRow
-            }
-        }
-    }
-
-    /// Emplacement du fichier depuis la racine du drive.
-    private func locationRow(_ path: String) -> some View {
-        HStack(alignment: .top, spacing: 12) {
-            Text("Emplacement")
-                .foregroundStyle(.secondary)
-            Spacer()
-            Text(path)
-                .font(.footnote)
-                .foregroundStyle(.primary)
-                .multilineTextAlignment(.trailing)
-                .lineLimit(3)
-                .truncationMode(.middle)
+            Divider()
+            labeledRow("Ajouté le", dateText(file.addedAt), symbol: "calendar.badge.plus")
+            Divider()
+            labeledRow("Modifié le", dateText(file.lastModifiedAt), symbol: "clock")
         }
     }
 
@@ -164,14 +168,22 @@ struct FileDetailSheet: View {
         Button {
             toggleFavorite()
         } label: {
-            HStack {
-                Text("Favori")
-                    .foregroundStyle(.primary)
-                Spacer()
+            HStack(spacing: 12) {
                 Image(systemName: file.isFavorite == true ? "star.fill" : "star")
-                    .foregroundStyle(file.isFavorite == true ? .yellow : .secondary)
+                    .foregroundStyle(file.isFavorite == true ? Color.yellow : Color.accentColor)
+                    .frame(width: 24)
+                Text(file.isFavorite == true ? "Retirer des favoris" : "Ajouter aux favoris")
+                    .foregroundStyle(.primary)
+                    .fixedSize(horizontal: false, vertical: true)
+                Spacer(minLength: 0)
+                if isFavoriteMutationInProgress {
+                    ProgressView()
+                }
             }
+            .frame(minHeight: 44)
+            .contentShape(Rectangle())
         }
+        .buttonStyle(.plain)
         .disabled(isFavoriteMutationInProgress || onToggleFavorite == nil)
     }
 
@@ -185,7 +197,7 @@ struct FileDetailSheet: View {
     }
 
     private var tagsSection: some View {
-        Section("Tags") {
+        detailSection("Tags", symbol: "tag") {
             if isTrashed {
                 Text("Restaurer le fichier pour modifier ses tags.")
                     .foregroundStyle(.secondary)
@@ -219,8 +231,8 @@ struct FileDetailSheet: View {
                 .frame(width: 10, height: 10)
             Text(category.name)
                 .font(.footnote)
-                .lineLimit(1)
-                .truncationMode(.tail)
+                .lineLimit(nil)
+                .fixedSize(horizontal: false, vertical: true)
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 8)
@@ -232,13 +244,22 @@ struct FileDetailSheet: View {
     }
 
     private var openSection: some View {
-        Section {
+        VStack(spacing: 12) {
             Button {
                 dismiss()
                 onOpen()
             } label: {
-                Label(file.isDirectory ? "Ouvrir le dossier" : "Ouvrir", systemImage: file.isDirectory ? "folder" : "play.fill")
+                Label(
+                    file.isDirectory ? "Ouvrir le dossier" : "Ouvrir le fichier",
+                    systemImage: file.isDirectory ? "folder" : "arrow.up.forward.square"
+                )
+                .font(.headline)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, minHeight: 32)
             }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.large)
+            .buttonBorderShape(.roundedRectangle(radius: 16))
 
             if !file.isDirectory, !isTrashed {
                 Button {
@@ -247,8 +268,79 @@ struct FileDetailSheet: View {
                     }
                 } label: {
                     Label("Télécharger", systemImage: "arrow.down.circle")
+                        .font(.headline)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .frame(maxWidth: .infinity, minHeight: 32)
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.large)
+                .buttonBorderShape(.roundedRectangle(radius: 16))
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var actionsSection: some View {
+        if !isTrashed, onToggleFavorite != nil || onRename != nil || onDelete != nil {
+            detailSection("Actions", symbol: "slider.horizontal.3") {
+                if onToggleFavorite != nil {
+                    favoriteRow
+                }
+                if onRename != nil {
+                    if onToggleFavorite != nil { Divider() }
+                    Button {
+                        renameText = file.name
+                        showRenameAlert = true
+                    } label: {
+                        actionLabel("Renommer", symbol: "pencil")
+                    }
+                    .buttonStyle(.plain)
+                }
+                if onDelete != nil {
+                    if onToggleFavorite != nil || onRename != nil { Divider() }
+                    Button(role: .destructive) {
+                        showDeleteConfirm = true
+                    } label: {
+                        actionLabel("Déplacer dans la corbeille", symbol: "trash")
+                            .foregroundStyle(.red)
+                    }
+                    .buttonStyle(.plain)
                 }
             }
+        }
+    }
+
+    private func actionLabel(_ title: String, symbol: String) -> some View {
+        HStack(spacing: 12) {
+            Image(systemName: symbol)
+                .frame(width: 24)
+            Text(title)
+                .fixedSize(horizontal: false, vertical: true)
+            Spacer(minLength: 0)
+        }
+        .frame(minHeight: 44)
+        .contentShape(Rectangle())
+    }
+
+    private func detailSection<Content: View>(
+        _ title: String,
+        symbol: String,
+        @ViewBuilder content: () -> Content
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Label(title, systemImage: symbol)
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(.secondary)
+                .accessibilityAddTraits(.isHeader)
+                .padding(.horizontal, 4)
+
+            VStack(alignment: .leading, spacing: 12, content: content)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(16)
+                .background(
+                    Color(uiColor: .secondarySystemGroupedBackground),
+                    in: RoundedRectangle(cornerRadius: DS.cardRadius, style: .continuous)
+                )
         }
     }
 
@@ -265,7 +357,13 @@ struct FileDetailSheet: View {
             .clipShape(shape)
             .overlay { shape.strokeBorder(.black.opacity(0.05), lineWidth: 0.5) }
         } else {
-            AsyncThumbnail(driveId: driveId, fileId: file.id, isTrashed: isTrashed, shape: shape)
+            AsyncThumbnail(
+                driveId: driveId,
+                fileId: file.id,
+                kind: file.fileKind,
+                isTrashed: isTrashed,
+                shape: shape
+            )
         }
     }
 
@@ -275,13 +373,29 @@ struct FileDetailSheet: View {
             ?? file.fileKind.tint
     }
 
-    private func labeledRow(_ label: String, _ value: String) -> some View {
-        HStack {
-            Text(label)
-                .foregroundStyle(.secondary)
-            Spacer()
-            Text(value)
-                .foregroundStyle(.primary)
+    private var previewTint: Color {
+        file.isDirectory ? folderTint : file.fileKind.tint
+    }
+
+    private func labeledRow(_ label: String, _ value: String, symbol: String) -> some View {
+        HStack(alignment: .top, spacing: 12) {
+            Image(systemName: symbol)
+                .foregroundStyle(previewTint)
+                .frame(width: 24)
+                .padding(.top, 2)
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 5) {
+                Text(label)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Text(value)
+                    .font(.subheadline)
+                    .foregroundStyle(.primary)
+                    .lineLimit(nil)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .textSelection(.enabled)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
 
@@ -327,27 +441,35 @@ struct FileDetailSheet: View {
 private struct AsyncThumbnail<S: InsettableShape>: View {
     let driveId: Int
     let fileId: Int
+    let kind: FileKind
     var isTrashed = false
     let shape: S
 
     @State private var image: UIImage?
+    @State private var isLoading = true
 
     var body: some View {
-        ZStack {
-            if let image {
-                Image(uiImage: image)
-                    .resizable()
-                    .scaledToFill()
-            } else {
-                ProgressView()
+        Rectangle()
+            .fill(kind.tint.opacity(0.10))
+            .overlay {
+                if let image {
+                    Image(uiImage: image)
+                        .resizable()
+                        .scaledToFill()
+                } else if isLoading && kind.supportsThumbnail {
+                    ProgressView()
+                } else {
+                    Image(systemName: kind.symbolName)
+                        .font(.system(size: 40, weight: .light))
+                        .foregroundStyle(kind.tint)
+                }
             }
-        }
-        .clipShape(shape)
-        .overlay { shape.strokeBorder(.black.opacity(0.05), lineWidth: 0.5) }
-        .task {
-            // Clé canonique partagée avec les grilles : même image servie
-            // depuis le cache au lieu d'un second téléchargement.
-            image = await ThumbnailProvider.shared.thumbnail(driveId: driveId, fileId: fileId, isTrashed: isTrashed)
-        }
+            .clipShape(shape)
+            .overlay { shape.strokeBorder(.black.opacity(0.05), lineWidth: 0.5) }
+            .task {
+                defer { isLoading = false }
+                guard kind.supportsThumbnail else { return }
+                image = await ThumbnailProvider.shared.thumbnail(driveId: driveId, fileId: fileId, isTrashed: isTrashed)
+            }
     }
 }
