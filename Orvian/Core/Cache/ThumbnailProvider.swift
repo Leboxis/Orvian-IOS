@@ -129,7 +129,7 @@ actor ThumbnailProvider {
         // Cache négatif : la clé n'est écartée que si le disque n'a rien à
         // servir. Une miniature déjà écrite (session précédente, préchargement
         // d'un autre écran) doit être affichée même après un échec réseau.
-        if failures.isBlocked(key.nsString), !hasDiskEntry(key) {
+        if failures.isBlocked(key.nsString as String), !hasDiskEntry(key) {
             return nil
         }
 
@@ -149,7 +149,7 @@ actor ThumbnailProvider {
         Self.memory.setObject(image, forKey: key.nsString, cost: image.estimatedByteSize)
         // Une miniature obtenue par le chemin direct invalide une absence
         // enregistrée (poster généré entre-temps).
-        failures.clear(key.nsString)
+        failures.clear(key.nsString as String)
         lastFailures[key] = nil
         return image
     }
@@ -214,7 +214,7 @@ actor ThumbnailProvider {
         // Clé écartée (absence mémorisée ou panne récente) : ne pas relancer la
         // boucle de réessais. Une miniature présente en mémoire ou sur disque
         // est servie par `thumbnail(for:)`, jamais bloquée par ce marqueur.
-        if failures.isBlocked(key.nsString) {
+        if failures.isBlocked(key.nsString as String) {
             return nil
         }
         guard shouldRetry else {
@@ -239,7 +239,7 @@ actor ThumbnailProvider {
             }
             if let image = await thumbnail(for: key) {
                 // Succès (poster enfin généré) : l'absence n'est plus d'actualité.
-                failures.clear(key.nsString)
+                failures.clear(key.nsString as String)
                 lastFailures[key] = nil
                 return image
             }
@@ -259,9 +259,9 @@ actor ThumbnailProvider {
         lastFailures[key] = nil
         switch observed.outcome {
         case .absent:
-            failures.markAbsent(key.nsString)
+            failures.markAbsent(key.nsString as String)
         case .transient:
-            failures.markTransientFailure(key.nsString)
+            failures.markTransientFailure(key.nsString as String)
         }
     }
 

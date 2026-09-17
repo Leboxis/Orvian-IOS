@@ -35,7 +35,7 @@ assert thumbnails.index("await loadFromDisk(key)") < thumbnails.index("return aw
 assert "private nonisolated func decodeAndStore" in thumbnails
 assert thumbnails.index("guard let image = UIImage.decode(data)") < thumbnails.index("disk.store(")
 assert "private var failures = ThumbnailFailureLedger()" in thumbnails
-assert "if failures.isBlocked(key.nsString), !hasDiskEntry(key)" in thumbnails
+assert "isBlocked(key.nsString as String), !hasDiskEntry(key)" in thumbnails
 assert "private func hasDiskEntry(_ key: Key) -> Bool" in thumbnails
 assert "recentFailures" not in thumbnails, "Le cache négatif doit passer par ThumbnailFailureLedger"
 assert "recentFailures" not in thumbnails, "Le cache négatif doit passer par ThumbnailFailureLedger"

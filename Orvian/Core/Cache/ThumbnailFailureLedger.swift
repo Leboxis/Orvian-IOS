@@ -52,43 +52,43 @@ struct ThumbnailFailureLedger {
     }
 
     /// Vrai tant que la clé est écartée. `now` est injectable pour les tests.
-    func isBlocked(_ key: String, now: Date = Date()) -> Bool {
-        guard let slot = slots[key] else { return false }
+    func isBlocked(_ storageKey: String, now: Date = Date()) -> Bool {
+        guard let slot = slots[storageKey] else { return false }
         return now.timeIntervalSince(slot.markedAt) < slot.ttl
     }
 
     /// Motif du blocage, `nil` si la clé est libre (ou son délai écoulé).
-    func blockedReason(_ key: String, now: Date = Date()) -> Reason? {
-        guard isBlocked(key, now: now) else { return nil }
-        return slots[key]?.reason
+    func blockedReason(_ storageKey: String, now: Date = Date()) -> Reason? {
+        guard isBlocked(storageKey, now: now) else { return nil }
+        return slots[storageKey]?.reason
     }
 
     /// Le serveur a confirmé l'absence de miniature : inutile de réessayer
     /// avant `absenceTTL`.
-    mutating func markAbsent(_ key: String, now: Date = Date()) {
-        mark(key, ttl: absenceTTL, reason: .absent, now: now)
+    mutating func markAbsent(_ storageKey: String, now: Date = Date()) {
+        mark(storageKey, ttl: absenceTTL, reason: .absent, now: now)
     }
 
     /// Échec sans preuve d'absence : la clé est seulement écartée le temps
     /// d'éviter une rafale de réessais.
-    mutating func markTransientFailure(_ key: String, now: Date = Date()) {
-        mark(key, ttl: transientTTL, reason: .transient, now: now)
+    mutating func markTransientFailure(_ storageKey: String, now: Date = Date()) {
+        mark(storageKey, ttl: transientTTL, reason: .transient, now: now)
     }
 
     /// Une miniature obtenue (réseau ou lecture disque) annule le marqueur.
-    mutating func clear(_ key: String) {
-        slots[key] = nil
+    mutating func clear(_ storageKey: String) {
+        slots[storageKey] = nil
     }
 
     mutating func removeAll() {
         slots.removeAll()
     }
 
-    private mutating func mark(_ key: String, ttl: TimeInterval, reason: Reason, now: Date) {
-        if slots.count >= limit, slots[key] == nil,
+    private mutating func mark(_ storageKey: String, ttl: TimeInterval, reason: Reason, now: Date) {
+        if slots.count >= limit, slots[storageKey] == nil,
            let oldest = slots.min(by: { $0.value.markedAt < $1.value.markedAt })?.key {
             slots[oldest] = nil
         }
-        slots[key] = Slot(markedAt: now, ttl: ttl, reason: reason)
+        slots[storageKey] = Slot(markedAt: now, ttl: ttl, reason: reason)
     }
 }
