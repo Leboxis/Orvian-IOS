@@ -177,7 +177,11 @@ final class FileGridViewModel {
     /// `forceNetwork` (pull-to-refresh, changement de tri, rafraîchissement
     /// post-mutation) impose une lecture réseau sans cache HTTP. Sans lui,
     /// la revalidation ETag/304 sert la liste inchangée en quelques octets.
-    func reload(sortedBy: FileFilters? = nil, forceNetwork: Bool = false) async {
+    func reload(
+        sortedBy: FileFilters? = nil,
+        forceNetwork: Bool = false,
+        refreshCount: Bool = true
+    ) async {
         guard credentialFingerprint == TokenStore.credentialFingerprint() else { return }
         if let sortedBy {
             // Un tri serveur (dates, type, poids) remplace l'ordre par défaut
@@ -212,7 +216,8 @@ final class FileGridViewModel {
             // Le compteur part en même temps que la page : la durée perçue
             // est le max des deux allers-retours au lieu de leur somme, et
             // le badge « N éléments » n'attend plus la fin de la liste.
-            async let countTask: Int? = fetchDirectoryCount()
+            let currentCount = totalItemCount
+            async let countTask: Int? = refreshCount ? fetchDirectoryCount() : currentCount
             let page = try await service.page(
                 source,
                 driveId: driveId,

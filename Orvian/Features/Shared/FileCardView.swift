@@ -48,6 +48,15 @@ struct FileCardView: View {
 
     private var kind: FileKind { file.fileKind }
 
+    /// Les réessais espacés servent uniquement aux aperçus encore générés
+    /// après un import. Un ancien fichier sans miniature est mis en cache
+    /// négatif dès le premier échec.
+    private var shouldRetryThumbnail: Bool {
+        guard let addedAt = file.addedAt else { return false }
+        let age = Date().timeIntervalSince1970 - addedAt
+        return age >= 0 && age <= 5 * 60
+    }
+
     /// Teinte de la carte : couleur du dossier fournie par l'API si présente,
     /// sinon la teinte par type.
     private var tint: Color {
@@ -307,7 +316,8 @@ struct FileCardView: View {
             driveId: driveId,
             fileId: file.id,
             isTrashed: isTrashed,
-            includeImmediateAttempt: false
+            includeImmediateAttempt: false,
+            shouldRetry: shouldRetryThumbnail
         ) {
             guard !Task.isCancelled else { return }
             thumbnail = image

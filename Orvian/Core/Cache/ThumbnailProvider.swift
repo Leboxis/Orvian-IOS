@@ -103,6 +103,10 @@ actor ThumbnailProvider {
         if let cached = Self.memory.object(forKey: key.nsString) {
             return cached
         }
+        if let failedAt = recentFailures[key] {
+            guard Date().timeIntervalSince(failedAt) >= failureRetryTTL else { return nil }
+            recentFailures[key] = nil
+        }
 
         if let existing = inFlight[key] {
             let image = await existing.value
@@ -170,12 +174,17 @@ actor ThumbnailProvider {
         driveId: Int,
         fileId: Int,
         isTrashed: Bool = false,
-        includeImmediateAttempt: Bool = true
+        includeImmediateAttempt: Bool = true,
+        shouldRetry: Bool = true
     ) async -> UIImage? {
         let key = Self.key(driveId: driveId, fileId: fileId, isTrashed: isTrashed)
 
         // Absence récemment établie : ne pas relancer la boucle de réessais.
         if let failedAt = recentFailures[key], Date().timeIntervalSince(failedAt) < failureRetryTTL {
+            return nil
+        }
+        guard shouldRetry else {
+            markAsFailed(key)
             return nil
         }
 

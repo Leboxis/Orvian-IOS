@@ -93,8 +93,15 @@ struct FileGridView: View {
             // temps ne lance plus deux rechargements réseau.
             .onChange(of: filters) { oldFilters, newFilters in
                 if oldFilters.sort != newFilters.sort || oldFilters.direction != newFilters.direction {
+                    let oldServerSort = oldFilters.serverOrderBy
+                    let newServerSort = newFilters.serverOrderBy
+                    guard oldServerSort != nil || newServerSort != nil else { return }
+                    guard oldServerSort != newServerSort
+                            || (newServerSort != nil && oldFilters.direction != newFilters.direction) else { return }
                     sortReloadTask?.cancel()
-                    sortReloadTask = Task { await viewModel.reload(sortedBy: newFilters, forceNetwork: true) }
+                    sortReloadTask = Task {
+                        await viewModel.reload(sortedBy: newFilters, forceNetwork: true, refreshCount: false)
+                    }
                 }
             }
             .onAppear {

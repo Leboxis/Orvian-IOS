@@ -44,6 +44,7 @@ final class MediaMetadataStore: ObservableObject {
     /// même identifiant de fichier).
     private var entries: [String: PersistedEntry] = [:]
     private var persistenceLoaded = false
+    private var persistenceLoadTask: Task<[String: PersistedEntry], Never>?
     private var pendingSaveTask: Task<Void, Never>?
     /// Limite douce du cache disque ; l'écriture écarte les entrées les plus
     /// anciennes au-delà (des milliers de vidéos restent couvertes).
@@ -76,26 +77,41 @@ final class MediaMetadataStore: ObservableObject {
         "\(TokenStore.credentialFingerprint() ?? "signed-out")-\(driveId)-\(fileId)"
     }
 
-    private func ensurePersistenceLoaded() {
+    private func ensurePersistenceLoaded() async {
         guard !persistenceLoaded else { return }
+        let task: Task<[String: PersistedEntry], Never>
+        if let existing = persistenceLoadTask {
+            task = existing
+        } else {
+            let source = storageURL
+            task = Task.detached(priority: .utility) {
+                guard let data = try? Data(contentsOf: source),
+                      let decoded = try? JSONDecoder().decode([String: PersistedEntry].self, from: data)
+                else { return [:] }
+                return decoded
+            }
+            persistenceLoadTask = task
+        }
+        let decoded = await task.value
+        guard !persistenceLoaded else { return }
+        entries.merge(decoded) { current, _ in current }
         persistenceLoaded = true
-        guard let data = try? Data(contentsOf: storageURL),
-              let decoded = try? JSONDecoder().decode([String: PersistedEntry].self, from: data)
-        else { return }
-        entries = decoded
+        persistenceLoadTask = nil
     }
 
     private func scheduleSave() {
-        // Coalescence : chaque nouvelle demande remplace la précédente tant
-        // qu'elle n'a pas démarré ; l'écriture atomique garantit qu'aucun
-        // fichier partiel ne peut être lu.
+        // Le snapshot n'est créé qu'après la période de coalescence. Le prendre
+        // avant chaque délai forçait une copie du dictionnaire à la résolution
+        // de chaque vidéo suivante.
         pendingSaveTask?.cancel()
-        let snapshot = entries
         let destination = storageURL
-        pendingSaveTask = Task.detached(priority: .utility) {
+        pendingSaveTask = Task { [weak self] in
             try? await Task.sleep(for: .seconds(1))
-            guard !Task.isCancelled else { return }
-            Self.write(entries: snapshot, to: destination)
+            guard !Task.isCancelled, let self else { return }
+            let snapshot = self.entries
+            await Task.detached(priority: .utility) {
+                Self.write(entries: snapshot, to: destination)
+            }.value
         }
     }
 
@@ -116,7 +132,6 @@ final class MediaMetadataStore: ObservableObject {
     /// dont la taille ou la date de modification ne correspondent plus est
     /// ignorée (la vidéo a été remplacée par une autre version).
     private func persistedInfo(driveId: Int, file: DriveFile) -> Info? {
-        ensurePersistenceLoaded()
         guard let entry = entries[persistenceKey(driveId: driveId, fileId: file.id)] else {
             return nil
         }
@@ -138,7 +153,7 @@ final class MediaMetadataStore: ObservableObject {
     /// connues (mémoire ou disque valide) sont servies sans aucun appel
     /// réseau ; seules les vidéos réellement inconnues sont analysées.
     func resolveAll(driveId: Int, items: [DriveFile]) async {
-        ensurePersistenceLoaded()
+        await ensurePersistenceLoaded()
         let credential = TokenStore.credentialFingerprint()
 
         var pending: [DriveFile] = []

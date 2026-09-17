@@ -19,10 +19,13 @@ actor HiresImageStore {
     /// Clé = `"\(driveId)-\(fileId)"` : comme pour les autres caches, le drive
     /// est inclus pour ne jamais confondre deux drives qui partageraient le
     /// même identifiant de fichier.
-    private var inFlight: [String: Task<UIImage?, Never>] = [:]
-    /// Deux images pleine résolution au plus en vol : au-delà, les demandes
+    private struct ImageResult: @unchecked Sendable {
+        let image: UIImage?
+    }
+    private let requests = SharedRequests<String, ImageResult>()
+    /// Une image pleine résolution au plus en vol : au-delà, les demandes
     /// patientent dans une file asynchrone sans bloquer aucun thread.
-    private let throttler = AsyncThrottler(maxConcurrent: 2)
+    private let throttler = AsyncThrottler(maxConcurrent: 1)
 
     init() {
         // Une photo pleine résolution occupe plusieurs dizaines de Mo décodée
@@ -48,23 +51,20 @@ actor HiresImageStore {
         if let cached = memory.object(forKey: memoryKey) {
             return cached
         }
-        if let task = inFlight[taskKey] {
-            return await task.value
-        }
-        let task = Task<UIImage?, Never> { [self] in
-            defer { inFlight[taskKey] = nil }
-            guard !Task.isCancelled,
-                  let url = await MediaURLCache.shared.url(driveId: driveId, fileId: fileId) else {
-                return nil
+        do {
+            let result = try await requests.value(for: taskKey) { [throttler] in
+                try Task.checkCancellation()
+                guard let url = await MediaURLCache.shared.url(driveId: driveId, fileId: fileId) else {
+                    return ImageResult(image: nil)
+                }
+                return ImageResult(image: await Self.downloadDecodeOriginal(url: url, throttler: throttler))
             }
-            guard let image = await Self.downloadDecodeOriginal(url: url, throttler: throttler) else {
-                return nil
-            }
+            guard !Task.isCancelled, let image = result.image else { return nil }
             memory.setObject(image, forKey: memoryKey, cost: Int(image.size.width * image.size.height * image.scale * 4))
             return image
+        } catch {
+            return nil
         }
-        inFlight[taskKey] = task
-        return await task.value
     }
 
     /// Téléchargement vers un fichier temporaire puis décodage pleine

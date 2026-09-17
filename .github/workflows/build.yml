@@ -86,6 +86,9 @@ jobs:
       - name: Check concurrency and bounded caches
         run: python3 .github/scripts/check_concurrency.py
 
+      - name: Check performance regressions
+        run: python3 .github/scripts/check_performance_regressions.py
+
       - name: Check favorites disk cache
         run: python3 .github/scripts/check_favorites_cache.py
 
