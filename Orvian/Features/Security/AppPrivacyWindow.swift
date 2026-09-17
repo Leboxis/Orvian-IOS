@@ -25,6 +25,16 @@ final class AppPrivacyState: ObservableObject {
         isLockConfigured() && !snapshot.isUnlocked
     }
 
+    /// L'interaction suit le verrouillage, pas la phase : après un succès
+    /// Face ID, le bouclier est masqué aussitôt (scène encore inactive) pour
+    /// ne pas laisser d'écran noir — bloquer les taps jusqu'à `.active`
+    /// avalait alors le premier tap sur un contenu déjà visible (y compris
+    /// un tap à cheval sur la réactivation). Quand le contenu doit rester
+    /// caché, la fenêtre de protection le couvre et absorbe déjà les touches.
+    func allowsInteraction(_ snapshot: Snapshot) -> Bool {
+        !requiresLock(snapshot)
+    }
+
     func transition(to phase: ScenePhase) {
         guard phase != snapshot.phase else { return }
         var next = snapshot
@@ -206,7 +216,17 @@ struct AppPrivacyWindow: UIViewRepresentable {
         }
 
         private func hide() {
-            guard let shield else { return }
+            guard let shield else {
+                // Le bouclier a pu être masqué dès le succès Face ID, scène
+                // encore inactive : `makeKey()` n'a alors aucun effet. Si la
+                // fenêtre de contenu n'a toujours pas la clé une fois la
+                // scène active, la lui rendre — sinon le premier tap (clavier
+                // notamment) peut être avalé.
+                if scene?.activationState == .foregroundActive, owner?.isKeyWindow == false {
+                    owner?.makeKey()
+                }
+                return
+            }
             shield.isHidden = true
             shield.rootViewController = nil
             self.shield = nil

@@ -63,6 +63,20 @@ final class PrivacyWindowTests: XCTestCase {
         XCTAssertTrue(privacy.requiresLock(privacy.snapshot))
     }
 
+    func testFirstTapAllowedAsSoonAsBiometricUnlockSucceeds() {
+        // Succès Face ID scène encore inactive : le contenu est déjà visible
+        // (bouclier masqué aussitôt) — le premier tap ne doit pas être avalé
+        // en attendant la réactivation.
+        let privacy = AppPrivacyState(isLockConfigured: { true })
+        privacy.transition(to: .background)
+        privacy.transition(to: .inactive)
+        privacy.unlockAfterBiometrics()
+        XCTAssertTrue(privacy.allowsInteraction(privacy.snapshot))
+        // Le ré-armement au passage en arrière-plan rebloque l'interaction.
+        privacy.transition(to: .background)
+        XCTAssertFalse(privacy.allowsInteraction(privacy.snapshot))
+    }
+
     func testBiometricUnlockWhileInactiveHidesShieldAtOnce() async throws {
         // Le succès Face ID arrive scène encore inactive (le dialogue
         // système désactive la scène, la réactivation suit). Le bouclier

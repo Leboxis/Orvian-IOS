@@ -36,8 +36,8 @@ struct RootView: View {
             }
         }
         .onAppear { privacy.contentDidAppear() }
-        .allowsHitTesting(!isLockRequired && snapshot.phase == .active)
-        .accessibilityHidden(isLockRequired || snapshot.phase != .active)
+        .allowsHitTesting(privacy.allowsInteraction(snapshot))
+        .accessibilityHidden(!privacy.allowsInteraction(snapshot))
         .background { AppPrivacyWindow(state: privacy) }
         .onReceive(NotificationCenter.default.publisher(for: .apiUnauthorized)) { notification in
             session.handleUnauthorized(credentialFingerprint: notification.object as? String)

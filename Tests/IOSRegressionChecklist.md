@@ -148,6 +148,8 @@ nombre de négociations TLS évitées ni gain de durée n'est garanti sans mesur
   un document, puis quitter l’app. La fenêtre de code doit masquer aussi les
   feuilles et visionneuses, le sélecteur d’apps et VoiceOver. Après le code,
   retrouver la présentation et la position ; aucune vidéo ne redémarre sous le verrou.
+  Avec Face ID (succès scène encore inactive) : le tout premier tap sur le
+  contenu déjà visible doit répondre immédiatement, sans tap préalable avalé.
 - PIN : portrait/paysage, clair/sombre, Dynamic Type accessibilité, erreur et
   délai après essais incorrects. Le zéro et Effacer restent accessibles en
   défilant, dans le verrouillage comme dans la configuration.
