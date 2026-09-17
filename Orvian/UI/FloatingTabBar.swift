@@ -25,12 +25,11 @@ struct FloatingTabBar: View {
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 8)
-        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: DS.tabBarRadius, style: .continuous))
-        .overlay {
-            RoundedRectangle(cornerRadius: DS.tabBarRadius, style: .continuous)
-                .strokeBorder(.quaternary, lineWidth: 0.5)
-        }
-        .shadow(color: .black.opacity(0.12), radius: 14, x: 0, y: 6)
+        .floatingChrome(RoundedRectangle(cornerRadius: DS.tabBarRadius, style: .continuous))
+        // Bornée sur iPad : sans cette largeur maximale, les cinq onglets
+        // s'étirent sur toute la largeur de l'écran. Sur iPhone, la largeur
+        // proposée est déjà inférieure : la barre ne bouge pas.
+        .frame(maxWidth: DS.maxTabBarWidth)
         .padding(.horizontal, DS.gridMargin + 8)
         .sensoryFeedback(.selection, trigger: selection) { oldValue, newValue in
             hapticFeedbackEnabled && oldValue != newValue
@@ -43,6 +42,13 @@ private struct TabButton: View {
     let isSelected: Bool
     let action: () -> Void
 
+    /// Au-delà d'Accessibility 1, les cinq libellés ne tiennent plus dans la
+    /// largeur d'un onglet. Ils sont alors masqués : l'icône reste seule, et
+    /// le nom continue d'être lu par VoiceOver (`accessibilityLabel`).
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+
+    private var showsTitle: Bool { dynamicTypeSize < .accessibility1 }
+
     var body: some View {
         Button {
             action()
@@ -51,8 +57,12 @@ private struct TabButton: View {
                 Image(systemName: isSelected ? tab.symbolFilled : tab.symbol)
                     .font(.system(size: 19, weight: .medium))
                     .symbolEffect(.bounce, value: isSelected)
-                Text(tab.title)
-                    .font(.caption2.weight(isSelected ? .semibold : .regular))
+                if showsTitle {
+                    Text(tab.title)
+                        .font(.caption2.weight(isSelected ? .semibold : .regular))
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.75)
+                }
             }
             .foregroundStyle(isSelected ? Color.accentColor : .secondary)
             .frame(maxWidth: .infinity)

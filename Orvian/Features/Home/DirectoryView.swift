@@ -413,11 +413,7 @@ struct DirectoryView: View {
         .padding(.leading, 14)
         .padding(.trailing, 8)
         .padding(.vertical, 7)
-        .background(.bar, in: Capsule())
-        .overlay {
-            Capsule().strokeBorder(.quaternary, lineWidth: 0.5)
-        }
-        .shadow(color: .black.opacity(0.08), radius: 6, x: 0, y: 2)
+        .inputChrome(Capsule())
         .frame(maxWidth: 260)
     }
 
@@ -682,7 +678,7 @@ struct DirectoryView: View {
         .padding(.horizontal, 16)
         .padding(.vertical, 10)
         .background(.black.opacity(0.75), in: Capsule())
-        .padding(.bottom, 130)
+        .padding(.bottom, DS.floatingPillInset)
         .transition(.opacity)
     }
 
@@ -704,13 +700,9 @@ struct DirectoryView: View {
             }
         )
         .frame(width: 52, height: 52)
-        .background(.ultraThinMaterial, in: Circle())
-        .overlay {
-            Circle().strokeBorder(.quaternary, lineWidth: 0.5)
-        }
-        .shadow(color: .black.opacity(0.15), radius: 10, x: 0, y: 4)
+        .floatingChrome(Circle())
         .padding(.trailing, DS.gridMargin + 4)
-        .padding(.bottom, 104)
+        .padding(.bottom, DS.floatingActionInset)
         .accessibilityLabel("Ajouter ou importer")
     }
 
@@ -757,11 +749,7 @@ struct DirectoryView: View {
         .foregroundStyle(.secondary)
         .padding(.horizontal, 10)
         .padding(.vertical, 3.5)
-        .background(.ultraThinMaterial, in: Capsule())
-        .overlay {
-            Capsule().strokeBorder(.quaternary.opacity(0.5), lineWidth: 0.5)
-        }
-        .shadow(color: .black.opacity(0.04), radius: 2, x: 0, y: 1)
+        .inlineChrome(Capsule())
         .accessibilityLabel("Chemin : " + crumbs.joined(separator: ", "))
     }
 
@@ -775,11 +763,7 @@ struct DirectoryView: View {
             .foregroundStyle(.secondary)
             .padding(.horizontal, 10)
             .padding(.vertical, 3.5)
-            .background(.ultraThinMaterial, in: Capsule())
-            .overlay {
-                Capsule().strokeBorder(.quaternary.opacity(0.5), lineWidth: 0.5)
-            }
-            .shadow(color: .black.opacity(0.04), radius: 2, x: 0, y: 1)
+            .inlineChrome(Capsule())
             .accessibilityLabel(usesVisibleItemCount ? text : "\(text) dans ce dossier")
     }
 

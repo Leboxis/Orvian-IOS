@@ -124,7 +124,7 @@ struct TagsEditorSheet: View {
                 }
                 .overlay {
                     if isApplied {
-                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        RoundedRectangle(cornerRadius: DS.compactRadius, style: .continuous)
                             .strokeBorder(Color.accentColor, lineWidth: 2)
                     }
                 }

@@ -196,7 +196,11 @@ struct TagsView: View {
             }
             .padding(.horizontal, DS.gridMargin)
             .padding(.top, 6)
-            .padding(.bottom, 110)
+            .padding(.bottom, DS.floatingBarInset)
+            // Bloc centré et borné en largeur : sur iPad, deux colonnes
+            // étirées sur 1 000 pt rendaient les cartes illisibles.
+            .frame(maxWidth: DS.maxContentWidth)
+            .frame(maxWidth: .infinity)
         }
         .background(Color(uiColor: .systemGroupedBackground))
         .refreshable {
@@ -245,7 +249,9 @@ struct TagsView: View {
             }
             .padding(.horizontal, DS.gridMargin)
             .padding(.top, 6)
-            .padding(.bottom, 110)
+            .padding(.bottom, DS.floatingBarInset)
+            .frame(maxWidth: DS.maxContentWidth)
+            .frame(maxWidth: .infinity)
         }
         .background(Color(uiColor: .systemGroupedBackground))
         .refreshable {

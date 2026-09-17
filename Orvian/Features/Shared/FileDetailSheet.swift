@@ -346,7 +346,7 @@ struct FileDetailSheet: View {
 
     @ViewBuilder
     private var thumbnailPreview: some View {
-        let shape = RoundedRectangle(cornerRadius: 12, style: .continuous)
+        let shape = RoundedRectangle(cornerRadius: DS.compactRadius, style: .continuous)
         if file.isDirectory {
             ZStack {
                 Rectangle().fill(folderTint.opacity(0.12))

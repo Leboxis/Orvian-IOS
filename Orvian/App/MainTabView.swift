@@ -246,12 +246,7 @@ private struct DownloadProgressBanner: View {
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 8)
-        .background(.ultraThinMaterial, in: Capsule())
-        .overlay {
-            Capsule()
-                .strokeBorder(.quaternary, lineWidth: 0.5)
-        }
-        .shadow(color: .black.opacity(0.12), radius: 10, x: 0, y: 4)
+        .floatingChrome(Capsule())
         .padding(.horizontal, DS.gridMargin + 8)
         .accessibilityLabel("Téléchargement en cours")
     }

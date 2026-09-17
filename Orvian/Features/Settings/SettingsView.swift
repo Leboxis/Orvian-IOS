@@ -315,7 +315,7 @@ struct SettingsView: View {
     private func driveSummary(_ drive: Drive) -> some View {
         VStack(alignment: .leading, spacing: 16) {
             HStack(alignment: .center, spacing: 12) {
-                settingIcon("externaldrive.fill", tint: .blue, size: 44)
+                settingIcon("externaldrive.fill", tint: .accentColor, size: 44)
                 VStack(alignment: .leading, spacing: 3) {
                     Text("Drive actuel")
                         .font(.caption.weight(.semibold))
@@ -333,17 +333,23 @@ struct SettingsView: View {
 
             VStack(alignment: .leading, spacing: 7) {
                 ProgressView(value: Double(drive.usedSize ?? 0), total: Double(max(drive.size ?? 1, 1)))
-                    .tint(.blue)
+                    .tint(.accentColor)
                 Text(ByteFormatter.usage(used: drive.usedSize, total: drive.size))
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
             }
         }
         .padding(18)
-        .background(.blue.opacity(0.10), in: RoundedRectangle(cornerRadius: 24, style: .continuous))
+        // Le résumé du drive reprend la couleur d'accent de l'app (et le rayon
+        // des autres panneaux) : il utilisait un bleu codé en dur et 24 pt,
+        // alors que les cartes de réglages juste en dessous sont à 22 pt.
+        .background(
+            Color.accentColor.opacity(0.10),
+            in: RoundedRectangle(cornerRadius: DS.panelRadius, style: .continuous)
+        )
         .overlay {
-            RoundedRectangle(cornerRadius: 24, style: .continuous)
-                .strokeBorder(.blue.opacity(0.14), lineWidth: 1)
+            RoundedRectangle(cornerRadius: DS.panelRadius, style: .continuous)
+                .strokeBorder(Color.accentColor.opacity(0.14), lineWidth: 1)
         }
     }
 
@@ -365,9 +371,9 @@ struct SettingsView: View {
             content()
         }
         .padding(18)
-        .background(.background, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+        .background(.background, in: RoundedRectangle(cornerRadius: DS.panelRadius, style: .continuous))
         .overlay {
-            RoundedRectangle(cornerRadius: 22, style: .continuous)
+            RoundedRectangle(cornerRadius: DS.panelRadius, style: .continuous)
                 .strokeBorder(.primary.opacity(0.06), lineWidth: 1)
         }
     }

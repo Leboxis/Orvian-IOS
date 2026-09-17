@@ -344,7 +344,11 @@ struct FileGridView: View {
                 }
                 .padding(.horizontal, DS.gridMargin)
                 .padding(.top, 6 + contentTopInset)
-                .padding(.bottom, 110) // barre flottante
+                .padding(.bottom, DS.floatingBarInset) // barre flottante
+                // Bloc centré et borné en largeur : sur iPad, les colonnes
+                // s'étiraient sur toute la largeur de l'écran.
+                .frame(maxWidth: DS.maxContentWidth)
+                .frame(maxWidth: .infinity)
             }
             // Le rebond permanent permet le pull-to-refresh même quand le
             // dossier est trop court pour défiler.
@@ -696,9 +700,21 @@ struct FileGridView: View {
     private var skeleton: some View {
         LazyVGrid(columns: columns, spacing: DS.gridSpacing) {
             ForEach(0..<9, id: \.self) { _ in
-                RoundedRectangle(cornerRadius: DS.cardRadius, style: .continuous)
-                    .fill(.quaternary.opacity(0.4))
-                    .aspectRatio(1, contentMode: .fit)
+                // Le squelette reprend la hauteur finale d'une carte (vignette
+                // carrée + deux lignes de texte) : le contenu ne se décale plus
+                // quand les données remplacent le chargement.
+                VStack(spacing: 5) {
+                    RoundedRectangle(cornerRadius: DS.cardRadius, style: .continuous)
+                        .fill(.quaternary.opacity(0.4))
+                        .aspectRatio(1, contentMode: .fit)
+                    RoundedRectangle(cornerRadius: DS.smallRadius, style: .continuous)
+                        .fill(.quaternary.opacity(0.3))
+                        .frame(height: 10)
+                    RoundedRectangle(cornerRadius: DS.smallRadius, style: .continuous)
+                        .fill(.quaternary.opacity(0.25))
+                        .frame(width: 34, height: 8)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
             }
         }
         .redacted(reason: .placeholder)

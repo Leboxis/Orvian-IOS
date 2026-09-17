@@ -250,6 +250,11 @@ struct FileCardView: View {
                     .foregroundStyle(.yellow)
                     .padding(5)
                     .background(.black.opacity(0.48), in: Circle())
+                    // Même liseré que la pastille de lecture : sans lui, le
+                    // fond noir se confond avec une miniature sombre.
+                    .overlay {
+                        Circle().strokeBorder(.white.opacity(0.35), lineWidth: 0.8)
+                    }
             }
             .buttonStyle(.plain)
             .accessibilityLabel("Retirer des favoris")
