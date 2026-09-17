@@ -63,9 +63,24 @@ struct FileFilters: Equatable, Hashable {
         var symbol: String {
             switch self {
             case .portrait: return "rectangle.portrait"
-            case .landscape: return "rectangle.landscape.rotate"
+            case .landscape: return "rectangle.landscape"
             case .square: return "square"
             }
+        }
+        /// Variante pleine du symbole : marque l'orientation active dans le
+        /// sélecteur d'une seule ligne de logos du menu de filtres.
+        var filledSymbol: String {
+            switch self {
+            case .portrait: return "rectangle.portrait.fill"
+            case .landscape: return "rectangle.landscape.fill"
+            case .square: return "square.fill"
+            }
+        }
+
+        /// Symbole affiché dans le menu de filtres : plein quand
+        /// l'orientation est active, contour sinon.
+        func symbol(selected: Bool) -> String {
+            selected ? filledSymbol : symbol
         }
 
         var title: String {
@@ -101,6 +116,22 @@ struct FileFilters: Equatable, Hashable {
             case .other: return "doc"
             }
         }
+        /// Variante pleine du symbole : marque l'option active dans le sélecteur
+        /// d'une seule ligne de logos du menu de filtres.
+        var filledSymbol: String {
+            switch self {
+            case .all: return "square.grid.2x2.fill"
+            case .videos: return "video.fill"
+            case .images: return "photo.fill"
+            case .other: return "doc.fill"
+            }
+        }
+
+        /// Symbole affiché dans le menu de filtres : plein quand l'option est
+        /// active, contour sinon. Les libellés restent lus par VoiceOver.
+        func symbol(selected: Bool) -> String {
+            selected ? filledSymbol : symbol
+        }
     }
 
     var sort: SortMode = .original
@@ -109,6 +140,9 @@ struct FileFilters: Equatable, Hashable {
     /// Limite l'affichage aux vidéos dont le plus grand côté atteint 3 840 px.
     var highResolutionVideosOnly = false
     var media: MediaFilter = .all
+    /// Ne garder que les fichiers, en masquant les dossiers (les dossiers
+    /// réapparaissent dès que l'option est désactivée).
+    var filesOnly = false
 
     /// Tris exprimables par l'API kDrive (`order_by[]`) : les appliquer côté
     /// serveur garantit que la pagination entière respecte le tri, pas
@@ -130,7 +164,7 @@ struct FileFilters: Equatable, Hashable {
 
     /// Vrai dès qu'un tri ou un filtre diffère du comportement par défaut.
     var isActive: Bool {
-        sort != .original || orientation != nil || highResolutionVideosOnly || media != .all
+        sort != .original || orientation != nil || highResolutionVideosOnly || media != .all || filesOnly
     }
 
     /// Applique les filtres (média, orientation et définition vidéo, recherche)
@@ -149,6 +183,11 @@ struct FileFilters: Equatable, Hashable {
         case .videos: result = result.filter(\.isVideo)
         case .images: result = result.filter(\.isImage)
         case .other: result = result.filter { !$0.isVideo && !$0.isImage }
+        }
+
+        // Ne garder que les fichiers de la liste : les dossiers sont masqués.
+        if filesOnly {
+            result = result.filter { !$0.isDirectory }
         }
 
         if let orientation {

@@ -42,6 +42,13 @@ enum TokenStore { static func credentialFingerprint() -> String? { "account-a" }
         + "\n" + (ROOT / "Tests/MediaURLCacheChecks.swift").read_text(encoding="utf-8"), encoding="utf-8")
     run(temp / "media", [media])
 
+    # La politique du cache négatif des miniatures (absence prouvée vs panne
+    # passagère, TTL, éviction bornée) : aucun UIKit, exécutable en CI.
+    run(temp / "thumbnail-failures", [ROOT / path for path in [
+        "Orvian/Core/Cache/ThumbnailFailureLedger.swift",
+        "Tests/ThumbnailFailureChecks.swift",
+    ]])
+
     recent = temp / "RecentLoaderChecks.swift"
     recent.write_text('''import Foundation
 struct DriveFile {

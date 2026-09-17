@@ -7,10 +7,10 @@ root = Path(__file__).resolve().parents[2]
 with tempfile.TemporaryDirectory() as temporary:
     temporary = Path(temporary)
     # Only the value type is needed; the store itself depends on the app session.
-    source = (root / "Orvian/Core/Cache/DirectoryListStore.swift").read_text()
+    source = (root / "Orvian/Core/Cache/DirectoryListStore.swift").read_text(encoding="utf-8")
     snapshot = source[source.index("struct DirectoryListSnapshot"):source.index("\n/// Mémoire")]
     model = temporary / "Snapshot.swift"
-    model.write_text("import Foundation\n" + snapshot)
+    model.write_text("import Foundation\n" + snapshot, encoding="utf-8")
     executable = temporary / "cache-checks"
     subprocess.run([
         "swiftc", "-parse-as-library", "-swift-version", "5",

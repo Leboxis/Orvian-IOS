@@ -170,6 +170,33 @@ nombre de négociations TLS évitées ni gain de durée n'est garanti sans mesur
 - Un lot avec une grosse vidéo et plusieurs petits fichiers réutilise les
   places libérées ; annuler le lot puis relancer un fichier reste possible.
 
+## Cache des miniatures, onglet Tag et menu de filtres — septembre 2026
+
+- Miniatures : parcourir un dossier, revenir au premier plan après une coupure
+  réseau brève. Une miniature déjà en cache s'affiche immédiatement, même si la
+  demande précédente a échoué (le marqueur d'absence ne bloque plus la lecture
+  disque). Un fichier dont le serveur refuse l'aperçu (404) cesse de réessayer
+  pendant 5 minutes ; un simple délai réseau ou un 5xx retente après ~30 s.
+  Réglages → « Miniatures enregistrées » doit croître pendant la navigation et
+  « Vider le cache » repartir de zéro.
+- Import d'une vidéo : le poster apparaît dans la fenêtre de réessais (~60 s)
+  même si kDrive répond 404 les premières secondes ; aucune absence n'est
+  mémorisée avant la fin de la fenêtre.
+- Menu de filtres (Accueil, Favoris, corbeille, dossier, tag) : les
+  orientations (portrait/paysage/carré) tiennent sur une seule ligne de logos,
+  idem pour Tout/Vidéos/Images/Autres. L'option active se voit à la variante
+  pleine du symbole ; un tap ne referme pas le menu, tap extérieur pour fermer.
+  VoiceOver lit le nom de chaque logo et l'état sélectionné.
+- « Fichiers uniquement » : masque les dossiers, y compris dans une recherche
+  ou un tri ; le compteur d'éléments passe en « visibles » ; désactiver
+  l'option (ou Réinitialiser) rend les dossiers. Vérifier qu'un filtre actif ne
+  déclenche pas de pagination infinie quand la page suivante ne contient que
+  des dossiers.
+- Onglet Tag, sans ouvrir de tag : défilement de la grille et de la liste
+  (grandes listes, Dynamic Type agrandi). Les cartes ne portent qu'une ombre
+  minimale ; si une saccade subsiste en mode liste, soupçonner les actions de
+  balayement (le menu contextuel long-press offre déjà Renommer/Supprimer).
+
 Automatisation : `check_concurrency.py` vérifie le partage/annulation des
 requêtes, la fenêtre glissante, les générations de purge, le décodage, la
 capacité et l’expiration des URLs. `OrvianTests` (dont `PrivacyWindowTests`)

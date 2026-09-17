@@ -775,6 +775,7 @@ struct DirectoryView: View {
         filters.orientation != nil
             || filters.highResolutionVideosOnly
             || filters.media != .all
+            || filters.filesOnly
     }
 
     private var reportedVisibleItemCount: Int? {

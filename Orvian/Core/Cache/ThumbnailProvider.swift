@@ -11,6 +11,12 @@ import UIKit
 ///   mais une fenêtre complète de réessais infructueuse arme un cache
 ///   négatif borné dans le temps : les réapparitions de la carte cessent
 ///   de relancer la boucle pendant la TTL au lieu de retester 8 fois ;
+/// - classe l'échec avant de le mémoriser : une absence **prouvée** par le
+///   serveur (404/410, corps vide) est retenue plusieurs minutes, une panne
+///   passagère (réseau, timeout, 5xx) quelques secondes seulement ;
+/// - ne barre jamais le cache disque : une miniature déjà écrite (session
+///   précédente, préchargement d'un autre écran) est servie même après un
+///   échec réseau, puisque le marqueur ne concerne que le réseau ;
 /// - le décodage et la préparation s'exécutent hors du MainActor.
 actor ThumbnailProvider {
     static let shared = ThumbnailProvider()
@@ -39,15 +45,26 @@ actor ThumbnailProvider {
         .seconds(8), .seconds(12), .seconds(15), .seconds(15),
     ]
 
-    /// Cache négatif borné : une fenêtre complète de réessais terminée sans
-    /// miniature y inscrit la clé. Pendant la TTL, `thumbnailWhenAvailable`
-    /// renvoie nil sans relancer la boucle — sinon chaque réapparition de la
-    /// carte rejouait 7 tentatives sur ~60 s pour des fichiers qui n'auront
-    /// jamais de miniature (documents, archives…). La TTL laisse toutefois
-    /// une nouvelle chance aux posters de vidéos longues à encoder.
-    private var recentFailures: [Key: Date] = [:]
-    private let failureRetryTTL: TimeInterval = 5 * 60
-    private let failureCacheLimit = 512
+    /// Cache négatif borné (politique dans `ThumbnailFailureLedger`) : une
+    /// absence prouvée par le serveur y reste plusieurs minutes, une panne
+    /// passagère quelques secondes. Les marqueurs ne concernent que le réseau :
+    /// une miniature déjà présente en mémoire ou sur disque fait toujours foi.
+    private var failures = ThumbnailFailureLedger()
+    /// Dernier échec observé par clé, en attente de classification. Le type
+    /// d'erreur n'est transformé en cache négatif qu'à la fin d'une fenêtre de
+    /// réessais : un 404 pendant la génération du poster d'un import récent ne
+    /// doit pas condamner la miniature dès la première tentative.
+    private var lastFailures: [Key: (outcome: FetchOutcome, at: Date)] = [:]
+    private let lastFailureLimit = 512
+
+    /// Nature d'un échec de téléchargement, avant mémorisation.
+    private enum FetchOutcome {
+        /// Le serveur a répondu qu'il n'a pas (encore) de miniature : 404/410
+        /// ou corps vide. Un média importé peut en générer une plus tard.
+        case absent
+        /// Panne passagère (réseau, timeout, 429, 5xx).
+        case transient
+    }
 
     private struct Key: Hashable, Sendable {
         let credentialFingerprint: String
@@ -103,15 +120,17 @@ actor ThumbnailProvider {
         if let cached = Self.memory.object(forKey: key.nsString) {
             return cached
         }
-        if let failedAt = recentFailures[key] {
-            guard Date().timeIntervalSince(failedAt) >= failureRetryTTL else { return nil }
-            recentFailures[key] = nil
-        }
-
         if let existing = inFlight[key] {
             let image = await existing.value
             guard Self.isCurrentCredential(key) else { return nil }
             return image
+        }
+
+        // Cache négatif : la clé n'est écartée que si le disque n'a rien à
+        // servir. Une miniature déjà écrite (session précédente, préchargement
+        // d'un autre écran) doit être affichée même après un échec réseau.
+        if failures.isBlocked(key.nsString), !hasDiskEntry(key) {
+            return nil
         }
 
         let task = Task<UIImage?, Never> { [self] in
@@ -130,8 +149,20 @@ actor ThumbnailProvider {
         Self.memory.setObject(image, forKey: key.nsString, cost: image.estimatedByteSize)
         // Une miniature obtenue par le chemin direct invalide une absence
         // enregistrée (poster généré entre-temps).
-        recentFailures[key] = nil
+        failures.clear(key.nsString)
+        lastFailures[key] = nil
         return image
+    }
+
+    /// La clé a-t-elle déjà une miniature sur disque ? Consulté par le cache
+    /// négatif, qui ne doit jamais masquer une lecture locale possible.
+    private func hasDiskEntry(_ key: Key) -> Bool {
+        disk.hasEntry(
+            credentialFingerprint: key.credentialFingerprint,
+            driveId: key.driveId,
+            fileId: key.fileId,
+            isTrashed: key.isTrashed
+        )
     }
 
     /// Lecture disque + décodage hors de l'executor de l'actor (`nonisolated`
@@ -167,9 +198,10 @@ actor ThumbnailProvider {
 
     /// Attend la disponibilité d'une miniature récemment créée. Le travail est
     /// annulable et chaque tentative passe par le cache/dédoublonnage normal.
-    /// Une fenêtre complète de réessais infructueuse inscrit la clé dans le
-    /// cache négatif : les appels suivants renvoient nil sans retester
-    /// pendant la TTL (les posters vidéo longs retrouvent une chance après).
+    /// À la fin d'une fenêtre de réessais sans résultat, l'échec est classé :
+    /// absence prouvée par le serveur (mémorisée durablement) ou panne
+    /// passagère (écartée quelques secondes). Sans classification, une carte
+    /// réapparue ne relance plus 8 tentatives sur ~60 s.
     func thumbnailWhenAvailable(
         driveId: Int,
         fileId: Int,
@@ -179,12 +211,17 @@ actor ThumbnailProvider {
     ) async -> UIImage? {
         let key = Self.key(driveId: driveId, fileId: fileId, isTrashed: isTrashed)
 
-        // Absence récemment établie : ne pas relancer la boucle de réessais.
-        if let failedAt = recentFailures[key], Date().timeIntervalSince(failedAt) < failureRetryTTL {
+        // Clé écartée (absence mémorisée ou panne récente) : ne pas relancer la
+        // boucle de réessais. Une miniature présente en mémoire ou sur disque
+        // est servie par `thumbnail(for:)`, jamais bloquée par ce marqueur.
+        if failures.isBlocked(key.nsString) {
             return nil
         }
         guard shouldRetry else {
-            markAsFailed(key)
+            // Aucune boucle de réessais pour un fichier ancien : l'échec de la
+            // tentative directe est classé selon sa preuve. Rien n'est décidé
+            // sans observation récente.
+            classifyFailure(key)
             return nil
         }
 
@@ -202,25 +239,40 @@ actor ThumbnailProvider {
             }
             if let image = await thumbnail(for: key) {
                 // Succès (poster enfin généré) : l'absence n'est plus d'actualité.
-                recentFailures[key] = nil
+                failures.clear(key.nsString)
+                lastFailures[key] = nil
                 return image
             }
         }
 
         guard Self.isCurrentCredential(key) else { return nil }
-        markAsFailed(key)
+        classifyFailure(key)
         return nil
     }
 
-    /// Inscrit une clé dans le cache négatif en bornant sa taille.
-    private func markAsFailed(_ key: Key) {
-        // Éviction FIFO simple : la table ne peut pas croître sans limite.
-        if recentFailures.count >= failureCacheLimit, recentFailures[key] == nil {
-            if let oldest = recentFailures.min(by: { $0.value < $1.value })?.key {
-                recentFailures.removeValue(forKey: oldest)
-            }
+    /// Inscrit l'échec observé pour cette clé, puis oublie l'observation.
+    /// Seule une absence prouvée par le serveur est mémorisée durablement ;
+    /// une panne passagère n'écarte la clé que quelques secondes, afin qu'une
+    /// coupure réseau ne condamne jamais la miniature pendant cinq minutes.
+    private func classifyFailure(_ key: Key) {
+        guard let observed = lastFailures[key] else { return }
+        lastFailures[key] = nil
+        switch observed.outcome {
+        case .absent:
+            failures.markAbsent(key.nsString)
+        case .transient:
+            failures.markTransientFailure(key.nsString)
         }
-        recentFailures[key] = Date()
+    }
+
+    /// Mémorise la nature de l'échec, en attendant la fin de la fenêtre de
+    /// réessais (`classifyFailure`) ou la prochaine tentative directe.
+    private func recordFailure(_ outcome: FetchOutcome, for key: Key) {
+        if lastFailures.count >= lastFailureLimit, lastFailures[key] == nil,
+           let oldest = lastFailures.min(by: { $0.value.at < $1.value.at })?.key {
+            lastFailures[oldest] = nil
+        }
+        lastFailures[key] = (outcome, Date())
     }
 
     /// Amorce la génération des miniatures dès la confirmation de l'upload,
@@ -242,12 +294,7 @@ actor ThumbnailProvider {
             )
             guard inFlight[key] == nil,
                   Self.memory.object(forKey: key.nsString) == nil,
-                  !disk.hasEntry(
-                      credentialFingerprint: credentialFingerprint,
-                      driveId: driveId,
-                      fileId: fileId,
-                      isTrashed: isTrashed
-                  )
+                  !hasDiskEntry(key)
             else { continue }
             if !newestKeys.contains(key) {
                 newestKeys.append(key)
@@ -330,15 +377,34 @@ actor ThumbnailProvider {
                 )
             }
             guard !Task.isCancelled, Self.isCurrentCredential(key) else { return nil }
+            // Un corps vide est une réponse du serveur, pas une panne : la
+            // miniature n'existe (encore) pas pour ce fichier.
+            guard !data.isEmpty else {
+                recordFailure(.absent, for: key)
+                return nil
+            }
             return await decodeAndStore(data, key: key)
         } catch is CancellationError {
             return nil
         } catch {
-            // Erreur réseau/HTTP ponctuelle : aucun marqueur. Juste après un
+            // L'échec est classé mais pas encore mémorisé : juste après un
             // upload, kDrive peut répondre 404 quelques secondes avant que la
-            // miniature soit générée ; une carte visible pourra donc réessayer.
+            // miniature soit générée. La classification ne devient un marqueur
+            // qu'à la fin d'une fenêtre de réessais (voir `classifyFailure`).
+            recordFailure(Self.classify(error), for: key)
             return nil
         }
+    }
+
+    /// Une absence est prouvée quand le serveur répond 404/410 : il n'a
+    /// réellement aucune miniature pour ce fichier. Tout le reste (réseau
+    /// coupé, timeout, 429, 5xx) est passager et sera retenté.
+    private static func classify(_ error: Error) -> FetchOutcome {
+        guard let apiError = error as? APIError,
+              case let .http(status, _, _) = apiError,
+              status == 404 || status == 410
+        else { return .transient }
+        return .absent
     }
 
     // MARK: - Maintenance
@@ -348,7 +414,8 @@ actor ThumbnailProvider {
         pendingPrefetchKeys.removeAll()
         prefetchTask?.cancel()
         prefetchTask = nil
-        recentFailures.removeAll()
+        failures.removeAll()
+        lastFailures.removeAll()
         disk.purge()
     }
 

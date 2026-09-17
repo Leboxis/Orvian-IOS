@@ -78,7 +78,8 @@ struct SecurityChecks {
         )
         precondition(
             thumbnailProvider.contains("private var inFlight: [Key:") &&
-            thumbnailProvider.contains("private var recentFailures: [Key:") &&
+            thumbnailProvider.contains("private var failures = ThumbnailFailureLedger()") &&
+            thumbnailProvider.contains("private var lastFailures: [Key: (outcome: FetchOutcome, at: Date)]") &&
             thumbnailProvider.contains("private var pendingPrefetchKeys: [Key]") &&
             thumbnailProvider.contains("Self.isCurrentCredential(key)"),
             "Prefetch and late responses must remain bound to their captured credential"

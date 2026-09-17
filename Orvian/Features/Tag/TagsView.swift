@@ -488,7 +488,11 @@ private struct CategoryRow: View {
         }
         .padding(12)
         .background(.background, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-        .shadow(color: .black.opacity(0.05), radius: 4, x: 0, y: 2)
+        // Ombre de pastille en ligne (DS.inlineShadow) : sur une liste qui
+        // défile, une ombre large force une passe de flou par cellule à chaque
+        // image. Le rayon minimal du système de design garde le relief sans
+        // ce surcoût par carte.
+        .shadow(color: DS.inlineShadow, radius: DS.inlineShadowRadius, x: 0, y: DS.inlineShadowY)
         .contentShape(Rectangle())
     }
 }
@@ -534,7 +538,9 @@ struct TagGridCard: View {
             RoundedRectangle(cornerRadius: compact ? 12 : 16, style: .continuous)
                 .strokeBorder(.quaternary, lineWidth: 0.5)
         }
-        .shadow(color: .black.opacity(0.05), radius: 4, x: 0, y: 2)
+        // Même raison que `CategoryRow` : le flou d'ombre se joue par carte à
+        // chaque image du défilement, le liseré suffit à détacher la carte.
+        .shadow(color: DS.inlineShadow, radius: DS.inlineShadowRadius, x: 0, y: DS.inlineShadowY)
         .contentShape(Rectangle())
     }
 }

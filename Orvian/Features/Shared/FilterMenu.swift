@@ -7,6 +7,12 @@ import SwiftUI
 /// au tap, fermeture au tap extérieur inopérante, probablement aggravée par
 /// la présentation imbriquée du tri). Le menu système s'ouvre à chaque tap
 /// et se referme au tap en dehors, sans état de présentation à gérer.
+///
+/// Les sélecteurs d'orientation et de type de média tiennent sur une seule
+/// ligne de logos (`ControlGroup` compact : jusqu'à quatre éléments). Un tap
+/// ne referme pas le menu, pour ajuster plusieurs critères d'affilée ; le
+/// libellé reste lu par VoiceOver et la sélection se voit à la variante
+/// pleine du symbole.
 struct FilterMenu: View {
     @Binding var filters: FileFilters
 
@@ -29,9 +35,16 @@ struct FilterMenu: View {
             }
 
             Section("Orientation vidéo") {
-                ForEach(FileFilters.Orientation.allCases) { orientation in
-                    Toggle(isOn: orientationBinding(for: orientation)) {
-                        Label(orientation.title, systemImage: orientation.symbol)
+                ControlGroup {
+                    ForEach(FileFilters.Orientation.allCases) { orientation in
+                        Button {
+                            select(orientation: orientation)
+                        } label: {
+                            Image(systemName: orientation.symbol(selected: filters.orientation == orientation))
+                        }
+                        .accessibilityLabel(orientation.title)
+                        .accessibilityAddTraits(filters.orientation == orientation ? .isSelected : [])
+                        .menuActionDismissBehavior(.disabled)
                     }
                 }
                 Toggle(isOn: highResolutionBinding) {
@@ -40,11 +53,20 @@ struct FilterMenu: View {
             }
 
             Section("Afficher") {
-                Picker("Afficher", selection: mediaBinding) {
+                ControlGroup {
                     ForEach(FileFilters.MediaFilter.allCases) { media in
-                        Label(media.title, systemImage: media.symbol)
-                            .tag(media)
+                        Button {
+                            select(media: media)
+                        } label: {
+                            Image(systemName: media.symbol(selected: filters.media == media))
+                        }
+                        .accessibilityLabel(media.title)
+                        .accessibilityAddTraits(filters.media == media ? .isSelected : [])
+                        .menuActionDismissBehavior(.disabled)
                     }
+                }
+                Toggle(isOn: $filters.filesOnly) {
+                    Label("Fichiers uniquement", systemImage: "doc")
                 }
             }
 
@@ -63,22 +85,18 @@ struct FilterMenu: View {
         .accessibilityHint("Trier et filtrer la liste")
     }
 
-    /// Sélection exclusive : une seule orientation à la fois, retaper la coche
-    /// la retire. Choisir une orientation bascule l'affichage sur les vidéos.
-    private func orientationBinding(for orientation: FileFilters.Orientation) -> Binding<Bool> {
-        Binding(
-            get: { filters.orientation == orientation },
-            set: { isOn in
-                if isOn {
-                    filters.orientation = orientation
-                    if filters.media == .images || filters.media == .other {
-                        filters.media = .videos
-                    }
-                } else if filters.orientation == orientation {
-                    filters.orientation = nil
-                }
-            }
-        )
+    /// Sélection exclusive : retaper le logo actif retire l'orientation.
+    /// Choisir une orientation bascule l'affichage sur les vidéos, car les
+    /// orientations ne concernent ni les images ni les autres fichiers.
+    private func select(orientation: FileFilters.Orientation) {
+        guard filters.orientation != orientation else {
+            filters.orientation = nil
+            return
+        }
+        filters.orientation = orientation
+        if filters.media == .images || filters.media == .other {
+            filters.media = .videos
+        }
     }
 
     /// Activer « 4K+ » bascule l'affichage sur les vidéos (même couplage que
@@ -97,16 +115,11 @@ struct FilterMenu: View {
 
     /// Choisir « Images » ou « Autres » retire les critères vidéo devenus sans
     /// objet (orientation, 4K+).
-    private var mediaBinding: Binding<FileFilters.MediaFilter> {
-        Binding(
-            get: { filters.media },
-            set: { media in
-                filters.media = media
-                if media == .images || media == .other {
-                    filters.orientation = nil
-                    filters.highResolutionVideosOnly = false
-                }
-            }
-        )
+    private func select(media: FileFilters.MediaFilter) {
+        filters.media = media
+        if media == .images || media == .other {
+            filters.orientation = nil
+            filters.highResolutionVideosOnly = false
+        }
     }
 }
