@@ -95,7 +95,7 @@ struct SettingsView: View {
                         settingsDivider
                         settingsToggle(
                             "Afficher le chemin du dossier",
-                            detail: "Le fil d’Ariane au-dessus du compteur d’éléments.",
+                            detail: "Le fil d’Ariane à côté du compteur d’éléments.",
                             icon: "signpost.right.fill",
                             tint: .gray,
                             isOn: $showBreadcrumb

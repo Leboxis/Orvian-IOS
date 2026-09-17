@@ -166,19 +166,19 @@ struct DirectoryView: View {
         .safeAreaInset(edge: .top, spacing: 0) {
             if !selectionMode {
                 VStack(spacing: 6) {
-                    if showBreadcrumb {
-                        breadcrumb
-                            .frame(maxWidth: .infinity)
+                    HStack(spacing: 6) {
+                        if showBreadcrumb {
+                            breadcrumb
+                        }
+                        itemCountLabel
+                            .fixedSize(horizontal: true, vertical: false)
                     }
+                    .padding(.horizontal, 16)
+                    .frame(maxWidth: .infinity)
 
                     if searchBarPresented {
-                        VStack(spacing: 6) {
-                            searchBar
-                            itemCountLabel
-                        }
-                        .transition(.move(edge: .top).combined(with: .opacity))
-                    } else {
-                        itemCountLabel
+                        searchBar
+                            .transition(.move(edge: .top).combined(with: .opacity))
                     }
                 }
                 .padding(.top, showBreadcrumb ? 2 : 4)
@@ -761,14 +761,15 @@ struct DirectoryView: View {
     private var itemCountLabel: some View {
         let text = itemCountText
         return Text(text)
-            .font(.caption.weight(.medium))
+            .font(.system(size: 11, weight: .medium))
             .foregroundStyle(.secondary)
-            .padding(.horizontal, 11)
-            .padding(.vertical, 5)
-            .background(.thinMaterial, in: Capsule())
+            .padding(.horizontal, 10)
+            .padding(.vertical, 3.5)
+            .background(.ultraThinMaterial, in: Capsule())
             .overlay {
                 Capsule().strokeBorder(.quaternary.opacity(0.5), lineWidth: 0.5)
             }
+            .shadow(color: .black.opacity(0.04), radius: 2, x: 0, y: 1)
             .accessibilityLabel(usesVisibleItemCount ? text : "\(text) dans ce dossier")
     }
 
