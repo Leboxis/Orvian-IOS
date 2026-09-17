@@ -24,6 +24,7 @@ struct AnimatedGIFView: UIViewRepresentable {
 
 /// Première frame + frame affichée + une frame d'avance : la mémoire ne croît
 /// plus avec la durée du GIF, et aucune réduction de résolution n'est nécessaire.
+@MainActor
 final class GIFPlaybackView: UIView {
     private var playback: Task<Void, Never>?
     private var imageID: UUID?
@@ -42,7 +43,7 @@ final class GIFPlaybackView: UIView {
         playing = isPlaying
         layer.contents = image.firstFrame.image
         guard isPlaying, image.frameCount > 1 else { return }
-        playback = Task { [weak self] in
+        playback = Task { @MainActor [weak self] in
             let clock = ContinuousClock()
             var frame = image.firstFrame
             var index = 0

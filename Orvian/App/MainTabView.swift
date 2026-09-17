@@ -21,7 +21,6 @@ struct MainTabView: View {
     /// de téléchargement + pilule d'upload). Zéro quand rien n'est affiché : la
     /// barre et les grilles gardent alors exactement leur apparence actuelle.
     @State private var overlayChromeHeight: CGFloat = 0
-    @StateObject private var downloadService = FileDownloadService.shared
     @AppStorage("favoritesReselectScrollToTop") private var favoritesReselectScrollToTop = true
 
     private let uploadManager = UploadManager.shared
@@ -50,7 +49,11 @@ struct MainTabView: View {
                 }
 
             VStack(spacing: 0) {
-                overlayChrome
+                TransferOverlayChrome(
+                    uploadManager: uploadManager,
+                    onShowUploads: { showUploadSheet = true },
+                    onHeightChange: { overlayChromeHeight = $0 }
+                )
 
                 FloatingTabBar(
                     selection: $shell.tab,
@@ -71,8 +74,6 @@ struct MainTabView: View {
                 )
             }
             .padding(.bottom, 4)
-            .animation(.snappy(duration: 0.28), value: uploadManager.isPillVisible)
-            .animation(.snappy(duration: 0.28), value: downloadService.isDownloading)
         }
         .ignoresSafeArea(.keyboard, edges: .bottom)
         .tint(.accentColor)
@@ -84,11 +85,6 @@ struct MainTabView: View {
         }
         .fullScreenCover(item: $shell.router.textFile) { file in
             TextFileViewer(file: file, driveId: drive.id)
-        }
-        .alert("Téléchargement impossible", isPresented: downloadErrorBinding) {
-            Button("OK", role: .cancel) {}
-        } message: {
-            Text(downloadService.errorMessage ?? "")
         }
     }
 
@@ -153,13 +149,18 @@ struct MainTabView: View {
         }
     }
 
-    /// Bandeau de téléchargement et pilule d'upload, empilés au-dessus de la
-    /// barre d'onglets. Regroupés pour être mesurés d'un seul coup : leur
-    /// hauteur alimente l'inset réservé aux onglets. Le vide de 8 points
-    /// jusqu'à la barre fait partie de la mesure ; sans pastille, le groupe
-    /// est vide (hauteur nulle) et ne décale donc rien.
-    @ViewBuilder
-    private var overlayChrome: some View {
+}
+
+/// Isole les mises à jour fréquentes de progression de la racine qui héberge
+/// les onglets. Un tick de transfert ne reconstruit ainsi que ces deux pastilles.
+private struct TransferOverlayChrome: View {
+    let uploadManager: UploadManager
+    let onShowUploads: () -> Void
+    let onHeightChange: (CGFloat) -> Void
+
+    @StateObject private var downloadService = FileDownloadService.shared
+
+    var body: some View {
         VStack(spacing: 0) {
             if downloadService.isDownloading {
                 DownloadProgressBanner(service: downloadService) {
@@ -173,7 +174,7 @@ struct MainTabView: View {
 
             if uploadManager.isPillVisible {
                 UploadProgressPill(manager: uploadManager) {
-                    showUploadSheet = true
+                    onShowUploads()
                 }
                 .transition(.asymmetric(
                     insertion: .move(edge: .bottom).combined(with: .opacity),
@@ -188,7 +189,14 @@ struct MainTabView: View {
         .onGeometryChange(for: CGFloat.self) { proxy in
             proxy.size.height
         } action: { height in
-            overlayChromeHeight = height
+            onHeightChange(height)
+        }
+        .animation(.snappy(duration: 0.28), value: uploadManager.isPillVisible)
+        .animation(.snappy(duration: 0.28), value: downloadService.isDownloading)
+        .alert("Téléchargement impossible", isPresented: downloadErrorBinding) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(downloadService.errorMessage ?? "")
         }
     }
 
