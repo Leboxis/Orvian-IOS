@@ -12,6 +12,7 @@ final class AppPrivacyState: ObservableObject {
         var hasPresentedContent = false
         var hasGoneBackground = false
         var generation = 0
+        var allowsInactiveBiometricDismissal = false
     }
     @Published private(set) var snapshot = Snapshot()
     private let isLockConfigured: @MainActor () -> Bool
@@ -28,6 +29,7 @@ final class AppPrivacyState: ObservableObject {
         guard phase != snapshot.phase else { return }
         var next = snapshot
         next.phase = phase
+        next.allowsInactiveBiometricDismissal = false
         if phase == .background {
             FavoritesDiskCache.shared.flushPending()
             next.hasGoneBackground = true
@@ -71,6 +73,7 @@ final class AppPrivacyState: ObservableObject {
         var next = snapshot
         next.isUnlocked = true
         next.hasPresentedContent = true
+        next.allowsInactiveBiometricDismissal = snapshot.phase == .inactive
         snapshot = next
     }
 }
@@ -169,15 +172,21 @@ struct AppPrivacyWindow: UIViewRepresentable {
 
         private func render(_ snapshot: AppPrivacyState.Snapshot) {
             guard let owner, let scene else { return }
-            if !state.requiresLock(snapshot), shield != nil {
+            defer {
+                FileDownloadService.shared.updatePresentation(
+                    isAllowed: !state.requiresLock(snapshot) && snapshot.phase == .active,
+                    window: owner
+                )
+            }
+            if !state.requiresLock(snapshot), snapshot.allowsInactiveBiometricDismissal {
                 // L'écran vient de se déverrouiller alors qu'un bouclier est
                 // visible : le masquer aussitôt, même scène inactive. Le
                 // succès Face ID arrive avant la réactivation (le dialogue
                 // système désactive la scène) ; attendre `.active` laisserait
                 // un bouclier vide — noir en mode sombre — affiché pendant la
-                // fermeture du dialogue. Quand aucun bouclier n'est visible,
-                // on passe ci-dessous : le rideau de confidentialité pour
-                // scène inactive (aperçu du sélecteur…) est préservé.
+                // fermeture du dialogue. Cette exception est réservée au
+                // succès biométrique et s'efface au prochain changement de
+                // phase ; le rideau ordinaire reste visible en arrière-plan.
                 hide()
                 return
             }
@@ -207,6 +216,7 @@ struct AppPrivacyWindow: UIViewRepresentable {
         }
 
         func stop() {
+            FileDownloadService.shared.updatePresentation(isAllowed: false, window: nil)
             observers.forEach { NotificationCenter.default.removeObserver($0) }
             observers.removeAll()
             subscription = nil

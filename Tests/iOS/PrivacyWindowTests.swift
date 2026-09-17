@@ -130,6 +130,33 @@ final class PrivacyWindowTests: XCTestCase {
         XCTAssertTrue(owner.accessibilityElementsHidden)
     }
 
+    func testPrivacyShieldSurvivesInactiveRendersAndBackgroundWithoutPIN() throws {
+        let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+        let original = scene.keyWindow
+        let owner = UIWindow(windowScene: scene)
+        owner.rootViewController = UIViewController()
+        owner.makeKeyAndVisible()
+        let privacy = AppPrivacyState(isLockConfigured: { false })
+        let coordinator = AppPrivacyWindow.Coordinator(state: privacy)
+        defer {
+            coordinator.stop()
+            owner.isHidden = true
+            original?.makeKey()
+        }
+        coordinator.attach(to: owner)
+        privacy.transition(to: .inactive)
+        let shield = try XCTUnwrap(scene.keyWindow)
+        XCTAssertTrue(shield !== owner && shield.windowLevel > .alert)
+        coordinator.attach(to: owner) // SwiftUI peut rendre plusieurs fois en phase inactive.
+        XCTAssertFalse(shield.isHidden)
+        privacy.transition(to: .background)
+        XCTAssertFalse(shield.isHidden)
+        XCTAssertTrue(owner.accessibilityElementsHidden)
+        privacy.transition(to: .active)
+        XCTAssertTrue(shield.isHidden)
+        XCTAssertTrue(owner.isKeyWindow)
+    }
+
     func testShieldCoversPresentedMediaAndPreservesContent() async throws {
         let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
         let original = scene.windows.first(where: \.isKeyWindow)

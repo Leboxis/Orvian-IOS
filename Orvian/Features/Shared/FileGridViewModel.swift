@@ -103,7 +103,8 @@ final class FileGridViewModel {
                 order: order,
                 fetchedAt: fetchedAt
             )
-            if FileGridMutationCenter.shared.isSnapshotStale(
+            let hasExpired = Date().timeIntervalSince(fetchedAt) > Self.freshSnapshotInterval
+            if hasExpired || FileGridMutationCenter.shared.isSnapshotStale(
                 currentSnapshot,
                 source: source,
                 driveId: driveId

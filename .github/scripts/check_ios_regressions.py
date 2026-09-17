@@ -28,6 +28,9 @@ with tempfile.TemporaryDirectory() as temporary:
     run_check(temp / "text-search", [ROOT / path for path in [
         "Orvian/Features/Viewer/TextSearch.swift", "Tests/TextSearchChecks.swift",
     ]])
+    run_check(temp / "text-content", [ROOT / path for path in [
+        "Orvian/Core/Utils/TextFileContent.swift", "Tests/TextFileContentChecks.swift",
+    ]])
     # UIKit is unavailable on the macOS command-line target. Exercise the
     # view's actual methods with plain state; Xcode still compiles the full UI.
     viewer = (ROOT / "Orvian/Features/Viewer/TextFileViewer.swift").read_text(encoding="utf-8")

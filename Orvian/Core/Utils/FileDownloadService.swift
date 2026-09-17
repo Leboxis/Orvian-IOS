@@ -14,13 +14,43 @@ final class FileDownloadService: ObservableObject {
     @Published var errorMessage: String?
 
     private var downloadTask: Task<Void, Never>?
+    private var sessionGeneration = 0
+    private var presentationAllowed = false
+    private weak var presentationWindow: UIWindow?
+    private weak var activityController: UIActivityViewController?
+    private var sharedDirectory: URL?
+    private struct PendingShare {
+        let fileURL: URL
+        let directory: URL
+        let credential: String
+    }
+    private var pendingShare: PendingShare?
+    private let currentCredential: () -> String?
+
+    init(currentCredential: @escaping () -> String? = { TokenStore.credentialFingerprint() }) {
+        self.currentCredential = currentCredential
+    }
+
+    /// Transfère la propriété du fichier terminé à la file de partage.
+    func enqueueCompletedDownload(fileURL: URL, directory: URL, credential: String) {
+        pendingShare = PendingShare(fileURL: fileURL, directory: directory, credential: credential)
+        presentPendingShareIfAllowed()
+    }
+
+    /// La fenêtre de contenu est fournie par le coordinateur de confidentialité,
+    /// jamais recherchée parmi les fenêtres clés (qui peuvent être le verrou).
+    func updatePresentation(isAllowed: Bool, window: UIWindow?) {
+        presentationAllowed = isAllowed
+        presentationWindow = window
+        presentPendingShareIfAllowed()
+    }
 
     /// Point d'entrée conservé `async` pour les appelants existants ; le
     /// travail est porté par une tâche interne qui reste annulable via
     /// `cancelDownload()`.
     func downloadAndShare(driveId: Int, file: DriveFile) async {
         guard !file.isDirectory else { return }
-        guard !isDownloading else {
+        guard !isDownloading, pendingShare == nil, activityController == nil else {
             errorMessage = "Un autre téléchargement est déjà en cours."
             return
         }
@@ -28,7 +58,15 @@ final class FileDownloadService: ObservableObject {
         progress = 0
         downloadingFileName = file.name
         errorMessage = nil
-        let task = Task { await performDownloadAndShare(driveId: driveId, file: file) }
+        guard let credential = currentCredential() else {
+            isDownloading = false
+            downloadingFileName = nil
+            return
+        }
+        let generation = sessionGeneration
+        let task = Task {
+            await performDownloadAndShare(driveId: driveId, file: file, credential: credential, generation: generation)
+        }
         downloadTask = task
         await task.value
     }
@@ -37,22 +75,48 @@ final class FileDownloadService: ObservableObject {
     /// nettoyés et aucun message d'erreur n'est présenté.
     func cancelDownload() {
         downloadTask?.cancel()
+        if let pendingShare {
+            try? FileManager.default.removeItem(at: pendingShare.directory)
+            self.pendingShare = nil
+        }
     }
 
-    private func performDownloadAndShare(driveId: Int, file: DriveFile) async {
+    func cancelAllAndClear() {
+        sessionGeneration &+= 1
+        cancelDownload()
+        downloadTask = nil
+        isDownloading = false
+        progress = 0
+        downloadingFileName = nil
+        activityController?.dismiss(animated: false)
+        activityController = nil
+        if let sharedDirectory {
+            try? FileManager.default.removeItem(at: sharedDirectory)
+            self.sharedDirectory = nil
+        }
+        errorMessage = nil
+    }
+
+    private func performDownloadAndShare(driveId: Int, file: DriveFile, credential: String, generation: Int) async {
         defer {
-            isDownloading = false
-            progress = 0
-            downloadingFileName = nil
-            downloadTask = nil
+            if generation == sessionGeneration {
+                isDownloading = false
+                progress = 0
+                downloadingFileName = nil
+                downloadTask = nil
+            }
         }
 
         var temporaryURLToClean: URL?
         var directoryToClean: URL?
         do {
+            try Task.checkCancellation()
+            guard generation == sessionGeneration,
+                  credential == currentCredential() else { throw CancellationError() }
             guard let remoteURL = await MediaURLCache.shared.url(driveId: driveId, fileId: file.id) else {
                 throw FileDownloadError.missingTemporaryURL
             }
+            try Task.checkCancellation()
 
             let tempURL = try await download(
                 from: remoteURL,
@@ -62,6 +126,8 @@ final class FileDownloadService: ObservableObject {
             )
             temporaryURLToClean = tempURL
             try Task.checkCancellation()
+            guard generation == sessionGeneration,
+                  credential == currentCredential() else { throw CancellationError() }
 
             let downloadDirectory = FileManager.default.temporaryDirectory
                 .appendingPathComponent("OrvianDownloads", isDirectory: true)
@@ -73,11 +139,9 @@ final class FileDownloadService: ObservableObject {
             try FileManager.default.moveItem(at: tempURL, to: destinationURL)
             temporaryURLToClean = nil
 
-            guard presentShareSheet(for: destinationURL, cleanupDirectory: downloadDirectory) else {
-                throw FileDownloadError.cannotPresentShareSheet
-            }
-            // La feuille de partage prend désormais en charge le nettoyage.
+            // La file d'attente conserve le fichier jusqu'au déverrouillage.
             directoryToClean = nil
+            enqueueCompletedDownload(fileURL: destinationURL, directory: downloadDirectory, credential: credential)
         } catch {
             if let temporaryURLToClean {
                 try? FileManager.default.removeItem(at: temporaryURLToClean)
@@ -86,7 +150,8 @@ final class FileDownloadService: ObservableObject {
                 try? FileManager.default.removeItem(at: directoryToClean)
             }
             // Annulation explicite : ce n'est pas un échec, aucun message.
-            guard !Task.isCancelled else { return }
+            guard !Task.isCancelled, generation == sessionGeneration,
+                  credential == currentCredential() else { return }
             errorMessage = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
         }
     }
@@ -134,8 +199,10 @@ final class FileDownloadService: ObservableObject {
     /// Task Swift déjà annulée ne peut plus invalider la session avant la
     /// création de la tâche.
     private func downloadWithProgress(from remoteURL: URL) async throws -> (URL, URLResponse) {
+        let generation = sessionGeneration
         let delegate = DownloadProgressDelegate(progress: { [weak self] fraction in
             Task { @MainActor in
+                guard self?.sessionGeneration == generation, self?.isDownloading == true else { return }
                 self?.progress = fraction
             }
         })
@@ -190,11 +257,26 @@ final class FileDownloadService: ObservableObject {
     }
 
     /// Ouvre le menu de partage natif iOS (UIActivityViewController) : Enregistrer dans Fichiers, Enregistrer l'image/vidéo, AirDrop, etc.
+    private func presentPendingShareIfAllowed() {
+        guard let pendingShare else { return }
+        guard pendingShare.credential == currentCredential() else {
+            try? FileManager.default.removeItem(at: pendingShare.directory)
+            self.pendingShare = nil
+            return
+        }
+        guard presentationAllowed,
+              presentationWindow?.windowScene?.activationState == .foregroundActive else { return }
+        self.pendingShare = nil
+        if !presentShareSheet(for: pendingShare.fileURL, cleanupDirectory: pendingShare.directory) {
+            try? FileManager.default.removeItem(at: pendingShare.directory)
+            errorMessage = FileDownloadError.cannotPresentShareSheet.localizedDescription
+        }
+    }
+
     @discardableResult
     private func presentShareSheet(for fileURL: URL, cleanupDirectory: URL) -> Bool {
-        guard let windowScene = UIApplication.shared.connectedScenes.first(where: { $0.activationState == .foregroundActive }) as? UIWindowScene
-                ?? UIApplication.shared.connectedScenes.first as? UIWindowScene,
-              let rootVC = windowScene.windows.first(where: { $0.isKeyWindow })?.rootViewController else {
+        guard presentationAllowed,
+              let rootVC = presentationWindow?.rootViewController else {
             return false
         }
 
@@ -209,9 +291,16 @@ final class FileDownloadService: ObservableObject {
             popover.sourceRect = CGRect(x: topVC.view.bounds.midX, y: topVC.view.bounds.midY, width: 0, height: 0)
             popover.permittedArrowDirections = []
         }
-        activityVC.completionWithItemsHandler = { _, _, _, _ in
+        activityVC.completionWithItemsHandler = { [weak self] _, _, _, _ in
             try? FileManager.default.removeItem(at: cleanupDirectory)
+            Task { @MainActor in
+                guard self?.sharedDirectory == cleanupDirectory else { return }
+                self?.sharedDirectory = nil
+                self?.activityController = nil
+            }
         }
+        activityController = activityVC
+        sharedDirectory = cleanupDirectory
         topVC.present(activityVC, animated: true)
         return true
     }

@@ -12,6 +12,23 @@ utilisent des secrets factices et des transferts simulés, sans compte kDrive.
 
 ## Parcours à vérifier sur iPhone / simulateur
 
+- Téléchargement lent avec PIN : passer en arrière-plan puis revenir sans
+  s'authentifier. Si le téléchargement termine, aucun aperçu ni partage ne
+  doit apparaître au-dessus du verrou. Après déverrouillage, le partage s'ouvre
+  depuis la fenêtre de contenu. Répéter avec Face ID (succès en phase inactive).
+- Déconnexion pendant un téléchargement, puis reconnexion : aucun nom,
+  progression ou partage de l'ancienne session ne doit réapparaître. Répéter
+  avec un fichier terminé et en attente derrière le verrou.
+- Sans PIN, vérifier le masque lors du passage actif → inactif → arrière-plan
+  et l'aperçu du sélecteur d'applications. Avec PIN, vérifier aussi qu'un succès
+  Face ID ne laisse pas d'écran noir avant la réactivation.
+- Accueil : modifier le dossier depuis kDrive Web, attendre plus de 60 s, puis
+  revenir sur l'onglet ou au premier plan. La liste doit se revalider. Un
+  pull-to-refresh doit récupérer les modifications sans attendre 60 s.
+- Ouvrir des textes UTF-16 LE et BE avec BOM (accents et emoji), UTF-8 et
+  Windows-1252. Ils doivent rester lisibles ; un ZIP ou un texte contenant un
+  caractère nul doit rester refusé comme contenu binaire.
+
 - Verrouillage par code : en portrait puis en paysage, toutes les touches
   restent visibles et utilisables. Répéter avec Dynamic Type au maximum ; si
   le contenu dépasse, il doit défiler sans réduire les cibles tactiles.

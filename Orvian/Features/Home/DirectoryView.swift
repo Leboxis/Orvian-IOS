@@ -10,6 +10,7 @@ struct DirectoryView: View {
     let showsSearchBar: Bool
     /// Retire le focus du champ quand son onglet n'est plus affiché.
     let isActive: Bool
+    @Environment(\.scenePhase) private var scenePhase
 
     @State private var viewModel: FileGridViewModel
     @State private var searchViewModel: FileGridViewModel?
@@ -155,7 +156,7 @@ struct DirectoryView: View {
             },
             searchText: searchText,
             filters: filters,
-            allowsPullToRefresh: !showsSearchBar,
+            allowsPullToRefresh: true,
             selectionMode: selectionMode,
             selectedIDs: selectedIDs,
             onToggleSelection: { toggleSelection($0) },
@@ -320,6 +321,10 @@ struct DirectoryView: View {
                 searchFocused = false
             }
         }
+        .task(id: DirectoryActivationKey(isActive: isActive, phase: scenePhase)) {
+            guard isActive, scenePhase == .active else { return }
+            await viewModel.loadIfNeeded()
+        }
         .task(id: SearchTaskKey(query: searchText, restricted: searchRestrictedToFolder)) {
             let trimmed = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !trimmed.isEmpty else {
@@ -374,6 +379,11 @@ struct DirectoryView: View {
     private struct SearchTaskKey: Hashable {
         let query: String
         let restricted: Bool
+    }
+
+    private struct DirectoryActivationKey: Equatable {
+        let isActive: Bool
+        let phase: ScenePhase
     }
 
     /// Pastille de recherche centrée et compacte.

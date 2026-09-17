@@ -111,6 +111,7 @@ final class SessionStore {
         // Annuler avant d'effacer le token afin que les URLSession actives
         // cessent d'envoyer des octets avec les anciennes autorisations.
         UploadManager.shared.cancelAllAndClear()
+        FileDownloadService.shared.cancelAllAndClear()
         DirectoryListStore.shared.clear()
         CategoryLibrary.shared.clear()
         TokenStore.clear()
