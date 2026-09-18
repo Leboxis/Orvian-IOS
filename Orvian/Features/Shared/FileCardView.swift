@@ -42,6 +42,8 @@ struct FileCardView: View {
 
     /// Préférence globale : conserve le type comme repère lorsque le poids est masqué.
     @AppStorage("showFileSizes") private var showFileSizes = true
+    /// Préférence globale : affiche ou masque l'étoile des favoris sur les cartes.
+    @AppStorage("showFavoriteStars") private var showFavoriteStars = true
     @AppStorage("defaultFolderColor") private var defaultFolderColor = "#4285F5"
     @State private var thumbnail: UIImage?
     @State private var thumbnailLoaded = false
@@ -78,7 +80,7 @@ struct FileCardView: View {
                     .overlay(alignment: .topTrailing) {
                         if selectionMode {
                             selectionBadge
-                        } else if showsFavoriteBadge {
+                        } else if showsFavoriteBadge && showFavoriteStars {
                             favoriteBadge
                         }
                     }
@@ -238,7 +240,8 @@ struct FileCardView: View {
         }
     }
 
-    /// Pastille translucide + étoile, lisible sur toute miniature.
+    /// Étoile de favori posée directement sur la miniature, sans pastille ni
+    /// contour : une ombre portée suffit à la détacher des fonds clairs.
     @ViewBuilder
     private var favoriteBadge: some View {
         if file.isFavorite == true {
@@ -246,19 +249,13 @@ struct FileCardView: View {
                 onToggleFavorite?()
             } label: {
                 Image(systemName: "star.fill")
-                    .font(.system(size: 11, weight: .semibold))
+                    .font(.system(size: 14, weight: .semibold))
                     .foregroundStyle(.yellow)
-                    .padding(5)
-                    .background(.black.opacity(0.48), in: Circle())
-                    // Même liseré que la pastille de lecture : sans lui, le
-                    // fond noir se confond avec une miniature sombre.
-                    .overlay {
-                        Circle().strokeBorder(.white.opacity(0.35), lineWidth: 0.8)
-                    }
+                    .shadow(color: .black.opacity(0.55), radius: 2, x: 0, y: 1)
             }
             .buttonStyle(.plain)
             .accessibilityLabel("Retirer des favoris")
-            .padding(5)
+            .padding(7)
         }
     }
 

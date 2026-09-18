@@ -183,10 +183,12 @@ nombre de négociations TLS évitées ni gain de durée n'est garanti sans mesur
   même si kDrive répond 404 les premières secondes ; aucune absence n'est
   mémorisée avant la fin de la fenêtre.
 - Menu de filtres (Accueil, Favoris, corbeille, dossier, tag) : les
-  orientations (portrait/paysage/carré) tiennent sur une seule ligne de logos,
-  idem pour Tout/Vidéos/Images/Autres. L'option active se voit à la variante
-  pleine du symbole ; un tap ne referme pas le menu, tap extérieur pour fermer.
-  VoiceOver lit le nom de chaque logo et l'état sélectionné.
+  orientations (portrait/paysage/carré) tiennent sur une seule ligne de logos
+  (`ControlGroup` `.compactMenu`), idem pour Tout/Vidéos/Images/Dossiers/Autres
+  (`Picker` `.palette`, défilement horizontal si étroit). L'option active se
+  voit à la variante pleine du symbole ; un tap sur une orientation ne referme
+  pas le menu, tap extérieur pour fermer. VoiceOver lit le nom de chaque logo
+  et l'état sélectionné.
 - « Fichiers uniquement » : masque les dossiers, y compris dans une recherche
   ou un tri ; le compteur d'éléments passe en « visibles » ; désactiver
   l'option (ou Réinitialiser) rend les dossiers. Vérifier qu'un filtre actif ne

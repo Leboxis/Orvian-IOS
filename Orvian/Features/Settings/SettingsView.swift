@@ -9,6 +9,7 @@ struct SettingsView: View {
     @State private var showDrivePicker = false
     @State private var showSignOutConfirm = false
     @AppStorage("showFileSizes") private var showFileSizes = true
+    @AppStorage("showFavoriteStars") private var showFavoriteStars = true
     @AppStorage("fileGridColumns") private var fileGridColumns = 3
     @AppStorage("tagGridColumns") private var tagGridColumns = 2
     @AppStorage("alwaysShowSearch") private var alwaysShowSearch = false
@@ -51,6 +52,14 @@ struct SettingsView: View {
                             icon: "scalemass",
                             tint: .indigo,
                             isOn: $showFileSizes
+                        )
+                        settingsDivider
+                        settingsToggle(
+                            "Afficher les étoiles des favoris",
+                            detail: "L’étoile apparaît sur les cartes des fichiers favoris.",
+                            icon: "star.fill",
+                            tint: .yellow,
+                            isOn: $showFavoriteStars
                         )
                         settingsDivider
                         settingsChoice(

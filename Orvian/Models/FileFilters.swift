@@ -63,7 +63,10 @@ struct FileFilters: Equatable, Hashable {
         var symbol: String {
             switch self {
             case .portrait: return "rectangle.portrait"
-            case .landscape: return "rectangle.landscape"
+            // `rectangle` (sans suffixe) est le rectangle paysage : il
+            // n'existe pas de `rectangle.landscape` dans SF Symbols, d'où
+            // l'icône vide dans le menu de filtres.
+            case .landscape: return "rectangle"
             case .square: return "square"
             }
         }
@@ -72,7 +75,7 @@ struct FileFilters: Equatable, Hashable {
         var filledSymbol: String {
             switch self {
             case .portrait: return "rectangle.portrait.fill"
-            case .landscape: return "rectangle.landscape.fill"
+            case .landscape: return "rectangle.fill"
             case .square: return "square.fill"
             }
         }
@@ -94,7 +97,7 @@ struct FileFilters: Equatable, Hashable {
 
     /// Type de média affiché.
     enum MediaFilter: String, CaseIterable, Identifiable {
-        case all, videos, images, other
+        case all, videos, images, folders, other
 
         var id: String { rawValue }
 
@@ -103,6 +106,7 @@ struct FileFilters: Equatable, Hashable {
             case .all: return "Tout"
             case .videos: return "Vidéos"
             case .images: return "Images"
+            case .folders: return "Dossiers"
             case .other: return "Autres"
             }
         }
@@ -113,6 +117,7 @@ struct FileFilters: Equatable, Hashable {
             case .all: return "square.grid.2x2"
             case .videos: return "video"
             case .images: return "photo"
+            case .folders: return "folder"
             case .other: return "doc"
             }
         }
@@ -123,6 +128,7 @@ struct FileFilters: Equatable, Hashable {
             case .all: return "square.grid.2x2.fill"
             case .videos: return "video.fill"
             case .images: return "photo.fill"
+            case .folders: return "folder.fill"
             case .other: return "doc.fill"
             }
         }
@@ -182,7 +188,8 @@ struct FileFilters: Equatable, Hashable {
         case .all: break
         case .videos: result = result.filter(\.isVideo)
         case .images: result = result.filter(\.isImage)
-        case .other: result = result.filter { !$0.isVideo && !$0.isImage }
+        case .folders: result = result.filter(\.isDirectory)
+        case .other: result = result.filter { !$0.isVideo && !$0.isImage && !$0.isDirectory }
         }
 
         // Ne garder que les fichiers de la liste : les dossiers sont masqués.

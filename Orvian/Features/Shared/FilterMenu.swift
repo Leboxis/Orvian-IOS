@@ -9,10 +9,16 @@ import SwiftUI
 /// et se referme au tap en dehors, sans état de présentation à gérer.
 ///
 /// Les sélecteurs d'orientation et de type de média tiennent sur une seule
-/// ligne de logos (`ControlGroup` compact : jusqu'à quatre éléments). Un tap
-/// ne referme pas le menu, pour ajuster plusieurs critères d'affilée ; le
-/// libellé reste lu par VoiceOver et la sélection se voit à la variante
-/// pleine du symbole.
+/// ligne de logos compacte. L'orientation (3 logos : portrait, paysage,
+/// carré) utilise un `ControlGroup` en style `.compactMenu` : le style
+/// `.menu` par défaut ne range que trois logos avec de larges marges
+/// verticales, et tronque tout logo supplémentaire. Le type de média
+/// (5 logos : tout, vidéos, images, dossiers, autres) dépasse la limite de
+/// quatre du `ControlGroup` : il utilise donc un `Picker` en style
+/// `.palette`, qui reste compact et défile horizontalement si la place
+/// manque. Un tap sur un logo d'orientation ne referme pas le menu, pour
+/// ajuster plusieurs critères d'affilée ; le libellé reste lu par VoiceOver
+/// et la sélection se voit à la variante pleine du symbole.
 struct FilterMenu: View {
     @Binding var filters: FileFilters
 
@@ -47,27 +53,30 @@ struct FilterMenu: View {
                         .menuActionDismissBehavior(.disabled)
                     }
                 }
+                .controlGroupStyle(.compactMenu)
                 Toggle(isOn: highResolutionBinding) {
                     Label("Vidéos 4K et plus", systemImage: "4k.tv")
                 }
             }
 
             Section("Afficher") {
-                ControlGroup {
+                // Le libellé visible est masqué : l'en-tête de section
+                // « Afficher » donne déjà le contexte, et un second intitulé
+                // ajouterait une rangée vide au-dessus des logos.
+                Picker(selection: mediaBinding) {
                     ForEach(FileFilters.MediaFilter.allCases) { media in
-                        Button {
-                            select(media: media)
-                        } label: {
-                            Image(systemName: media.symbol(selected: filters.media == media))
-                        }
-                        .accessibilityLabel(media.title)
-                        .accessibilityAddTraits(filters.media == media ? .isSelected : [])
-                        .menuActionDismissBehavior(.disabled)
+                        Label(media.title, systemImage: media.symbol(selected: filters.media == media))
+                            .tag(media)
                     }
+                } label: {
+                    EmptyView()
                 }
+                .pickerStyle(.palette)
+                .accessibilityLabel("Type de média")
                 Toggle(isOn: $filters.filesOnly) {
                     Label("Fichiers uniquement", systemImage: "doc")
                 }
+                .disabled(filters.media == .folders)
             }
 
             if filters.isActive {
@@ -87,14 +96,15 @@ struct FilterMenu: View {
 
     /// Sélection exclusive : retaper le logo actif retire l'orientation.
     /// Choisir une orientation bascule l'affichage sur les vidéos, car les
-    /// orientations ne concernent ni les images ni les autres fichiers.
+    /// orientations ne concernent ni les images, ni les dossiers, ni les
+    /// autres fichiers.
     private func select(orientation: FileFilters.Orientation) {
         guard filters.orientation != orientation else {
             filters.orientation = nil
             return
         }
         filters.orientation = orientation
-        if filters.media == .images || filters.media == .other {
+        if filters.media == .images || filters.media == .folders || filters.media == .other {
             filters.media = .videos
         }
     }
@@ -113,13 +123,23 @@ struct FilterMenu: View {
         )
     }
 
-    /// Choisir « Images » ou « Autres » retire les critères vidéo devenus sans
-    /// objet (orientation, 4K+).
-    private func select(media: FileFilters.MediaFilter) {
-        filters.media = media
-        if media == .images || media == .other {
-            filters.orientation = nil
-            filters.highResolutionVideosOnly = false
-        }
+    /// Choisir « Images », « Dossiers » ou « Autres » retire les critères
+    /// vidéo devenus sans objet (orientation, 4K+). Choisir « Dossiers »
+    /// réactive l'affichage des dossiers si « Fichiers uniquement » le
+    /// masquait (sinon la combinaison n'afficherait rien).
+    private var mediaBinding: Binding<FileFilters.MediaFilter> {
+        Binding(
+            get: { filters.media },
+            set: { media in
+                filters.media = media
+                if media == .images || media == .folders || media == .other {
+                    filters.orientation = nil
+                    filters.highResolutionVideosOnly = false
+                }
+                if media == .folders {
+                    filters.filesOnly = false
+                }
+            }
+        )
     }
 }
