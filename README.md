@@ -4,47 +4,6 @@ Client iOS natif non officiel pour **kDrive** (Infomaniak), en Swift + SwiftUI.
 Pensé pour une expérience « Apple Photos » : grilles de miniatures fluides,
 visionneuse photos avec zoom, lecteur vidéo AVPlayer quasi instantané.
 
-## Fonctionnalités (jalon 4 — v0.4.0)
-
-- **5 onglets** avec barre flottante translucide, de gauche à droite :
-  **Réglages · Tag · Accueil · Favoris · Profil**
-- **Accueil** : navigation dans l'arborescence du drive, dossiers en premier,
-  breadcrumb compact, pagination infinie, pull-to-refresh — l'ancien contenu
-  reste affiché pendant le rechargement
-- **Tag** : catégories kDrive (couleur, nom) et grille des fichiers de chaque
-  catégorie, avec navigation dans les dossiers
-- **Favoris** : grille des favoris, bascule de l'étoile optimiste depuis les
-  cartes, navigation dans les dossiers favoris
-- **Réglages** : stockage du drive, purge du cache de miniatures, changement de drive
-- **Profil** : compte Infomaniak, drive utilisé, version, déconnexion
-- **Cartes uniformes** : zone de miniature carrée stricte — toutes les cartes
-  ont exactement la même taille, quelle que soit l'orientation d'origine
-- **Visionneuse de médias** : pager plein écran unique pour les images **et** les vidéos —
-  le swipe horizontal passe au média suivant/précédent dans l'ordre du tri et des filtres
-  de l'onglet d'origine, avec continuation de la pagination. Images : pinch zoom, double-tap,
-  fermeture au swipe vertical, miniature instantanée puis haute résolution sous-échantillonnée (ImageIO).
-  Vidéos : interface personnalisée (titre et fermer en haut, play/pause, progression, muet,
-  AirPlay, favori et tags), lecture via URL temporaire, seule la page courante lit
-- **GIF animés** : lecture dans la visionneuse avec les délais de chaque frame,
-  zoom et gestes habituels ; animation limitée à la page active, arrêt en arrière-plan.
-  Un seul téléchargement, première frame préchargée pour le média suivant,
-  puis décodage progressif hors thread principal à la résolution originale.
-  Seules la première frame, la courante et la suivante restent en mémoire. Import Photos sans transcodage demandé.
-- **Favoris & tags sur les cartes** : étoile dorée en haut à droite des favoris,
-  pastilles colorées des tags à côté du poids (`with=is_favorite,categories`)
-- **Ajout** : bouton « + » dans les dossiers — créer un dossier, importer un
-  fichier, importer photos/vidéos (upload kDrive v3, conflits renommés automatiquement)
-- **Déplacement** : action rapide après un appui long, sélection multiple et
-  choix du dossier cible dans l’arborescence kDrive
-- **Couleurs de dossiers** : teinte d'origine définie dans kDrive (API), sinon
-  teinte par type ; l'onglet Accueil démarre directement dans le premier dossier
-  de la racine
-- **Performance** : cache mémoire + disque LRU (250 Mo) des miniatures, déduplication des requêtes,
-  annulation hors écran, préchargement des cartes suivantes, décodage hors thread principal
-
-### Non inclus dans ce jalon (route map)
-
-Cache offline, liens de partage, commentaires et synchronisation.
 
 ## Démarrage
 
