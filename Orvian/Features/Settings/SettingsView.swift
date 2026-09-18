@@ -126,17 +126,13 @@ struct SettingsView: View {
                             Label("Session temporaire", systemImage: "lock.trianglebadge.exclamationmark")
                                 .font(.caption.weight(.semibold))
                                 .foregroundStyle(.orange)
-                        } else if isLockCodeEnabled {
-                            Label("Protégé par code", systemImage: "lock.fill")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
                         } else {
                             Text("Compte connecté sur cet appareil")
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                         }
                         if let drive = session.selectedDrive {
-                            quotaBar(drive)
+                            quotaLine(drive)
                                 .padding(.top, 6)
                         }
                     }
@@ -168,25 +164,13 @@ struct SettingsView: View {
             .accessibilityHidden(true)
     }
 
-    private func quotaBar(_ drive: Drive) -> some View {
-        let used = Double(drive.usedSize ?? 0)
-        let total = Double(max(drive.size ?? 1, 1))
-        return VStack(alignment: .leading, spacing: 4) {
-            GeometryReader { proxy in
-                ZStack(alignment: .leading) {
-                    Capsule()
-                        .fill(.quaternary)
-                        .frame(height: 6)
-                    Capsule()
-                        .fill(Color.accentColor)
-                        .frame(width: proxy.size.width * min(1, used / total), height: 6)
-                }
-            }
-            .frame(height: 6)
-            Text(ByteFormatter.usage(used: drive.usedSize, total: drive.size))
-                .font(.caption)
-                .foregroundStyle(.secondary)
-        }
+    /// Une seule ligne discrète : « X utilisés · Y libres », sans jauge.
+    private func quotaLine(_ drive: Drive) -> some View {
+        let free = max((drive.size ?? 0) - (drive.usedSize ?? 0), 0)
+        return Text("\(ByteFormatter.string(fromBytes: drive.usedSize)) utilisés · \(ByteFormatter.string(fromBytes: free)) libres")
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            .lineLimit(1)
     }
 
     // MARK: - Hub : accès rapide
@@ -628,6 +612,9 @@ private struct AppearanceSpace: View {
                 Text("Une légère vibration accompagne les changements d'onglet.")
             }
         }
+        .safeAreaInset(edge: .bottom) {
+            Color.clear.frame(height: 90)
+        }
         .navigationTitle("Apparence")
         .navigationBarTitleDisplayMode(.inline)
     }
@@ -685,6 +672,9 @@ private struct MediaSpace: View {
                 Text("Journal des durées et codes HTTP, consultable dans Profil → Mesures réseau. Désactivé, rien n'est collecté.")
             }
         }
+        .safeAreaInset(edge: .bottom) {
+            Color.clear.frame(height: 90)
+        }
         .navigationTitle("Médias et réseau")
         .navigationBarTitleDisplayMode(.inline)
     }
@@ -730,6 +720,9 @@ private struct StorageSpace: View {
             } footer: {
                 Text("Sans danger : les miniatures seront retéléchargées à la demande.")
             }
+        }
+        .safeAreaInset(edge: .bottom) {
+            Color.clear.frame(height: 90)
         }
         .navigationTitle("Stockage")
         .navigationBarTitleDisplayMode(.inline)
@@ -801,6 +794,9 @@ private struct SecuritySpace: View {
                 }
             }
         }
+        .safeAreaInset(edge: .bottom) {
+            Color.clear.frame(height: 90)
+        }
         .navigationTitle("Sécurité")
         .navigationBarTitleDisplayMode(.inline)
     }
@@ -847,6 +843,9 @@ private struct AccountSpace: View {
             } footer: {
                 Text("Le token et le drive choisi sont enregistrés uniquement sur cet appareil.")
             }
+        }
+        .safeAreaInset(edge: .bottom) {
+            Color.clear.frame(height: 90)
         }
         .navigationTitle("Compte")
         .navigationBarTitleDisplayMode(.inline)
