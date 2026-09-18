@@ -394,9 +394,15 @@ final class FileGridViewModel {
             }
         }
         if case .recents = source, orderBy.isEmpty {
+            // Ordre total (date puis `id`) : `sort` n'est pas stable et les
+            // horodatages à la seconde créent des ex æquo lors des imports en
+            // rafale. Sans tiebreak, l'instantané partagé (donc l'aperçu
+            // Profil qui le relit) permute à chaque fusion.
             items.sort {
-                ($0.updatedAt ?? $0.lastModifiedAt ?? $0.addedAt ?? 0) >
-                ($1.updatedAt ?? $1.lastModifiedAt ?? $1.addedAt ?? 0)
+                let lhs = $0.updatedAt ?? $0.lastModifiedAt ?? $0.addedAt ?? 0
+                let rhs = $1.updatedAt ?? $1.lastModifiedAt ?? $1.addedAt ?? 0
+                if lhs != rhs { return lhs > rhs }
+                return $0.id > $1.id
             }
             return
         }

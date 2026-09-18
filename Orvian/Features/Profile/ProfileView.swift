@@ -160,27 +160,46 @@ struct ProfileView: View {
 
     // MARK: - Chargement
 
+    /// Ordre déterministe de l'aperçu : date décroissante, `id` décroissant
+    /// en cas d'égalité. Les horodatages kDrive sont à la seconde : les
+    /// imports en rafale partagent la même seconde et l'ordre serveur des
+    /// ex æquo n'est pas garanti d'une requête `last_modified` à l'autre.
+    /// Sans ce tri, les 3 cartes visibles (`prefix(3)`) permutent ~1 s après
+    /// l'affichage du cache, alors même que le jeu de fichiers est identique.
+    /// Le tri vit ici (aperçu seul), jamais dans le magasin partagé : trier
+    /// la première page casserait la pagination au curseur de « voir plus ».
+    private static func previewOrder(_ files: [DriveFile]) -> [DriveFile] {
+        files.sorted {
+            let lhs = $0.updatedAt ?? $0.lastModifiedAt ?? $0.addedAt ?? 0
+            let rhs = $1.updatedAt ?? $1.lastModifiedAt ?? $1.addedAt ?? 0
+            if lhs != rhs { return lhs > rhs }
+            return $0.id > $1.id
+        }
+    }
+
     private func loadPreviews(forceNetwork: Bool = false) async {
         guard let drive = session.selectedDrive else { return }
 
         // Mémoire puis disque : les cartes connues apparaissent avant la
         // requête `last_modified`, y compris au premier accès après lancement.
         if !forceNetwork, let snapshot = await recentUploadsLoader.cachedSnapshot(driveId: drive.id) {
-            recentUploads = snapshot.items.filter { !$0.isDirectory }
+            recentUploads = Self.previewOrder(snapshot.items.filter { !$0.isDirectory })
             isLoadingRecents = false
         }
 
         if let snapshot = await recentUploadsLoader.refresh(
             driveId: drive.id, forceNetwork: forceNetwork
         ) {
-            recentUploads = snapshot.items.filter { !$0.isDirectory }
+            recentUploads = Self.previewOrder(snapshot.items.filter { !$0.isDirectory })
         }
         isLoadingRecents = false
     }
 
     private func mergeUploaded(_ files: [DriveFile]) {
         let uploadedIDs = Set(files.map(\.id))
-        recentUploads = Array((files + recentUploads.filter { !uploadedIDs.contains($0.id) }).prefix(12))
+        recentUploads = Array(Self.previewOrder(
+            files + recentUploads.filter { !uploadedIDs.contains($0.id) }
+        ).prefix(12))
         isLoadingRecents = false
     }
 }

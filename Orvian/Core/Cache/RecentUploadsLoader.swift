@@ -11,6 +11,11 @@ final class RecentUploadsLoader {
 
     static let source = FileSource.recents(limit: 12)
     private static let revalidationInterval: TimeInterval = 60
+    /// L'index serveur (`last_modified`) peut mettre plusieurs minutes à
+    /// converger après un upload. Au-delà de l'aller-retour en cours, un
+    /// ajout local récent absent de la réponse serveur est donc conservé en
+    /// tête au lieu de disparaître ~1 s après l'affichage du cache.
+    private static let recentUploadGraceInterval: TimeInterval = 10 * 60
 
     private struct InFlight {
         let id: UUID
@@ -87,16 +92,53 @@ final class RecentUploadsLoader {
                 forceNetwork: forcesNetwork
             ),
                   !Task.isCancelled
-            else { return credential == TokenStore.credentialFingerprint() && !Task.isCancelled ? cached : nil }
+            else {
+                // Échec réseau : ne pas écraser avec l'instantané d'avant
+                // requête, qui ignore les uploads fusionnés pendant
+                // l'aller-retour. Relire le magasin courant (à jour), sinon
+                // repli sur l'état d'avant requête.
+                guard credential == TokenStore.credentialFingerprint(), !Task.isCancelled else { return nil }
+                return DirectoryListStore.shared.snapshot(
+                    source: Self.source, driveId: driveId, orderBy: [], order: "asc"
+                ) ?? cached
+            }
             guard !Task.isCancelled, credential == TokenStore.credentialFingerprint() else { return nil }
             let serverFiles = (page.data ?? []).filter { !$0.isDirectory }
-            // Si un upload s'est terminé pendant l'aller-retour, une réponse
-            // d'index encore en retard ne doit pas faire disparaître sa carte.
-            let localAdditions = DirectoryListStore.shared.snapshot(
+            let serverIDs = Set(serverFiles.map(\.id))
+            // L'aperçu affiche d'abord le cache (disque/mémoire, avec les
+            // uploads fusionnés localement), puis cette réponse réseau ~1 s
+            // plus tard. Si l'index serveur est encore en retard, elle ne
+            // contient pas les fichiers importés juste avant l'ouverture de
+            // l'onglet : sans garde, leurs cartes sont remplacées par des
+            // éléments plus anciens. On conserve donc les ajouts locaux
+            // récents absents du serveur — terminés pendant l'aller-retour
+            // ou dans les minutes précédentes. Un élément absent du serveur
+            // avec un horodatage ancien suit le serveur (suppression réelle
+            // ou sortie du top 12) au lieu d'être ressuscité.
+            let now = Date().timeIntervalSince1970
+            let afterItems = DirectoryListStore.shared.snapshot(
                 source: Self.source, driveId: driveId, orderBy: [], order: "asc"
-            )?.items.filter {
-                ($0.updatedAt ?? $0.lastModifiedAt ?? $0.addedAt ?? 0) >= requestStartedAt
-            } ?? []
+            )?.items ?? []
+            let beforeIDs = Set(cached?.items.map(\.id) ?? [])
+            var seenCandidate = Set<Int>()
+            var candidates: [DriveFile] = []
+            candidates.reserveCapacity(afterItems.count + (cached?.items.count ?? 0))
+            for item in afterItems + (cached?.items ?? []) {
+                guard seenCandidate.insert(item.id).inserted else { continue }
+                candidates.append(item)
+            }
+            let localAdditions = candidates.filter { item in
+                guard !serverIDs.contains(item.id), !item.isDirectory else { return false }
+                let ts = item.updatedAt ?? item.lastModifiedAt ?? item.addedAt ?? 0
+                if ts <= 0 {
+                    // Date inconnue : conserver uniquement une fusion survenue
+                    // pendant l'aller-retour, jamais un ancien élément.
+                    return !beforeIDs.contains(item.id)
+                }
+                // Terminé pendant l'aller-retour, ou upload récent dont
+                // l'index serveur n'a pas encore convergé.
+                return ts >= requestStartedAt || (now - ts) <= Self.recentUploadGraceInterval
+            }
             let localIDs = Set(localAdditions.map(\.id))
             let files = localAdditions + serverFiles.filter { !localIDs.contains($0.id) }
             let snapshot = DirectoryListSnapshot(
