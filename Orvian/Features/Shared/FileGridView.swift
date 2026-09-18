@@ -86,6 +86,16 @@ struct FileGridView: View {
             .task(id: viewModel.source) {
                 await viewModel.loadIfNeeded()
             }
+            // Un déclencheur de pagination avalé pendant un rechargement ne
+            // se répète pas tout seul (`onAppear` déjà consommé pour ces
+            // cartes) : relancer une fois le rechargement terminé, sinon la
+            // grille reste figée sur sa première page sans erreur visible.
+            // Sans effet quand `hasMore` est faux.
+            .onChange(of: viewModel.isReloading) { oldValue, newValue in
+                if oldValue, !newValue {
+                    requestMoreFiles()
+                }
+            }
             // Un changement de tri (dates, type, poids) relit le serveur avec
             // l'ordre demandé : la pagination entière respecte alors le tri,
             // et pas seulement les éléments déjà chargés. Un seul déclencheur

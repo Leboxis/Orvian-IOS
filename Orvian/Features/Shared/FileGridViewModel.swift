@@ -131,7 +131,13 @@ final class FileGridViewModel {
         } else {
             diskSnapshot = nil
         }
-        guard dataGeneration == restoreGeneration else { return }
+        guard dataGeneration == restoreGeneration else {
+            // Un `reload` concurrent a pris le relais : mourir sans laisser
+            // `isInitialLoading` bloqué (squelette permanent et pagination
+            // `loadMoreIfNeeded` verrouillée par sa garde).
+            isInitialLoading = false
+            return
+        }
         isInitialLoading = false
         guard !Task.isCancelled,
               credentialFingerprint == TokenStore.credentialFingerprint() else { return }
@@ -288,6 +294,13 @@ final class FileGridViewModel {
             // la pagination à jour avec les nouvelles cartes.
             cursor = page.cursor
             hasMore = page.hasMore ?? false
+            // Le serveur a renvoyé la même page (curseur inchangé, aucun
+            // élément nouveau, p. ex. curseur d'un autre endpoint) : couper
+            // `hasMore` au lieu de re-demander la même page à chaque
+            // apparition de carte, sans rien afficher ni signaler d'erreur.
+            if page.cursor == requestedCursor, appended.isEmpty {
+                hasMore = false
+            }
             items.append(contentsOf: appended)
         } catch {
             guard !Task.isCancelled, dataGeneration == requestGeneration,
