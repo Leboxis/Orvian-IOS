@@ -227,7 +227,7 @@ struct SettingsView: View {
     // MARK: - Hub : destinations
 
     private var destinationsSection: some View {
-        Section("Personnaliser") {
+        Section {
             DestinationRow(
                 icon: "paintbrush.fill",
                 title: "Apparence et navigation",
@@ -264,19 +264,23 @@ struct SettingsView: View {
                 tint: .teal,
                 route: .account
             )
+        } header: {
+            Text("Personnaliser")
         } footer: {
             Text("Chaque espace regroupe les options qui vont ensemble. Rien n'est perdu : tout l'ancien contenu est réparti dans ces 5 espaces.")
         }
     }
 
     private var aboutSection: some View {
-        Section("À propos") {
+        Section {
             HStack {
                 Label("Version", systemImage: "info.circle")
                 Spacer()
                 Text(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "—")
                     .foregroundStyle(.secondary)
             }
+        } header: {
+            Text("À propos")
         } footer: {
             Text("Orvian conserve le token et le drive choisi uniquement sur cet appareil.")
         }
@@ -307,7 +311,7 @@ struct SettingsView: View {
     }
 
     private var searchResultsSection: some View {
-        Section("Résultats") {
+        Section {
             if matches("poids taille afficher fichiers") {
                 Toggle("Afficher le poids des fichiers", isOn: $showFileSizes)
             }
@@ -373,6 +377,8 @@ struct SettingsView: View {
                     path.append(SettingsRoute.account)
                 }
             }
+        } header: {
+            Text("Résultats")
         } footer: {
             Text("Tapez « cache », « code », « grille »… le réglage s'affiche ici sans ouvrir d'écran.")
         }
@@ -553,7 +559,7 @@ private struct AppearanceSpace: View {
 
     var body: some View {
         List {
-            Section("Densité") {
+            Section {
                 VStack(alignment: .leading, spacing: 10) {
                     Stepper(value: $fileGridColumns, in: 2...7) {
                         HStack {
@@ -586,6 +592,8 @@ private struct AppearanceSpace: View {
                             .monospacedDigit()
                     }
                 }
+            } header: {
+                Text("Densité")
             } footer: {
                 Text("Moins de cartes = plus grandes miniatures. L'aperçu ci-dessus suit votre choix.")
             }
@@ -597,7 +605,7 @@ private struct AppearanceSpace: View {
                 Toggle("Recherche toujours visible", isOn: $alwaysShowSearch)
             }
 
-            Section("Organisation") {
+            Section {
                 Toggle("Dossiers en premier (tags)", isOn: $foldersFirstInTags)
                 Toggle("Revenir en haut (favoris)", isOn: $favoritesReselectScrollToTop)
                 HStack {
@@ -606,12 +614,16 @@ private struct AppearanceSpace: View {
                     ColorPicker("Couleur des dossiers", selection: $defaultFolderColor, supportsOpacity: false)
                         .labelsHidden()
                 }
+            } header: {
+                Text("Organisation")
             } footer: {
                 Text("La couleur s'applique aux dossiers sans couleur personnalisée.")
             }
 
-            Section("Confort") {
+            Section {
                 Toggle("Retours haptiques", isOn: $hapticFeedbackEnabled)
+            } header: {
+                Text("Confort")
             } footer: {
                 Text("Une légère vibration accompagne les changements d'onglet.")
             }
@@ -656,15 +668,19 @@ private struct MediaSpace: View {
                 Text("Anticipe les contenus autour de ce que vous regardez.")
             }
 
-            Section("Données mobiles") {
+            Section {
                 Toggle("Wi-Fi uniquement", isOn: $prefetchOnWiFiOnly)
                     .disabled(!prefetchThumbnails && !prefetchVideoURLs)
+            } header: {
+                Text("Données mobiles")
             } footer: {
                 Text("Recommandé si votre forfait est limité.")
             }
 
-            Section("Diagnostic") {
+            Section {
                 Toggle("Suivi des requêtes réseau", isOn: $networkPerfEnabled)
+            } header: {
+                Text("Diagnostic")
             } footer: {
                 Text("Journal des durées et codes HTTP, consultable dans Profil → Mesures réseau. Désactivé, rien n'est collecté.")
             }
@@ -822,10 +838,12 @@ private struct AccountSpace: View {
                 }
             }
 
-            Section("Session") {
+            Section {
                 Button(role: .destructive, action: onSignOut) {
                     Label("Changer de token / se déconnecter", systemImage: "rectangle.portrait.and.arrow.right")
                 }
+            } header: {
+                Text("Session")
             } footer: {
                 Text("Le token et le drive choisi sont enregistrés uniquement sur cet appareil.")
             }
