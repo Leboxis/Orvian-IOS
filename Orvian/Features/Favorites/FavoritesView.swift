@@ -7,6 +7,11 @@ struct FavoritesView: View {
     @Binding var path: [DriveFile]
     let scrollToTopRequest: Int
 
+    @State private var searchText = ""
+    @State private var searchRevealed = false
+    @FocusState private var searchFocused: Bool
+    @AppStorage("alwaysShowSearch") private var alwaysShowSearch = false
+
     @State private var selectionMode = false
     @State private var selectedIDs: Set<Int> = []
     @State private var visibleItemsReport: VisibleItemsReport?
@@ -43,6 +48,7 @@ struct FavoritesView: View {
         let source: FileSource
         let itemsRevision: Int
         let filters: FileFilters
+        let searchText: String
     }
 
     private struct VisibleItemsReport {
@@ -50,12 +56,21 @@ struct FavoritesView: View {
         let items: [DriveFile]
     }
 
+    private var isSearching: Bool {
+        !searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    private var searchBarVisible: Bool {
+        alwaysShowSearch || searchFocused || isSearching || searchRevealed
+    }
+
     private var currentVisibleItemsContext: VisibleItemsContext {
         VisibleItemsContext(
             viewModelID: ObjectIdentifier(viewModel),
             source: viewModel.source,
             itemsRevision: viewModel.itemsRevision,
-            filters: filters
+            filters: filters,
+            searchText: searchText
         )
     }
 
@@ -84,23 +99,28 @@ struct FavoritesView: View {
 
     private var displayedItemCount: Int? {
         guard viewModel.itemsRevision > 0, !viewModel.isInitialLoading else { return nil }
-        if filters.orientation != nil || filters.highResolutionVideosOnly || filters.media != .all || filters.filesOnly {
-            return visibleSelectionItems.isEmpty ? nil : visibleSelectionItems.count
+        if isSearching || hasCountFiltering {
+            return visibleSelectionItems.count
         }
         return viewModel.totalItemCount ?? viewModel.items.count
     }
 
     private var itemCountText: String {
         guard let count = displayedItemCount else {
-            return hasCountFiltering ? "Filtrage…" : "Chargement…"
+            return hasCountFiltering || isSearching ? "Filtrage…" : "Chargement…"
         }
         let plural = count > 1
-        if hasCountFiltering {
-            let text = "\(count) élément\(plural ? "s" : "") visible\(plural ? "s" : "")"
-            return viewModel.hasMore ? text + " (partiel)" : text
+        if isSearching {
+            return "\(count) résultat\(plural ? "s" : "")"
         }
-        let text = "\(count) élément\(plural ? "s" : "")"
-        return viewModel.hasMore ? text + " (partiel)" : text
+        if usesVisibleItemCount {
+            return "\(count) élément\(plural ? "s" : "") visible\(plural ? "s" : "")"
+        }
+        return "\(count) élément\(plural ? "s" : "")"
+    }
+
+    private var usesVisibleItemCount: Bool {
+        isSearching || hasCountFiltering
     }
 
     private var hasCountFiltering: Bool {
@@ -110,26 +130,33 @@ struct FavoritesView: View {
             || filters.filesOnly
     }
 
+    private var playableFiles: [DriveFile] {
+        viewModel.items.filter { !$0.isDirectory }
+    }
+
     var body: some View {
         let visibleItemsContext = currentVisibleItemsContext
         NavigationStack(path: $path) {
             FileGridView(
                 viewModel: viewModel,
                 onOpenDirectory: { folder in
+                    searchFocused = false
                     path.append(folder)
                 },
                 onOpenFile: { file, siblings in
+                    searchFocused = false
                     router.open(
                         file,
                         siblings: siblings,
                         filters: filters,
-                        searchText: "",
+                        searchText: searchText,
                         viewModel: viewModel
                     )
                 },
                 onVisibleItemsChanged: { items in
                     updateVisibleSelectionItems(items, context: visibleItemsContext)
                 },
+                searchText: searchText,
                 filters: filters,
                 allowsPullToRefresh: true,
                 selectionMode: selectionMode,
@@ -142,14 +169,22 @@ struct FavoritesView: View {
             .navigationBarTitleDisplayMode(.inline)
             .safeAreaInset(edge: .top, spacing: 0) {
                 if !selectionMode {
-                    HStack(spacing: 6) {
-                        itemCountLabel
-                            .fixedSize(horizontal: true, vertical: false)
+                    VStack(spacing: 6) {
+                        HStack(spacing: 6) {
+                            itemCountLabel
+                                .fixedSize(horizontal: true, vertical: false)
+                        }
+                        .padding(.horizontal, 16)
+                        .frame(maxWidth: .infinity)
+
+                        if searchBarVisible {
+                            searchBar
+                                .transition(.move(edge: .top).combined(with: .opacity))
+                        }
                     }
-                    .padding(.horizontal, 16)
-                    .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.top, 4)
                     .padding(.bottom, 2)
+                    .animation(.snappy(duration: 0.25), value: searchBarVisible)
                 }
             }
             .toolbar {
@@ -205,6 +240,7 @@ struct FavoritesView: View {
                 } else {
                     ToolbarItemGroup(placement: .topBarLeading) {
                         FilterMenu(filters: $filters)
+                        searchToggleButton
                     }
 
                     ToolbarItem(placement: .principal) {
@@ -214,6 +250,8 @@ struct FavoritesView: View {
                     }
 
                     ToolbarItemGroup(placement: .topBarTrailing) {
+                        randomFileButton
+
                         Button {
                             startSelection()
                         } label: {
@@ -227,11 +265,6 @@ struct FavoritesView: View {
                 if moveBusy || deleteBusy {
                     busyIndicator
                 }
-            }
-            .alert("Impossible", isPresented: addErrorBinding) {
-                Button("OK", role: .cancel) {}
-            } message: {
-                Text("")
             }
             .sheet(item: $pendingMove) { request in
                 MoveDestinationPicker(
@@ -267,6 +300,9 @@ struct FavoritesView: View {
             } message: {
                 Text("Les éléments sélectionnés seront déplacés dans la corbeille.")
             }
+            .onChange(of: searchText) { _, _ in
+                if selectionMode { endSelection() }
+            }
             .navigationDestination(for: DriveFile.self) { directory in
                 let index = path.firstIndex(where: { $0.id == directory.id })
                 let crumbs = ["Favoris"] + (index.map { Array(path[...$0].map(\.name)) } ?? [])
@@ -283,6 +319,81 @@ struct FavoritesView: View {
         }
     }
 
+    private var searchBar: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "magnifyingglass")
+                .font(.system(size: 13, weight: .medium))
+                .foregroundStyle(.secondary)
+            TextField(
+                "Rechercher dans les favoris…",
+                text: $searchText
+            )
+            .focused($searchFocused)
+            .autocorrectionDisabled()
+            .submitLabel(.search)
+            if !searchText.isEmpty {
+                Button {
+                    searchText = ""
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .foregroundStyle(.secondary)
+                }
+                .accessibilityLabel("Effacer la recherche")
+            }
+        }
+        .padding(.leading, 14)
+        .padding(.trailing, 8)
+        .padding(.vertical, 7)
+        .inputChrome(Capsule())
+        .frame(maxWidth: 260)
+    }
+
+    private var searchToggleButton: some View {
+        Button {
+            if searchFocused || searchBarVisible {
+                searchFocused = false
+                if !alwaysShowSearch {
+                    searchRevealed = false
+                }
+            } else {
+                searchRevealed = true
+                DispatchQueue.main.async {
+                    searchFocused = true
+                }
+            }
+        } label: {
+            Image(systemName: searchBarVisible ? "magnifyingglass.circle.fill" : "magnifyingglass")
+        }
+        .accessibilityLabel(searchBarVisible ? "Fermer la recherche" : "Ouvrir la recherche")
+        .accessibilityHint("Affiche ou masque la barre de recherche")
+    }
+
+    private var randomFileButton: some View {
+        Button {
+            openRandomFile()
+        } label: {
+            Image(systemName: "dice")
+                .font(.system(size: 17, weight: .medium))
+                .foregroundStyle(Color.accentColor)
+                .frame(width: 32, height: 32)
+                .contentShape(Rectangle())
+        }
+        .disabled(playableFiles.isEmpty)
+        .accessibilityLabel("Ouvrir un fichier au hasard")
+    }
+
+    private func openRandomFile() {
+        guard let random = playableFiles.randomElement() else { return }
+        searchFocused = false
+        router.open(
+            random,
+            siblings: playableFiles,
+            filters: filters,
+            searchText: searchText,
+            viewModel: viewModel
+        )
+    }
+
     private var itemCountLabel: some View {
         Text(itemCountText)
             .font(.system(size: 11, weight: .medium))
@@ -291,13 +402,6 @@ struct FavoritesView: View {
             .padding(.vertical, 3.5)
             .inlineChrome(Capsule())
             .accessibilityLabel("\(itemCountText) dans les favoris")
-    }
-
-    private var addErrorBinding: Binding<Bool> {
-        Binding(
-            get: { false },
-            set: { _ in }
-        )
     }
 
     private var busyIndicator: some View {
@@ -340,6 +444,8 @@ struct FavoritesView: View {
     }
 
     private func startSelection() {
+        searchFocused = false
+        searchRevealed = false
         selectionMode = true
     }
 
@@ -431,3 +537,5 @@ struct FavoritesView: View {
         }
     }
 }
+
+</content>
