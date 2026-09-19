@@ -1,15 +1,12 @@
 import SwiftUI
 
-/// Hub de réglages : fini la liste infinie de cartes.
+/// Hub de réglages : un écran court, une seule liste.
 ///
-/// Avant : un seul scroll de ~25 interrupteurs au même niveau, 9 cartes
-/// custom, icônes arc-en-ciel, Drive en haut et Compte tout en bas.
-///
-/// Après : un écran d'accueil court qui répond à « où suis-je / que puis-je
-/// changer ? », puis 5 espaces dédiés poussés dans la pile :
-/// Apparence · Médias & réseau · Stockage · Sécurité · Compte.
-/// Chaque ligne du hub affiche un résumé d'état live, et une recherche
-/// instantanée expose directement le réglage cherché sans naviguer.
+/// En haut, une carte de compte (avatar, drive, jauge de quota) qui ouvre
+/// « Compte et drive ». En dessous, les 5 espaces — Apparence · Médias et
+/// réseau · Stockage · Sécurité · Compte — chacun résumé d'un coup d'œil par
+/// son état réel, sans avoir à entrer. La recherche instantanée reste
+/// disponible : elle affiche directement le réglage cherché sans naviguer.
 struct SettingsView: View {
     let session: SessionStore
     @Binding var path: NavigationPath
@@ -40,16 +37,19 @@ struct SettingsView: View {
     @State private var showChangeCode = false
     @State private var showDisableCode = false
 
+    private var isSearching: Bool {
+        !searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
     var body: some View {
         NavigationStack(path: $path) {
             List {
-                if searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                if isSearching {
+                    searchResultsSection
+                } else {
                     accountHeaderSection
-                    quickAccessSection
                     destinationsSection
                     aboutSection
-                } else {
-                    searchResultsSection
                 }
             }
             .listStyle(.insetGrouped)
@@ -108,38 +108,39 @@ struct SettingsView: View {
         }
     }
 
-    // MARK: - Hub : en-tête compte
+    // MARK: - Hub : carte de compte
 
     private var accountHeaderSection: some View {
         Section {
             Button {
                 path.append(SettingsRoute.account)
             } label: {
-                HStack(spacing: 14) {
-                    avatarView
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text(session.selectedDrive?.name ?? "Mon drive")
-                            .font(.headline)
-                            .foregroundStyle(.primary)
-                            .lineLimit(1)
-                        if session.usesTemporaryCredentials {
-                            Label("Session temporaire", systemImage: "lock.trianglebadge.exclamationmark")
-                                .font(.caption.weight(.semibold))
-                                .foregroundStyle(.orange)
-                        } else {
-                            Text("Compte connecté sur cet appareil")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
+                VStack(alignment: .leading, spacing: 12) {
+                    HStack(spacing: 14) {
+                        avatarView
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(session.selectedDrive?.name ?? "Mon drive")
+                                .font(.headline)
+                                .foregroundStyle(.primary)
+                                .lineLimit(1)
+                            if session.usesTemporaryCredentials {
+                                Label("Session temporaire", systemImage: "lock.trianglebadge.exclamationmark")
+                                    .font(.caption.weight(.semibold))
+                                    .foregroundStyle(.orange)
+                            } else {
+                                Text("Compte et drive")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
                         }
-                        if let drive = session.selectedDrive {
-                            quotaLine(drive)
-                                .padding(.top, 6)
-                        }
+                        Spacer(minLength: 6)
+                        Image(systemName: "chevron.right")
+                            .font(.caption.weight(.bold))
+                            .foregroundStyle(.tertiary)
                     }
-                    Spacer(minLength: 6)
-                    Image(systemName: "chevron.right")
-                        .font(.caption.weight(.bold))
-                        .foregroundStyle(.tertiary)
+                    if let drive = session.selectedDrive {
+                        quotaBar(drive)
+                    }
                 }
                 .padding(.vertical, 6)
             }
@@ -164,94 +165,68 @@ struct SettingsView: View {
             .accessibilityHidden(true)
     }
 
-    /// Une seule ligne discrète : « X utilisés · Y libres », sans jauge.
-    private func quotaLine(_ drive: Drive) -> some View {
-        let free = max((drive.size ?? 0) - (drive.usedSize ?? 0), 0)
-        return Text("\(ByteFormatter.string(fromBytes: drive.usedSize)) utilisés · \(ByteFormatter.string(fromBytes: free)) libres")
-            .font(.caption)
-            .foregroundStyle(.secondary)
-            .lineLimit(1)
-    }
-
-    // MARK: - Hub : accès rapide
-
-    private var quickAccessSection: some View {
-        Section("Accès rapide") {
-            LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 10) {
-                QuickTile(
-                    icon: "photo.stack",
-                    title: "Médias",
-                    status: mediaSummary,
-                    tint: .blue
-                ) { path.append(SettingsRoute.media) }
-                QuickTile(
-                    icon: "internaldrive.fill",
-                    title: "Stockage",
-                    status: ByteFormatter.string(fromBytes: cacheSize),
-                    tint: .green
-                ) { path.append(SettingsRoute.storage) }
-                QuickTile(
-                    icon: "lock.fill",
-                    title: "Sécurité",
-                    status: isLockCodeEnabled ? "Activée" : "Coupée",
-                    tint: isLockCodeEnabled ? .green : .orange
-                ) { path.append(SettingsRoute.security) }
-                QuickTile(
-                    icon: "square.grid.2x2",
-                    title: "Affichage",
-                    status: "\(fileGridColumns) / ligne",
-                    tint: .indigo
-                ) { path.append(SettingsRoute.appearance) }
-            }
-            .listRowInsets(EdgeInsets(top: 10, leading: 0, bottom: 10, trailing: 0))
-            .listRowBackground(Color.clear)
+    /// Jauge fine « X utilisés · Y libres » : l'état du drive se lit d'un
+    /// coup d'œil, sans ouvrir l'espace Compte.
+    private func quotaBar(_ drive: Drive) -> some View {
+        let used = drive.usedSize ?? 0
+        let total = max(drive.size ?? 0, 1)
+        let free = max(total - used, 0)
+        return VStack(alignment: .leading, spacing: 6) {
+            ProgressView(value: Double(used), total: Double(total))
+                .tint(.accentColor)
+            Text("\(ByteFormatter.string(fromBytes: used)) utilisés · \(ByteFormatter.string(fromBytes: free)) libres")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .monospacedDigit()
+                .lineLimit(1)
         }
+        .accessibilityElement(children: .combine)
     }
 
-    // MARK: - Hub : destinations
+    // MARK: - Hub : les 5 espaces, chacun avec son état réel
 
     private var destinationsSection: some View {
         Section {
-            DestinationRow(
+            SettingsLinkRow(
                 icon: "paintbrush.fill",
                 title: "Apparence et navigation",
-                subtitle: appearanceSummary,
+                summary: appearanceSummary,
                 tint: .indigo,
                 route: .appearance
             )
-            DestinationRow(
-                icon: "play.rectangle.fill",
+            SettingsLinkRow(
+                icon: "photo.stack",
                 title: "Médias et réseau",
-                subtitle: mediaSummary,
+                summary: mediaSummary,
                 tint: .blue,
                 route: .media
             )
-            DestinationRow(
+            SettingsLinkRow(
                 icon: "internaldrive.fill",
-                title: "Stockage local",
-                subtitle: storageSummary,
+                title: "Stockage",
+                summary: storageSummary,
                 tint: .green,
                 route: .storage
             )
-            DestinationRow(
+            SettingsLinkRow(
                 icon: "lock.shield.fill",
                 title: "Sécurité",
-                subtitle: isLockCodeEnabled ? "Code exigé à l'ouverture" : "Aucun code exigé",
+                summary: securitySummary,
                 tint: .orange,
                 route: .security,
                 showsDot: !isLockCodeEnabled
             )
-            DestinationRow(
+            SettingsLinkRow(
                 icon: "person.circle.fill",
                 title: "Compte et drive",
-                subtitle: session.selectedDrive?.name ?? "—",
+                summary: session.selectedDrive?.name ?? "—",
                 tint: .teal,
                 route: .account
             )
         } header: {
-            Text("Personnaliser")
+            Text("Réglages")
         } footer: {
-            Text("Chaque espace regroupe les options qui vont ensemble. Rien n'est perdu : tout l'ancien contenu est réparti dans ces 5 espaces.")
+            Text("Chaque espace regroupe les options qui vont ensemble.")
         }
     }
 
@@ -262,6 +237,7 @@ struct SettingsView: View {
                 Spacer()
                 Text(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "—")
                     .foregroundStyle(.secondary)
+                    .monospacedDigit()
             }
         } header: {
             Text("À propos")
@@ -273,7 +249,7 @@ struct SettingsView: View {
     // MARK: - Résumés d'état (évitent d'entrer pour comprendre)
 
     private var appearanceSummary: String {
-        "\(fileGridColumns)/ligne · Tags \(tagGridColumns) col."
+        "\(fileGridColumns) cartes par ligne · Tags \(tagGridColumns) col."
     }
 
     private var mediaSummary: String {
@@ -284,6 +260,10 @@ struct SettingsView: View {
     private var storageSummary: String {
         let limit = thumbnailCacheLimitMB == 0 ? "sans limite" : "max \(thumbnailCacheLimitMB >= 1_024 ? "1 Go" : "\(thumbnailCacheLimitMB) Mo")"
         return "\(ByteFormatter.string(fromBytes: cacheSize)) · \(limit)"
+    }
+
+    private var securitySummary: String {
+        isLockCodeEnabled ? "Verrouillage actif" : "Aucun code exigé"
     }
 
     // MARK: - Recherche instantanée : le réglage répond directement
@@ -444,10 +424,11 @@ private enum SettingsRoute: Hashable {
 
 // MARK: - Briques du hub
 
-private struct DestinationRow: View {
+/// Ligne de destination : icône teintée, titre, résumé d'état live.
+private struct SettingsLinkRow: View {
     let icon: String
     let title: String
-    let subtitle: String
+    let summary: String
     let tint: Color
     let route: SettingsRoute
     var showsDot = false
@@ -464,45 +445,14 @@ private struct DestinationRow: View {
                                 .accessibilityLabel("Action recommandée")
                         }
                     }
-                    Text(subtitle)
+                    Text(summary)
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
                 }
             }
+            .padding(.vertical, 2)
         }
-    }
-}
-
-private struct QuickTile: View {
-    let icon: String
-    let title: String
-    let status: String
-    let tint: Color
-    let action: () -> Void
-
-    var body: some View {
-        Button(action: action) {
-            VStack(alignment: .leading, spacing: 10) {
-                HubIcon(icon, tint: tint, size: 36)
-                Spacer(minLength: 0)
-                Text(title)
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(.primary)
-                Text(status)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-            }
-            .padding(12)
-            .frame(maxWidth: .infinity, minHeight: 118, alignment: .leading)
-            .background(.background, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-            .overlay {
-                RoundedRectangle(cornerRadius: 16, style: .continuous)
-                    .strokeBorder(.primary.opacity(0.06), lineWidth: 1)
-            }
-        }
-        .buttonStyle(.plain)
     }
 }
 
