@@ -14,9 +14,8 @@ struct MediaPagerView: View {
     /// stable quand la liste se réordonne ou s'allonge pendant la pagination.
     @State private var selectedFileID: Int
     /// Médias affichés : instantané de la grille, complété par les pages
-    /// suivantes chargées depuis la vue-modèle d'origine. Seules les pages
-    /// voisines de la position courante en sont réellement montées
-    /// (`pageWindow`) : la liste reste la source de vérité de la sélection.
+    /// suivantes chargées depuis la vue-modèle d'origine. La liste reste la
+    /// source de vérité de la sélection et de la pagination.
     @State private var settled: [DriveFile]
     /// Position de chaque média dans `settled`.
     ///
@@ -30,9 +29,9 @@ struct MediaPagerView: View {
     @State private var mediaLoadsInFlight = 0
     /// Déplacement vertical du pager lors d'un geste de fermeture sur une image.
     @State private var dismissOffset: CGFloat = 0
-    /// Les pages conservent leur zoom tant qu'elles restent dans la fenêtre
-    /// montée (`pageWindow`). Cet ensemble permet au pager de ne jamais
-    /// interpréter leur pan comme une demande de fermeture.
+    /// Les pages conservent leur zoom quand elles restent en mémoire. Cet
+    /// ensemble permet au pager de ne jamais interpréter leur pan comme une
+    /// demande de fermeture.
     @State private var zoomedImageIDs: Set<Int> = []
     /// Pages vidéo dont une barre de contrôle est actuellement touchée.
     /// Tant que l'ensemble n'est pas vide, le pager horizontal est suspendu.
@@ -82,14 +81,14 @@ struct MediaPagerView: View {
             Color.black.ignoresSafeArea()
 
             TabView(selection: $selectedFileID) {
-                // Fenêtre de pages : sans elle, le `TabView` d'un pager
-                // déclarait un `VideoPlayerView` complet (lecteur, observateurs
-                // KVO, gestes, une trentaine d'états) et une page photo pour
-                // *chaque* média de la sélection, même jamais affiché. Seules
-                // la page courante et ses voisines sont construites, et la
-                // fenêtre suit `selectedFileID` : le voisin visé par un swipe
-                // est donc toujours monté avant le geste.
-                ForEach(pageWindow) { file in
+                // Toutes les pages sont déclarées : une fenêtre (page courante
+                // ± voisines) a été tentée ici puis retirée, car le `TabView`
+                // en style page supporte mal qu'on ajoute/retire ses enfants
+                // pendant la transition — sauts et pages perdues au swipe.
+                // Le coût lourd est déjà borné autrement : seule la page active
+                // charge sa vidéo (`isActive`), seules la page courante et la
+                // suivante demandent la haute résolution (`hiresRequested`).
+                ForEach(settled) { file in
                     MediaPagerPage(
                         file: file,
                         driveId: context.driveId,
@@ -275,26 +274,6 @@ struct MediaPagerView: View {
         return candidates.contains {
             $0.isVideo && MediaMetadataStore.shared.info(driveId: context.driveId, for: $0.id) == nil
         }
-    }
-
-    /// Rayon de la fenêtre de pages montées autour du média affiché.
-    private static let pageWindowRadius = 1
-
-    /// Pages réellement construites : le média affiché et ses voisins.
-    ///
-    /// Fonction pure de `settled` et de `selectedFileID` : aucune mutation
-    /// d'état ne survient donc pendant un geste de balayage. En quittant la
-    /// fenêtre, une page est démontée — son zoom et, pour une vidéo, son
-    /// lecteur sont libérés ; revenir dessus les reconstruit à la demande.
-    private var pageWindow: [DriveFile] {
-        guard let index = selectionIndex else {
-            // Sélection absente (liste remplacée à l'instant) : la première page
-            // suffit à afficher l'état courant sans construire tout le pager.
-            return Array(settled.prefix(1))
-        }
-        let lower = max(0, index - Self.pageWindowRadius)
-        let upper = min(settled.count - 1, index + Self.pageWindowRadius)
-        return Array(settled[lower...upper])
     }
 
     /// La page courante est toujours chargée. La suivante (préchargement N+1)
