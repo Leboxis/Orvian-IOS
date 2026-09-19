@@ -537,5 +537,3 @@ struct FavoritesView: View {
         }
     }
 }
-
-</content>
