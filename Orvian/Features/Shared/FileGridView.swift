@@ -52,6 +52,9 @@ struct FileGridView: View {
     @AppStorage("prefetchOnWiFiOnly") private var prefetchOnWiFiOnly = true
     @AppStorage("fileGridColumns") private var fileGridColumns = 3
     @AppStorage("foldersFirstInTags") private var foldersFirstInTags = true
+    /// Préférence globale : affiche l'étoile des favoris sur les cartes,
+    /// y compris dans l'onglet Favoris où elle était autrefois masquée d'office.
+    @AppStorage("showFavoriteStars") private var showFavoriteStars = true
     @State private var metadataRevision = 0
     @State private var prefetchTask: Task<Void, Never>?
     /// Demande de préchargement la plus récente. Une rafale d'apparitions de
@@ -639,7 +642,7 @@ struct FileGridView: View {
             selectionMode: selectionMode,
             isTrashed: viewModel.source == .trash,
             isSelected: selectedIDs.contains(file.id),
-            showsFavoriteBadge: viewModel.source != .favorites,
+            showsFavoriteBadge: showFavoriteStars,
             onToggleSelection: onToggleSelection == nil ? nil : { onToggleSelection?(file) },
             onToggleFavorite: {
                 Task { await viewModel.toggleFavorite(file) }

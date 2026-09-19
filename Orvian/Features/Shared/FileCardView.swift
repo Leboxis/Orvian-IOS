@@ -30,8 +30,8 @@ struct FileCardView: View {
     var isTrashed = false
     /// État de la coche en mode sélection.
     var isSelected = false
-    /// L'étoile est redondante dans l'onglet Favoris, où chaque carte est déjà
-    /// un favori. Les autres grilles la conservent comme action rapide.
+    /// Affiche l'étoile de favori sur la miniature (sous réserve de la
+    /// préférence globale `showFavoriteStars`), avec retrait au tap.
     var showsFavoriteBadge = true
     var onToggleSelection: (() -> Void)?
     var onToggleFavorite: (() -> Void)?
