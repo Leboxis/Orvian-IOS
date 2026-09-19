@@ -206,6 +206,13 @@ extension Endpoint {
         Endpoint(path: "/2/drive/\(driveId)/files/\(fileId)/categories/\(categoryId)")
     }
 
+    /// Catégorie (tag) appliquée à plusieurs fichiers en un seul appel (v2) :
+    /// POST pour appliquer, DELETE pour retirer, corps JSON `{"file_ids": […]}`.
+    /// Cf. `kDriveAddCategoryOnFilesV2` / `kDriveRemoveCategoryOnFilesV2`.
+    static func bulkFileCategory(driveId: Int, categoryId: Int) -> Endpoint {
+        Endpoint(path: "/2/drive/\(driveId)/files/categories/\(categoryId)")
+    }
+
     /// Créer un dossier : POST JSON `{"name": …}` (v3).
     static func createFolder(driveId: Int, directoryId: Int) -> Endpoint {
         Endpoint(path: "/3/drive/\(driveId)/files/\(directoryId)/directory")

@@ -212,43 +212,37 @@ struct ApplyTagsSheet: View {
         defer { busy = false }
         let toAdd = addIDs
         let toRemove = removeIDs
+        let fileIds = files.map(\.id)
 
-        // Petits lots de 4 requêtes simultanées : appliquer des tags sur une
-        // grande sélection ne défile plus les appels API un par un.
-        var work: [(file: DriveFile, categoryId: Int, isAdd: Bool)] = []
-        for file in files {
-            for categoryId in toRemove {
-                work.append((file, categoryId, false))
-            }
-        }
-        for file in files {
-            for categoryId in toAdd {
-                work.append((file, categoryId, true))
-            }
-        }
-
-        let results = await mapBounded(work, concurrency: 4) { item -> Result<TagChange, TagApplyError> in
-            do {
-                if item.isAdd {
-                    try await service.addCategory(driveId: driveId, fileId: item.file.id, categoryId: item.categoryId)
-                    return .success(TagChange(file: item.file, categoryId: item.categoryId, isAdd: true))
-                } else {
-                    try await service.removeCategory(driveId: driveId, fileId: item.file.id, categoryId: item.categoryId)
-                    return .success(TagChange(file: item.file, categoryId: item.categoryId, isAdd: false))
-                }
-            } catch {
-                return .failure(TagApplyError(message: (error as? APIError)?.errorDescription ?? error.localizedDescription))
-            }
-        }
-
+        // Appel groupé du doc (`POST/DELETE …/files/categories/{id}` avec
+        // `{"file_ids": […]}`) : une requête par tag au lieu d'une par fichier.
+        // En cas d'échec groupé, repli sur l'ancien chemin un-par-un pour
+        // conserver les succès partiels au lieu de tout marquer en erreur.
         var appliedChanges: [TagChange] = []
         var firstErrorDescription: String?
-        for result in results {
-            switch result {
-            case let .success(change):
-                appliedChanges.append(change)
-            case let .failure(error):
-                if firstErrorDescription == nil { firstErrorDescription = error.message }
+
+        for categoryId in toRemove.sorted() {
+            do {
+                try await service.removeCategory(driveId: driveId, fileIds: fileIds, categoryId: categoryId)
+                appliedChanges += files.map { TagChange(file: $0, categoryId: categoryId, isAdd: false) }
+            } catch {
+                let fallback = await applyOneByOne(categoryId: categoryId, isAdd: false)
+                appliedChanges += fallback.changes
+                if firstErrorDescription == nil {
+                    firstErrorDescription = fallback.error ?? (error as? APIError)?.errorDescription ?? error.localizedDescription
+                }
+            }
+        }
+        for categoryId in toAdd.sorted() {
+            do {
+                try await service.addCategory(driveId: driveId, fileIds: fileIds, categoryId: categoryId)
+                appliedChanges += files.map { TagChange(file: $0, categoryId: categoryId, isAdd: true) }
+            } catch {
+                let fallback = await applyOneByOne(categoryId: categoryId, isAdd: true)
+                appliedChanges += fallback.changes
+                if firstErrorDescription == nil {
+                    firstErrorDescription = fallback.error ?? (error as? APIError)?.errorDescription ?? error.localizedDescription
+                }
             }
         }
 
@@ -274,5 +268,34 @@ struct ApplyTagsSheet: View {
         } else {
             dismiss()
         }
+    }
+
+    /// Repli un-par-un (4 requêtes simultanées) quand l'appel groupé échoue :
+    /// récupère les succès partiels au lieu de perdre toute la sélection.
+    private func applyOneByOne(categoryId: Int, isAdd: Bool) async -> (changes: [TagChange], error: String?) {
+        let results = await mapBounded(files, concurrency: 4) { file -> Result<TagChange, TagApplyError> in
+            do {
+                if isAdd {
+                    try await self.service.addCategory(driveId: self.driveId, fileId: file.id, categoryId: categoryId)
+                    return .success(TagChange(file: file, categoryId: categoryId, isAdd: true))
+                } else {
+                    try await self.service.removeCategory(driveId: self.driveId, fileId: file.id, categoryId: categoryId)
+                    return .success(TagChange(file: file, categoryId: categoryId, isAdd: false))
+                }
+            } catch {
+                return .failure(TagApplyError(message: (error as? APIError)?.errorDescription ?? error.localizedDescription))
+            }
+        }
+        var changes: [TagChange] = []
+        var firstError: String?
+        for result in results {
+            switch result {
+            case let .success(change):
+                changes.append(change)
+            case let .failure(error):
+                if firstError == nil { firstError = error.message }
+            }
+        }
+        return (changes, firstError)
     }
 }

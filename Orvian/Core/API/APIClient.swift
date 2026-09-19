@@ -109,7 +109,21 @@ actor APIClient {
 
     /// Requête « vide » (POST/DELETE renvoyant `{result, data}`).
     func sendEmpty(_ endpoint: Endpoint, method: String) async throws {
-        let request = try request(for: endpoint, method: method, cachePolicy: .reloadIgnoringLocalCacheData)
+        try await send(endpoint, method: method, body: nil, contentType: nil)
+    }
+
+    /// Mutation avec corps optionnel (ex. DELETE groupé `{"file_ids": […]}`).
+    /// Le retrait groupé de tags exige un corps JSON sur un DELETE, ce que
+    /// `sendEmpty` ne permet pas. Lève une erreur si le statut n'est pas 2xx ;
+    /// le contenu de la réponse est ignoré.
+    func send(_ endpoint: Endpoint, method: String, body: Data?, contentType: String?) async throws {
+        var request = try request(for: endpoint, method: method, cachePolicy: .reloadIgnoringLocalCacheData)
+        if let body {
+            request.httpBody = body
+            if let contentType {
+                request.setValue(contentType, forHTTPHeaderField: "Content-Type")
+            }
+        }
         let (data, response, _) = try await transmit(
             request: request,
             measuredMethod: method,

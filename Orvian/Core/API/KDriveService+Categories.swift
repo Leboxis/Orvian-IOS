@@ -42,4 +42,26 @@ extension KDriveService {
     func removeCategory(driveId: Int, fileId: Int, categoryId: Int) async throws {
         try await api.sendEmpty(.fileCategory(driveId: driveId, fileId: fileId, categoryId: categoryId), method: "DELETE")
     }
+
+    private struct BulkCategoryRequest: Encodable {
+        let fileIds: [Int]
+
+        enum CodingKeys: String, CodingKey {
+            case fileIds = "file_ids"
+        }
+    }
+
+    /// Applique une catégorie (tag) sur plusieurs fichiers en un seul appel
+    /// (`POST /2/drive/{id}/files/categories/{id}`, corps `{"file_ids": […]}`).
+    func addCategory(driveId: Int, fileIds: [Int], categoryId: Int) async throws {
+        let body = try JSONEncoder().encode(BulkCategoryRequest(fileIds: fileIds))
+        try await api.post(.bulkFileCategory(driveId: driveId, categoryId: categoryId), body: body, contentType: "application/json")
+    }
+
+    /// Retire une catégorie (tag) de plusieurs fichiers en un seul appel
+    /// (`DELETE /2/drive/{id}/files/categories/{id}`, même corps JSON).
+    func removeCategory(driveId: Int, fileIds: [Int], categoryId: Int) async throws {
+        let body = try JSONEncoder().encode(BulkCategoryRequest(fileIds: fileIds))
+        try await api.send(.bulkFileCategory(driveId: driveId, categoryId: categoryId), method: "DELETE", body: body, contentType: "application/json")
+    }
 }
