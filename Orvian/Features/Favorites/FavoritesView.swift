@@ -137,7 +137,7 @@ struct FavoritesView: View {
     }
 
     private var playableFiles: [DriveFile] {
-        viewModel.items.filter { !.isDirectory }
+        viewModel.items.filter { !{ !.isDirectory }.isDirectory }
     }
 
     private func fetchAllFavorites() async -> [DriveFile] {
@@ -148,7 +148,7 @@ struct FavoritesView: View {
             guard let page = try? await service.page(
                 .favorites(limit: 60), driveId: viewModel.driveId, cursor: cursor, forceNetwork: true
             ) else { break }
-            allFiles.append(contentsOf: (page.data ?? []).filter { !.isDirectory })
+            allFiles.append(contentsOf: (page.data ?? []).filter { !{ !.isDirectory }.isDirectory })
             cursor = page.cursor
         } while cursor != nil
         return allFiles
