@@ -1,6 +1,36 @@
 import SwiftUI
 import AVFoundation
+import Observation
 import UIKit
+
+/// Horloge de transport du lecteur, observée par la seule barre de temps.
+///
+/// `@Observable` : l'observateur périodique d'AVPlayer écrit `currentTime`
+/// quatre fois par seconde quand les contrôles sont visibles. Tant que ces
+/// valeurs vivaient dans le `@State` de `VideoPlayerView`, chaque tick
+/// reconstruisait le corps entier du lecteur — barre du haut, boutons, zone
+/// vidéo et couche `AVPlayerLayer` compris. Ici, seules les vues qui *lisent*
+/// ces propriétés (la barre de transport) se rafraîchissent.
+///
+/// `scrubValue` y est rangée pour la même raison : elle suit le doigt à
+/// ~60 Hz pendant un glissement, et la garder dans le `@State` du lecteur
+/// reconstruirait toute la page à chaque frame du geste.
+///
+/// Pas d'isolateur d'acteur : la closure de l'observateur est `@Sendable` aux
+/// yeux du compilateur, et toutes les écritures se font en pratique sur le fil
+/// principal (`queue: .main`), comme les méthodes de la vue. Ce type ne fait
+/// que porter des valeurs de transport.
+@Observable
+private final class PlaybackClock {
+    /// Position de lecture courante (secondes).
+    var currentTime: Double = 0
+    /// Durée de l'élément, connue dès que l'observateur périodique la voit.
+    var duration: Double = 0
+    /// Fin de la plage bufferisée (pour la zone grisée du scrubber).
+    var bufferedEnd: Double = 0
+    /// Position du doigt pendant un glissement de la barre de progression.
+    var scrubValue: Double = 0
+}
 
 /// Lecteur vidéo personnalisé : les barres (titre + boutons en haut,
 /// transport en bas) sont hors de la zone de lecture de la vidéo.
@@ -25,15 +55,22 @@ struct VideoPlayerView: View {
     @State private var poster: UIImage?
 
     // Transport
-    @State private var currentTime: Double = 0
-    @State private var duration: Double = 0
+    /// Position de lecture, durée, avance du tampon et position du doigt vivent
+    /// dans cette référence observée séparément.
+    ///
+    /// L'observateur périodique d'AVPlayer écrit la position **quatre fois par
+    /// seconde** pendant toute la lecture (contrôles visibles). Quand ces trois
+    /// valeurs vivaient dans le `@State` de cette vue, chaque tick réévaluait le
+    /// corps entier du lecteur — barre du haut, boutons, zone vidéo et couche
+    /// `AVPlayerLayer` compris — soit quatre reconstructions par seconde. Seule
+    /// la barre de transport observe désormais l'horloge.
+    @State private var clock = PlaybackClock()
     @State private var transport = VideoPlaybackTransport()
     private var isScrubbing: Bool { transport.isScrubbing }
     /// Une recherche AVPlayer est asynchrone : tant qu'elle n'est pas terminée,
     /// le curseur doit rester sur la position demandée, pas sur l'ancienne
     /// position remontée par l'observateur périodique.
     private var isSeeking: Bool { transport.isSeeking }
-    @State private var scrubValue: Double = 0
     @State private var playbackRate: Float = 1
 
     // Son
@@ -68,8 +105,6 @@ struct VideoPlayerView: View {
     @State private var stallWatchdogTask: Task<Void, Never>?
     /// Conservée pendant les retries, y compris après épuisement du quota.
     private var recoveryPosition: Double? { transport.recoveryPosition }
-    /// Fin de la plage bufferisée (pour la zone grisée du scrubber).
-    @State private var bufferedEnd: Double = 0
     /// Anti-débounce des seeks « live » pendant le drag : la vidéo suit le
     /// doigt via des seeks grossiers, au plus un toutes les 100 ms.
     /// Référence (pas de reconstruction de vue à chaque acceptation).
@@ -409,33 +444,20 @@ struct VideoPlayerView: View {
         HStack(spacing: 8) {
             playButton
 
-            Text(timeText(displayedTime))
-                .font(.caption.monospacedDigit().weight(.medium))
-                .foregroundStyle(.white.opacity(0.85))
-                .scaleEffect(isScrubbing ? 1.18 : 1, anchor: .trailing)
-                .contentTransition(.numericText())
-                .animation(.snappy(duration: 0.2), value: Int(displayedTime))
-                .frame(minWidth: 34, alignment: .trailing)
-
-            ScrubberBar(
-                position: displayedTime,
-                duration: duration,
-                bufferedEnd: bufferedEnd,
+            // Position, durée et plage tampon sont observées par cette seule
+            // sous-vue (`TransportTimeView`) : l'observateur périodique
+            // d'AVPlayer ne reconstruit donc plus le lecteur, ni la zone vidéo,
+            // ni les barres du haut, quatre fois par seconde.
+            TransportTimeView(
+                clock: clock,
                 isScrubbing: isScrubbing,
+                isSeeking: isSeeking,
                 timeFormatter: { timeText($0) },
                 onDragStarted: beginScrub,
                 onDragChanged: updateScrub(to:),
                 onDragEnded: endScrub(to:),
                 onDragCancelled: cancelScrub
             )
-
-            Text(timeText(duration))
-                .font(.caption.monospacedDigit().weight(.medium))
-                .foregroundStyle(.white.opacity(0.85))
-                .scaleEffect(isScrubbing ? 1.18 : 1, anchor: .leading)
-                .contentTransition(.numericText())
-                .animation(.snappy(duration: 0.2), value: Int(duration))
-                .frame(minWidth: 34, alignment: .leading)
 
             speedMenu
 
@@ -457,7 +479,7 @@ struct VideoPlayerView: View {
         hideControlsTask?.cancel()
         cancelPendingSeek()
         transport.clearRecoveryPosition()
-        scrubValue = playerTime ?? currentTime
+        clock.scrubValue = playerTime ?? clock.currentTime
         transport.beginScrub()
         // Le son cesse pendant le geste : le suivi visuel sous le doigt
         // remplace la lecture (comportement natif).
@@ -466,7 +488,7 @@ struct VideoPlayerView: View {
 
     private func updateScrub(to seconds: Double) {
         guard isScrubbing else { return }
-        scrubValue = max(0, seconds)
+        clock.scrubValue = max(0, seconds)
         scheduleLiveScrubSeek(to: seconds)
     }
 
@@ -500,8 +522,8 @@ struct VideoPlayerView: View {
         guard transport.endScrub() else { return }
         cancelPendingSeek()
         liveSeekThrottle.reset()
-        currentTime = playerTime ?? currentTime
-        scrubValue = currentTime
+        clock.currentTime = playerTime ?? clock.currentTime
+        clock.scrubValue = clock.currentTime
         resumePlaybackIfRequested()
         scheduleControlsAutoHide(delay: 2.5)
     }
@@ -606,10 +628,6 @@ struct VideoPlayerView: View {
 
     // MARK: - Transport
 
-    private var displayedTime: Double {
-        isScrubbing || isSeeking ? scrubValue : currentTime
-    }
-
     private var playerTime: Double? {
         guard let player else { return nil }
         let time = player.currentTime().seconds
@@ -629,7 +647,7 @@ struct VideoPlayerView: View {
             // Position réelle du lecteur (l'état `currentTime` peut être
             // périmé : sa mise à jour est suspendue contrôles masqués).
             let position = player.currentTime().seconds
-            let atEnd = duration.isFinite && duration > 0 && position >= duration - 0.5
+            let atEnd = clock.duration.isFinite && clock.duration > 0 && position >= clock.duration - 0.5
             if !atEnd {
                 requestPlayback()
                 return
@@ -675,13 +693,13 @@ struct VideoPlayerView: View {
             ? CMTime(seconds: 0.4, preferredTimescale: 600)
             : .positiveInfinity
         let target: Double
-        if duration.isFinite, duration > 0 {
-            target = min(max(seconds, 0), duration)
+        if clock.duration.isFinite, clock.duration > 0 {
+            target = min(max(seconds, 0), clock.duration)
         } else {
             target = max(seconds, 0)
         }
         let requestID = transport.beginSeek()
-        scrubValue = target
+        clock.scrubValue = target
         // Un seek antérieur peut encore être en cours après deux relâchements
         // rapides. On le remplace explicitement par la dernière intention.
         player.currentItem?.cancelPendingSeeks()
@@ -699,11 +717,11 @@ struct VideoPlayerView: View {
 
                 let resolvedTime = player.currentTime().seconds
                 if resolvedTime.isFinite {
-                    currentTime = resolvedTime
-                    scrubValue = resolvedTime
+                    clock.currentTime = resolvedTime
+                    clock.scrubValue = resolvedTime
                 } else if finished {
-                    currentTime = target
-                    scrubValue = target
+                    clock.currentTime = target
+                    clock.scrubValue = target
                 }
                 let shouldResume = transport.finishSeek(requestID, finished: finished)
                 if finished { transport.clearRecoveryPosition() }
@@ -711,7 +729,7 @@ struct VideoPlayerView: View {
 
                 // L'intention actuelle prime, même si elle a changé pendant
                 // la recherche. À la fin, le bouton propose de rejouer.
-                let nearEnd = duration.isFinite && duration > 0 && target >= duration - 0.5
+                let nearEnd = clock.duration.isFinite && clock.duration > 0 && target >= clock.duration - 0.5
                 if nearEnd {
                     pausePlayback()
                 } else if shouldResume {
@@ -858,12 +876,12 @@ struct VideoPlayerView: View {
         if let resumePosition, resumePosition.isFinite, resumePosition > 0 {
             // Même mécanisme que le scrub : une pause ou un nouveau geste
             // peut préempter la reprise après une erreur réseau.
-            currentTime = resumePosition
-            scrubValue = resumePosition
+            clock.currentTime = resumePosition
+            clock.scrubValue = resumePosition
             seek(to: resumePosition, precise: true)
         } else {
-            currentTime = 0
-            scrubValue = 0
+            clock.currentTime = 0
+            clock.scrubValue = 0
             // Pas de seek : la lecture démarre déjà à zéro, un seek à tolérance
             // nulle forcerait une préparation précise avant la première frame.
             transport.clearRecoveryPosition()
@@ -915,7 +933,7 @@ struct VideoPlayerView: View {
         // Un item de remplacement peut échouer avant d'avoir rejoint la position
         // initiale : ne pas remplacer celle-ci par son temps de départ (zéro).
         guard recoveryPosition == nil else { return }
-        let position = isScrubbing || isSeeking ? scrubValue : (playerTime ?? currentTime)
+        let position = isScrubbing || isSeeking ? clock.scrubValue : (playerTime ?? clock.currentTime)
         transport.rememberRecoveryPosition(position)
     }
 
@@ -984,11 +1002,11 @@ struct VideoPlayerView: View {
             guard showControls else { return }
             let itemDuration = player.currentItem?.duration.seconds ?? 0
             if itemDuration.isFinite, itemDuration > 0,
-               abs(duration - itemDuration) > 0.01 {
-                duration = itemDuration
+               abs(clock.duration - itemDuration) > 0.01 {
+                clock.duration = itemDuration
             }
             if !isScrubbing, !isSeeking, showControls, time.seconds.isFinite {
-                currentTime = time.seconds
+                clock.currentTime = time.seconds
             }
             // Plage bufferisée : fin la plus avancée des segments chargés —
             // après un seek en avant, le segment contenant la position peut
@@ -997,12 +1015,14 @@ struct VideoPlayerView: View {
             let ranges = player.currentItem?.loadedTimeRanges.map(\.timeRangeValue) ?? []
             if !ranges.isEmpty {
                 let rawEnd = ranges.map(\.end.seconds).max() ?? 0
-                let clampedEnd = duration.isFinite && duration > 0 ? min(rawEnd, duration) : rawEnd
-                if abs(bufferedEnd - clampedEnd) > 0.05 {
-                    bufferedEnd = max(0, clampedEnd)
+                let clampedEnd = clock.duration.isFinite && clock.duration > 0
+                    ? min(rawEnd, clock.duration)
+                    : rawEnd
+                if abs(clock.bufferedEnd - clampedEnd) > 0.05 {
+                    clock.bufferedEnd = max(0, clampedEnd)
                 }
-            } else if bufferedEnd != 0 {
-                bufferedEnd = 0
+            } else if clock.bufferedEnd != 0 {
+                clock.bufferedEnd = 0
             }
         }
     }
@@ -1097,7 +1117,7 @@ struct VideoPlayerView: View {
         if !preservingPlaybackIntent {
             resumePlaybackAfterTags = false
         }
-        bufferedEnd = 0
+        clock.bufferedEnd = 0
         liveSeekThrottle.reset()
         itemStatusObserver?.invalidate()
         itemStatusObserver = nil
@@ -1166,8 +1186,8 @@ struct VideoPlayerView: View {
         guard player != nil, !isScrubbing, !isSeeking else { return }
         // Source de vérité : la position réelle du lecteur (l'état peut être
         // périmé quand les contrôles sont masqués).
-        let position = playerTime ?? currentTime
-        let upperBound = duration.isFinite && duration > 0 ? duration : Double.infinity
+        let position = playerTime ?? clock.currentTime
+        let upperBound = clock.duration.isFinite && clock.duration > 0 ? clock.duration : Double.infinity
         let target = min(max(position + delta, 0), upperBound)
         guard target != position else { return }
         transport.clearRecoveryPosition()
@@ -1234,5 +1254,61 @@ struct VideoPlayerView: View {
             get: { errorMessage != nil },
             set: { if !$0 { errorMessage = nil } }
         )
+    }
+}
+/// Barre de temps du lecteur : position courante, glissière et durée.
+///
+/// Vue séparée volontairement : elle est la **seule** à lire l'horloge de
+/// transport (`PlaybackClock`). L'observateur périodique d'AVPlayer écrit la
+/// position quatre fois par seconde pendant la lecture ; avec ces valeurs dans
+/// le `@State` du lecteur, chaque tick reconstruisait toute la page (barre du
+/// haut, boutons, zone vidéo et couche `AVPlayerLayer`). Ici, seuls les deux
+/// compteurs et la glissière se rafraîchissent.
+private struct TransportTimeView: View {
+    let clock: PlaybackClock
+    let isScrubbing: Bool
+    let isSeeking: Bool
+    let timeFormatter: (Double) -> String
+    let onDragStarted: () -> Void
+    let onDragChanged: (Double) -> Void
+    let onDragEnded: (Double) -> Void
+    let onDragCancelled: () -> Void
+
+    /// Position affichée : celle du doigt pendant un glissement ou une
+    /// recherche en cours, la position de lecture sinon.
+    private var displayedTime: Double {
+        isScrubbing || isSeeking ? clock.scrubValue : clock.currentTime
+    }
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Text(timeFormatter(displayedTime))
+                .font(.caption.monospacedDigit().weight(.medium))
+                .foregroundStyle(.white.opacity(0.85))
+                .scaleEffect(isScrubbing ? 1.18 : 1, anchor: .trailing)
+                .contentTransition(.numericText())
+                .animation(.snappy(duration: 0.2), value: Int(displayedTime))
+                .frame(minWidth: 34, alignment: .trailing)
+
+            ScrubberBar(
+                position: displayedTime,
+                duration: clock.duration,
+                bufferedEnd: clock.bufferedEnd,
+                isScrubbing: isScrubbing,
+                timeFormatter: timeFormatter,
+                onDragStarted: onDragStarted,
+                onDragChanged: onDragChanged,
+                onDragEnded: onDragEnded,
+                onDragCancelled: onDragCancelled
+            )
+
+            Text(timeFormatter(clock.duration))
+                .font(.caption.monospacedDigit().weight(.medium))
+                .foregroundStyle(.white.opacity(0.85))
+                .scaleEffect(isScrubbing ? 1.18 : 1, anchor: .leading)
+                .contentTransition(.numericText())
+                .animation(.snappy(duration: 0.2), value: Int(clock.duration))
+                .frame(minWidth: 34, alignment: .leading)
+        }
     }
 }

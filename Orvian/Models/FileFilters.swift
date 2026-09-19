@@ -55,7 +55,7 @@ struct FileFilters: Equatable, Hashable {
     /// Orientation des vidéos (sélection unique et exclusive).
     /// `Codable` : l'orientation est persistée dans le cache disque des
     /// métadonnées vidéo pour survivre aux relances de l'app.
-    enum Orientation: String, CaseIterable, Identifiable, Codable {
+    enum Orientation: String, CaseIterable, Identifiable, Codable, Sendable {
         case portrait, landscape, square
 
         var id: String { rawValue }
@@ -180,8 +180,18 @@ struct FileFilters: Equatable, Hashable {
     /// Les tris pris en charge par l'API sont également appliqués localement.
     /// Cela garde le tri opérationnel sur les sources qui ne prennent pas
     /// `order_by[]` en charge (notamment les tags et les médias consultés).
-    @MainActor
-    func visible(_ items: [DriveFile], driveId: Int, searchText: String, mediaMetadata: MediaMetadataStore) -> [DriveFile] {
+    ///
+    /// La fonction ne dépend plus d'un type isolé : `nonisolated`, et les
+    /// métadonnées vidéo arrivent sous forme d'instantané (`VideoMetadataSnapshot`)
+    /// au lieu du store. La passe complète — filtres puis tri de plusieurs
+    /// milliers d'éléments — peut donc s'exécuter hors du MainActor, et chaque
+    /// lecture de métadonnée devient une simple table `fileId → info` au lieu
+    /// d'une clé chaîne « empreinte-drive-fichier » reconstruite par fichier.
+    nonisolated func visible(
+        _ items: [DriveFile],
+        searchText: String,
+        metadata: VideoMetadataSnapshot
+    ) -> [DriveFile] {
         var result = items
 
         switch media {
@@ -199,36 +209,36 @@ struct FileFilters: Equatable, Hashable {
 
         if let orientation {
             result = result.filter { file in
-                guard file.isVideo, let info = mediaMetadata.info(driveId: driveId, for: file.id) else { return false }
+                guard file.isVideo, let info = metadata.info(for: file.id) else { return false }
                 return info.orientation == orientation
             }
         }
 
         if highResolutionVideosOnly {
             result = result.filter { file in
-                guard file.isVideo, let info = mediaMetadata.info(driveId: driveId, for: file.id) else { return false }
+                guard file.isVideo, let info = metadata.info(for: file.id) else { return false }
                 return info.is4KOrAbove
             }
         }
 
+        // Mots-clés repliés une seule fois pour toute la passe : chaque fichier
+        // n'est ensuite comparé qu'à des chaînes déjà normalisées.
         let keywords = searchText
             .trimmingCharacters(in: .whitespacesAndNewlines)
             .split(whereSeparator: \.isWhitespace)
-            .map(String.init)
+            .map { DriveFile.foldedSearchTerm(String($0)) }
         if !keywords.isEmpty {
             result = result.filter { $0.matchesSearchKeywords(keywords) }
         }
 
-        result = sorted(result, driveId: driveId, mediaMetadata: mediaMetadata)
+        result = sorted(result, metadata: metadata)
 
         return result
     }
 
-    @MainActor
-    private func sorted(
+    nonisolated private func sorted(
         _ files: [DriveFile],
-        driveId: Int,
-        mediaMetadata: MediaMetadataStore
+        metadata: VideoMetadataSnapshot
     ) -> [DriveFile] {
         guard sort != .original, serverOrderBy == nil else { return files }
 
@@ -245,13 +255,19 @@ struct FileFilters: Equatable, Hashable {
             case .size:
                 return ordered(lhs.size ?? -1, rhs.size ?? -1, lhs: lhs, rhs: rhs)
             case .duration:
-                let lhsDuration = mediaMetadata.info(driveId: driveId, for: lhs.id)?.duration ?? -1
-                let rhsDuration = mediaMetadata.info(driveId: driveId, for: rhs.id)?.duration ?? -1
+                let lhsDuration = metadata.info(for: lhs.id)?.duration ?? -1
+                let rhsDuration = metadata.info(for: rhs.id)?.duration ?? -1
                 return ordered(lhsDuration, rhsDuration, lhs: lhs, rhs: rhs)
             }
         }
     }
 
+    /// Départage deux valeurs égales par leur nom, dans l'ordre « Finder »
+    /// (`localizedStandardCompare` : accents et nombres — « fichier 2 » avant
+    /// « fichier 10 »). Ce comparateur ICU reste donc volontairement hors du
+    /// chemin chaud : il n'est appelé que sur des égalités de critère, jamais
+    /// pour la comparaison principale. Les égalités de recherche, elles,
+    /// passent par le nom replié mémorisé (`DriveFile.foldedName`).
     private func ordered<Value: Comparable>(
         _ lhsValue: Value,
         _ rhsValue: Value,

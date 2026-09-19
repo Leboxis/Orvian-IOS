@@ -57,13 +57,47 @@ struct DriveFile: Codable, Identifiable, Hashable {
         return FileKind(extensionType: extensionType, mimeType: mimeType, fileName: name, isDirectory: isDirectory)
     }
 
-    /// Vérifie si le nom du fichier contient l'ensemble des mots-clés recherchés.
-    func matchesSearchKeywords(_ keywords: [String]) -> Bool {
-        guard !keywords.isEmpty else { return true }
-        return keywords.allSatisfy { word in
-            name.localizedStandardContains(word)
-        }
+    /// Nom replié (minuscules, sans diacritiques) pour la recherche locale.
+    ///
+    /// Le repliage est mémorisé par nom : `localizedStandardContains` repliait
+    /// casse et accents à **chaque** comparaison, sur le fil principal, pour
+    /// chaque fichier de chaque passe de filtrage.
+    var foldedName: String { Self.foldedSearchTerm(name) }
+
+    /// Vérifie que le nom replié contient chaque mot-clé replié.
+    ///
+    /// Les mots-clés sont repliés une seule fois par passe (voir `FileFilters`)
+    /// au lieu d'être repliés pour chaque fichier comparé : la comparaison
+    /// devient un `contains` sur deux chaînes déjà normalisées.
+    func matchesSearchKeywords(_ foldedKeywords: [String]) -> Bool {
+        guard !foldedKeywords.isEmpty else { return true }
+        let name = foldedName
+        return foldedKeywords.allSatisfy { name.contains($0) }
     }
+
+    /// Replie un terme pour la recherche locale. Le cache évite de refaire le
+    /// repliage d'un nom déjà vu (listes longues, passes répétées) ; il est
+    /// borné et `NSCache` est sûr depuis n'importe quel thread.
+    static func foldedSearchTerm(_ term: String) -> String {
+        let key = term as NSString
+        if let cached = foldedNameCache.object(forKey: key) {
+            return cached as String
+        }
+        let folded = term
+            .folding(options: [.diacriticInsensitive, .caseInsensitive], locale: .current)
+            .lowercased()
+        foldedNameCache.setObject(folded as NSString, forKey: key)
+        return folded
+    }
+
+    private static let foldedNameCache: NSCache<NSString, NSString> = {
+        let cache = NSCache<NSString, NSString>()
+        // Quelques milliers de noms couvrent largement une liste affichée et
+        // ses passes de tri successives, sans garder en mémoire tous les
+        // fichiers jamais parcourus.
+        cache.countLimit = 4_000
+        return cache
+    }()
 
     enum CodingKeys: String, CodingKey {
         case id, name, type, size, path

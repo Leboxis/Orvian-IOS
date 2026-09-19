@@ -14,15 +14,25 @@ struct MediaPagerView: View {
     /// stable quand la liste se réordonne ou s'allonge pendant la pagination.
     @State private var selectedFileID: Int
     /// Médias affichés : instantané de la grille, complété par les pages
-    /// suivantes chargées depuis la vue-modèle d'origine.
-    @State private var files: [DriveFile]
+    /// suivantes chargées depuis la vue-modèle d'origine. Seules les pages
+    /// voisines de la position courante en sont réellement montées
+    /// (`pageWindow`) : la liste reste la source de vérité de la sélection.
+    @State private var settled: [DriveFile]
+    /// Position de chaque média dans `settled`.
+    ///
+    /// Le pager cherchait l'index de la sélection (`firstIndex(where:)`), puis
+    /// les voisins, **à chaque évaluation de son corps** — donc à chaque frame
+    /// du geste de fermeture, qui déplace verticalement tout le pager. La table
+    /// est construite une fois par liste (chargement, pagination, filtre) :
+    /// chaque lecture devient O(1).
+    @State private var indexByFileID: [Int: Int] = [:]
     /// Inclut la résolution des métadonnées, même sans page réseau suivante.
     @State private var mediaLoadsInFlight = 0
     /// Déplacement vertical du pager lors d'un geste de fermeture sur une image.
     @State private var dismissOffset: CGFloat = 0
-    /// Les pages conservent leur zoom quand elles restent en mémoire. Cet
-    /// ensemble permet au pager de ne jamais interpréter leur pan comme une
-    /// demande de fermeture.
+    /// Les pages conservent leur zoom tant qu'elles restent dans la fenêtre
+    /// montée (`pageWindow`). Cet ensemble permet au pager de ne jamais
+    /// interpréter leur pan comme une demande de fermeture.
     @State private var zoomedImageIDs: Set<Int> = []
     /// Pages vidéo dont une barre de contrôle est actuellement touchée.
     /// Tant que l'ensemble n'est pas vide, le pager horizontal est suspendu.
@@ -45,8 +55,22 @@ struct MediaPagerView: View {
             ? context.files[context.startIndex].id
             : context.files.first?.id ?? 0
         _selectedFileID = State(initialValue: firstID)
-        _files = State(initialValue: context.files)
+        _settled = State(initialValue: context.files)
+        _indexByFileID = State(initialValue: Self.indexMap(context.files))
     }
+
+    /// Table `fileId → position` dans `settled`.
+    private static func indexMap(_ files: [DriveFile]) -> [Int: Int] {
+        var map: [Int: Int] = [:]
+        map.reserveCapacity(files.count)
+        for (index, file) in files.enumerated() {
+            map[file.id] = index
+        }
+        return map
+    }
+
+    /// Position du média affiché, sans balayage de la liste.
+    private var selectionIndex: Int? { indexByFileID[selectedFileID] }
 
     var body: some View {
         // Calculé une fois par rendu : évaluée dans le `ForEach`, cette
@@ -58,7 +82,14 @@ struct MediaPagerView: View {
             Color.black.ignoresSafeArea()
 
             TabView(selection: $selectedFileID) {
-                ForEach(files) { file in
+                // Fenêtre de pages : sans elle, le `TabView` d'un pager
+                // déclarait un `VideoPlayerView` complet (lecteur, observateurs
+                // KVO, gestes, une trentaine d'états) et une page photo pour
+                // *chaque* média de la sélection, même jamais affiché. Seules
+                // la page courante et ses voisines sont construites, et la
+                // fenêtre suit `selectedFileID` : le voisin visé par un swipe
+                // est donc toujours monté avant le geste.
+                ForEach(pageWindow) { file in
                     MediaPagerPage(
                         file: file,
                         driveId: context.driveId,
@@ -82,7 +113,7 @@ struct MediaPagerView: View {
             // le vertical sans priver son pager interne du swipe horizontal.
             .simultaneousGesture(imageDismissGesture)
 
-            if files.isEmpty {
+            if settled.isEmpty {
                 if mediaLoadsInFlight > 0 {
                     ProgressView("Chargement des médias…")
                         .tint(.white)
@@ -129,10 +160,10 @@ struct MediaPagerView: View {
         .onChange(of: selectedFileID) { _, newID in
             dismissOffset = 0
             controlInteractionFileIDs.removeAll()
-            guard let index = files.firstIndex(where: { $0.id == newID }) else { return }
+            guard let index = settled.firstIndex(where: { $0.id == newID }) else { return }
             // Proche de la fin de la liste : demande la page suivante à la
             // vue-modèle de la grille, qui reprend là où elle s'était arrêtée.
-            if index >= files.count - 2 {
+            if index >= settled.count - 2 {
                 Task { await loadMoreMediaIfNeeded(around: newID) }
             }
         }
@@ -140,26 +171,35 @@ struct MediaPagerView: View {
 
     /// Reconstruit la liste des médias après un chargement de page : réapplique
     /// les mêmes filtres/tri que la grille d'origine, puis conserve la position.
+    ///
+    /// La passe reste synchrone et sur le MainActor : depuis que les
+    /// métadonnées se lisent en O(1) (`VideoMetadataSnapshot`) et que les
+    /// recherches par nom sont repliées en cache, elle coûte quelques
+    /// millisecondes sur les très grandes listes — et elle garantit, sans
+    /// délai ni double écriture d'état, que la liste affichée est toujours la
+    /// version la plus récente après un chargement de page. La fonction est
+    /// prête à passer hors du MainActor (`FileFilters.visible` est
+    /// `nonisolated`) si un profilage le justifie.
     private func refreshFiles() {
         guard let viewModel = context.viewModel else { return }
         let visible = context.filters.visible(
             viewModel.items,
-            driveId: context.driveId,
             searchText: context.searchText,
-            mediaMetadata: MediaMetadataStore.shared
+            metadata: MediaMetadataStore.shared.snapshot(driveId: context.driveId, items: viewModel.items)
         )
         let media = visible.filter { $0.isImage || $0.isVideo }
-        guard media.map(\.id) != files.map(\.id) else { return }
+        guard media.map(\.id) != settled.map(\.id) else { return }
         // Une suppression ou un filtre peut réellement vider la liste.
         // Afficher l'attente ou l'état vide avec fermeture, jamais d'anciens
         // fichiers qui ne figurent plus dans la sélection.
-        files = media
+        settled = media
+        indexByFileID = Self.indexMap(media)
         let ids = Set(media.map(\.id))
         zoomedImageIDs.formIntersection(ids)
         controlInteractionFileIDs.formIntersection(ids)
         if let tagSheetFile, !ids.contains(tagSheetFile.id) { self.tagSheetFile = nil }
-        if !files.contains(where: { $0.id == selectedFileID }) {
-            selectedFileID = files.first?.id ?? 0
+        if !settled.contains(where: { $0.id == selectedFileID }) {
+            selectedFileID = settled.first?.id ?? 0
         }
     }
 
@@ -179,9 +219,9 @@ struct MediaPagerView: View {
 
         while !Task.isCancelled,
               viewModel.hasMore {
-            if !files.isEmpty {
-                guard let index = files.firstIndex(where: { $0.id == fileID }),
-                      index >= files.count - 2 else { return }
+            if !settled.isEmpty {
+                guard let index = settled.firstIndex(where: { $0.id == fileID }),
+                      index >= settled.count - 2 else { return }
             }
 
             let previousItemCount = viewModel.items.count
@@ -210,7 +250,8 @@ struct MediaPagerView: View {
     }
 
     private var currentFile: DriveFile? {
-        files.first { $0.id == selectedFileID }
+        guard let index = selectionIndex, settled.indices.contains(index) else { return nil }
+        return settled[index]
     }
 
     /// Après un échec de résolution, une vidéo encore inconnue ne prouve pas
@@ -222,27 +263,52 @@ struct MediaPagerView: View {
         var filters = context.filters
         filters.orientation = nil
         filters.highResolutionVideosOnly = false
+        // Instantané vide : ce diagnostic ne décide que de l'affichage d'un
+        // état vide. Y injecter les métadonnées appliquerait aussi le tri par
+        // durée, qui dépend justement des analyses en cours ; l'ordre est ici
+        // sans importance, seul l'ensemble des candidats compte.
         let candidates = filters.visible(
-            viewModel.items, driveId: context.driveId,
-            searchText: context.searchText, mediaMetadata: MediaMetadataStore.shared
+            viewModel.items,
+            searchText: context.searchText,
+            metadata: VideoMetadataSnapshot()
         )
         return candidates.contains {
             $0.isVideo && MediaMetadataStore.shared.info(driveId: context.driveId, for: $0.id) == nil
         }
     }
 
+    /// Rayon de la fenêtre de pages montées autour du média affiché.
+    private static let pageWindowRadius = 1
+
+    /// Pages réellement construites : le média affiché et ses voisins.
+    ///
+    /// Fonction pure de `settled` et de `selectedFileID` : aucune mutation
+    /// d'état ne survient donc pendant un geste de balayage. En quittant la
+    /// fenêtre, une page est démontée — son zoom et, pour une vidéo, son
+    /// lecteur sont libérés ; revenir dessus les reconstruit à la demande.
+    private var pageWindow: [DriveFile] {
+        guard let index = selectionIndex else {
+            // Sélection absente (liste remplacée à l'instant) : la première page
+            // suffit à afficher l'état courant sans construire tout le pager.
+            return Array(settled.prefix(1))
+        }
+        let lower = max(0, index - Self.pageWindowRadius)
+        let upper = min(settled.count - 1, index + Self.pageWindowRadius)
+        return Array(settled[lower...upper])
+    }
+
     /// La page courante est toujours chargée. La suivante (préchargement N+1)
     /// respecte la même préférence réseau que la grille ; les autres pages ne
-    /// déclenchent aucun téléchargement pleine résolution.
+    /// déclenchent aucun téléchargement haute résolution.
     private var hiresPreloadIDs: Set<Int> {
-        guard let selectedIndex = files.firstIndex(where: { $0.id == selectedFileID }) else {
+        guard let selectedIndex = selectionIndex else {
             return []
         }
-        var ids = [files[selectedIndex].id]
+        var ids = [settled[selectedIndex].id]
         let allowsNextPagePrefetch = !prefetchOnWiFiOnly
             || NetworkMonitor.shared.allowsBackgroundPrefetch
-        if allowsNextPagePrefetch, selectedIndex + 1 < files.count {
-            ids.append(files[selectedIndex + 1].id)
+        if allowsNextPagePrefetch, selectedIndex + 1 < settled.count {
+            ids.append(settled[selectedIndex + 1].id)
         }
         return Set(ids)
     }
@@ -314,7 +380,7 @@ struct MediaPagerView: View {
                 }
                 .padding(.horizontal, 14)
                 .padding(.top, 6)
-            } else if files.isEmpty {
+            } else if settled.isEmpty {
                 // Aucune page (liste momentanément vide) : la barre ci-dessus
                 // n'existerait pas et la fermeture au swipe vertical n'est
                 // disponible que sur les images. Sans ce bouton, la visionneuse
@@ -495,13 +561,31 @@ private struct ZoomablePhotoPage: View {
     let onZoomChanged: (Bool) -> Void
 
     @Environment(\.scenePhase) private var scenePhase
+    /// Échelle de l'écran (2× ou 3×) : convertit la taille en points du pager
+    /// en pixels pour dimensionner le décodage.
+    @Environment(\.displayScale) private var displayScale
     @State private var gif: GIFImage?
-    @State private var hires: UIImage?
+    /// Image au niveau affichage (≈ 1× l'écran en pixels) : c'est elle qui
+    /// s'affiche et qui est décodée pour chaque page visitée.
+    @State private var displayImage: UIImage?
+    /// Image à la résolution native du fichier, chargée **seulement** quand
+    /// l'utilisateur zoome. Elle pèse plusieurs dizaines de mégaoctets décodée
+    /// (48 Mpx ≈ 195 Mo) : la décoder pour chaque photo ouverte faisait
+    /// travailler ImageIO et le GPU pour une image presque toujours réduite à
+    /// l'écran.
+    @State private var fullImage: UIImage?
     @State private var thumbnail: UIImage?
     @State private var scale: CGFloat = 1
     @State private var lastScale: CGFloat = 1
     @State private var offset: CGSize = .zero
     @State private var dragOffset: CGSize = .zero
+    /// Taille de la page en pixels, relevée une seule fois (rotation comprise).
+    @State private var viewportPixelSize: CGFloat = 0
+    /// Demande du niveau natif : armée à la fin d'un pincement qui zoome ou par
+    /// un double-tap. `isZoomed` est dérivé de `scale`, qui change à chaque
+    /// image du geste : l'utiliser comme clé de tâche relancerait le
+    /// téléchargement sans arrêt.
+    @State private var wantsFullResolution = false
 
     private var isZoomed: Bool { scale > 1.01 }
 
@@ -529,9 +613,9 @@ private struct ZoomablePhotoPage: View {
         .task(id: file.id) {
             await loadThumbnail()
         }
-        .task(id: hiresRequested) {
+        .task(id: hiresRequestKey) {
             guard hiresRequested, !file.isGIF else { return }
-            await loadHiresWithRetry()
+            await loadDisplayImage(maximumPixelSize: viewportPixelSize)
         }
         .task(id: hiresRequested) {
             guard file.isGIF, hiresRequested else {
@@ -550,6 +634,20 @@ private struct ZoomablePhotoPage: View {
                     return
                 }
             }
+        }
+        .task(id: wantsFullResolution) {
+            // Une seule fois par page : le zoom suivant réutilise l'image déjà
+            // chargée, qui reste attachée à la page tant qu'elle est montée.
+            guard wantsFullResolution, fullImage == nil else { return }
+            await loadFullResolutionImage()
+        }
+        .onGeometryChange(for: CGFloat.self) { geometry in
+            // Taille de la page en pixels : dimension cible du décodage.
+            max(geometry.size.width, geometry.size.height) * displayScale
+        } action: { pixelSize in
+            // N'écrit l'état que sur un vrai changement (rotation) : sinon la
+            // mesure relancerait le corps du pager à chaque frame de geste.
+            if viewportPixelSize != pixelSize { viewportPixelSize = pixelSize }
         }
         .onAppear {
             onZoomChanged(isZoomed)
@@ -591,7 +689,7 @@ private struct ZoomablePhotoPage: View {
         }
     }
 
-    private var display: UIImage? { hires ?? thumbnail }
+    private var display: UIImage? { fullImage ?? displayImage ?? thumbnail }
 
     /// À l'échelle normale, aucun drag n'est attaché à l'image : le pager
     /// horizontal reçoit donc toute sa surface. Une fois zoomée, l'image prend
@@ -620,6 +718,9 @@ private struct ZoomablePhotoPage: View {
                     } else {
                         scale = 2.5
                         lastScale = 2.5
+                        // Un zoom demande la résolution native : c'est le seul
+                        // cas où l'image d'affichage ne suffit plus.
+                        wantsFullResolution = true
                     }
                 }
             }
@@ -676,6 +777,9 @@ private struct ZoomablePhotoPage: View {
                     }
                 }
                 lastScale = scale
+                // Le pincement est terminé : la valeur est stable, la demande
+                // de résolution native part donc une seule fois.
+                if scale >= 1.15 { wantsFullResolution = true }
             }
     }
 
@@ -711,27 +815,55 @@ private struct ZoomablePhotoPage: View {
         thumbnail = image
     }
 
-    /// Haute résolution originale avec quelques tentatives espacées : un
-    /// échec réseau ponctuel ne laisse plus la page bloquée sur la miniature.
-    /// La bascule s'anime même si elle survient longtemps après l'ouverture,
-    /// y compris pendant un zoom déjà en cours (`display` bascule vers la
-    /// version nette dès qu'elle arrive).
-    private func loadHiresWithRetry() async {
-        guard hires == nil else { return }
+    /// Clé de la demande « niveau affichage » : elle dépend de la page **et**
+    /// de la taille de l'écran en pixels, pour que la tâche reparte une fois la
+    /// géométrie connue (rotation comprise) au lieu de décoder sans cible.
+    private struct HiresRequestKey: Hashable {
+        let requested: Bool
+        let pixelSize: Int
+    }
+
+    private var hiresRequestKey: HiresRequestKey {
+        HiresRequestKey(requested: hiresRequested, pixelSize: Int(viewportPixelSize.rounded()))
+    }
+
+    /// Image au niveau affichage (~1× l'écran en pixels) avec quelques
+    /// tentatives espacées : un échec réseau ponctuel ne laisse pas la page
+    /// bloquée sur la miniature. La bascule s'anime même si elle survient
+    /// longtemps après l'ouverture, y compris pendant un zoom déjà en cours.
+    private func loadDisplayImage(maximumPixelSize: CGFloat) async {
+        // Sans géométrie connue, ne rien demander : décoder sans taille cible
+        // retomberait sur la résolution native du capteur. La clé de tâche
+        // (`hiresRequestKey`) relancera la demande dès que la taille arrive.
+        guard displayImage == nil, maximumPixelSize > 0 else { return }
         let retryDelays: [Duration] = [.zero, .seconds(3), .seconds(8)]
         for delay in retryDelays {
             if delay != .zero {
                 try? await Task.sleep(for: delay)
                 guard !Task.isCancelled else { return }
             }
-            let image = await HiresImageStore.shared.image(driveId: driveId, fileId: file.id)
+            let image = await HiresImageStore.shared.displayImage(
+                driveId: driveId,
+                fileId: file.id,
+                maximumPixelSize: maximumPixelSize
+            )
             guard !Task.isCancelled else { return }
             if let image {
                 withAnimation(.easeIn(duration: 0.2)) {
-                    hires = image
+                    displayImage = image
                 }
                 return
             }
+        }
+    }
+
+    /// Niveau natif, réservé au zoom : la résolution du capteur n'est plus
+    /// décodée pour une photo simplement affichée.
+    private func loadFullResolutionImage() async {
+        let image = await HiresImageStore.shared.fullResolutionImage(driveId: driveId, fileId: file.id)
+        guard !Task.isCancelled, let image else { return }
+        withAnimation(.easeIn(duration: 0.2)) {
+            fullImage = image
         }
     }
 }

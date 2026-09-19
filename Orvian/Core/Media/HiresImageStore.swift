@@ -7,18 +7,26 @@ import ImageIO
 /// - Le fichier est téléchargé sur disque (`URLSession.download`) puis décodé
 ///   directement depuis son URL : les octets compressés ne transittent jamais
 ///   par la mémoire et aucune copie intermédiaire n'est conservée.
-/// - L'image originale est décodée en pleine résolution, sans réduction :
-///   le zoom de la visionneuse reste net jusqu'au niveau natif du capteur.
-/// - Un régulateur borne la concurrence (2 téléchargements simultanés) pour
-///   ne jamais saturer le réseau ni la mémoire lorsque plusieurs pages du
-///   pager demandent leur haute résolution en même temps.
+/// - Le décodage se fait au **niveau affichage** (`displayImage`) : ImageIO
+///   réduit pendant la décompression, à la dimension de l'écran en pixels.
+///   L'ancien décodage « taille native du capteur » produisait une image de
+///   48 Mpx (≈ 195 Mo décodés) que SwiftUI réduisait ensuite sur le GPU à
+///   chaque frame ; le cache, limité à trois entrées, était vidé par une seule
+///   photo et ne conservait donc presque rien pour les pages voisines.
+/// - `fullResolutionImage` reste disponible pour le zoom, à la demande
+///   seulement, sous sa propre clé de cache.
+/// - Un régulateur borne la concurrence (un décodage à la fois) pour ne jamais
+///   saturer le réseau ni la mémoire lorsque plusieurs pages du pager
+///   demandent leur image en même temps.
 actor HiresImageStore {
     static let shared = HiresImageStore()
 
     private let memory = NSCache<NSString, UIImage>()
-    /// Clé = `"\(driveId)-\(fileId)"` : comme pour les autres caches, le drive
-    /// est inclus pour ne jamais confondre deux drives qui partageraient le
-    /// même identifiant de fichier.
+    /// Clé = `"\(niveau)-\(driveId)-\(fileId)"` : comme pour les autres caches,
+    /// le drive est inclus pour ne jamais confondre deux drives qui
+    /// partageraient le même identifiant de fichier, et le niveau (affichage à
+    /// telle taille, ou natif) pour qu'un aperçu réduit ne soit jamais servi
+    /// comme image pleine résolution.
     private struct ImageResult: @unchecked Sendable {
         let image: UIImage?
     }
@@ -28,26 +36,48 @@ actor HiresImageStore {
     private let throttler = AsyncThrottler(maxConcurrent: 1)
 
     init() {
-        // Une photo pleine résolution occupe plusieurs dizaines de Mo décodée
-        // (48 MP ≈ 195 Mo). Les limites sont volontairement basses : le pager
-        // précharge la page suivante, chaque image décodée peut donc se
-        // cumuler avec la précédente, et l'enveloppe mémoire d'un conteneur
+        // Une image « niveau affichage » (≈ 1× l'écran en pixels) pèse quelques
+        // mégaoctets décodés : le cache sert désormais plusieurs pages voisines
+        // au lieu d'être vidé par une seule photo pleine résolution. Le plafond
+        // de coût reste volontairement bas : l'enveloppe mémoire d'un conteneur
         // comme LiveContainer est plus contrainte que celle d'une app native.
-        memory.countLimit = 3
-        memory.totalCostLimit = 192 * 1024 * 1024
+        memory.countLimit = 6
+        memory.totalCostLimit = 96 * 1024 * 1024
     }
 
-    private func memoryKey(driveId: Int, fileId: Int) -> NSString {
-        "\(driveId)-\(fileId)" as NSString
+    private func memoryKey(level: String, driveId: Int, fileId: Int) -> NSString {
+        "\(level)-\(driveId)-\(fileId)" as NSString
     }
 
-    private func taskKey(driveId: Int, fileId: Int) -> String {
-        "\(driveId)-\(fileId)"
+    /// Image prête à afficher (`maximumPixelSize` en pixels, côté long).
+    ///
+    /// Plusieurs niveaux peuvent coexister pour un même fichier : la clé de
+    /// cache inclut la taille demandée, sinon un aperçu réduit serait servi
+    /// comme image « pleine résolution » (ou l'inverse).
+    func displayImage(driveId: Int, fileId: Int, maximumPixelSize: CGFloat) async -> UIImage? {
+        let pixels = max(1, maximumPixelSize.rounded())
+        return await image(
+            driveId: driveId,
+            fileId: fileId,
+            maximumPixelSize: pixels,
+            level: "display-\(Int(pixels))"
+        )
     }
 
-    func image(driveId: Int, fileId: Int) async -> UIImage? {
-        let memoryKey = memoryKey(driveId: driveId, fileId: fileId)
-        let taskKey = taskKey(driveId: driveId, fileId: fileId)
+    /// Image à la résolution native du fichier : réservée aux usages qui ne
+    /// peuvent pas se contenter du niveau affichage.
+    func fullResolutionImage(driveId: Int, fileId: Int) async -> UIImage? {
+        await image(driveId: driveId, fileId: fileId, maximumPixelSize: nil, level: "full")
+    }
+
+    private func image(
+        driveId: Int,
+        fileId: Int,
+        maximumPixelSize: CGFloat?,
+        level: String
+    ) async -> UIImage? {
+        let memoryKey = memoryKey(level: level, driveId: driveId, fileId: fileId)
+        let taskKey = "\(level)-\(driveId)-\(fileId)"
         if let cached = memory.object(forKey: memoryKey) {
             return cached
         }
@@ -57,7 +87,11 @@ actor HiresImageStore {
                 guard let url = await MediaURLCache.shared.url(driveId: driveId, fileId: fileId) else {
                     return ImageResult(image: nil)
                 }
-                return ImageResult(image: await Self.downloadDecodeOriginal(url: url, throttler: throttler))
+                return ImageResult(image: await Self.downloadDecode(
+                    url: url,
+                    maximumPixelSize: maximumPixelSize,
+                    throttler: throttler
+                ))
             }
             guard !Task.isCancelled, let image = result.image else { return nil }
             memory.setObject(image, forKey: memoryKey, cost: Int(image.size.width * image.size.height * image.scale * 4))
@@ -67,16 +101,17 @@ actor HiresImageStore {
         }
     }
 
-    /// Téléchargement vers un fichier temporaire puis décodage pleine
-    /// résolution par ImageIO. Téléchargement **et** décodage partagent le
-    /// régulateur : deux décompressions simultanées (page courante + page
-    /// suivante du pager) formaient un pic mémoire d'environ 400 Mo pour du
-    /// 48 MP, auquel s'ajoutaient les images déjà en cache. Un seul décodage
-    /// à la fois borne le pic sans dégrader la qualité affichée. Le fichier
-    /// source est supprimé dans tous les cas ; l'annulation de la tâche
-    /// interrompt le transfert réseau.
-    nonisolated private static func downloadDecodeOriginal(
+    /// Téléchargement vers un fichier temporaire puis décodage par ImageIO à la
+    /// taille demandée. Téléchargement **et** décodage partagent le régulateur :
+    /// deux décompressions simultanées (page courante + page suivante du pager)
+    /// formaient un pic mémoire d'environ 400 Mo pour du 48 Mpx, auquel
+    /// s'ajoutaient les images déjà en cache. Un seul décodage à la fois borne
+    /// le pic sans dégrader la qualité affichée. Le fichier source est supprimé
+    /// dans tous les cas ; l'annulation de la tâche interrompt le transfert
+    /// réseau.
+    nonisolated private static func downloadDecode(
         url: URL,
+        maximumPixelSize: CGFloat?,
         throttler: AsyncThrottler
     ) async -> UIImage? {
         struct DownloadRejected: Error {}
@@ -91,7 +126,7 @@ actor HiresImageStore {
                     throw DownloadRejected()
                 }
                 defer { try? FileManager.default.removeItem(at: downloadedURL) }
-                return Self.decodeOriginal(fromFile: downloadedURL)
+                return Self.decode(fromFile: downloadedURL, maximumPixelSize: maximumPixelSize)
             }
             return image
         } catch {
@@ -99,19 +134,26 @@ actor HiresImageStore {
         }
     }
 
-    /// Décodage complet de l'image originale depuis son fichier, à la taille
-    /// native du capteur. `kCGImageSourceCreateThumbnailFromImageAlways` avec
+    /// Décodage depuis le fichier téléchargé.
+    ///
+    /// `maximumPixelSize` non nul réduit l'image **pendant** la décompression
+    /// (ImageIO redimensionne avant de matérialiser les pixels), au lieu de
+    /// décoder la pleine résolution puis de la laisser réduire par le GPU à
+    /// chaque affichage. `kCGImageSourceCreateThumbnailFromImageAlways` avec
     /// transformation applique l'orientation EXIF ; `ShouldCacheImmediately`
     /// force la décompression hors du thread appelant.
-    nonisolated static func decodeOriginal(fromFile fileURL: URL) -> UIImage? {
+    nonisolated static func decode(fromFile fileURL: URL, maximumPixelSize: CGFloat?) -> UIImage? {
         let sourceOptions = [kCGImageSourceShouldCache: false] as CFDictionary
         guard let source = CGImageSourceCreateWithURL(fileURL as CFURL, sourceOptions) else { return nil }
-        let options = [
+        var options: [CFString: Any] = [
             kCGImageSourceCreateThumbnailFromImageAlways: true,
             kCGImageSourceCreateThumbnailWithTransform: true,
             kCGImageSourceShouldCacheImmediately: true,
-        ] as CFDictionary
-        guard let cgImage = CGImageSourceCreateThumbnailAtIndex(source, 0, options) else { return nil }
+        ]
+        if let maximumPixelSize, maximumPixelSize > 0 {
+            options[kCGImageSourceThumbnailMaxPixelSize] = maximumPixelSize
+        }
+        guard let cgImage = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary) else { return nil }
         return UIImage(cgImage: cgImage)
     }
 }

@@ -135,7 +135,7 @@ struct FileGridView: View {
                     scheduleMutationReload()
                 }
             }
-            .onReceive(mediaMetadata.$revision) { newRev in
+            .onChange(of: mediaMetadata.revision) { _, newRev in
                 if needsVideoMetadata {
                     metadataRevision = newRev
                 }
@@ -796,6 +796,11 @@ private struct VisibleItemsCache {
     private var cachedKey: VisibleItemsKey?
     private var cachedResult: [DriveFile] = []
 
+    /// Mémoïse la passe filtres + tri. Le store n'est lu que pour construire
+    /// l'instantané de métadonnées (une fois par passe, et non une clé chaîne
+    /// par fichier à l'intérieur du tri) : `FileFilters.visible` ne dépend plus
+    /// d'un type isolé et pourrait être déplacé hors du MainActor sans
+    /// changer sa signature.
     mutating func visibleItems(
         key: VisibleItemsKey,
         items: [DriveFile],
@@ -805,7 +810,11 @@ private struct VisibleItemsCache {
             return cachedResult
         }
         cachedKey = key
-        cachedResult = key.filters.visible(items, driveId: key.driveId, searchText: key.searchText, mediaMetadata: mediaMetadata)
+        cachedResult = key.filters.visible(
+            items,
+            searchText: key.searchText,
+            metadata: mediaMetadata.snapshot(driveId: key.driveId, items: items)
+        )
         return cachedResult
     }
 }
