@@ -71,16 +71,6 @@ struct MediaPagerView: View {
     /// Position du média affiché, sans balayage de la liste.
     private var selectionIndex: Int? { indexByFileID[selectedFileID] }
 
-    /// Fenêtre de rendu autour de la sélection : le type externe de chaque
-    /// page reste `MediaPagerPage` (même `tag`) pour ne pas perturber le
-    /// `TabView` pendant le swipe — seul l'intérieur est allégé au loin.
-    /// 500 médias = ~11 vraies pages + le reste en placeholder vide.
-    private func isPageNear(_ fileID: Int) -> Bool {
-        guard let selectedIndex = selectionIndex,
-              let index = indexByFileID[fileID] else { return true }
-        return abs(index - selectedIndex) <= 5
-    }
-
     var body: some View {
         // Calculé une fois par rendu : évaluée dans le `ForEach`, cette
         // propriété relançait un balayage complet de la liste **par page** —
@@ -91,18 +81,18 @@ struct MediaPagerView: View {
             Color.black.ignoresSafeArea()
 
             TabView(selection: $selectedFileID) {
-                // Identité stable : chaque enfant reste un `MediaPagerPage`
-                // avec son `tag`. L'allègement se fait à l'intérieur de la
-                // page (`isNear`), pas en changeant le type de l'enfant —
-                // sinon le pager saute ou perd des pages pendant le swipe.
-                // Le coût vidéo/HD reste borné par `isActive` et
-                // `hiresRequested`, le coût view-graph par `isNear`.
+                // Toutes les pages sont déclarées : une fenêtre (page courante
+                // ± voisines) a été tentée ici puis retirée, car le `TabView`
+                // en style page supporte mal qu'on ajoute/retire ses enfants
+                // pendant la transition — sauts et pages perdues au swipe.
+                // Le coût lourd est déjà borné autrement : seule la page active
+                // charge sa vidéo (`isActive`), seules la page courante et la
+                // suivante demandent la haute résolution (`hiresRequested`).
                 ForEach(settled) { file in
                     MediaPagerPage(
                         file: file,
                         driveId: context.driveId,
                         isActive: selectedFileID == file.id,
-                        isNear: isPageNear(file.id),
                         hiresRequested: preloadIDs.contains(file.id),
                         onImageZoomChanged: { isZoomed in
                             setImageZoomed(isZoomed, fileID: file.id)
@@ -495,9 +485,6 @@ private struct MediaPagerPage: View {
     let file: DriveFile
     let driveId: Int
     let isActive: Bool
-    /// Faux au-delà de ±5 pages : on n'instancie ni zoom ni lecteur,
-    /// juste un fond noir qui garde la taille de page pour le swipe.
-    let isNear: Bool
     /// Vrai pour la page courante ou la suivante : seule condition de
     /// téléchargement de l'image pleine résolution.
     let hiresRequested: Bool
@@ -506,9 +493,7 @@ private struct MediaPagerPage: View {
 
     var body: some View {
         Group {
-            if !isNear {
-                Color.black.frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else if file.isImage {
+            if file.isImage {
                 ZoomablePhotoPage(
                     file: file,
                     driveId: driveId,
