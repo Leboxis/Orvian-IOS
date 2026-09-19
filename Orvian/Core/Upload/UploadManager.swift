@@ -248,9 +248,9 @@ final class UploadManager {
         let count = items.count
         var newTasks: [UploadTaskItem] = []
         for i in 0..<count {
-            let item = items[i]
-            let ext = item.supportedContentTypes.first?.preferredFilenameExtension ?? "jpg"
-            let name = count == 1 ? "Photo.\(ext)" : "Média \(i + 1).\(ext)"
+            // Nom d'attente neutre : le vrai nom d'origine n'est connu qu'après
+            // `loadTransferable` (asynchrone). Pas de fausse extension.
+            let name = count == 1 ? "Préparation de la photo…" : "Préparation du média \(i + 1)…"
             newTasks.append(UploadTaskItem(fileName: name, totalBytes: 0, status: .inProgress(progress: 0.05)))
         }
         tasks.append(contentsOf: newTasks)
@@ -289,6 +289,8 @@ final class UploadManager {
     }
 
     /// Prépare (I/O disque) puis téléverse une photo/vidéo PhotosPicker.
+    /// Le nom d'origine (ex. IMG_1234.HEIC) est préservé quand le système le
+    /// fournit via l'URL transférée ; sinon repli daté lisible.
     private func prepareAndUploadPhoto(
         item: PhotosPickerItem,
         taskId: UUID,
@@ -300,15 +302,15 @@ final class UploadManager {
 
         let contentType = item.supportedContentTypes.first ?? .data
         let ext = contentType.preferredFilenameExtension ?? "jpg"
-        let realName = "Import-\(Int(Date().timeIntervalSince1970))-\(itemIndex + 1).\(ext)"
 
-        tasks[taskIndex].fileName = realName
         tasks[taskIndex].status = .inProgress(progress: 0.15)
 
         var payload: UploadPayload? = nil
         if let picked = try? await item.loadTransferable(type: PickedPhotoTransferable.self) {
+            let realName = Self.photoFileName(fromTemporaryURL: picked.url, fallbackExt: ext, itemIndex: itemIndex)
             payload = await UploadFileIO.payload(forTemporaryURL: picked.url, fileName: realName)
         } else if let data = try? await item.loadTransferable(type: Data.self) {
+            let realName = Self.datedFallbackPhotoName(ext: ext, itemIndex: itemIndex)
             payload = await UploadFileIO.writeToTemporaryDirectory(data: data, fileName: realName)
         }
 
@@ -319,14 +321,19 @@ final class UploadManager {
             return nil
         }
         guard let payload else {
+            // `PhotosPickerItem` ne survit pas forcément à la fermeture du
+            // sélecteur : proposer "Réessayer" sur le même item serait un
+            // échec garanti. On retire le contexte pour ne pas afficher le
+            // bouton, avec un message qui invite à resélectionner le média.
             if let curIdx = tasks.firstIndex(where: { $0.id == taskId }) {
-                tasks[curIdx].status = .failed(message: "Échec de lecture du média")
+                tasks[curIdx].status = .failed(message: "Échec de lecture du média — resélectionnez-le dans Photos pour réessayer")
             }
+            retryContexts.removeValue(forKey: taskId)
             return nil
         }
 
         if let curIdx = tasks.firstIndex(where: { $0.id == taskId }) {
-            tasks[curIdx].fileName = realName
+            tasks[curIdx].fileName = payload.fileName
             tasks[curIdx].totalBytes = payload.totalBytes
             tasks[curIdx].status = .inProgress(progress: 0.2)
         }
@@ -339,6 +346,35 @@ final class UploadManager {
         retryContext.source = .payload(payload)
         retryContexts[taskId] = retryContext
         return await uploadSingleFile(taskId: taskId, driveId: driveId, directoryId: directoryId, payload: payload)
+    }
+
+    /// Nom d'origine extrait de l'URL transférée (`<uuid>_<original>`).
+    /// Conserve ex. `IMG_1234.HEIC` au lieu d'inventer `Photo.jpg`.
+    private static func photoFileName(fromTemporaryURL url: URL, fallbackExt: String, itemIndex: Int) -> String {
+        let last = url.lastPathComponent
+        let original: String
+        if let underscore = last.firstIndex(of: "_") {
+            let suffix = String(last[last.index(after: underscore)...])
+            original = suffix.isEmpty ? last : suffix
+        } else {
+            original = last
+        }
+        let trimmed = original.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty {
+            return datedFallbackPhotoName(ext: fallbackExt, itemIndex: itemIndex)
+        }
+        if URL(fileURLWithPath: trimmed).pathExtension.isEmpty {
+            return "\(trimmed).\(fallbackExt)"
+        }
+        return trimmed
+    }
+
+    /// Repli lisible quand le système ne fournit aucun nom (`Photo_20250919_…`).
+    private static func datedFallbackPhotoName(ext: String, itemIndex: Int) -> String {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyyMMdd_HHmmss"
+        let stamp = formatter.string(from: Date())
+        return "Photo_\(stamp)_\(itemIndex + 1).\(ext)"
     }
 
     /// Import immédiat et asynchrone des documents (la bulle s'affiche instantanément)

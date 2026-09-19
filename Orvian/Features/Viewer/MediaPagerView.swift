@@ -71,6 +71,17 @@ struct MediaPagerView: View {
     /// Position du média affiché, sans balayage de la liste.
     private var selectionIndex: Int? { indexByFileID[selectedFileID] }
 
+    /// Fenêtre de rendu autour de la sélection : le `TabView` garde le même
+    /// nombre d'enfants (mêmes `tag`), seul le contenu varie. Les pages
+    /// éloignées affichent un placeholder vide au lieu d'instancier lecteur
+    /// vidéo / zoom / tâches d'images — 500 médias = 5 vraies pages + 495 vides.
+    /// Sans cela, chaque page lourde vit dans le view-graph même à distance.
+    private func isPageNear(_ fileID: Int) -> Bool {
+        guard let selectedIndex = selectionIndex,
+              let index = indexByFileID[fileID] else { return true }
+        return abs(index - selectedIndex) <= 2
+    }
+
     var body: some View {
         // Calculé une fois par rendu : évaluée dans le `ForEach`, cette
         // propriété relançait un balayage complet de la liste **par page** —
@@ -81,26 +92,31 @@ struct MediaPagerView: View {
             Color.black.ignoresSafeArea()
 
             TabView(selection: $selectedFileID) {
-                // Toutes les pages sont déclarées : une fenêtre (page courante
-                // ± voisines) a été tentée ici puis retirée, car le `TabView`
-                // en style page supporte mal qu'on ajoute/retire ses enfants
-                // pendant la transition — sauts et pages perdues au swipe.
-                // Le coût lourd est déjà borné autrement : seule la page active
-                // charge sa vidéo (`isActive`), seules la page courante et la
-                // suivante demandent la haute résolution (`hiresRequested`).
+                // Le `TabView` en style page supporte mal qu'on ajoute/retire
+                // ses enfants pendant la transition (sauts, pages perdues).
+                // On garde donc tous les enfants déclarés, mais seules les
+                // pages proches de la sélection (±2) instancient leur contenu
+                // lourd. Le coût vidéo/HD reste borné par `isActive` et
+                // `hiresRequested`, le coût view-graph par `isPageNear`.
                 ForEach(settled) { file in
-                    MediaPagerPage(
-                        file: file,
-                        driveId: context.driveId,
-                        isActive: selectedFileID == file.id,
-                        hiresRequested: preloadIDs.contains(file.id),
-                        onImageZoomChanged: { isZoomed in
-                            setImageZoomed(isZoomed, fileID: file.id)
-                        },
-                        onVideoControlsInteractionChanged: { isInteracting in
-                            setVideoControlsInteracting(isInteracting, fileID: file.id)
+                    Group {
+                        if isPageNear(file.id) {
+                            MediaPagerPage(
+                                file: file,
+                                driveId: context.driveId,
+                                isActive: selectedFileID == file.id,
+                                hiresRequested: preloadIDs.contains(file.id),
+                                onImageZoomChanged: { isZoomed in
+                                    setImageZoomed(isZoomed, fileID: file.id)
+                                },
+                                onVideoControlsInteractionChanged: { isInteracting in
+                                    setVideoControlsInteracting(isInteracting, fileID: file.id)
+                                }
+                            )
+                        } else {
+                            Color.clear
                         }
-                    )
+                    }
                     .tag(file.id)
                 }
             }

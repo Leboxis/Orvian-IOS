@@ -19,8 +19,15 @@ final class FileGridViewModel {
             // Les mutations locales (corbeille, déplacement, import, favoris,
             // renommage…) resynchronisent l'entrée de cache : une réouverture
             // de la liste affiche immédiatement l'état à jour.
+            // Regroupées via `withoutSnapshot`, plusieurs mutations
+            // synchrones (ex. removeAll + append + sort) ne stockent qu'une
+            // fois au lieu de N fois.
             if loadedOnce {
-                storeListSnapshot()
+                if snapshotSuppressionDepth > 0 {
+                    snapshotDirtyWhileSuppressed = true
+                } else {
+                    storeListSnapshot()
+                }
             }
         }
     }
@@ -61,6 +68,26 @@ final class FileGridViewModel {
     /// Empêche deux taps rapides de lancer des valeurs favorites opposées en
     /// parallèle pour le même fichier.
     private var favoriteMutationsInFlight: Set<Int> = []
+    /// Regroupement des écritures cache : `mergeUploaded` fait
+    /// removeAll + append + sort, soit 3 `didSet`. Sans regroupement, 3
+    /// snapshots mémoire (et 3 révisions) pour une seule opération logique.
+    private var snapshotSuppressionDepth = 0
+    private var snapshotDirtyWhileSuppressed = false
+
+    /// Exécute `work` en ne stockant qu'un seul snapshot à la fin, même si
+    /// `items` est muté plusieurs fois. Les lectures concurrentes sur le
+    /// MainActor ne peuvent pas observer d'état intermédiaire.
+    private func withoutSnapshot<T>(_ work: () -> T) -> T {
+        snapshotSuppressionDepth += 1
+        defer {
+            snapshotSuppressionDepth = max(0, snapshotSuppressionDepth - 1)
+            if snapshotSuppressionDepth == 0, snapshotDirtyWhileSuppressed, loadedOnce {
+                snapshotDirtyWhileSuppressed = false
+                storeListSnapshot()
+            }
+        }
+        return work()
+    }
 
     let source: FileSource
     let driveId: Int
@@ -155,14 +182,18 @@ final class FileGridViewModel {
             }
             // L'ordre des affectations importe : `items` en dernier déclenche
             // la resynchronisation du cache avec un état déjà complet.
-            orderBy = snapshot.orderBy
-            order = snapshot.order
-            cursor = snapshot.cursor
-            hasMore = snapshot.hasMore
-            totalItemCount = snapshot.totalItemCount
-            fetchedAt = snapshot.fetchedAt
-            loadedOnce = true
-            items = snapshot.items
+            // Restauration depuis un snapshot existant : inutile de réécrire
+            // le même snapshot (1 `didSet` évité).
+            withoutSnapshot {
+                orderBy = snapshot.orderBy
+                order = snapshot.order
+                cursor = snapshot.cursor
+                hasMore = snapshot.hasMore
+                totalItemCount = snapshot.totalItemCount
+                fetchedAt = snapshot.fetchedAt
+                loadedOnce = true
+                items = snapshot.items
+            }
             // Revalidation silencieuse : les cartes restent affichées et
             // l'ETag renvoie 304 (quelques octets) si rien n'a changé.
             // Un instantané de moins de 60 s est jugé à jour : aucun appel.
@@ -364,14 +395,16 @@ final class FileGridViewModel {
             if file.updatedAt == nil { file.updatedAt = now }
             return file
         }
-        let uploadedIDs = Set(merged.map(\.id))
-        let existingIDs = Set(items.map(\.id))
-        // Compteur d'abord, items ensuite : le snapshot issu de `didSet`
-        // capture le badge recalé avec les cartes insérées.
-        adjustItemCount(by: merged.filter { !existingIDs.contains($0.id) }.count)
-        items.removeAll { uploadedIDs.contains($0.id) }
-        items.append(contentsOf: merged)
-        resortAfterMerge()
+        withoutSnapshot {
+            let uploadedIDs = Set(merged.map(\.id))
+            let existingIDs = Set(items.map(\.id))
+            // Compteur d'abord, items ensuite : le snapshot issu de `didSet`
+            // capture le badge recalé avec les cartes insérées.
+            adjustItemCount(by: merged.filter { !existingIDs.contains($0.id) }.count)
+            items.removeAll { uploadedIDs.contains($0.id) }
+            items.append(contentsOf: merged)
+            resortAfterMerge()
+        }
         if broadcast {
             DirectoryListStore.shared.mergeRecentUploads(driveId: driveId, files: merged)
             FileGridMutationCenter.shared.publish(.uploaded(driveId: driveId, files: merged))
@@ -503,45 +536,47 @@ final class FileGridViewModel {
     @discardableResult
     func apply(_ mutation: FileGridMutation) -> Bool {
         guard mutation.driveId == driveId else { return false }
-        switch mutation {
-        case let .favorite(_, fileId, isFavorite):
-            return applyFavoriteChange(fileId: fileId, isFavorite: isFavorite)
-        case let .category(_, fileId, category, applied):
-            return applyCategoryChange(fileId: fileId, category: category, applied: applied)
-        case let .rename(_, fileId, name):
-            if let index = items.firstIndex(where: { $0.id == fileId }) {
-                items[index].name = name
+        return withoutSnapshot {
+            switch mutation {
+            case let .favorite(_, fileId, isFavorite):
+                return applyFavoriteChange(fileId: fileId, isFavorite: isFavorite)
+            case let .category(_, fileId, category, applied):
+                return applyCategoryChange(fileId: fileId, category: category, applied: applied)
+            case let .rename(_, fileId, name):
+                if let index = items.firstIndex(where: { $0.id == fileId }) {
+                    items[index].name = name
+                }
+                // Un renommage peut ajouter ou retirer un résultat de recherche ;
+                // seul le serveur peut recalculer cette appartenance.
+                if case .search = source { return true }
+                return false
+            case let .color(_, fileId, color):
+                if let index = items.firstIndex(where: { $0.id == fileId }) {
+                    items[index].color = color
+                }
+                return false
+            case let .removal(_, fileIds):
+                items.removeAll { fileIds.contains($0.id) }
+                return false
+            case .moved:
+                var updated = items
+                let needsReload = mutation.applyMove(to: &updated, source: source)
+                adjustItemCount(by: updated.count - items.count)
+                if updated != items { items = updated }
+                return needsReload
+            case let .trashed(_, fileIds):
+                if case .trash = source {
+                    let existingIds = Set(items.map(\.id))
+                    return !fileIds.isSubset(of: existingIds)
+                }
+                items.removeAll { fileIds.contains($0.id) }
+                return false
+            case let .uploaded(_, files):
+                if case .recents = source {
+                    mergeUploaded(files, broadcast: false)
+                }
+                return false
             }
-            // Un renommage peut ajouter ou retirer un résultat de recherche ;
-            // seul le serveur peut recalculer cette appartenance.
-            if case .search = source { return true }
-            return false
-        case let .color(_, fileId, color):
-            if let index = items.firstIndex(where: { $0.id == fileId }) {
-                items[index].color = color
-            }
-            return false
-        case let .removal(_, fileIds):
-            items.removeAll { fileIds.contains($0.id) }
-            return false
-        case .moved:
-            var updated = items
-            let needsReload = mutation.applyMove(to: &updated, source: source)
-            adjustItemCount(by: updated.count - items.count)
-            if updated != items { items = updated }
-            return needsReload
-        case let .trashed(_, fileIds):
-            if case .trash = source {
-                let existingIds = Set(items.map(\.id))
-                return !fileIds.isSubset(of: existingIds)
-            }
-            items.removeAll { fileIds.contains($0.id) }
-            return false
-        case let .uploaded(_, files):
-            if case .recents = source {
-                mergeUploaded(files, broadcast: false)
-            }
-            return false
         }
     }
 
