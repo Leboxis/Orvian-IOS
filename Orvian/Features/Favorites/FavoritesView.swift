@@ -146,7 +146,7 @@ struct FavoritesView: View {
         var cursor: String? = nil
         repeat {
             guard let page = try? await service.page(
-                .favorites(limit: 60), driveId: viewModel.driveId, cursor: cursor, forceNetwork: true
+                .favorites(limit: 200), driveId: viewModel.driveId, cursor: cursor, forceNetwork: true
             ) else { break }
             allFiles.append(contentsOf: Array(page.data ?? []).filter { !$0.isDirectory })
             cursor = page.cursor
