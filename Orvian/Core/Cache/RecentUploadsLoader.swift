@@ -83,7 +83,7 @@ final class RecentUploadsLoader {
         let credential = TokenStore.credentialFingerprint()
         let requestID = UUID()
         let requestStartedAt = Date().timeIntervalSince1970
-        let task = Task { [service] in
+        let task = Task<DirectoryListSnapshot?, Never> { [service] in
             guard !Task.isCancelled,
                   let page = try? await service.page(
                 Self.source,
