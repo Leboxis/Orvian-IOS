@@ -230,7 +230,7 @@ struct FileFilters: Equatable, Hashable {
         driveId: Int,
         mediaMetadata: MediaMetadataStore
     ) -> [DriveFile] {
-        guard sort != .original else { return files }
+        guard sort != .original, serverOrderBy == nil else { return files }
 
         return files.sorted { lhs, rhs in
             switch sort {

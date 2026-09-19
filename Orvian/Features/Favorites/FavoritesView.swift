@@ -12,6 +12,7 @@ struct FavoritesView: View {
     @FocusState private var searchFocused: Bool
     @AppStorage("alwaysShowSearch") private var alwaysShowSearch = false
 
+    @State private var fetchingAllFavorites = false
     @State private var selectionMode = false
     @State private var selectedIDs: Set<Int> = []
     @State private var visibleItemsReport: VisibleItemsReport?
@@ -97,12 +98,17 @@ struct FavoritesView: View {
         return "\(count) sélectionné\(count > 1 ? "s" : "")"
     }
 
+    private var reportedVisibleItemCount: Int? {
+        guard visibleItemsReport?.context == currentVisibleItemsContext else { return nil }
+        return visibleItemsReport?.items.count
+    }
+
     private var displayedItemCount: Int? {
         guard viewModel.itemsRevision > 0, !viewModel.isInitialLoading else { return nil }
         if isSearching || hasCountFiltering {
-            return visibleSelectionItems.count
+            return reportedVisibleItemCount
         }
-        return viewModel.totalItemCount ?? viewModel.items.count
+        return viewModel.totalItemCount ?? reportedVisibleItemCount ?? viewModel.items.count
     }
 
     private var itemCountText: String {
@@ -131,7 +137,21 @@ struct FavoritesView: View {
     }
 
     private var playableFiles: [DriveFile] {
-        viewModel.items.filter { !$0.isDirectory }
+        viewModel.items.filter { !.isDirectory }
+    }
+
+    private func fetchAllFavorites() async -> [DriveFile] {
+        let service = KDriveService()
+        var allFiles: [DriveFile] = []
+        var cursor: String? = nil
+        repeat {
+            guard let page = try? await service.page(
+                .favorites(limit: 60), driveId: viewModel.driveId, cursor: cursor, forceNetwork: true
+            ) else { break }
+            allFiles.append(contentsOf: (page.data ?? []).filter { !.isDirectory })
+            cursor = page.cursor
+        } while cursor != nil
+        return allFiles
     }
 
     var body: some View {
@@ -378,20 +398,25 @@ struct FavoritesView: View {
                 .frame(width: 32, height: 32)
                 .contentShape(Rectangle())
         }
-        .disabled(playableFiles.isEmpty)
+        .disabled(playableFiles.isEmpty || fetchingAllFavorites)
         .accessibilityLabel("Ouvrir un fichier au hasard")
     }
 
     private func openRandomFile() {
-        guard let random = playableFiles.randomElement() else { return }
-        searchFocused = false
-        router.open(
-            random,
-            siblings: playableFiles,
-            filters: filters,
-            searchText: searchText,
-            viewModel: viewModel
-        )
+        Task {
+            fetchingAllFavorites = true
+            let all = await fetchAllFavorites()
+            fetchingAllFavorites = false
+            guard let random = all.randomElement() else { return }
+            searchFocused = false
+            router.open(
+                random,
+                siblings: all,
+                filters: filters,
+                searchText: searchText,
+                viewModel: viewModel
+            )
+        }
     }
 
     private var itemCountLabel: some View {
