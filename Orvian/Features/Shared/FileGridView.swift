@@ -54,6 +54,11 @@ struct FileGridView: View {
     @AppStorage("foldersFirstInTags") private var foldersFirstInTags = true
     @State private var metadataRevision = 0
     @State private var prefetchTask: Task<Void, Never>?
+    /// Demande de préchargement la plus récente. Une rafale d'apparitions de
+    /// cartes pendant le scroll ne fait que remplacer cette demande : la
+    /// tâche d'accalmie unique la relit, au lieu d'être annulée et recréée
+    /// (coût + allocation) à chaque carte.
+    @State private var pendingPrefetch: PrefetchRequest?
     @State private var paginationTask: Task<Void, Never>?
     @State private var paginationRequestID: UUID?
     @State private var sortReloadTask: Task<Void, Never>?
@@ -135,17 +140,18 @@ struct FileGridView: View {
                     scheduleMutationReload()
                 }
             }
-            .onChange(of: mediaMetadata.revision) { _, newRev in
-                if needsVideoMetadata {
-                    metadataRevision = newRev
-                }
-            }
+            .modifier(MetadataRevisionGate(
+                needsVideoMetadata: needsVideoMetadata,
+                metadata: mediaMetadata,
+                onUpdate: { metadataRevision = $0 }
+            ))
             .onDisappear {
                 paginationTask?.cancel()
                 paginationTask = nil
                 paginationRequestID = nil
                 prefetchTask?.cancel()
                 prefetchTask = nil
+                pendingPrefetch = nil
                 sortReloadTask?.cancel()
                 sortReloadTask = nil
                 mutationReloadTask?.cancel()
@@ -398,15 +404,11 @@ struct FileGridView: View {
     /// La clé de mémoïsation est purement incrémentale : sa comparaison est
     /// O(1) au lieu de relire tout le tableau à chaque rendu.
     private var visibleItems: [DriveFile] {
-        var result = visibleItemsCache.visibleItems(
+        visibleItemsCache.visibleItems(
             key: visibleItemsKey,
             items: viewModel.items,
             mediaMetadata: mediaMetadata
         )
-        if foldersFirstInTags, case .category = viewModel.source {
-            result = result.filter(\.isDirectory) + result.filter { !$0.isDirectory }
-        }
-        return result
     }
 
     private var visibleItemsKey: VisibleItemsKey {
@@ -664,45 +666,65 @@ struct FileGridView: View {
     }
 
     /// Apparition d'une carte : pagination immédiate, puis préchargement d'une
-    /// seule rangée après une courte accalmie. Un scroll rapide annule ainsi le
-    /// travail prévu pour les cartes déjà dépassées.
+    /// seule rangée après une courte accalmie. Les apparitions d'une rafale
+    /// de scroll remplacent la demande en attente ; la tâche unique repart
+    /// pour un nouveau délai avec la demande la plus récente, si bien que le
+    /// travail prévu pour les cartes déjà dépassées n'est plus exécuté.
     private func appeared(file: DriveFile, index: Int, in siblings: [DriveFile]) {
         if index >= siblings.count - 6 {
             requestMoreFiles()
         }
 
         let ahead = siblings.dropFirst(index + 1).prefix(3)
-        let thumbnailIds = ahead.filter { $0.fileKind.supportsThumbnail }.map(\.id)
-        let videoIds = viewModel.source == .trash
-            ? []
-            : Array(ahead.lazy.filter(\.isVideo).prefix(2).map(\.id))
-        let driveId = viewModel.driveId
-        let isTrashed = viewModel.source == .trash
-
-        prefetchTask?.cancel()
-        guard prefetchThumbnails || prefetchVideoURLs,
-              !prefetchOnWiFiOnly || NetworkMonitor.shared.allowsBackgroundPrefetch
-        else { return }
+        if prefetchThumbnails || prefetchVideoURLs,
+           !prefetchOnWiFiOnly || NetworkMonitor.shared.allowsBackgroundPrefetch {
+            pendingPrefetch = PrefetchRequest(
+                driveId: viewModel.driveId,
+                isTrashed: viewModel.source == .trash,
+                thumbnailIds: prefetchThumbnails
+                    ? ahead.filter { $0.fileKind.supportsThumbnail }.map(\.id) : [],
+                videoIds: viewModel.source == .trash
+                    ? [] : Array(ahead.lazy.filter(\.isVideo).prefix(2).map(\.id))
+            )
+        } else {
+            pendingPrefetch = nil
+        }
+        guard pendingPrefetch != nil else { return }
+        guard prefetchTask == nil else { return }
 
         prefetchTask = Task {
-            do {
-                try await Task.sleep(for: .milliseconds(180))
-            } catch {
-                return
+            while !Task.isCancelled {
+                guard let request = pendingPrefetch else { break }
+                pendingPrefetch = nil
+                do {
+                    try await Task.sleep(for: .milliseconds(180))
+                } catch {
+                    break
+                }
+                if prefetchThumbnails, !request.thumbnailIds.isEmpty {
+                    await ThumbnailProvider.shared.prefetch(
+                        driveId: request.driveId,
+                        fileIds: request.thumbnailIds,
+                        isTrashed: request.isTrashed
+                    )
+                }
+                if prefetchVideoURLs, !request.videoIds.isEmpty {
+                    await VideoAssetCache.shared.prefetch(
+                        driveId: request.driveId,
+                        fileIds: request.videoIds
+                    )
+                }
             }
-            guard !Task.isCancelled else { return }
-
-            if prefetchThumbnails, !thumbnailIds.isEmpty {
-                await ThumbnailProvider.shared.prefetch(
-                    driveId: driveId,
-                    fileIds: Array(thumbnailIds),
-                    isTrashed: isTrashed
-                )
-            }
-            if prefetchVideoURLs, !videoIds.isEmpty {
-                await VideoAssetCache.shared.prefetch(driveId: driveId, fileIds: videoIds)
-            }
+            prefetchTask = nil
         }
+    }
+
+    /// Demande de préchargement issue des cartes qui viennent d'apparaître.
+    private struct PrefetchRequest {
+        let driveId: Int
+        let isTrashed: Bool
+        let thumbnailIds: [Int]
+        let videoIds: [Int]
     }
 
     // MARK: - États
@@ -774,6 +796,28 @@ struct FileGridView: View {
     }
 }
 
+/// N'observe la révision du store global de métadonnées que si les filtres
+/// courants en dépendent. Sans ce garde structurel, la lecture de
+/// `mediaMetadata.revision` dans le corps de la grille abonnait **toutes**
+/// les grilles montées au store global : chaque lot de métadonnées résolu
+/// n'importe où dans l'app (pager, favoris, corbeille…) provoquait un
+/// re-rendu de chaque grille, y compris en plein défilement.
+private struct MetadataRevisionGate: ViewModifier {
+    let needsVideoMetadata: Bool
+    let metadata: MediaMetadataStore
+    let onUpdate: (Int) -> Void
+
+    func body(content: Content) -> some View {
+        if needsVideoMetadata {
+            content.onChange(of: metadata.revision) { _, newRevision in
+                onUpdate(newRevision)
+            }
+        } else {
+            content
+        }
+    }
+}
+
 /// Clé de mémoïsation du résultat des filtres/tri de la grille : la version
 /// incrémentale du contenu (itemsRevision) remplace la comparaison du
 /// tableau complet — tant que les données, les filtres, la recherche et la
@@ -796,11 +840,10 @@ private struct VisibleItemsCache {
     private var cachedKey: VisibleItemsKey?
     private var cachedResult: [DriveFile] = []
 
-    /// Mémoïse la passe filtres + tri. Le store n'est lu que pour construire
-    /// l'instantané de métadonnées (une fois par passe, et non une clé chaîne
-    /// par fichier à l'intérieur du tri) : `FileFilters.visible` ne dépend plus
-    /// d'un type isolé et pourrait être déplacé hors du MainActor sans
-    /// changer sa signature.
+    /// Mémoïse la passe filtres + tri + repli « dossiers d'abord ». Ce
+    /// repli vivait dans la vue (refait O(n) à chaque évaluation du
+    /// corps) ; il ne dépend que de la clé, il est donc calculé une
+    /// seule fois ici, au même titre que les filtres.
     mutating func visibleItems(
         key: VisibleItemsKey,
         items: [DriveFile],
@@ -810,11 +853,15 @@ private struct VisibleItemsCache {
             return cachedResult
         }
         cachedKey = key
-        cachedResult = key.filters.visible(
+        var result = key.filters.visible(
             items,
             searchText: key.searchText,
             metadata: mediaMetadata.snapshot(driveId: key.driveId, items: items)
         )
-        return cachedResult
+        if key.foldersFirst {
+            result = result.filter(\.isDirectory) + result.filter { !$0.isDirectory }
+        }
+        cachedResult = result
+        return result
     }
 }
