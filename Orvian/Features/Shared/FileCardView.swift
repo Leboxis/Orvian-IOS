@@ -148,6 +148,10 @@ struct FileCardView: View {
                         }
                     }
                 )
+                // Micro-pas A (Jev) : force pleine taille. Un UIViewRepresentable
+                // sans taille intrinsèque retombe à 0×0, le highlight n'aurait
+                // alors aucune zone à animer.
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
         // L'étoile favori et la coche sont dessinées APRÈS l'interaction :
@@ -438,6 +442,7 @@ private struct CardInteraction: UIViewRepresentable {
     func makeUIView(context: Context) -> InteractionView {
         let view = InteractionView()
         view.onTap = { [weak coordinator = context.coordinator] in coordinator?.parent.onTap() }
+        view.previewImage = previewImage
         let interaction = UIContextMenuInteraction(delegate: context.coordinator)
         view.addInteraction(interaction)
         return view
@@ -446,19 +451,45 @@ private struct CardInteraction: UIViewRepresentable {
     func updateUIView(_ uiView: InteractionView, context: Context) {
         context.coordinator.parent = self
         uiView.onTap = { [weak coordinator = context.coordinator] in coordinator?.parent.onTap() }
+        uiView.previewImage = previewImage
     }
 
     /// Vue transparente pleine taille : tap court = ouverture, long-press =
     /// menu contextuel avec aperçu. `UIContextMenuInteraction` gère les deux.
     final class InteractionView: UIView {
         var onTap: (() -> Void)?
-        private var tapGesture: UITapGestureRecognizer?
+        /// Miniature rejouée pour le highlight. Vue cachée, carrée en haut,
+        /// même géométrie que la vignette SwiftUI : sans elle le système
+        /// snapshotterait une vue transparente (animation depuis du vide).
+        var previewImage: UIImage? {
+            didSet { syncPreview() }
+        }
+
+        private let previewImageView = UIImageView()
+
+        /// Source du highlight ; nil (dossiers/documents) → animation par défaut.
+        var highlightView: UIView? {
+            previewImage == nil ? nil : previewImageView
+        }
 
         override init(frame: CGRect) {
             super.init(frame: frame)
+            backgroundColor = .clear
+            previewImageView.contentMode = .scaleAspectFill
+            previewImageView.clipsToBounds = true
+            previewImageView.layer.cornerRadius = DS.cardRadius
+            previewImageView.layer.cornerCurve = .continuous
+            previewImageView.isHidden = true
+            previewImageView.translatesAutoresizingMaskIntoConstraints = false
+            addSubview(previewImageView)
+            NSLayoutConstraint.activate([
+                previewImageView.topAnchor.constraint(equalTo: topAnchor),
+                previewImageView.leadingAnchor.constraint(equalTo: leadingAnchor),
+                previewImageView.trailingAnchor.constraint(equalTo: trailingAnchor),
+                previewImageView.heightAnchor.constraint(equalTo: previewImageView.widthAnchor),
+            ])
             let tap = UITapGestureRecognizer(target: self, action: #selector(handleTap))
             addGestureRecognizer(tap)
-            tapGesture = tap
         }
 
         @available(*, unavailable)
@@ -467,6 +498,11 @@ private struct CardInteraction: UIViewRepresentable {
         @objc private func handleTap(_ gesture: UITapGestureRecognizer) {
             guard gesture.state == .ended else { return }
             onTap?()
+        }
+
+        private func syncPreview() {
+            previewImageView.image = previewImage
+            previewImageView.isHidden = previewImage == nil
         }
     }
 
@@ -493,6 +529,39 @@ private struct CardInteraction: UIViewRepresentable {
                     return self.buildMenu()
                 }
             )
+        }
+
+        // Micro-pas A (Jev) : highlight seul. Le lift part de la vignette
+        // carrée, coins arrondis DS.cardRadius, fond clear. Aucun changement
+        // de taille d'aperçu, de tap, ni de VoiceOver dans ce pas.
+        func contextMenuInteraction(
+            _ interaction: UIContextMenuInteraction,
+            previewForHighlightingMenuWithConfiguration configuration: UIContextMenuConfiguration
+        ) -> UITargetedPreview? {
+            targetedPreview(for: interaction)
+        }
+
+        func contextMenuInteraction(
+            _ interaction: UIContextMenuInteraction,
+            previewForDismissingMenuWithConfiguration configuration: UIContextMenuConfiguration
+        ) -> UITargetedPreview? {
+            targetedPreview(for: interaction)
+        }
+
+        private func targetedPreview(for interaction: UIContextMenuInteraction) -> UITargetedPreview? {
+            guard let interactionView = interaction.view as? InteractionView,
+                  let highlightView = interactionView.highlightView else { return nil }
+            // Le highlight peut être demandé avant le layout final.
+            interactionView.layoutIfNeeded()
+            highlightView.layoutIfNeeded()
+            guard highlightView.bounds.width > 1, highlightView.bounds.height > 1 else { return nil }
+            let parameters = UIPreviewParameters()
+            parameters.backgroundColor = .clear
+            parameters.visiblePath = UIBezierPath(
+                roundedRect: highlightView.bounds,
+                cornerRadius: DS.cardRadius
+            )
+            return UITargetedPreview(view: highlightView, parameters: parameters)
         }
 
         private func buildMenu() -> UIMenu {
