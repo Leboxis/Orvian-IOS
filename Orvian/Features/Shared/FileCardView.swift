@@ -493,9 +493,8 @@ private struct QuickLookInteraction: UIViewRepresentable {
         }
 
         func presentPreview(from sourceView: UIView) {
-            guard let windowScene = sourceView.window?.windowScene,
-                  let window = UIWindow(windowScene: windowScene)
-            else { return }
+            guard let windowScene = sourceView.window?.windowScene else { return }
+            let window = UIWindow(windowScene: windowScene)
 
             let controller = QuickLookPreviewViewController(
                 image: previewImage,
