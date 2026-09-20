@@ -14,10 +14,11 @@ actor SharedRequests<Key: Hashable & Sendable, Value: Sendable> {
     func value(for key: Key, operation: @escaping @Sendable () async throws -> Value) async throws -> Value {
         let waiterID = UUID()
         return try await withTaskCancellationHandler {
-            try Task.checkCancellation()
+try Task.checkCancellation()
             return try await withCheckedThrowingContinuation { continuation in
-                if requests[key] != nil {
-                    requests[key]?.waiters[waiterID] = continuation
+                if var existing = requests[key] {
+                    existing.waiters[waiterID] = continuation
+                    requests[key] = existing
                     return
                 }
                 let requestID = UUID()

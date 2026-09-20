@@ -370,10 +370,14 @@ final class UploadManager {
     }
 
     /// Repli lisible quand le système ne fournit aucun nom (`Photo_20250919_…`).
+private static let fallbackDateFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "yyyyMMdd_HHmmss"
+        return f
+    }()
+
     private static func datedFallbackPhotoName(ext: String, itemIndex: Int) -> String {
-        let formatter = DateFormatter()
-        formatter.dateFormat = "yyyyMMdd_HHmmss"
-        let stamp = formatter.string(from: Date())
+        let stamp = fallbackDateFormatter.string(from: Date())
         return "Photo_\(stamp)_\(itemIndex + 1).\(ext)"
     }
 

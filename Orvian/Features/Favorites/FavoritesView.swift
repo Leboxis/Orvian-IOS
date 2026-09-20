@@ -136,7 +136,7 @@ struct FavoritesView: View {
     }
 
     private var playableFiles: [DriveFile] {
-        Array(viewModel.items).filter { !$0.isDirectory }
+        viewModel.items.filter { !$0.isDirectory }
     }
 
 
