@@ -154,11 +154,22 @@ final class SessionStore {
 
     private func loadDrives(preferredDriveId: Int?) async throws {
         let generation = sessionGeneration
-        if let stored = defaults.object(forKey: Keys.accountId) as? Int,
-           let list = try? await service.drives(accountId: stored), !list.isEmpty {
-            guard !Task.isCancelled, generation == sessionGeneration else { throw CancellationError() }
-            apply(list, accountId: stored, preferredDriveId: preferredDriveId)
-            return
+        if let stored = defaults.object(forKey: Keys.accountId) as? Int {
+            do {
+                let list = try await service.drives(accountId: stored)
+                if !list.isEmpty {
+                    guard !Task.isCancelled, generation == sessionGeneration else { throw CancellationError() }
+                    apply(list, accountId: stored, preferredDriveId: preferredDriveId)
+                    return
+                }
+            } catch {
+                // Un token expiré ne doit pas être masqué par un repli sur la
+                // découverte : on remonte immédiatement le 401 pour déclencher
+                // la déconnexion propre dans `bootstrap()`.
+                if (error as? APIError)?.isUnauthorized == true { throw error }
+                // Toute autre erreur (réseau, 5xx…) laisse sa chance à la
+                // découverte complète, qui re-trouvera le bon compte.
+            }
         }
 
         let (accountId, list) = try await service.discoverDrives()

@@ -620,6 +620,15 @@ private struct ZoomablePhotoPage: View {
             guard wantsFullResolution, fullImage == nil else { return }
             await loadFullResolutionImage()
         }
+        .onChange(of: isActive) { wasActive, isNowActive in
+            // La page n'est plus visible : sa pleine résolution n'a plus de
+            // raison d'être conservée en mémoire. Elle sera rechargée à la
+            // demande si l'utilisateur revient et zoome à nouveau.
+            if wasActive && !isNowActive && !isZoomed {
+                fullImage = nil
+                wantsFullResolution = false
+            }
+        }
         .onGeometryChange(for: CGFloat.self) { geometry in
             // Taille de la page en pixels : dimension cible du décodage.
             max(geometry.size.width, geometry.size.height) * displayScale
@@ -635,6 +644,14 @@ private struct ZoomablePhotoPage: View {
             onZoomChanged(newValue)
         }
         .onDisappear {
+            // Quand la page sort complètement de la hiérarchie (fermeture du
+            // pager, remplacement de la liste), on libère aussi la miniature
+            // et l'image d'affichage : elles se rechargent en quelques
+            // dizaines de millisecondes depuis les caches.
+            fullImage = nil
+            displayImage = nil
+            thumbnail = nil
+            gif = nil
             onZoomChanged(false)
         }
     }

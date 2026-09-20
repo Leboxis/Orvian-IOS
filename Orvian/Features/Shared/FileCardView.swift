@@ -108,6 +108,30 @@ struct FileCardView: View {
         .disabled(!enabled)
         .contextMenu {
             if !selectionMode {
+                // Aperçu rapide en haut du menu (pattern Fichiers.app) : la
+                // miniature déjà en cache s'affiche instantanément, sans
+                // téléchargement supplémentaire. Le menu complet est conservé.
+                if !file.isDirectory, let previewImage = thumbnail ?? (file.isImage || file.isGIF ? thumbnail : nil) {
+                    Image(uiImage: previewImage)
+                        .resizable()
+                        .scaledToFit()
+                        .frame(maxWidth: 220, maxHeight: 220)
+                        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                        .padding(.bottom, 4)
+                } else if !file.isDirectory {
+                    VStack(spacing: 8) {
+                        Image(systemName: kind.symbolName)
+                            .font(.system(size: 44, weight: .light))
+                            .foregroundStyle(tint)
+                        Text(file.name)
+                            .font(.caption)
+                            .lineLimit(2)
+                            .multilineTextAlignment(.center)
+                    }
+                    .frame(maxWidth: 180)
+                    .padding(.vertical, 8)
+                }
+
                 Button {
                     onPresent?(.details)
                 } label: {

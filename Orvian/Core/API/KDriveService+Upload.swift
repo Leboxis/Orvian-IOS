@@ -286,6 +286,9 @@ extension KDriveService {
             progress(1)
             return file
         } catch {
+            // Une annulation volontaire (même après le finish) n'a jamais
+            // créé de fichier : on propage sans message de doute.
+            if UploadSafety.isCancellation(error) { throw error }
             // Une clôture acceptée peut avoir créé le fichier malgré une réponse perdue.
             if finishRequested && UploadSafety.outcomeMayBeUnknown(error) {
                 throw UploadOutcomeUnknown()
@@ -335,6 +338,11 @@ extension KDriveService {
                 return
             } catch {
                 lastError = error
+                // Une annulation explicite n'est pas un échec réseau : on la
+                // propage immédiatement sans la transformer en doute sur le
+                // résultat côté serveur.
+                if UploadSafety.isCancellation(error) { throw error }
+                try Task.checkCancellation()
                 guard attempt < Self.uploadChunkMaximumAttempts else { break }
                 try await Task.sleep(for: .seconds(Int64(attempt)))
             }

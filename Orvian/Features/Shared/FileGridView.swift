@@ -27,7 +27,7 @@ struct FileGridView: View {
     /// que la première rangée ne soit jamais masquée.
     var contentTopInset: CGFloat = 0
 
-    /// Pull-to-refresh (désactivé sur l'Accueil, remplacé par la barre de recherche).
+    /// Pull-to-refresh, actif sur tous les écrans (Accueil, Favoris, Corbeille).
     var allowsPullToRefresh = true
 
     /// Mode sélection : le tap coche au lieu d'ouvrir.

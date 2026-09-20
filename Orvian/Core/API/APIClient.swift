@@ -275,6 +275,13 @@ actor APIClient {
             }
         } catch {
             if error is APIError { throw error }
+            // Une annulation explicite (Swift CancellationError ou URLError.cancelled)
+            // n'est pas une erreur réseau : on la propage telle quelle pour que
+            // l'appelant la distingue d'une vraie perte de connexion.
+            if error is CancellationError { throw error }
+            if let urlError = error as? URLError, urlError.code == .cancelled {
+                throw CancellationError()
+            }
             throw APIError.network(error)
         }
     }
@@ -299,6 +306,10 @@ actor APIClient {
             }
             return (data, response, credentialFingerprint)
         } catch {
+            if error is CancellationError { throw error }
+            if let urlError = error as? URLError, urlError.code == .cancelled {
+                throw CancellationError()
+            }
             throw APIError.network(error)
         }
     }
