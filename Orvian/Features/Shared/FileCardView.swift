@@ -144,7 +144,6 @@ struct FileCardView: View {
                     previewName: file.name,
                     previewSubtitle: subtitle,
                     previewIsVideo: file.isVideo,
-                    previewIsGIF: file.isGIF,
                     accessibilityLabel: file.name,
                     menuItems: menuItems,
                     onTap: {
@@ -478,7 +477,6 @@ private struct CardInteraction: UIViewRepresentable {
     /// Légende de l'aperçu (poids ou type) + pastilles.
     let previewSubtitle: String?
     let previewIsVideo: Bool
-    let previewIsGIF: Bool
     let accessibilityLabel: String
     let menuItems: [CardMenuItem]
     let onTap: () -> Void
@@ -602,8 +600,7 @@ private struct CardInteraction: UIViewRepresentable {
                         image: image,
                         fileName: self.parent.previewName,
                         subtitle: self.parent.previewSubtitle,
-                        isVideo: self.parent.previewIsVideo,
-                        isGIF: self.parent.previewIsGIF
+                        isVideo: self.parent.previewIsVideo
                     )
                     preview.preferredContentSize = self.previewSize(for: image, in: interaction)
                     return preview
@@ -656,27 +653,25 @@ private struct CardInteraction: UIViewRepresentable {
             return UITargetedPreview(view: highlightView, parameters: parameters)
         }
 
-        /// Taille de l'aperçu détaché : ratio de l'image préservé, borné à
-        /// ~85 % de la largeur et ~62 % de la hauteur d'écran (+ légende
-        /// deux lignes et marges). Sans `preferredContentSize`, le platter
-        /// système tombe sur une taille petite et imprévisible.
+        /// Taille de l'aperçu détaché : largeur toujours identique (~85 %
+        /// de l'écran, centrée par le système quelle que soit la résolution
+        /// de l'élément), hauteur bornée à ~62 % (+ légende deux lignes et
+        /// marges). Sans `preferredContentSize`, le platter système tombe
+        /// sur une taille petite et imprévisible.
         private func previewSize(for image: UIImage, in interaction: UIContextMenuInteraction) -> CGSize {
             let screenBounds = interaction.view?.window?.windowScene?.screen.bounds
                 ?? UIScreen.main.bounds
             let maxWidth = min(screenBounds.width * 0.85, 420)
             let maxHeight = screenBounds.height * 0.62
-            let captionHeight: CGFloat = 58
+            let captionHeight: CGFloat = 54
             let ratio = image.size.height / max(image.size.width, 1)
             guard ratio.isFinite, ratio > 0 else {
                 return CGSize(width: maxWidth, height: min(maxHeight, maxWidth + captionHeight))
             }
-            var width = maxWidth
-            var height = width * ratio + captionHeight
-            if height > maxHeight {
-                height = maxHeight
-                width = max((height - captionHeight) / max(ratio, 0.01), 200)
-            }
-            return CGSize(width: max(width, 200), height: max(height, 200))
+            // Largeur constante : l'image se lettreboxe (`aspectFit`) au lieu
+            // de rétrécir la fenêtre, qui reste centrée et stable.
+            let height = min(maxWidth * ratio + captionHeight, maxHeight)
+            return CGSize(width: maxWidth, height: max(height, 200))
         }
 
         private func buildMenu() -> UIMenu {
@@ -692,17 +687,15 @@ private struct CardInteraction: UIViewRepresentable {
     }
 }
 
-/// Aperçu rapide, style Photos : image flottante aux coins arrondis sur
-/// fond flouté de la même image, pastille givrée Vidéo/GIF, bouton
-/// lecture pour les vidéos et légende nom + détails. Épuré : aucun
-/// chrome superflu, même langage givré que les badges de la carte.
+/// Aperçu rapide, style Photos : image bord à bord en haut et sur les
+/// côtés, légende nom + détails resserrée en bas, bouton lecture pour
+/// les vidéos. Épuré : aucun chrome superflu.
 /// Le tap sur l'aperçu ouvre le fichier (commit géré par le coordinateur).
 private final class QuickLookPreviewViewController: UIViewController {
     private let image: UIImage
     private let fileName: String
     private let subtitle: String?
     private let isVideo: Bool
-    private let isGIF: Bool
 
     private let backdropView = UIImageView()
     private let imageView = UIImageView()
@@ -711,14 +704,12 @@ private final class QuickLookPreviewViewController: UIViewController {
         image: UIImage,
         fileName: String,
         subtitle: String? = nil,
-        isVideo: Bool = false,
-        isGIF: Bool = false
+        isVideo: Bool = false
     ) {
         self.image = image
         self.fileName = fileName
         self.subtitle = subtitle
         self.isVideo = isVideo
-        self.isGIF = isGIF
         super.init(nibName: nil, bundle: nil)
     }
 
@@ -747,19 +738,9 @@ private final class QuickLookPreviewViewController: UIViewController {
         imageView.image = image
         imageView.contentMode = .scaleAspectFit
         imageView.clipsToBounds = true
-        imageView.layer.cornerRadius = 14
-        imageView.layer.cornerCurve = .continuous
         imageView.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(imageView)
 
-        if isVideo || isGIF {
-            let pill = makePill(text: isVideo ? "Vidéo" : "GIF", systemIcon: isVideo ? "play.fill" : nil)
-            view.addSubview(pill)
-            NSLayoutConstraint.activate([
-                pill.topAnchor.constraint(equalTo: imageView.topAnchor, constant: 10),
-                pill.leadingAnchor.constraint(equalTo: imageView.leadingAnchor, constant: 10),
-            ])
-        }
         if isVideo {
             let play = makePlayButton()
             play.isUserInteractionEnabled = false
@@ -807,62 +788,14 @@ private final class QuickLookPreviewViewController: UIViewController {
             dim.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             dim.trailingAnchor.constraint(equalTo: view.trailingAnchor),
             dim.bottomAnchor.constraint(equalTo: view.bottomAnchor),
-            imageView.topAnchor.constraint(equalTo: view.topAnchor, constant: 10),
-            imageView.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 10),
-            imageView.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -10),
-            imageView.bottomAnchor.constraint(equalTo: caption.topAnchor, constant: -10),
+            imageView.topAnchor.constraint(equalTo: view.topAnchor),
+            imageView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            imageView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            imageView.bottomAnchor.constraint(equalTo: caption.topAnchor, constant: -6),
             caption.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 16),
             caption.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -16),
             caption.bottomAnchor.constraint(equalTo: view.bottomAnchor, constant: -12),
         ])
-    }
-
-    /// Pastille flottante givrée (type de média) : même langage que les
-    /// badges de la carte, adoucie — flou sombre, contour fin discret.
-    private func makePill(text: String, systemIcon: String?) -> UIView {
-        let container = UIView()
-        container.layer.cornerRadius = 11
-        container.layer.cornerCurve = .continuous
-        container.layer.borderWidth = 0.7
-        container.layer.borderColor = UIColor.white.withAlphaComponent(0.25).cgColor
-        container.clipsToBounds = true
-        container.translatesAutoresizingMaskIntoConstraints = false
-        let blur = UIVisualEffectView(effect: UIBlurEffect(style: .systemThinMaterialDark))
-        blur.translatesAutoresizingMaskIntoConstraints = false
-        container.addSubview(blur)
-        let stack = UIStackView()
-        stack.axis = .horizontal
-        stack.alignment = .center
-        stack.spacing = 4
-        stack.translatesAutoresizingMaskIntoConstraints = false
-        if let systemIcon, let iconImage = UIImage(systemName: systemIcon) {
-            let icon = UIImageView(image: iconImage)
-            icon.tintColor = .white
-            icon.contentMode = .scaleAspectFit
-            icon.translatesAutoresizingMaskIntoConstraints = false
-            NSLayoutConstraint.activate([
-                icon.widthAnchor.constraint(equalToConstant: 9),
-                icon.heightAnchor.constraint(equalToConstant: 9),
-            ])
-            stack.addArrangedSubview(icon)
-        }
-        let label = UILabel()
-        label.text = text
-        label.font = .systemFont(ofSize: 11, weight: .semibold)
-        label.textColor = .white
-        stack.addArrangedSubview(label)
-        container.addSubview(stack)
-        NSLayoutConstraint.activate([
-            blur.topAnchor.constraint(equalTo: container.topAnchor),
-            blur.leadingAnchor.constraint(equalTo: container.leadingAnchor),
-            blur.trailingAnchor.constraint(equalTo: container.trailingAnchor),
-            blur.bottomAnchor.constraint(equalTo: container.bottomAnchor),
-            stack.topAnchor.constraint(equalTo: container.topAnchor, constant: 5),
-            stack.bottomAnchor.constraint(equalTo: container.bottomAnchor, constant: -5),
-            stack.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 9),
-            stack.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -9),
-        ])
-        return container
     }
 
     /// Bouton lecture givré (vidéos), purement indicatif : tout tap
