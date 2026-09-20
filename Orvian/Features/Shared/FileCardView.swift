@@ -68,12 +68,6 @@ struct FileCardView: View {
             : kind.tint)
     }
 
-    /// Les fichiers média ont droit à un vrai aperçu détaché au long-press
-    /// (pattern Fichiers.app), les dossiers et documents gardent le menu simple.
-    private var hasQuickPreview: Bool {
-        !file.isDirectory && (file.isImage || file.isGIF || file.isVideo)
-    }
-
     /// Contenu du menu contextuel, reconstruit pour `UIMenu` : la carte n'a
     /// plus de bouton englobant (l'interaction UIKit porte tap et long-press),
     /// les actions restent strictement identiques à l'ancien menu SwiftUI.
@@ -131,14 +125,12 @@ struct FileCardView: View {
         }
         .opacity(enabled ? 1 : 0.55)
         .contentShape(Rectangle())
-        // Interaction (tap + long-press) portée par UIKit : seul
-        // `UIContextMenuInteraction` offre l'aperçu détaché au-dessus du menu
-        // (pattern Fichiers.app) — SwiftUI l'a retiré de `contextMenu`.
+        // Interaction (tap + long-press) portée par UIKit : `contextMenu`
+        // SwiftUI n'offre plus de contrôle fin depuis iOS 16. Appui long =
+        // menu seul, sans aperçu détaché (fonctionnalité retirée).
         .overlay {
             if enabled {
                 CardInteraction(
-                    previewImage: hasQuickPreview ? thumbnail : nil,
-                    previewName: file.name,
                     menuItems: menuItems,
                     onTap: {
                         if selectionMode {
@@ -146,17 +138,10 @@ struct FileCardView: View {
                         } else {
                             action()
                         }
-                    },
-                    // Micro-pas C (Jev) : tap sur l'aperçu détaché = ouverture.
-                    onCommit: {
-                        if !selectionMode {
-                            action()
-                        }
                     }
                 )
-                // Micro-pas A (Jev) : force pleine taille. Un UIViewRepresentable
-                // sans taille intrinsèque retombe à 0×0, le highlight n'aurait
-                // alors aucune zone à animer.
+                // Pleine taille obligatoire : un UIViewRepresentable sans taille
+                // intrinsèque retombe à 0×0 et le menu n'a plus d'ancrage.
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
@@ -430,18 +415,12 @@ private struct CardMenuItem {
     }
 }
 
-/// Interaction UIKit portée par `UIContextMenuInteraction` : tap = ouverture,
-/// long-press = aperçu détaché grand format + menu complet (pattern
-/// Fichiers.app). Remplace l'ancien `Button` + `contextMenu` SwiftUI qui ne
-/// permettait plus d'aperçu détaché depuis iOS 16.
+/// Interaction UIKit : tap = ouverture, long-press = menu seul (sans aperçu).
+/// Remplace l'ancien `Button` + `contextMenu` SwiftUI qui offrait moins de
+/// contrôle sur le tap depuis iOS 16.
 private struct CardInteraction: UIViewRepresentable {
-    /// Miniature en cache pour l'aperçu ; nil pour les dossiers et documents.
-    let previewImage: UIImage?
-    let previewName: String
     let menuItems: [CardMenuItem]
     let onTap: () -> Void
-    /// Tap sur l'aperçu détaché (commit) = ouverture du fichier.
-    let onCommit: () -> Void
 
     func makeCoordinator() -> Coordinator {
         Coordinator(parent: self)
@@ -450,7 +429,6 @@ private struct CardInteraction: UIViewRepresentable {
     func makeUIView(context: Context) -> InteractionView {
         let view = InteractionView()
         view.onTap = { [weak coordinator = context.coordinator] in coordinator?.parent.onTap() }
-        view.previewImage = previewImage
         let interaction = UIContextMenuInteraction(delegate: context.coordinator)
         view.addInteraction(interaction)
         return view
@@ -459,43 +437,16 @@ private struct CardInteraction: UIViewRepresentable {
     func updateUIView(_ uiView: InteractionView, context: Context) {
         context.coordinator.parent = self
         uiView.onTap = { [weak coordinator = context.coordinator] in coordinator?.parent.onTap() }
-        uiView.previewImage = previewImage
     }
 
     /// Vue transparente pleine taille : tap court = ouverture, long-press =
-    /// menu contextuel avec aperçu. `UIContextMenuInteraction` gère les deux.
+    /// menu contextuel sans aperçu. `UIContextMenuInteraction` gère les deux.
     final class InteractionView: UIView {
         var onTap: (() -> Void)?
-        /// Miniature rejouée pour le highlight. Vue cachée, carrée en haut,
-        /// même géométrie que la vignette SwiftUI : sans elle le système
-        /// snapshotterait une vue transparente (animation depuis du vide).
-        var previewImage: UIImage? {
-            didSet { syncPreview() }
-        }
-
-        private let previewImageView = UIImageView()
-
-        /// Source du highlight ; nil (dossiers/documents) → animation par défaut.
-        var highlightView: UIView? {
-            previewImage == nil ? nil : previewImageView
-        }
 
         override init(frame: CGRect) {
             super.init(frame: frame)
             backgroundColor = .clear
-            previewImageView.contentMode = .scaleAspectFill
-            previewImageView.clipsToBounds = true
-            previewImageView.layer.cornerRadius = DS.cardRadius
-            previewImageView.layer.cornerCurve = .continuous
-            previewImageView.isHidden = true
-            previewImageView.translatesAutoresizingMaskIntoConstraints = false
-            addSubview(previewImageView)
-            NSLayoutConstraint.activate([
-                previewImageView.topAnchor.constraint(equalTo: topAnchor),
-                previewImageView.leadingAnchor.constraint(equalTo: leadingAnchor),
-                previewImageView.trailingAnchor.constraint(equalTo: trailingAnchor),
-                previewImageView.heightAnchor.constraint(equalTo: previewImageView.widthAnchor),
-            ])
             let tap = UITapGestureRecognizer(target: self, action: #selector(handleTap))
             addGestureRecognizer(tap)
         }
@@ -506,11 +457,6 @@ private struct CardInteraction: UIViewRepresentable {
         @objc private func handleTap(_ gesture: UITapGestureRecognizer) {
             guard gesture.state == .ended else { return }
             onTap?()
-        }
-
-        private func syncPreview() {
-            previewImageView.image = previewImage
-            previewImageView.isHidden = previewImage == nil
         }
     }
 
@@ -528,88 +474,12 @@ private struct CardInteraction: UIViewRepresentable {
         ) -> UIContextMenuConfiguration? {
             UIContextMenuConfiguration(
                 identifier: nil,
-                previewProvider: { [weak self] in
-                    guard let self, let image = self.parent.previewImage else { return nil }
-                    // Micro-pas B (Jev) : taille bornée, ratio préservé.
-                    let preview = QuickLookPreviewViewController(image: image, fileName: self.parent.previewName)
-                    preview.preferredContentSize = self.previewSize(for: image, in: interaction)
-                    return preview
-                },
+                previewProvider: nil,
                 actionProvider: { [weak self] _ in
                     guard let self else { return nil }
                     return self.buildMenu()
                 }
             )
-        }
-
-        // Micro-pas A (Jev) : highlight seul. Le lift part de la vignette
-        // carrée, coins arrondis DS.cardRadius, fond clear. Aucun changement
-        // de taille d'aperçu, de tap, ni de VoiceOver dans ce pas.
-        func contextMenuInteraction(
-            _ interaction: UIContextMenuInteraction,
-            previewForHighlightingMenuWithConfiguration configuration: UIContextMenuConfiguration
-        ) -> UITargetedPreview? {
-            targetedPreview(for: interaction)
-        }
-
-        func contextMenuInteraction(
-            _ interaction: UIContextMenuInteraction,
-            previewForDismissingMenuWithConfiguration configuration: UIContextMenuConfiguration
-        ) -> UITargetedPreview? {
-            targetedPreview(for: interaction)
-        }
-
-        /// Micro-pas C (Jev) : tap sur l'aperçu détaché = ouverture du fichier
-        /// (pattern Fichiers.app). En mode sélection, pas d'ouverture.
-        func contextMenuInteraction(
-            _ interaction: UIContextMenuInteraction,
-            willCommitWithAnimator animator: UIContextMenuInteractionCommitAnimating
-        ) {
-            animator.addCompletion { [weak self] in
-                guard let self else { return }
-                self.parent.onCommit()
-            }
-        }
-
-        private func targetedPreview(for interaction: UIContextMenuInteraction) -> UITargetedPreview? {
-            guard let interactionView = interaction.view as? InteractionView,
-                  let highlightView = interactionView.highlightView else { return nil }
-            // Le highlight peut être demandé avant le layout final.
-            interactionView.layoutIfNeeded()
-            highlightView.layoutIfNeeded()
-            guard highlightView.bounds.width > 1, highlightView.bounds.height > 1 else { return nil }
-            let parameters = UIPreviewParameters()
-            parameters.backgroundColor = .clear
-            parameters.visiblePath = UIBezierPath(
-                roundedRect: highlightView.bounds,
-                cornerRadius: DS.cardRadius
-            )
-            return UITargetedPreview(view: highlightView, parameters: parameters)
-        }
-
-        /// Micro-pas B (Jev) : taille de l'aperçu détaché, ratio préservé,
-        /// bornée à ~85 % largeur et ~62 % hauteur d'écran (+ légende).
-        /// Sans `preferredContentSize`, le platter système tombe sur une
-        /// taille petite et imprévisible.
-        private func previewSize(for image: UIImage, in interaction: UIContextMenuInteraction) -> CGSize {
-            let screenBounds = interaction.view?.window?.windowScene?.screen.bounds
-                ?? UIScreen.main.bounds
-            let maxWidth = min(screenBounds.width * 0.85, 420)
-            let maxHeight = screenBounds.height * 0.62
-            // 6pt image→légende + 20pt légende + 8pt marge basse : le nom
-            // long reste dans le cadre avec "..." visible, sans flotter en paysage.
-            let captionHeight: CGFloat = 34
-            let ratio = image.size.height / max(image.size.width, 1)
-            guard ratio.isFinite, ratio > 0 else {
-                return CGSize(width: maxWidth, height: min(maxHeight, maxWidth + captionHeight))
-            }
-            var width = maxWidth
-            var height = width * ratio + captionHeight
-            if height > maxHeight {
-                height = maxHeight
-                width = max((height - captionHeight) / max(ratio, 0.01), 200)
-            }
-            return CGSize(width: max(width, 200), height: max(height, 200))
         }
 
         private func buildMenu() -> UIMenu {
@@ -622,63 +492,6 @@ private struct CardInteraction: UIViewRepresentable {
             }
             return UIMenu(title: "", children: actions)
         }
-    }
-}
-
-/// Aperçu rapide : image agrandie sur fond noir avec nom en légende.
-/// Le tap sur l'aperçu ouvre le fichier (commit géré par le coordinateur).
-private final class QuickLookPreviewViewController: UIViewController {
-    private let image: UIImage
-    private let fileName: String
-
-    private let imageView = UIImageView()
-    private let nameLabel = UILabel()
-
-    init(image: UIImage, fileName: String) {
-        self.image = image
-        self.fileName = fileName
-        super.init(nibName: nil, bundle: nil)
-    }
-
-    @available(*, unavailable)
-    required init?(coder: NSCoder) { fatalError() }
-
-    override func viewDidLoad() {
-        super.viewDidLoad()
-        // Micro-pas B (Jev) : fond noir style Fichiers.app, légende blanche
-        // lisible en clair comme en sombre. Indissociable de la taille fixe.
-        view.backgroundColor = .black
-
-        imageView.image = image
-        imageView.contentMode = .scaleAspectFit
-        imageView.clipsToBounds = true
-        imageView.layer.cornerRadius = 16
-        imageView.layer.cornerCurve = .continuous
-        imageView.translatesAutoresizingMaskIntoConstraints = false
-
-        nameLabel.text = fileName
-        nameLabel.font = .preferredFont(forTextStyle: .subheadline)
-        nameLabel.textColor = .white
-        nameLabel.textAlignment = .center
-        nameLabel.lineBreakMode = .byTruncatingMiddle
-        nameLabel.numberOfLines = 1
-        nameLabel.translatesAutoresizingMaskIntoConstraints = false
-
-        view.addSubview(imageView)
-        view.addSubview(nameLabel)
-
-        // Marges latérales + basse : sans elles un nom long touche les bords
-        // arrondis du platter et sort du cadre sans "..." visible.
-        NSLayoutConstraint.activate([
-            imageView.topAnchor.constraint(equalTo: view.topAnchor),
-            imageView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
-            imageView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-            imageView.bottomAnchor.constraint(equalTo: nameLabel.topAnchor, constant: -6),
-            nameLabel.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 12),
-            nameLabel.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -12),
-            nameLabel.bottomAnchor.constraint(equalTo: view.bottomAnchor, constant: -8),
-            nameLabel.heightAnchor.constraint(equalToConstant: 20),
-        ])
     }
 }
 
