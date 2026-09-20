@@ -1,4 +1,4 @@
-import SwiftUI
+﻿import SwiftUI
 import UIKit
 
 /// Carte de fichier : miniature, étoile favori, nom et informations secondaires.
@@ -74,118 +74,90 @@ struct FileCardView: View {
         !file.isDirectory && (file.isImage || file.isGIF || file.isVideo)
     }
 
+    /// Contenu du menu contextuel, reconstruit pour `UIMenu` : la carte n'a
+    /// plus de bouton englobant (l'interaction UIKit porte tap et long-press),
+    /// les actions restent strictement identiques à l'ancien menu SwiftUI.
+    private var menuItems: [CardMenuItem] {
+        guard !selectionMode else { return [] }
+        var items: [CardMenuItem] = [
+            CardMenuItem(title: "Détails", systemImage: "info.circle") { onPresent?(.details) }
+        ]
+        if !isTrashed {
+            if file.isDirectory, onPresent != nil {
+                items.append(CardMenuItem(title: "Changer la couleur", systemImage: "paintpalette") { onPresent?(.colorPicker) })
+            }
+            if !file.isDirectory {
+                items.append(CardMenuItem(title: "Télécharger", systemImage: "arrow.down.circle") {
+                    Task { await FileDownloadService.shared.downloadAndShare(driveId: driveId, file: file) }
+                })
+            }
+            items.append(CardMenuItem(title: "Tags", systemImage: "tag") { onPresent?(.tags) })
+            items.append(CardMenuItem(
+                title: file.isFavorite == true ? "Retirer des favoris" : "Ajouter aux favoris",
+                systemImage: file.isFavorite == true ? "star.slash" : "star"
+            ) { onToggleFavorite?() })
+            if onPresent != nil {
+                items.append(CardMenuItem(title: "Renommer", systemImage: "pencil") { onPresent?(.rename) })
+            }
+            if onMove != nil {
+                items.append(CardMenuItem(title: "Déplacer", systemImage: "folder") { onMove?() })
+            }
+            if onPresent != nil {
+                items.append(CardMenuItem(title: "Supprimer", systemImage: "trash", destructive: true) { onPresent?(.deleteConfirm) })
+            }
+        }
+        return items
+    }
+
     var body: some View {
-        Button {
-            if selectionMode {
-                onToggleSelection?()
-            } else {
-                action()
-            }
-        } label: {
-            VStack(spacing: 5) {
-                thumbnailArea
-                    .overlay(alignment: .topTrailing) {
-                        if selectionMode {
-                            selectionBadge
-                        } else if showsFavoriteBadge && showFavoriteStars {
-                            favoriteBadge
-                        }
-                    }
-                    .overlay(alignment: .center) { playBadge }
+        VStack(spacing: 5) {
+            thumbnailArea
+                .overlay(alignment: .center) { playBadge }
 
-                Text(file.name)
-                    .font(.footnote)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-                    .foregroundStyle(.primary)
-                    .frame(maxWidth: .infinity)
-
-                HStack(spacing: 4) {
-                    Text(subtitle)
-                    categoryDots
-                }
-                .font(.caption2)
-                .foregroundStyle(.tertiary)
+            Text(file.name)
+                .font(.footnote)
+                .lineLimit(1)
+                .truncationMode(.middle)
+                .foregroundStyle(.primary)
                 .frame(maxWidth: .infinity)
+
+            HStack(spacing: 4) {
+                Text(subtitle)
+                categoryDots
             }
-            .opacity(enabled ? 1 : 0.55)
-            .contentShape(Rectangle())
+            .font(.caption2)
+            .foregroundStyle(.tertiary)
+            .frame(maxWidth: .infinity)
         }
-        .buttonStyle(.plain)
-        .disabled(!enabled)
-        // Aperçu détaché au long-press (pattern Fichiers.app) : uniquement
-        // pour les médias, et uniquement quand la miniature est déjà en cache.
-        // L'aperçu flotte au-dessus du contenu, le menu complet est conservé.
+        .opacity(enabled ? 1 : 0.55)
+        .contentShape(Rectangle())
+        // Interaction (tap + long-press) portée par UIKit : seul
+        // `UIContextMenuInteraction` offre l'aperçu détaché au-dessus du menu
+        // (pattern Fichiers.app) — SwiftUI l'a retiré de `contextMenu`.
         .overlay {
-            if hasQuickPreview, thumbnail != nil, !selectionMode, enabled {
-                QuickLookInteraction(
-                    previewImage: thumbnail!,
-                    fileName: file.name,
-                    onCommit: { action() }
+            if enabled {
+                CardInteraction(
+                    previewImage: hasQuickPreview ? thumbnail : nil,
+                    previewName: file.name,
+                    menuItems: menuItems,
+                    onTap: {
+                        if selectionMode {
+                            onToggleSelection?()
+                        } else {
+                            action()
+                        }
+                    }
                 )
-                .frame(width: 0, height: 0)
-                .allowsHitTesting(true)
             }
         }
-        .contextMenu {
-            if !selectionMode {
-                Button {
-                    onPresent?(.details)
-                } label: {
-                    Label("Détails", systemImage: "info.circle")
-                }
-                if !isTrashed {
-                    if file.isDirectory, onPresent != nil {
-                        Button {
-                            onPresent?(.colorPicker)
-                        } label: {
-                            Label("Changer la couleur", systemImage: "paintpalette")
-                        }
-                    }
-                    if !file.isDirectory {
-                        Button {
-                            Task {
-                                await FileDownloadService.shared.downloadAndShare(driveId: driveId, file: file)
-                            }
-                        } label: {
-                            Label("Télécharger", systemImage: "arrow.down.circle")
-                        }
-                    }
-                    Button {
-                        onPresent?(.tags)
-                    } label: {
-                        Label("Tags", systemImage: "tag")
-                    }
-                    Button {
-                        onToggleFavorite?()
-                    } label: {
-                        Label(
-                            file.isFavorite == true ? "Retirer des favoris" : "Ajouter aux favoris",
-                            systemImage: file.isFavorite == true ? "star.slash" : "star"
-                        )
-                    }
-                    if onPresent != nil {
-                        Button {
-                            onPresent?(.rename)
-                        } label: {
-                            Label("Renommer", systemImage: "pencil")
-                        }
-                    }
-                    if onMove != nil {
-                        Button {
-                            onMove?()
-                        } label: {
-                            Label("Déplacer", systemImage: "folder")
-                        }
-                    }
-                    if onPresent != nil {
-                        Button(role: .destructive) {
-                            onPresent?(.deleteConfirm)
-                        } label: {
-                            Label("Supprimer", systemImage: "trash")
-                        }
-                    }
-                }
+        // L'étoile favori et la coche sont dessinées APRÈS l'interaction :
+        // elles sont au-dessus dans l'ordre de hit-test, leurs touches ne
+        // passent jamais par la vue UIKit.
+        .overlay(alignment: .topTrailing) {
+            if selectionMode {
+                selectionBadge
+            } else if showsFavoriteBadge && showFavoriteStars {
+                favoriteBadge
             }
         }
         .task(id: file.id) {
@@ -430,133 +402,125 @@ struct FolderColorPickerSheet: View {
     }
 }
 
-/// Interaction UIKit qui détecte le long-press sur la carte et présente
-/// l'aperçu détaché grand format (pattern Fichiers.app). L'aperçu flotte
-/// au-dessus du contenu avec un fond flouté ; le menu contextuel SwiftUI
-/// existant reste disponible au relâchement.
-private struct QuickLookInteraction: UIViewRepresentable {
-    let previewImage: UIImage
-    let fileName: String
-    /// Action d'ouverture complète, appelée quand l'utilisateur relève le
-    /// doigt sur l'aperçu (tap-to-open).
-    let onCommit: () -> Void
+
+/// Élément de menu reconstruit pour `UIMenu` : titre, icône SF Symbol,
+/// style destructeur optionnel. Permet de conserver le menu complet de la
+/// carte dans le même geste que l'aperçu détaché.
+private struct CardMenuItem {
+    let title: String
+    let systemImage: String
+    let destructive: Bool
+    let action: () -> Void
+
+    init(title: String, systemImage: String, destructive: Bool = false, action: @escaping () -> Void) {
+        self.title = title
+        self.systemImage = systemImage
+        self.destructive = destructive
+        self.action = action
+    }
+}
+
+/// Interaction UIKit portée par `UIContextMenuInteraction` : tap = ouverture,
+/// long-press = aperçu détaché grand format + menu complet (pattern
+/// Fichiers.app). Remplace l'ancien `Button` + `contextMenu` SwiftUI qui ne
+/// permettait plus d'aperçu détaché depuis iOS 16.
+private struct CardInteraction: UIViewRepresentable {
+    /// Miniature en cache pour l'aperçu ; nil pour les dossiers et documents.
+    let previewImage: UIImage?
+    let previewName: String
+    let menuItems: [CardMenuItem]
+    let onTap: () -> Void
 
     func makeCoordinator() -> Coordinator {
-        Coordinator(previewImage: previewImage, fileName: fileName, onCommit: onCommit)
+        Coordinator(parent: self)
     }
 
     func makeUIView(context: Context) -> InteractionView {
         let view = InteractionView()
-        view.coordinator = context.coordinator
+        view.onTap = { [weak coordinator = context.coordinator] in coordinator?.parent.onTap() }
+        let interaction = UIContextMenuInteraction(delegate: context.coordinator)
+        view.addInteraction(interaction)
         return view
     }
 
     func updateUIView(_ uiView: InteractionView, context: Context) {
-        context.coordinator.previewImage = previewImage
-        context.coordinator.fileName = fileName
+        context.coordinator.parent = self
+        uiView.onTap = { [weak coordinator = context.coordinator] in coordinator?.parent.onTap() }
     }
 
-    /// Vue transparente qui capte le long-press sans interférer avec les
-    /// taps normaux (le bouton SwiftUI en dessous reçoit les taps courts).
+    /// Vue transparente pleine taille : tap court = ouverture, long-press =
+    /// menu contextuel avec aperçu. `UIContextMenuInteraction` gère les deux.
     final class InteractionView: UIView {
-        weak var coordinator: Coordinator?
+        var onTap: (() -> Void)?
+        private var tapGesture: UITapGestureRecognizer?
 
         override init(frame: CGRect) {
             super.init(frame: frame)
-            let gesture = UILongPressGestureRecognizer(target: self, action: #selector(handleLongPress(_:)))
-            gesture.minimumPressDuration = 0.45
-            gesture.allowableMovement = 8
-            addGestureRecognizer(gesture)
+            let tap = UITapGestureRecognizer(target: self, action: #selector(handleTap))
+            addGestureRecognizer(tap)
+            tapGesture = tap
         }
 
         @available(*, unavailable)
         required init?(coder: NSCoder) { fatalError() }
 
-        @objc private func handleLongPress(_ gesture: UILongPressGestureRecognizer) {
-            guard gesture.state == .began, let coordinator else { return }
-            coordinator.presentPreview(from: self)
+        @objc private func handleTap(_ gesture: UITapGestureRecognizer) {
+            guard gesture.state == .ended else { return }
+            onTap?()
         }
     }
 
     @MainActor
-    final class Coordinator: NSObject {
-        var previewImage: UIImage
-        var fileName: String
-        let onCommit: () -> Void
+    final class Coordinator: NSObject, UIContextMenuInteractionDelegate {
+        var parent: CardInteraction
 
-        private var overlayWindow: UIWindow?
-
-        init(previewImage: UIImage, fileName: String, onCommit: @escaping () -> Void) {
-            self.previewImage = previewImage
-            self.fileName = fileName
-            self.onCommit = onCommit
+        init(parent: CardInteraction) {
+            self.parent = parent
         }
 
-        func presentPreview(from sourceView: UIView) {
-            guard let windowScene = sourceView.window?.windowScene else { return }
-            let window = UIWindow(windowScene: windowScene)
-
-            let controller = QuickLookPreviewViewController(
-                image: previewImage,
-                fileName: fileName,
-                sourceFrame: sourceView.convert(sourceView.bounds, to: nil),
-                onCommit: { [weak self] in
-                    self?.dismissPreview()
-                    self?.onCommit()
+        func contextMenuInteraction(
+            _ interaction: UIContextMenuInteraction,
+            configurationForMenuAtLocation location: CGPoint
+        ) -> UIContextMenuConfiguration? {
+            UIContextMenuConfiguration(
+                identifier: nil,
+                previewProvider: { [weak self] in
+                    guard let self, let image = self.parent.previewImage else { return nil }
+                    return QuickLookPreviewViewController(image: image, fileName: self.parent.previewName)
                 },
-                onDismiss: { [weak self] in
-                    self?.dismissPreview()
+                actionProvider: { [weak self] _ in
+                    guard let self else { return nil }
+                    return self.buildMenu()
                 }
             )
-
-            window.windowLevel = .alert + 1
-            window.rootViewController = controller
-            window.makeKeyAndVisible()
-            overlayWindow = window
         }
 
-        func dismissPreview() {
-            guard let window = overlayWindow else { return }
-            UIView.animate(withDuration: 0.2, animations: {
-                window.alpha = 0
-            }, completion: { _ in
-                window.isHidden = true
-                window.rootViewController = nil
-                self.overlayWindow = nil
-            })
+        private func buildMenu() -> UIMenu {
+            let actions = parent.menuItems.map { item in
+                UIAction(
+                    title: item.title,
+                    image: UIImage(systemName: item.systemImage),
+                    attributes: item.destructive ? .destructive : []
+                ) { _ in item.action() }
+            }
+            return UIMenu(title: "", children: actions)
         }
     }
 }
 
-/// Contrôleur plein écran de l'aperçu rapide : fond flouté, image agrandie
-/// animée depuis la position de la carte, nom du fichier en légende.
-/// Tap sur l'image → ouverture complète. Tap sur le fond → fermeture.
+/// Contrôleur plein écran de l'aperçu rapide : image agrandie animée depuis
+/// la position de la carte, nom en légende. Tap sur l'image = fermeture.
 private final class QuickLookPreviewViewController: UIViewController {
     private let image: UIImage
     private let fileName: String
-    private let sourceFrame: CGRect
-    private let onCommit: () -> Void
-    private let onDismiss: () -> Void
 
-    private let blurView = UIVisualEffectView(effect: UIBlurEffect(style: .systemUltraThinMaterialDark))
     private let imageView = UIImageView()
     private let nameLabel = UILabel()
-    private let containerView = UIView()
 
-    init(
-        image: UIImage,
-        fileName: String,
-        sourceFrame: CGRect,
-        onCommit: @escaping () -> Void,
-        onDismiss: @escaping () -> Void
-    ) {
+    init(image: UIImage, fileName: String) {
         self.image = image
         self.fileName = fileName
-        self.sourceFrame = sourceFrame
-        self.onCommit = onCommit
-        self.onDismiss = onDismiss
         super.init(nibName: nil, bundle: nil)
-        modalPresentationStyle = .overFullScreen
     }
 
     @available(*, unavailable)
@@ -566,88 +530,33 @@ private final class QuickLookPreviewViewController: UIViewController {
         super.viewDidLoad()
         view.backgroundColor = .clear
 
-        blurView.alpha = 0
-        blurView.frame = view.bounds
-        blurView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
-        view.addSubview(blurView)
-
-        // Taille cible : bornée à 85 % de la largeur, 72 % de la hauteur.
-        let maxSize = CGSize(
-            width: view.bounds.width * 0.85,
-            height: view.bounds.height * 0.72
-        )
-        let aspect = image.size.width > 0 ? image.size.height / image.size.width : 1
-        var targetSize = CGSize(width: maxSize.width, height: maxSize.width * aspect)
-        if targetSize.height > maxSize.height {
-            targetSize = CGSize(width: maxSize.height / max(aspect, 0.01), height: maxSize.height)
-        }
-
         imageView.image = image
         imageView.contentMode = .scaleAspectFit
         imageView.clipsToBounds = true
         imageView.layer.cornerRadius = 16
         imageView.layer.cornerCurve = .continuous
-        imageView.isUserInteractionEnabled = true
+        imageView.translatesAutoresizingMaskIntoConstraints = false
 
         nameLabel.text = fileName
         nameLabel.font = .preferredFont(forTextStyle: .subheadline)
         nameLabel.textColor = .white
         nameLabel.textAlignment = .center
         nameLabel.lineBreakMode = .byTruncatingMiddle
+        nameLabel.translatesAutoresizingMaskIntoConstraints = false
 
-        containerView.addSubview(imageView)
-        containerView.addSubview(nameLabel)
-        view.addSubview(containerView)
+        view.addSubview(imageView)
+        view.addSubview(nameLabel)
 
-        imageView.frame = CGRect(origin: .zero, size: targetSize)
-        nameLabel.frame = CGRect(
-            x: 0, y: targetSize.height + 12,
-            width: targetSize.width, height: 20
-        )
-        containerView.frame = CGRect(
-            x: (view.bounds.width - targetSize.width) / 2,
-            y: (view.bounds.height - targetSize.height - 32) / 2,
-            width: targetSize.width,
-            height: targetSize.height + 32
-        )
-
-        // Animation d'ouverture : l'aperçu part de la position de la carte.
-        containerView.frame = CGRect(
-            x: sourceFrame.midX - targetSize.width / 2,
-            y: sourceFrame.midY - (targetSize.height + 32) / 2,
-            width: targetSize.width,
-            height: targetSize.height + 32
-        )
-        let scaleX = max(sourceFrame.width / max(targetSize.width, 1), 0.05)
-        let scaleY = max(sourceFrame.height / max(targetSize.height + 32, 1), 0.05)
-        containerView.transform = CGAffineTransform(scaleX: scaleX, y: scaleY)
-        containerView.alpha = 0
-
-        UIView.animate(withDuration: 0.35, delay: 0, usingSpringWithDamping: 0.82, initialSpringVelocity: 0) {
-            self.blurView.alpha = 1
-            self.containerView.transform = .identity
-            self.containerView.frame = CGRect(
-                x: (self.view.bounds.width - targetSize.width) / 2,
-                y: (self.view.bounds.height - targetSize.height - 32) / 2,
-                width: targetSize.width,
-                height: targetSize.height + 32
-            )
-            self.containerView.alpha = 1
-        }
-
-        let tapImage = UITapGestureRecognizer(target: self, action: #selector(handleTapImage))
-        imageView.addGestureRecognizer(tapImage)
-
-        let tapBackground = UITapGestureRecognizer(target: self, action: #selector(handleTapBackground))
-        blurView.addGestureRecognizer(tapBackground)
-    }
-
-    @objc private func handleTapImage() {
-        onCommit()
-    }
-
-    @objc private func handleTapBackground() {
-        onDismiss()
+        NSLayoutConstraint.activate([
+            imageView.topAnchor.constraint(equalTo: view.topAnchor),
+            imageView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            imageView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            imageView.bottomAnchor.constraint(equalTo: nameLabel.topAnchor, constant: -12),
+            nameLabel.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            nameLabel.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            nameLabel.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+            nameLabel.heightAnchor.constraint(equalToConstant: 20),
+        ])
     }
 }
 
