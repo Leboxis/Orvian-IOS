@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 /// Carte de fichier : miniature, étoile favori, nom et informations secondaires.
 /// Tap → ouverture du fichier/dossier. Appui long → menu contextuel
@@ -67,6 +68,12 @@ struct FileCardView: View {
             : kind.tint)
     }
 
+    /// Les fichiers média ont droit à un vrai aperçu détaché au long-press
+    /// (pattern Fichiers.app), les dossiers et documents gardent le menu simple.
+    private var hasQuickPreview: Bool {
+        !file.isDirectory && (file.isImage || file.isGIF || file.isVideo)
+    }
+
     var body: some View {
         Button {
             if selectionMode {
@@ -106,32 +113,22 @@ struct FileCardView: View {
         }
         .buttonStyle(.plain)
         .disabled(!enabled)
+        // Aperçu détaché au long-press (pattern Fichiers.app) : uniquement
+        // pour les médias, et uniquement quand la miniature est déjà en cache.
+        // L'aperçu flotte au-dessus du contenu, le menu complet est conservé.
+        .overlay {
+            if hasQuickPreview, thumbnail != nil, !selectionMode, enabled {
+                QuickLookInteraction(
+                    previewImage: thumbnail!,
+                    fileName: file.name,
+                    onCommit: { action() }
+                )
+                .frame(width: 0, height: 0)
+                .allowsHitTesting(true)
+            }
+        }
         .contextMenu {
             if !selectionMode {
-                // Aperçu rapide en haut du menu (pattern Fichiers.app) : la
-                // miniature déjà en cache s'affiche instantanément, sans
-                // téléchargement supplémentaire. Le menu complet est conservé.
-                if !file.isDirectory, let previewImage = thumbnail ?? (file.isImage || file.isGIF ? thumbnail : nil) {
-                    Image(uiImage: previewImage)
-                        .resizable()
-                        .scaledToFit()
-                        .frame(maxWidth: 220, maxHeight: 220)
-                        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-                        .padding(.bottom, 4)
-                } else if !file.isDirectory {
-                    VStack(spacing: 8) {
-                        Image(systemName: kind.symbolName)
-                            .font(.system(size: 44, weight: .light))
-                            .foregroundStyle(tint)
-                        Text(file.name)
-                            .font(.caption)
-                            .lineLimit(2)
-                            .multilineTextAlignment(.center)
-                    }
-                    .frame(maxWidth: 180)
-                    .padding(.vertical, 8)
-                }
-
                 Button {
                     onPresent?(.details)
                 } label: {
@@ -432,3 +429,226 @@ struct FolderColorPickerSheet: View {
         .accessibilityLabel("Couleur \(hex)")
     }
 }
+
+/// Interaction UIKit qui détecte le long-press sur la carte et présente
+/// l'aperçu détaché grand format (pattern Fichiers.app). L'aperçu flotte
+/// au-dessus du contenu avec un fond flouté ; le menu contextuel SwiftUI
+/// existant reste disponible au relâchement.
+private struct QuickLookInteraction: UIViewRepresentable {
+    let previewImage: UIImage
+    let fileName: String
+    /// Action d'ouverture complète, appelée quand l'utilisateur relève le
+    /// doigt sur l'aperçu (tap-to-open).
+    let onCommit: () -> Void
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(previewImage: previewImage, fileName: fileName, onCommit: onCommit)
+    }
+
+    func makeUIView(context: Context) -> InteractionView {
+        let view = InteractionView()
+        view.coordinator = context.coordinator
+        return view
+    }
+
+    func updateUIView(_ uiView: InteractionView, context: Context) {
+        context.coordinator.previewImage = previewImage
+        context.coordinator.fileName = fileName
+    }
+
+    /// Vue transparente qui capte le long-press sans interférer avec les
+    /// taps normaux (le bouton SwiftUI en dessous reçoit les taps courts).
+    final class InteractionView: UIView {
+        weak var coordinator: Coordinator?
+
+        override init(frame: CGRect) {
+            super.init(frame: frame)
+            let gesture = UILongPressGestureRecognizer(target: self, action: #selector(handleLongPress(_:)))
+            gesture.minimumPressDuration = 0.45
+            gesture.allowableMovement = 8
+            addGestureRecognizer(gesture)
+        }
+
+        @available(*, unavailable)
+        required init?(coder: NSCoder) { fatalError() }
+
+        @objc private func handleLongPress(_ gesture: UILongPressGestureRecognizer) {
+            guard gesture.state == .began, let coordinator else { return }
+            coordinator.presentPreview(from: self)
+        }
+    }
+
+    @MainActor
+    final class Coordinator: NSObject {
+        var previewImage: UIImage
+        var fileName: String
+        let onCommit: () -> Void
+
+        private var overlayWindow: UIWindow?
+
+        init(previewImage: UIImage, fileName: String, onCommit: @escaping () -> Void) {
+            self.previewImage = previewImage
+            self.fileName = fileName
+            self.onCommit = onCommit
+        }
+
+        func presentPreview(from sourceView: UIView) {
+            guard let windowScene = sourceView.window?.windowScene,
+                  let window = UIWindow(windowScene: windowScene)
+            else { return }
+
+            let controller = QuickLookPreviewViewController(
+                image: previewImage,
+                fileName: fileName,
+                sourceFrame: sourceView.convert(sourceView.bounds, to: nil),
+                onCommit: { [weak self] in
+                    self?.dismissPreview()
+                    self?.onCommit()
+                },
+                onDismiss: { [weak self] in
+                    self?.dismissPreview()
+                }
+            )
+
+            window.windowLevel = .alert + 1
+            window.rootViewController = controller
+            window.makeKeyAndVisible()
+            overlayWindow = window
+        }
+
+        func dismissPreview() {
+            guard let window = overlayWindow else { return }
+            UIView.animate(withDuration: 0.2, animations: {
+                window.alpha = 0
+            }, completion: { _ in
+                window.isHidden = true
+                window.rootViewController = nil
+                self.overlayWindow = nil
+            })
+        }
+    }
+}
+
+/// Contrôleur plein écran de l'aperçu rapide : fond flouté, image agrandie
+/// animée depuis la position de la carte, nom du fichier en légende.
+/// Tap sur l'image → ouverture complète. Tap sur le fond → fermeture.
+private final class QuickLookPreviewViewController: UIViewController {
+    private let image: UIImage
+    private let fileName: String
+    private let sourceFrame: CGRect
+    private let onCommit: () -> Void
+    private let onDismiss: () -> Void
+
+    private let blurView = UIVisualEffectView(effect: UIBlurEffect(style: .systemUltraThinMaterialDark))
+    private let imageView = UIImageView()
+    private let nameLabel = UILabel()
+    private let containerView = UIView()
+
+    init(
+        image: UIImage,
+        fileName: String,
+        sourceFrame: CGRect,
+        onCommit: @escaping () -> Void,
+        onDismiss: @escaping () -> Void
+    ) {
+        self.image = image
+        self.fileName = fileName
+        self.sourceFrame = sourceFrame
+        self.onCommit = onCommit
+        self.onDismiss = onDismiss
+        super.init(nibName: nil, bundle: nil)
+        modalPresentationStyle = .overFullScreen
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError() }
+
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        view.backgroundColor = .clear
+
+        blurView.alpha = 0
+        blurView.frame = view.bounds
+        blurView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        view.addSubview(blurView)
+
+        // Taille cible : bornée à 85 % de la largeur, 72 % de la hauteur.
+        let maxSize = CGSize(
+            width: view.bounds.width * 0.85,
+            height: view.bounds.height * 0.72
+        )
+        let aspect = image.size.width > 0 ? image.size.height / image.size.width : 1
+        var targetSize = CGSize(width: maxSize.width, height: maxSize.width * aspect)
+        if targetSize.height > maxSize.height {
+            targetSize = CGSize(width: maxSize.height / max(aspect, 0.01), height: maxSize.height)
+        }
+
+        imageView.image = image
+        imageView.contentMode = .scaleAspectFit
+        imageView.clipsToBounds = true
+        imageView.layer.cornerRadius = 16
+        imageView.layer.cornerCurve = .continuous
+        imageView.isUserInteractionEnabled = true
+
+        nameLabel.text = fileName
+        nameLabel.font = .preferredFont(forTextStyle: .subheadline)
+        nameLabel.textColor = .white
+        nameLabel.textAlignment = .center
+        nameLabel.lineBreakMode = .byTruncatingMiddle
+
+        containerView.addSubview(imageView)
+        containerView.addSubview(nameLabel)
+        view.addSubview(containerView)
+
+        imageView.frame = CGRect(origin: .zero, size: targetSize)
+        nameLabel.frame = CGRect(
+            x: 0, y: targetSize.height + 12,
+            width: targetSize.width, height: 20
+        )
+        containerView.frame = CGRect(
+            x: (view.bounds.width - targetSize.width) / 2,
+            y: (view.bounds.height - targetSize.height - 32) / 2,
+            width: targetSize.width,
+            height: targetSize.height + 32
+        )
+
+        // Animation d'ouverture : l'aperçu part de la position de la carte.
+        containerView.frame = CGRect(
+            x: sourceFrame.midX - targetSize.width / 2,
+            y: sourceFrame.midY - (targetSize.height + 32) / 2,
+            width: targetSize.width,
+            height: targetSize.height + 32
+        )
+        let scaleX = max(sourceFrame.width / max(targetSize.width, 1), 0.05)
+        let scaleY = max(sourceFrame.height / max(targetSize.height + 32, 1), 0.05)
+        containerView.transform = CGAffineTransform(scaleX: scaleX, y: scaleY)
+        containerView.alpha = 0
+
+        UIView.animate(withDuration: 0.35, delay: 0, usingSpringWithDamping: 0.82, initialSpringVelocity: 0) {
+            self.blurView.alpha = 1
+            self.containerView.transform = .identity
+            self.containerView.frame = CGRect(
+                x: (self.view.bounds.width - targetSize.width) / 2,
+                y: (self.view.bounds.height - targetSize.height - 32) / 2,
+                width: targetSize.width,
+                height: targetSize.height + 32
+            )
+            self.containerView.alpha = 1
+        }
+
+        let tapImage = UITapGestureRecognizer(target: self, action: #selector(handleTapImage))
+        imageView.addGestureRecognizer(tapImage)
+
+        let tapBackground = UITapGestureRecognizer(target: self, action: #selector(handleTapBackground))
+        blurView.addGestureRecognizer(tapBackground)
+    }
+
+    @objc private func handleTapImage() {
+        onCommit()
+    }
+
+    @objc private func handleTapBackground() {
+        onDismiss()
+    }
+}
+
