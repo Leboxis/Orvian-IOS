@@ -75,8 +75,6 @@ struct FileGridView: View {
     @State private var colorRequest: FilePresentation?
     /// Confirmation de suppression demandée par une carte.
     @State private var deleteRequest: FilePresentation?
-    /// Menu custom centré demandé par appui long sur une carte.
-    @State private var menuRequest: FilePresentation?
     /// Alerte de renommage demandée par une carte.
     @State private var renameRequest: FilePresentation?
     /// Texte de l'alerte de renommage, conservé entre l'ouverture et la validation.
@@ -237,12 +235,6 @@ struct FileGridView: View {
                 if isMissing(colorRequest) { colorRequest = nil }
                 if isMissing(deleteRequest) { deleteRequest = nil }
                 if isMissing(renameRequest) { renameRequest = nil }
-                if isMissing(menuRequest) { menuRequest = nil }
-            }
-            .overlay {
-                if let request = menuRequest {
-                    centerMenuOverlay(for: request)
-                }
             }
     }
 
@@ -298,103 +290,7 @@ struct FileGridView: View {
             renameRequest = FilePresentation(file: file)
         case .deleteConfirm:
             deleteRequest = FilePresentation(file: file)
-        case .customMenu:
-            guard !selectionMode else { return }
-            menuRequest = FilePresentation(file: file, siblings: siblings)
         }
-    }
-
-    // MARK: - Menu custom centré
-
-    /// Menu d'appui long strictement centré en largeur : fond dimmé (tap
-    /// extérieur = fermeture) + carte d'actions au centre, mêmes actions
-    /// que l'ancien menu natif. Étape 1 (Jev) : actions seules, sans aperçu.
-    private func centerMenuOverlay(for request: FilePresentation) -> some View {
-        let file = currentFile(matching: request)
-        let isTrashed = viewModel.source == .trash
-        return ZStack {
-            Color.black.opacity(0.4)
-                .ignoresSafeArea()
-                .onTapGesture { menuRequest = nil }
-            VStack(spacing: 0) {
-                Text(file.name)
-                    .font(.headline)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 12)
-                Divider()
-                centerMenuRows(for: file, siblings: request.siblings, isTrashed: isTrashed)
-                Divider()
-                centerMenuRow(title: "Fermer", systemImage: "xmark") {
-                    menuRequest = nil
-                }
-            }
-            .frame(maxWidth: 300)
-            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
-            .padding(.horizontal, 32)
-        }
-    }
-
-    /// Lignes d'actions : mêmes conditions que l'ancien menu natif de la carte.
-    @ViewBuilder
-    private func centerMenuRows(for file: DriveFile, siblings: [DriveFile], isTrashed: Bool) -> some View {
-        centerMenuRow(title: "Détails", systemImage: "info.circle") {
-            menuRequest = nil
-            present(.details, for: file, siblings: siblings)
-        }
-        if !isTrashed {
-            if file.isDirectory {
-                centerMenuRow(title: "Changer la couleur", systemImage: "paintpalette") {
-                    menuRequest = nil
-                    present(.colorPicker, for: file, siblings: siblings)
-                }
-            }
-            if !file.isDirectory {
-                centerMenuRow(title: "Télécharger", systemImage: "arrow.down.circle") {
-                    menuRequest = nil
-                    Task { await FileDownloadService.shared.downloadAndShare(driveId: viewModel.driveId, file: file) }
-                }
-            }
-            centerMenuRow(title: "Tags", systemImage: "tag") {
-                menuRequest = nil
-                present(.tags, for: file, siblings: siblings)
-            }
-            centerMenuRow(
-                title: file.isFavorite == true ? "Retirer des favoris" : "Ajouter aux favoris",
-                systemImage: file.isFavorite == true ? "star.slash" : "star"
-            ) {
-                menuRequest = nil
-                Task { await viewModel.toggleFavorite(file) }
-            }
-            centerMenuRow(title: "Renommer", systemImage: "pencil") {
-                menuRequest = nil
-                present(.rename, for: file, siblings: siblings)
-            }
-            if onMove != nil {
-                centerMenuRow(title: "Déplacer", systemImage: "folder") {
-                    menuRequest = nil
-                    onMove?(file)
-                }
-            }
-            centerMenuRow(title: "Supprimer", systemImage: "trash", destructive: true) {
-                menuRequest = nil
-                present(.deleteConfirm, for: file, siblings: siblings)
-            }
-        }
-    }
-
-    private func centerMenuRow(title: String, systemImage: String, destructive: Bool = false, action: @escaping () -> Void) -> some View {
-        Button(role: destructive ? .destructive : nil) {
-            action()
-        } label: {
-            Label(title, systemImage: systemImage)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, 16)
-                .padding(.vertical, 11)
-        }
-        .buttonStyle(.plain)
-        .foregroundStyle(destructive ? .red : .primary)
     }
 
     /// Ouverture depuis la fiche détails : même routage que le tap sur la
