@@ -587,15 +587,28 @@ private struct CardInteraction: UIViewRepresentable {
             return UITargetedPreview(view: highlightView, parameters: parameters)
         }
 
-        /// Taille fixe (Jev) : même fenêtre ~85 % x ~62 % pour tous les
-        /// éléments, image en aspectFit letterboxée. La position du platter
-        /// et du menu ne bouge plus selon le ratio ; contrepartie : vide
-        /// noir autour en paysage. Légende : 6pt + 20pt + 8pt marge basse.
-        private func previewSize(for _: UIImage, in interaction: UIContextMenuInteraction) -> CGSize {
+        /// Micro-pas B (Jev) : taille de l'aperçu détaché, ratio préservé,
+        /// bornée à ~85 % largeur et ~62 % hauteur d'écran (+ légende).
+        /// Sans `preferredContentSize`, le platter système tombe sur une
+        /// taille petite et imprévisible.
+        private func previewSize(for image: UIImage, in interaction: UIContextMenuInteraction) -> CGSize {
             let screenBounds = interaction.view?.window?.windowScene?.screen.bounds
                 ?? UIScreen.main.bounds
-            let width = min(screenBounds.width * 0.85, 420)
-            let height = screenBounds.height * 0.62
+            let maxWidth = min(screenBounds.width * 0.85, 420)
+            let maxHeight = screenBounds.height * 0.62
+            // 6pt image→légende + 20pt légende + 8pt marge basse : le nom
+            // long reste dans le cadre avec "..." visible, sans flotter en paysage.
+            let captionHeight: CGFloat = 34
+            let ratio = image.size.height / max(image.size.width, 1)
+            guard ratio.isFinite, ratio > 0 else {
+                return CGSize(width: maxWidth, height: min(maxHeight, maxWidth + captionHeight))
+            }
+            var width = maxWidth
+            var height = width * ratio + captionHeight
+            if height > maxHeight {
+                height = maxHeight
+                width = max((height - captionHeight) / max(ratio, 0.01), 200)
+            }
             return CGSize(width: max(width, 200), height: max(height, 200))
         }
 
