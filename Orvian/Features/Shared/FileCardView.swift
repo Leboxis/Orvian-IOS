@@ -134,11 +134,14 @@ struct FileCardView: View {
         // Interaction (tap + long-press) portée par UIKit : seul
         // `UIContextMenuInteraction` offre l'aperçu détaché au-dessus du menu
         // (pattern Fichiers.app) — SwiftUI l'a retiré de `contextMenu`.
+        // L'overlay est forcé pleine taille : un UIViewRepresentable sans
+        // taille intrinsèque retomberait sinon à 0×0 (aucune zone tactile).
         .overlay {
             if enabled {
                 CardInteraction(
                     previewImage: hasQuickPreview ? thumbnail : nil,
                     previewName: file.name,
+                    accessibilityLabel: file.name,
                     menuItems: menuItems,
                     onTap: {
                         if selectionMode {
@@ -146,8 +149,15 @@ struct FileCardView: View {
                         } else {
                             action()
                         }
+                    },
+                    onCommit: {
+                        if !selectionMode {
+                            action()
+                        }
                     }
                 )
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .allowsHitTesting(true)
             }
         }
         // L'étoile favori et la coche sont dessinées APRÈS l'interaction :
@@ -248,7 +258,8 @@ struct FileCardView: View {
             }
             .buttonStyle(.plain)
             .accessibilityLabel("Retirer des favoris")
-            .padding(7)
+            .padding(10)
+            .contentShape(Rectangle())
         }
     }
 
@@ -259,7 +270,8 @@ struct FileCardView: View {
             .font(.system(size: 20, weight: .medium))
             .foregroundStyle(isSelected ? Color.accentColor : .white)
             .shadow(color: .black.opacity(isSelected ? 0 : 0.35), radius: 3, y: 1)
-            .padding(5)
+            .padding(8)
+            .contentShape(Rectangle())
     }
 
     /// Indicateur de lecture sur les vidéos.
@@ -428,8 +440,11 @@ private struct CardInteraction: UIViewRepresentable {
     /// Miniature en cache pour l'aperçu ; nil pour les dossiers et documents.
     let previewImage: UIImage?
     let previewName: String
+    let accessibilityLabel: String
     let menuItems: [CardMenuItem]
     let onTap: () -> Void
+    /// Tap sur l'aperçu détaché (commit) = ouverture du fichier.
+    let onCommit: () -> Void
 
     func makeCoordinator() -> Coordinator {
         Coordinator(parent: self)
@@ -438,6 +453,14 @@ private struct CardInteraction: UIViewRepresentable {
     func makeUIView(context: Context) -> InteractionView {
         let view = InteractionView()
         view.onTap = { [weak coordinator = context.coordinator] in coordinator?.parent.onTap() }
+        view.previewImage = previewImage
+        view.accessibilityLabel = accessibilityLabel
+        view.accessibilityCustomActions = menuItems.map { item in
+            UIAccessibilityCustomAction(name: item.title) { _ in
+                item.action()
+                return true
+            }
+        }
         let interaction = UIContextMenuInteraction(delegate: context.coordinator)
         view.addInteraction(interaction)
         return view
@@ -446,19 +469,55 @@ private struct CardInteraction: UIViewRepresentable {
     func updateUIView(_ uiView: InteractionView, context: Context) {
         context.coordinator.parent = self
         uiView.onTap = { [weak coordinator = context.coordinator] in coordinator?.parent.onTap() }
+        uiView.previewImage = previewImage
+        uiView.accessibilityLabel = accessibilityLabel
+        uiView.accessibilityCustomActions = menuItems.map { item in
+            UIAccessibilityCustomAction(name: item.title) { _ in
+                item.action()
+                return true
+            }
+        }
     }
 
     /// Vue transparente pleine taille : tap court = ouverture, long-press =
     /// menu contextuel avec aperçu. `UIContextMenuInteraction` gère les deux.
+    /// La miniature est rejouée dans un `UIImageView` carré en haut (même
+    /// géométrie que la vignette SwiftUI) : c'est lui qui sert de source au
+    /// `UITargetedPreview` de lift/dismiss — sans cela le système
+    /// snapshotterait une vue transparente (animation depuis du vide).
     final class InteractionView: UIView {
         var onTap: (() -> Void)?
-        private var tapGesture: UITapGestureRecognizer?
+        var previewImage: UIImage? {
+            didSet { syncPreview() }
+        }
+
+        private let previewImageView = UIImageView()
+
+        /// Source du highlight ; nil (dossiers/documents) → animation par défaut.
+        var highlightView: UIView? {
+            previewImage == nil ? nil : previewImageView
+        }
 
         override init(frame: CGRect) {
             super.init(frame: frame)
+            backgroundColor = .clear
+            isAccessibilityElement = true
+            accessibilityTraits = .button
+            previewImageView.contentMode = .scaleAspectFill
+            previewImageView.clipsToBounds = true
+            previewImageView.layer.cornerRadius = DS.cardRadius
+            previewImageView.layer.cornerCurve = .continuous
+            previewImageView.isHidden = true
+            previewImageView.translatesAutoresizingMaskIntoConstraints = false
+            addSubview(previewImageView)
+            NSLayoutConstraint.activate([
+                previewImageView.topAnchor.constraint(equalTo: topAnchor),
+                previewImageView.leadingAnchor.constraint(equalTo: leadingAnchor),
+                previewImageView.trailingAnchor.constraint(equalTo: trailingAnchor),
+                previewImageView.heightAnchor.constraint(equalTo: previewImageView.widthAnchor),
+            ])
             let tap = UITapGestureRecognizer(target: self, action: #selector(handleTap))
             addGestureRecognizer(tap)
-            tapGesture = tap
         }
 
         @available(*, unavailable)
@@ -467,6 +526,17 @@ private struct CardInteraction: UIViewRepresentable {
         @objc private func handleTap(_ gesture: UITapGestureRecognizer) {
             guard gesture.state == .ended else { return }
             onTap?()
+        }
+
+        /// VoiceOver : le double-tap n'active pas l'UITapGestureRecognizer.
+        override func accessibilityActivate() -> Bool {
+            onTap?()
+            return true
+        }
+
+        private func syncPreview() {
+            previewImageView.image = previewImage
+            previewImageView.isHidden = previewImage == nil
         }
     }
 
@@ -482,17 +552,86 @@ private struct CardInteraction: UIViewRepresentable {
             _ interaction: UIContextMenuInteraction,
             configurationForMenuAtLocation location: CGPoint
         ) -> UIContextMenuConfiguration? {
-            UIContextMenuConfiguration(
+            // Mode sélection : le tap coche déjà, aucun menu au long-press.
+            // Retourner nil désactive le long-press tout en gardant le tap.
+            guard !parent.menuItems.isEmpty else { return nil }
+            return UIContextMenuConfiguration(
                 identifier: nil,
                 previewProvider: { [weak self] in
                     guard let self, let image = self.parent.previewImage else { return nil }
-                    return QuickLookPreviewViewController(image: image, fileName: self.parent.previewName)
+                    let preview = QuickLookPreviewViewController(image: image, fileName: self.parent.previewName)
+                    preview.preferredContentSize = self.previewSize(for: image, in: interaction)
+                    return preview
                 },
                 actionProvider: { [weak self] _ in
-                    guard let self else { return nil }
+                    guard let self, !self.parent.menuItems.isEmpty else { return nil }
                     return self.buildMenu()
                 }
             )
+        }
+
+        func contextMenuInteraction(
+            _ interaction: UIContextMenuInteraction,
+            previewForHighlightingMenuWithConfiguration configuration: UIContextMenuConfiguration
+        ) -> UITargetedPreview? {
+            targetedPreview(for: interaction)
+        }
+
+        func contextMenuInteraction(
+            _ interaction: UIContextMenuInteraction,
+            previewForDismissingMenuWithConfiguration configuration: UIContextMenuConfiguration
+        ) -> UITargetedPreview? {
+            targetedPreview(for: interaction)
+        }
+
+        /// Tap sur l'aperçu détaché = ouverture du fichier (pattern Fichiers.app).
+        func contextMenuInteraction(
+            _ interaction: UIContextMenuInteraction,
+            willCommitWithAnimator animator: UIContextMenuInteractionCommitAnimating
+        ) {
+            animator.addCompletion { [weak self] in
+                guard let self else { return }
+                self.parent.onCommit()
+            }
+        }
+
+        private func targetedPreview(for interaction: UIContextMenuInteraction) -> UITargetedPreview? {
+            guard let interactionView = interaction.view as? InteractionView,
+                  let highlightView = interactionView.highlightView else { return nil }
+            // Le highlight peut être demandé avant le layout final.
+            interactionView.layoutIfNeeded()
+            highlightView.layoutIfNeeded()
+            guard highlightView.bounds.width > 1, highlightView.bounds.height > 1 else { return nil }
+            let parameters = UIPreviewParameters()
+            parameters.backgroundColor = .clear
+            parameters.visiblePath = UIBezierPath(
+                roundedRect: highlightView.bounds,
+                cornerRadius: DS.cardRadius
+            )
+            return UITargetedPreview(view: highlightView, parameters: parameters)
+        }
+
+        /// Taille de l'aperçu détaché : ratio de l'image préservé, borné à
+        /// ~85 % de la largeur et ~62 % de la hauteur d'écran (+ légende).
+        /// Sans `preferredContentSize`, le platter système tombe sur une
+        /// taille petite et imprévisible.
+        private func previewSize(for image: UIImage, in interaction: UIContextMenuInteraction) -> CGSize {
+            let screenBounds = interaction.view?.window?.windowScene?.screen.bounds
+                ?? UIScreen.main.bounds
+            let maxWidth = min(screenBounds.width * 0.85, 420)
+            let maxHeight = screenBounds.height * 0.62
+            let captionHeight: CGFloat = 32
+            let ratio = image.size.height / max(image.size.width, 1)
+            guard ratio.isFinite, ratio > 0 else {
+                return CGSize(width: maxWidth, height: min(maxHeight, maxWidth + captionHeight))
+            }
+            var width = maxWidth
+            var height = width * ratio + captionHeight
+            if height > maxHeight {
+                height = maxHeight
+                width = max((height - captionHeight) / max(ratio, 0.01), 200)
+            }
+            return CGSize(width: max(width, 200), height: max(height, 200))
         }
 
         private func buildMenu() -> UIMenu {
@@ -508,8 +647,8 @@ private struct CardInteraction: UIViewRepresentable {
     }
 }
 
-/// Contrôleur plein écran de l'aperçu rapide : image agrandie animée depuis
-/// la position de la carte, nom en légende. Tap sur l'image = fermeture.
+/// Aperçu rapide : image agrandie sur fond noir avec nom en légende.
+/// Le tap sur l'aperçu ouvre le fichier (commit géré par le coordinateur).
 private final class QuickLookPreviewViewController: UIViewController {
     private let image: UIImage
     private let fileName: String
@@ -528,7 +667,9 @@ private final class QuickLookPreviewViewController: UIViewController {
 
     override func viewDidLoad() {
         super.viewDidLoad()
-        view.backgroundColor = .clear
+        // Fond noir (style Fichiers.app) : la légende blanche reste lisible
+        // en mode clair comme en mode sombre.
+        view.backgroundColor = .black
 
         imageView.image = image
         imageView.contentMode = .scaleAspectFit
