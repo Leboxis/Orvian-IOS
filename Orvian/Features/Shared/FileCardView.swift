@@ -132,9 +132,8 @@ struct FileCardView: View {
         }
         .opacity(enabled ? 1 : 0.55)
         .contentShape(Rectangle())
-        // Interaction (tap + long-press) portée par UIKit : seul
-        // `UIContextMenuInteraction` offre l'aperçu détaché au-dessus du menu
-        // (pattern Fichiers.app) — SwiftUI l'a retiré de `contextMenu`.
+        // Interaction (tap + long-press) portée par UIKit. L'appui long
+        // ouvre l'aperçu + menu dans une fenêtre centrée sur l'écran.
         // L'overlay est forcé pleine taille : un UIViewRepresentable sans
         // taille intrinsèque retomberait sinon à 0×0 (aucune zone tactile).
         .overlay {
@@ -143,7 +142,6 @@ struct FileCardView: View {
                     previewImage: hasQuickPreview ? thumbnail : nil,
                     previewName: file.name,
                     previewSubtitle: subtitle,
-                    previewIsVideo: file.isVideo,
                     accessibilityLabel: file.name,
                     menuItems: menuItems,
                     onTap: {
@@ -449,9 +447,9 @@ struct FolderColorPickerSheet: View {
 }
 
 
-/// Élément de menu reconstruit pour `UIMenu` : titre, icône SF Symbol,
-/// style destructeur optionnel. Permet de conserver le menu complet de la
-/// carte dans le même geste que l'aperçu détaché.
+/// Élément de menu de la carte : titre, icône SF Symbol, style destructeur
+/// optionnel. Même contenu que l'ancien menu natif, affiché dans la carte
+/// d'actions de la fenêtre centrée.
 private struct CardMenuItem {
     let title: String
     let systemImage: String
@@ -466,17 +464,18 @@ private struct CardMenuItem {
     }
 }
 
-/// Interaction UIKit portée par `UIContextMenuInteraction` : tap = ouverture,
-/// long-press = aperçu détaché grand format + menu complet (pattern
-/// Fichiers.app). Remplace l'ancien `Button` + `contextMenu` SwiftUI qui ne
-/// permettait plus d'aperçu détaché depuis iOS 16.
+/// Interaction UIKit : tap = ouverture, appui long = aperçu + menu centrés
+/// sur l'écran (fenêtre dédiée). Le menu natif (`UIContextMenuInteraction`)
+/// est positionné par le système au niveau de la carte — ni l'aperçu ni le
+/// menu ne peuvent y être centrés — d'où cette fenêtre qui affiche
+/// toujours la même disposition, quelle que soit la carte d'origine.
+/// Remplace l'ancien `Button` + `contextMenu` SwiftUI.
 private struct CardInteraction: UIViewRepresentable {
     /// Miniature en cache pour l'aperçu ; nil pour les dossiers et documents.
     let previewImage: UIImage?
     let previewName: String
-    /// Légende de l'aperçu (poids ou type) + pastilles.
+    /// Légende de l'aperçu (poids ou type).
     let previewSubtitle: String?
-    let previewIsVideo: Bool
     let accessibilityLabel: String
     let menuItems: [CardMenuItem]
     let onTap: () -> Void
@@ -490,7 +489,7 @@ private struct CardInteraction: UIViewRepresentable {
     func makeUIView(context: Context) -> InteractionView {
         let view = InteractionView()
         view.onTap = { [weak coordinator = context.coordinator] in coordinator?.parent.onTap() }
-        view.previewImage = previewImage
+        view.onLongPress = { [weak coordinator = context.coordinator] source in coordinator?.showOverlay(from: source) }
         view.accessibilityLabel = accessibilityLabel
         view.accessibilityCustomActions = menuItems.map { item in
             UIAccessibilityCustomAction(name: item.title) { _ in
@@ -498,15 +497,13 @@ private struct CardInteraction: UIViewRepresentable {
                 return true
             }
         }
-        let interaction = UIContextMenuInteraction(delegate: context.coordinator)
-        view.addInteraction(interaction)
         return view
     }
 
     func updateUIView(_ uiView: InteractionView, context: Context) {
         context.coordinator.parent = self
         uiView.onTap = { [weak coordinator = context.coordinator] in coordinator?.parent.onTap() }
-        uiView.previewImage = previewImage
+        uiView.onLongPress = { [weak coordinator = context.coordinator] source in coordinator?.showOverlay(from: source) }
         uiView.accessibilityLabel = accessibilityLabel
         uiView.accessibilityCustomActions = menuItems.map { item in
             UIAccessibilityCustomAction(name: item.title) { _ in
@@ -516,44 +513,24 @@ private struct CardInteraction: UIViewRepresentable {
         }
     }
 
-    /// Vue transparente pleine taille : tap court = ouverture, long-press =
-    /// menu contextuel avec aperçu. `UIContextMenuInteraction` gère les deux.
-    /// La miniature est rejouée dans un `UIImageView` carré en haut (même
-    /// géométrie que la vignette SwiftUI) : c'est lui qui sert de source au
-    /// `UITargetedPreview` de lift/dismiss — sans cela le système
-    /// snapshotterait une vue transparente (animation depuis du vide).
+    /// Vue transparente pleine taille : tap court = ouverture, appui long =
+    /// aperçu + menu centrés (fenêtre dédiée). Le tap attend l'échec du
+    /// long-press pour ne jamais s'ouvrir au relâché d'un appui long.
     final class InteractionView: UIView {
         var onTap: (() -> Void)?
-        var previewImage: UIImage? {
-            didSet { syncPreview() }
-        }
-
-        private let previewImageView = UIImageView()
-
-        /// Source du highlight ; nil (dossiers/documents) → animation par défaut.
-        var highlightView: UIView? {
-            previewImage == nil ? nil : previewImageView
-        }
+        var onLongPress: ((InteractionView) -> Void)?
 
         override init(frame: CGRect) {
             super.init(frame: frame)
             backgroundColor = .clear
             isAccessibilityElement = true
             accessibilityTraits = .button
-            previewImageView.contentMode = .scaleAspectFill
-            previewImageView.clipsToBounds = true
-            previewImageView.layer.cornerRadius = DS.cardRadius
-            previewImageView.layer.cornerCurve = .continuous
-            previewImageView.isHidden = true
-            previewImageView.translatesAutoresizingMaskIntoConstraints = false
-            addSubview(previewImageView)
-            NSLayoutConstraint.activate([
-                previewImageView.topAnchor.constraint(equalTo: topAnchor),
-                previewImageView.leadingAnchor.constraint(equalTo: leadingAnchor),
-                previewImageView.trailingAnchor.constraint(equalTo: trailingAnchor),
-                previewImageView.heightAnchor.constraint(equalTo: previewImageView.widthAnchor),
-            ])
+            let longPress = UILongPressGestureRecognizer(target: self, action: #selector(handleLongPress))
+            longPress.minimumPressDuration = 0.45
+            longPress.allowableMovement = 12
+            addGestureRecognizer(longPress)
             let tap = UITapGestureRecognizer(target: self, action: #selector(handleTap))
+            tap.require(toFail: longPress)
             addGestureRecognizer(tap)
         }
 
@@ -565,193 +542,225 @@ private struct CardInteraction: UIViewRepresentable {
             onTap?()
         }
 
+        @objc private func handleLongPress(_ gesture: UILongPressGestureRecognizer) {
+            guard gesture.state == .began else { return }
+            onLongPress?(self)
+        }
+
         /// VoiceOver : le double-tap n'active pas l'UITapGestureRecognizer.
         override func accessibilityActivate() -> Bool {
             onTap?()
             return true
         }
-
-        private func syncPreview() {
-            previewImageView.image = previewImage
-            previewImageView.isHidden = previewImage == nil
-        }
     }
 
     @MainActor
-    final class Coordinator: NSObject, UIContextMenuInteractionDelegate {
+    final class Coordinator: NSObject {
         var parent: CardInteraction
+        private var activeOverlay: PreviewOverlay?
 
         init(parent: CardInteraction) {
             self.parent = parent
         }
 
-        func contextMenuInteraction(
-            _ interaction: UIContextMenuInteraction,
-            configurationForMenuAtLocation location: CGPoint
-        ) -> UIContextMenuConfiguration? {
-            // Mode sélection : le tap coche déjà, aucun menu au long-press.
-            // Retourner nil désactive le long-press tout en gardant le tap.
-            guard !parent.menuItems.isEmpty else { return nil }
-            return UIContextMenuConfiguration(
-                identifier: nil,
-                previewProvider: { [weak self] in
-                    guard let self, let image = self.parent.previewImage else { return nil }
-                    let preview = QuickLookPreviewViewController(
-                        image: image,
-                        fileName: self.parent.previewName,
-                        subtitle: self.parent.previewSubtitle,
-                        isVideo: self.parent.previewIsVideo
-                    )
-                    preview.preferredContentSize = self.previewSize(for: image, in: interaction)
-                    return preview
+        /// Appui long : aperçu + menu dans une fenêtre centrée sur l'écran,
+        /// identique quelle que soit la carte d'origine. En mode sélection
+        /// le tap coche déjà : aucun overlay quand le menu est vide.
+        func showOverlay(from sourceView: UIView) {
+            guard activeOverlay == nil,
+                  !parent.menuItems.isEmpty,
+                  let scene = sourceView.window?.windowScene else { return }
+            UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+            let overlay = PreviewOverlay(
+                image: parent.previewImage,
+                fileName: parent.previewName,
+                subtitle: parent.previewSubtitle,
+                items: parent.menuItems,
+                scene: scene,
+                onMediaTapped: { [weak self] in
+                    guard let self else { return }
+                    let commit = self.parent.onCommit
+                    self.dismissOverlay(then: commit)
                 },
-                actionProvider: { [weak self] _ in
-                    guard let self, !self.parent.menuItems.isEmpty else { return nil }
-                    return self.buildMenu()
-                }
+                onItemPicked: { [weak self] item in
+                    guard let self else { return }
+                    let action = item.action
+                    self.dismissOverlay(then: action)
+                },
+                onDidDismiss: { [weak self] in self?.activeOverlay = nil }
             )
+            activeOverlay = overlay
+            overlay.show()
         }
 
-        func contextMenuInteraction(
-            _ interaction: UIContextMenuInteraction,
-            previewForHighlightingMenuWithConfiguration configuration: UIContextMenuConfiguration
-        ) -> UITargetedPreview? {
-            targetedPreview(for: interaction)
-        }
-
-        func contextMenuInteraction(
-            _ interaction: UIContextMenuInteraction,
-            previewForDismissingMenuWithConfiguration configuration: UIContextMenuConfiguration
-        ) -> UITargetedPreview? {
-            targetedPreview(for: interaction)
-        }
-
-        /// Tap sur l'aperçu détaché = ouverture du fichier (pattern Fichiers.app).
-        func contextMenuInteraction(
-            _ interaction: UIContextMenuInteraction,
-            willCommitWithAnimator animator: UIContextMenuInteractionCommitAnimating
-        ) {
-            animator.addCompletion { [weak self] in
-                guard let self else { return }
-                self.parent.onCommit()
-            }
-        }
-
-        private func targetedPreview(for interaction: UIContextMenuInteraction) -> UITargetedPreview? {
-            guard let interactionView = interaction.view as? InteractionView,
-                  let highlightView = interactionView.highlightView else { return nil }
-            // Le highlight peut être demandé avant le layout final.
-            interactionView.layoutIfNeeded()
-            highlightView.layoutIfNeeded()
-            guard highlightView.bounds.width > 1, highlightView.bounds.height > 1 else { return nil }
-            let parameters = UIPreviewParameters()
-            parameters.backgroundColor = .clear
-            parameters.visiblePath = UIBezierPath(
-                roundedRect: highlightView.bounds,
-                cornerRadius: DS.cardRadius
-            )
-            return UITargetedPreview(view: highlightView, parameters: parameters)
-        }
-
-        /// Taille de l'aperçu détaché : largeur toujours identique (~85 %
-        /// de l'écran, centrée par le système quelle que soit la résolution
-        /// de l'élément), hauteur bornée à ~62 % (+ légende deux lignes et
-        /// marges). Sans `preferredContentSize`, le platter système tombe
-        /// sur une taille petite et imprévisible.
-        private func previewSize(for image: UIImage, in interaction: UIContextMenuInteraction) -> CGSize {
-            let screenBounds = interaction.view?.window?.windowScene?.screen.bounds
-                ?? UIScreen.main.bounds
-            let maxWidth = min(screenBounds.width * 0.85, 420)
-            let maxHeight = screenBounds.height * 0.62
-            let captionHeight: CGFloat = 54
-            let ratio = image.size.height / max(image.size.width, 1)
-            guard ratio.isFinite, ratio > 0 else {
-                return CGSize(width: maxWidth, height: min(maxHeight, maxWidth + captionHeight))
-            }
-            // Largeur constante : l'image se lettreboxe (`aspectFit`) au lieu
-            // de rétrécir la fenêtre, qui reste centrée et stable.
-            let height = min(maxWidth * ratio + captionHeight, maxHeight)
-            return CGSize(width: maxWidth, height: max(height, 200))
-        }
-
-        private func buildMenu() -> UIMenu {
-            let actions = parent.menuItems.map { item in
-                UIAction(
-                    title: item.title,
-                    image: UIImage(systemName: item.systemImage),
-                    attributes: item.destructive ? .destructive : []
-                ) { _ in item.action() }
-            }
-            return UIMenu(title: "", children: actions)
+        private func dismissOverlay(then action: (() -> Void)? = nil) {
+            activeOverlay?.dismiss(then: action)
         }
     }
 }
 
-/// Aperçu rapide, style Photos : image bord à bord en haut et sur les
-/// côtés, légende nom + détails resserrée en bas, bouton lecture pour
-/// les vidéos. Épuré : aucun chrome superflu.
-/// Le tap sur l'aperçu ouvre le fichier (commit géré par le coordinateur).
-private final class QuickLookPreviewViewController: UIViewController {
-    private let image: UIImage
-    private let fileName: String
-    private let subtitle: String?
-    private let isVideo: Bool
+/// Fenêtre d'aperçu + menu, toujours centrée sur l'écran : fond assombri,
+/// carte média (image bord à bord, légende resserrée) puis carte d'actions.
+/// Le menu natif est positionné par le système au niveau de la carte : ni
+/// l'aperçu ni le menu ne peuvent y être centrés, d'où cette fenêtre dont
+/// la disposition est identique quel que soit l'élément d'origine.
+private final class PreviewOverlay: UIWindow {
+    private let onMediaTapped: () -> Void
+    private let onItemPicked: (CardMenuItem) -> Void
+    private let onDidDismiss: () -> Void
+    private var didDismiss = false
 
-    private let backdropView = UIImageView()
-    private let imageView = UIImageView()
+    private let dimView = UIButton(type: .custom)
+    private let stack = UIStackView()
 
     init(
-        image: UIImage,
+        image: UIImage?,
         fileName: String,
-        subtitle: String? = nil,
-        isVideo: Bool = false
+        subtitle: String?,
+        items: [CardMenuItem],
+        scene: UIWindowScene,
+        onMediaTapped: @escaping () -> Void,
+        onItemPicked: @escaping (CardMenuItem) -> Void,
+        onDidDismiss: @escaping () -> Void
     ) {
-        self.image = image
-        self.fileName = fileName
-        self.subtitle = subtitle
-        self.isVideo = isVideo
-        super.init(nibName: nil, bundle: nil)
+        self.onMediaTapped = onMediaTapped
+        self.onItemPicked = onItemPicked
+        self.onDidDismiss = onDidDismiss
+        super.init(windowScene: scene)
+
+        let root = UIViewController()
+        root.view.backgroundColor = .clear
+        root.view.accessibilityViewIsModal = true
+        rootViewController = root
+        let content = root.view!
+
+        let screenBounds = scene.screen.bounds
+        let width = min(screenBounds.width * 0.85, 420)
+
+        dimView.backgroundColor = UIColor.black.withAlphaComponent(0.6)
+        dimView.alpha = 0
+        dimView.accessibilityLabel = "Fermer"
+        dimView.translatesAutoresizingMaskIntoConstraints = false
+        dimView.addTarget(self, action: #selector(handleDimTap), for: .touchUpInside)
+        content.addSubview(dimView)
+
+        let scroll = UIScrollView()
+        scroll.alwaysBounceVertical = false
+        scroll.showsVerticalScrollIndicator = false
+        scroll.translatesAutoresizingMaskIntoConstraints = false
+        content.addSubview(scroll)
+        let container = UIView()
+        container.translatesAutoresizingMaskIntoConstraints = false
+        scroll.addSubview(container)
+
+        stack.axis = .vertical
+        stack.alignment = .fill
+        stack.spacing = 10
+        stack.alpha = 0
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        container.addSubview(stack)
+
+        if let image {
+            stack.addArrangedSubview(mediaCard(
+                image: image,
+                fileName: fileName,
+                subtitle: subtitle,
+                width: width,
+                maxMediaHeight: screenBounds.height * 0.5
+            ))
+        }
+        stack.addArrangedSubview(actionsCard(items: items))
+
+        let centerY = stack.centerYAnchor.constraint(equalTo: container.centerYAnchor)
+        centerY.priority = .defaultHigh
+        NSLayoutConstraint.activate([
+            dimView.topAnchor.constraint(equalTo: content.topAnchor),
+            dimView.leadingAnchor.constraint(equalTo: content.leadingAnchor),
+            dimView.trailingAnchor.constraint(equalTo: content.trailingAnchor),
+            dimView.bottomAnchor.constraint(equalTo: content.bottomAnchor),
+
+            scroll.topAnchor.constraint(equalTo: content.safeAreaLayoutGuide.topAnchor),
+            scroll.leadingAnchor.constraint(equalTo: content.leadingAnchor),
+            scroll.trailingAnchor.constraint(equalTo: content.trailingAnchor),
+            scroll.bottomAnchor.constraint(equalTo: content.safeAreaLayoutGuide.bottomAnchor),
+
+            container.topAnchor.constraint(equalTo: scroll.contentLayoutGuide.topAnchor),
+            container.leadingAnchor.constraint(equalTo: scroll.contentLayoutGuide.leadingAnchor),
+            container.trailingAnchor.constraint(equalTo: scroll.contentLayoutGuide.trailingAnchor),
+            container.bottomAnchor.constraint(equalTo: scroll.contentLayoutGuide.bottomAnchor),
+            container.widthAnchor.constraint(equalTo: scroll.frameLayoutGuide.widthAnchor),
+            container.heightAnchor.constraint(greaterThanOrEqualTo: scroll.frameLayoutGuide.heightAnchor),
+
+            stack.centerXAnchor.constraint(equalTo: container.centerXAnchor),
+            stack.topAnchor.constraint(greaterThanOrEqualTo: container.topAnchor, constant: 12),
+            stack.bottomAnchor.constraint(lessThanOrEqualTo: container.bottomAnchor, constant: -12),
+            stack.widthAnchor.constraint(equalToConstant: width),
+        ])
+        centerY.isActive = true
     }
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError() }
 
-    override func viewDidLoad() {
-        super.viewDidLoad()
-        view.backgroundColor = .black
+    func show() {
+        windowLevel = .alert
+        isHidden = false
+        stack.transform = CGAffineTransform(scaleX: 0.92, y: 0.92)
+        UIView.animate(
+            withDuration: 0.38,
+            delay: 0,
+            usingSpringWithDamping: 0.82,
+            initialSpringVelocity: 0,
+            options: .allowUserInteraction
+        ) {
+            self.dimView.alpha = 1
+            self.stack.alpha = 1
+            self.stack.transform = .identity
+        }
+    }
 
-        // Même image en remplissage flouté : plus de bandes noires vides
-        // sur les panoramas et portraits, rendu plein et lumineux.
-        backdropView.image = image
-        backdropView.contentMode = .scaleAspectFill
-        backdropView.clipsToBounds = true
-        backdropView.translatesAutoresizingMaskIntoConstraints = false
-        view.addSubview(backdropView)
-        let blur = UIVisualEffectView(effect: UIBlurEffect(style: .systemMaterialDark))
-        blur.translatesAutoresizingMaskIntoConstraints = false
-        view.addSubview(blur)
-        let dim = UIView()
-        dim.backgroundColor = UIColor.black.withAlphaComponent(0.3)
-        dim.translatesAutoresizingMaskIntoConstraints = false
-        view.addSubview(dim)
+    func dismiss(then action: (() -> Void)? = nil) {
+        guard !didDismiss else { return }
+        didDismiss = true
+        UIView.animate(
+            withDuration: 0.18,
+            delay: 0,
+            options: [.beginFromCurrentState, .allowUserInteraction]
+        ) {
+            self.dimView.alpha = 0
+            self.stack.alpha = 0
+            self.stack.transform = CGAffineTransform(scaleX: 0.94, y: 0.94)
+        } completion: { _ in
+            self.isHidden = true
+            self.onDidDismiss()
+            action?()
+        }
+    }
 
-        imageView.image = image
-        imageView.contentMode = .scaleAspectFit
+    @objc private func handleDimTap() {
+        dismiss()
+    }
+
+    @objc private func handleMediaTap() {
+        dismiss(then: onMediaTapped)
+    }
+
+    /// Carte média : image bord à bord en haut et sur les côtés, recadrée
+    /// (`aspectFill`) — aucune bordure quelle que soit la résolution —,
+    /// légende resserrée en bas avec la marge conservée.
+    private func mediaCard(image: UIImage, fileName: String, subtitle: String?, width: CGFloat, maxMediaHeight: CGFloat) -> UIView {
+        let card = UIView()
+        card.backgroundColor = .black
+        card.layer.cornerRadius = 16
+        card.layer.cornerCurve = .continuous
+        card.clipsToBounds = true
+        card.translatesAutoresizingMaskIntoConstraints = false
+
+        let imageView = UIImageView(image: image)
+        imageView.contentMode = .scaleAspectFill
         imageView.clipsToBounds = true
         imageView.translatesAutoresizingMaskIntoConstraints = false
-        view.addSubview(imageView)
-
-        if isVideo {
-            let play = makePlayButton()
-            play.isUserInteractionEnabled = false
-            view.addSubview(play)
-            NSLayoutConstraint.activate([
-                play.centerXAnchor.constraint(equalTo: imageView.centerXAnchor),
-                play.centerYAnchor.constraint(equalTo: imageView.centerYAnchor),
-                play.widthAnchor.constraint(equalToConstant: 60),
-                play.heightAnchor.constraint(equalToConstant: 60),
-            ])
-        }
+        card.addSubview(imageView)
 
         let caption = UIStackView()
         caption.axis = .vertical
@@ -773,59 +782,137 @@ private final class QuickLookPreviewViewController: UIViewController {
             detailLabel.textAlignment = .center
             caption.addArrangedSubview(detailLabel)
         }
-        view.addSubview(caption)
+        card.addSubview(caption)
+
+        let openButton = UIButton(type: .custom)
+        openButton.accessibilityLabel = fileName
+        openButton.accessibilityHint = "Ouvrir"
+        openButton.translatesAutoresizingMaskIntoConstraints = false
+        openButton.addTarget(self, action: #selector(handleMediaTap), for: .touchUpInside)
+        card.addSubview(openButton)
+
+        let ratio = image.size.height / max(image.size.width, 1)
+        let mediaHeight: CGFloat
+        if ratio.isFinite, ratio > 0 {
+            mediaHeight = min(max(width * ratio, 160), maxMediaHeight)
+        } else {
+            mediaHeight = 240
+        }
 
         NSLayoutConstraint.activate([
-            backdropView.topAnchor.constraint(equalTo: view.topAnchor),
-            backdropView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
-            backdropView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-            backdropView.bottomAnchor.constraint(equalTo: view.bottomAnchor),
-            blur.topAnchor.constraint(equalTo: view.topAnchor),
-            blur.leadingAnchor.constraint(equalTo: view.leadingAnchor),
-            blur.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-            blur.bottomAnchor.constraint(equalTo: view.bottomAnchor),
-            dim.topAnchor.constraint(equalTo: view.topAnchor),
-            dim.leadingAnchor.constraint(equalTo: view.leadingAnchor),
-            dim.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-            dim.bottomAnchor.constraint(equalTo: view.bottomAnchor),
-            imageView.topAnchor.constraint(equalTo: view.topAnchor),
-            imageView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
-            imageView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-            imageView.bottomAnchor.constraint(equalTo: caption.topAnchor, constant: -6),
-            caption.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 16),
-            caption.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -16),
-            caption.bottomAnchor.constraint(equalTo: view.bottomAnchor, constant: -12),
+            imageView.topAnchor.constraint(equalTo: card.topAnchor),
+            imageView.leadingAnchor.constraint(equalTo: card.leadingAnchor),
+            imageView.trailingAnchor.constraint(equalTo: card.trailingAnchor),
+            imageView.heightAnchor.constraint(equalToConstant: mediaHeight),
+            caption.topAnchor.constraint(equalTo: imageView.bottomAnchor, constant: 6),
+            caption.leadingAnchor.constraint(equalTo: card.leadingAnchor, constant: 16),
+            caption.trailingAnchor.constraint(equalTo: card.trailingAnchor, constant: -16),
+            caption.bottomAnchor.constraint(equalTo: card.bottomAnchor, constant: -12),
+            openButton.topAnchor.constraint(equalTo: card.topAnchor),
+            openButton.leadingAnchor.constraint(equalTo: card.leadingAnchor),
+            openButton.trailingAnchor.constraint(equalTo: card.trailingAnchor),
+            openButton.bottomAnchor.constraint(equalTo: card.bottomAnchor),
         ])
+        return card
     }
 
-    /// Bouton lecture givré (vidéos), purement indicatif : tout tap
-    /// sur l'aperçu ouvre le fichier.
-    private func makePlayButton() -> UIView {
-        let container = UIView()
-        container.layer.cornerRadius = 30
-        container.layer.borderWidth = 0.9
-        container.layer.borderColor = UIColor.white.withAlphaComponent(0.35).cgColor
-        container.clipsToBounds = true
-        container.translatesAutoresizingMaskIntoConstraints = false
-        let blur = UIVisualEffectView(effect: UIBlurEffect(style: .systemThinMaterialDark))
+    /// Carte d'actions : lignes titre + icône SF, séparateurs fins,
+    /// destructive en rouge — même contenu que l'ancien menu natif.
+    private func actionsCard(items: [CardMenuItem]) -> UIView {
+        let blur = UIVisualEffectView(effect: UIBlurEffect(style: .systemMaterial))
+        blur.layer.cornerRadius = 16
+        blur.layer.cornerCurve = .continuous
+        blur.clipsToBounds = true
         blur.translatesAutoresizingMaskIntoConstraints = false
-        container.addSubview(blur)
-        let icon = UIImageView(image: UIImage(systemName: "play.fill"))
-        icon.tintColor = .white
-        icon.contentMode = .scaleAspectFit
-        icon.translatesAutoresizingMaskIntoConstraints = false
-        container.addSubview(icon)
+        let list = UIStackView()
+        list.axis = .vertical
+        list.alignment = .fill
+        list.spacing = 0
+        list.translatesAutoresizingMaskIntoConstraints = false
+        blur.contentView.addSubview(list)
         NSLayoutConstraint.activate([
-            blur.topAnchor.constraint(equalTo: container.topAnchor),
-            blur.leadingAnchor.constraint(equalTo: container.leadingAnchor),
-            blur.trailingAnchor.constraint(equalTo: container.trailingAnchor),
-            blur.bottomAnchor.constraint(equalTo: container.bottomAnchor),
-            icon.centerXAnchor.constraint(equalTo: container.centerXAnchor, constant: 2),
-            icon.centerYAnchor.constraint(equalTo: container.centerYAnchor),
-            icon.widthAnchor.constraint(equalToConstant: 22),
-            icon.heightAnchor.constraint(equalToConstant: 22),
+            list.topAnchor.constraint(equalTo: blur.contentView.topAnchor, constant: 6),
+            list.leadingAnchor.constraint(equalTo: blur.contentView.leadingAnchor),
+            list.trailingAnchor.constraint(equalTo: blur.contentView.trailingAnchor),
+            list.bottomAnchor.constraint(equalTo: blur.contentView.bottomAnchor, constant: -6),
         ])
-        return container
+        for (index, item) in items.enumerated() {
+            let row = ActionRow(item: item) { [weak self] picked in
+                guard let self else { return }
+                self.dismiss(then: { self.onItemPicked(picked) })
+            }
+            if index < items.count - 1 {
+                row.showsSeparator = true
+            }
+            list.addArrangedSubview(row)
+        }
+        return blur
+    }
+
+    /// Ligne d'action : icône + titre, fondu au toucher, séparateur
+    /// optionnel — `UIControl` direct, sans API dépréciée.
+    private final class ActionRow: UIControl {
+        private let content = UIStackView()
+        private let separator = UIView()
+        var showsSeparator = false {
+            didSet { separator.isHidden = !showsSeparator }
+        }
+
+        init(item: CardMenuItem, onTap: @escaping (CardMenuItem) -> Void) {
+            super.init(frame: .zero)
+            accessibilityLabel = item.title
+            accessibilityTraits = .button
+
+            let color: UIColor = item.destructive ? .systemRed : .label
+            let icon = UIImageView(image: UIImage(systemName: item.systemImage))
+            icon.tintColor = color
+            icon.contentMode = .scaleAspectFit
+            icon.preferredSymbolConfiguration = UIImage.SymbolConfiguration(pointSize: 17)
+            icon.translatesAutoresizingMaskIntoConstraints = false
+            NSLayoutConstraint.activate([
+                icon.widthAnchor.constraint(equalToConstant: 22),
+                icon.heightAnchor.constraint(equalToConstant: 22),
+            ])
+            let label = UILabel()
+            label.text = item.title
+            label.font = .systemFont(ofSize: 16)
+            label.textColor = color
+            content.axis = .horizontal
+            content.alignment = .center
+            content.spacing = 12
+            content.isUserInteractionEnabled = false
+            content.translatesAutoresizingMaskIntoConstraints = false
+            content.addArrangedSubview(icon)
+            content.addArrangedSubview(label)
+            addSubview(content)
+
+            separator.backgroundColor = .separator
+            separator.isHidden = true
+            separator.isUserInteractionEnabled = false
+            separator.translatesAutoresizingMaskIntoConstraints = false
+            addSubview(separator)
+
+            translatesAutoresizingMaskIntoConstraints = false
+            NSLayoutConstraint.activate([
+                heightAnchor.constraint(equalToConstant: 46),
+                content.topAnchor.constraint(equalTo: topAnchor),
+                content.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 16),
+                content.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -16),
+                content.bottomAnchor.constraint(equalTo: bottomAnchor),
+                separator.heightAnchor.constraint(equalToConstant: 0.5),
+                separator.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 50),
+                separator.trailingAnchor.constraint(equalTo: trailingAnchor),
+                separator.bottomAnchor.constraint(equalTo: bottomAnchor),
+            ])
+            addAction(UIAction { _ in onTap(item) }, for: .touchUpInside)
+        }
+
+        @available(*, unavailable)
+        required init?(coder: NSCoder) { fatalError() }
+
+        override var isHighlighted: Bool {
+            didSet { content.alpha = isHighlighted ? 0.45 : 1 }
+        }
     }
 }
 
