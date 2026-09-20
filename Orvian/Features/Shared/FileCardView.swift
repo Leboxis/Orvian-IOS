@@ -16,6 +16,8 @@ struct FileCardView: View {
         case tags
         case rename
         case deleteConfirm
+        /// Appui long : la grille monte le menu custom centré pour ce fichier.
+        case customMenu
     }
 
     let file: DriveFile
@@ -139,6 +141,10 @@ struct FileCardView: View {
                 CardInteraction(
                     previewImage: hasQuickPreview ? thumbnail : nil,
                     previewName: file.name,
+                    // Aperçu aussi pour dossiers/documents (icône teintée) :
+                    // le menu tombe toujours sous un aperçu homogène.
+                    fallbackSymbol: hasQuickPreview ? nil : kind.symbolName,
+                    fallbackTint: tint,
                     menuItems: menuItems,
                     onTap: {
                         if selectionMode {
@@ -151,6 +157,13 @@ struct FileCardView: View {
                     onCommit: {
                         if !selectionMode {
                             action()
+                        }
+                    },
+                    // Menu custom centré (Jev) : monté par la grille parente.
+                    // `menuItems` vide en sélection → long-press désactivé.
+                    onLongPress: {
+                        if !selectionMode, !menuItems.isEmpty {
+                            onPresent?(.customMenu)
                         }
                     }
                 )
@@ -438,10 +451,15 @@ private struct CardInteraction: UIViewRepresentable {
     /// Miniature en cache pour l'aperçu ; nil pour les dossiers et documents.
     let previewImage: UIImage?
     let previewName: String
+    /// Icône de repli (dossiers/documents sans miniature) ; nil pour les médias.
+    let fallbackSymbol: String?
+    let fallbackTint: Color
     let menuItems: [CardMenuItem]
     let onTap: () -> Void
     /// Tap sur l'aperçu détaché (commit) = ouverture du fichier.
     let onCommit: () -> Void
+    /// Appui long : ouvre le menu custom centré (monté par la grille).
+    let onLongPress: () -> Void
 
     func makeCoordinator() -> Coordinator {
         Coordinator(parent: self)
@@ -450,22 +468,27 @@ private struct CardInteraction: UIViewRepresentable {
     func makeUIView(context: Context) -> InteractionView {
         let view = InteractionView()
         view.onTap = { [weak coordinator = context.coordinator] in coordinator?.parent.onTap() }
+        view.onLongPress = { [weak coordinator = context.coordinator] in coordinator?.parent.onLongPress() }
         view.previewImage = previewImage
-        let interaction = UIContextMenuInteraction(delegate: context.coordinator)
-        view.addInteraction(interaction)
+        // Menu natif désactivé (remplacé par le custom centré) : plus
+        // d'UIContextMenuInteraction. Le Coordinator et les contrôleurs
+        // d'aperçu restent pour l'étape aperçu du custom.
         return view
     }
 
     func updateUIView(_ uiView: InteractionView, context: Context) {
         context.coordinator.parent = self
         uiView.onTap = { [weak coordinator = context.coordinator] in coordinator?.parent.onTap() }
+        uiView.onLongPress = { [weak coordinator = context.coordinator] in coordinator?.parent.onLongPress() }
         uiView.previewImage = previewImage
     }
 
-    /// Vue transparente pleine taille : tap court = ouverture, long-press =
-    /// menu contextuel avec aperçu. `UIContextMenuInteraction` gère les deux.
+    /// Vue transparente pleine taille : tap court = ouverture, appui long =
+    /// menu custom centré. Le tap attend l'échec du long-press : relâcher
+    /// après 0,5 s n'ouvre pas le fichier en plus du menu.
     final class InteractionView: UIView {
         var onTap: (() -> Void)?
+        var onLongPress: (() -> Void)?
         /// Miniature rejouée pour le highlight. Vue cachée, carrée en haut,
         /// même géométrie que la vignette SwiftUI : sans elle le système
         /// snapshotterait une vue transparente (animation depuis du vide).
@@ -497,7 +520,11 @@ private struct CardInteraction: UIViewRepresentable {
                 previewImageView.heightAnchor.constraint(equalTo: previewImageView.widthAnchor),
             ])
             let tap = UITapGestureRecognizer(target: self, action: #selector(handleTap))
+            let longPress = UILongPressGestureRecognizer(target: self, action: #selector(handleLongPress))
+            longPress.minimumPressDuration = 0.5
+            tap.require(toFail: longPress)
             addGestureRecognizer(tap)
+            addGestureRecognizer(longPress)
         }
 
         @available(*, unavailable)
@@ -506,6 +533,11 @@ private struct CardInteraction: UIViewRepresentable {
         @objc private func handleTap(_ gesture: UITapGestureRecognizer) {
             guard gesture.state == .ended else { return }
             onTap?()
+        }
+
+        @objc private func handleLongPress(_ gesture: UILongPressGestureRecognizer) {
+            guard gesture.state == .began else { return }
+            onLongPress?()
         }
 
         private func syncPreview() {
@@ -529,11 +561,25 @@ private struct CardInteraction: UIViewRepresentable {
             UIContextMenuConfiguration(
                 identifier: nil,
                 previewProvider: { [weak self] in
-                    guard let self, let image = self.parent.previewImage else { return nil }
-                    // Micro-pas B (Jev) : taille bornée, ratio préservé.
-                    let preview = QuickLookPreviewViewController(image: image, fileName: self.parent.previewName)
-                    preview.preferredContentSize = self.previewSize(for: image, in: interaction)
-                    return preview
+                    guard let self else { return nil }
+                    if let image = self.parent.previewImage {
+                        // Micro-pas B (Jev) : taille bornée, ratio préservé.
+                        let preview = QuickLookPreviewViewController(image: image, fileName: self.parent.previewName)
+                        preview.preferredContentSize = self.previewSize(for: image, in: interaction)
+                        return preview
+                    }
+                    // Dossiers/documents : aperçu icône pour une position
+                    // de menu homogène avec les médias.
+                    if let symbol = self.parent.fallbackSymbol {
+                        let preview = IconPreviewViewController(
+                            symbolName: symbol,
+                            tint: self.parent.fallbackTint,
+                            fileName: self.parent.previewName
+                        )
+                        preview.preferredContentSize = self.fallbackSize(in: interaction)
+                        return preview
+                    }
+                    return nil
                 },
                 actionProvider: { [weak self] _ in
                     guard let self else { return nil }
@@ -612,6 +658,17 @@ private struct CardInteraction: UIViewRepresentable {
             return CGSize(width: max(width, 200), height: max(height, 200))
         }
 
+        /// Taille de l'aperçu icône (dossiers/documents) : même largeur que
+        /// les médias, hauteur 4:3 + légende, proche des miniatures serveur.
+        /// Le menu tombe ainsi à une place homogène quel que soit l'élément.
+        private func fallbackSize(in interaction: UIContextMenuInteraction) -> CGSize {
+            let screenBounds = interaction.view?.window?.windowScene?.screen.bounds
+                ?? UIScreen.main.bounds
+            let width = min(screenBounds.width * 0.85, 420)
+            let height = min(width * 0.75 + 34, screenBounds.height * 0.62)
+            return CGSize(width: max(width, 200), height: max(height, 200))
+        }
+
         private func buildMenu() -> UIMenu {
             let actions = parent.menuItems.map { item in
                 UIAction(
@@ -674,6 +731,72 @@ private final class QuickLookPreviewViewController: UIViewController {
             imageView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             imageView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
             imageView.bottomAnchor.constraint(equalTo: nameLabel.topAnchor, constant: -6),
+            nameLabel.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 12),
+            nameLabel.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -12),
+            nameLabel.bottomAnchor.constraint(equalTo: view.bottomAnchor, constant: -8),
+            nameLabel.heightAnchor.constraint(equalToConstant: 20),
+        ])
+    }
+}
+
+/// Aperçu icône (dossiers/documents sans miniature) : pastille teintée avec
+/// symbole SF sur fond noir + nom en légende, mêmes marges que l'aperçu
+/// image. Le menu tombe ainsi à une place homogène pour tous les éléments.
+private final class IconPreviewViewController: UIViewController {
+    private let symbolName: String
+    private let tint: Color
+    private let fileName: String
+
+    private let badgeView = UIView()
+    private let symbolView = UIImageView()
+    private let nameLabel = UILabel()
+
+    init(symbolName: String, tint: Color, fileName: String) {
+        self.symbolName = symbolName
+        self.tint = tint
+        self.fileName = fileName
+        super.init(nibName: nil, bundle: nil)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError() }
+
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        view.backgroundColor = .black
+
+        badgeView.backgroundColor = UIColor(tint).withAlphaComponent(0.18)
+        badgeView.layer.cornerRadius = 18
+        badgeView.layer.cornerCurve = .continuous
+        badgeView.translatesAutoresizingMaskIntoConstraints = false
+
+        symbolView.image = UIImage(systemName: symbolName)
+        symbolView.contentMode = .scaleAspectFit
+        symbolView.tintColor = UIColor(tint)
+        symbolView.translatesAutoresizingMaskIntoConstraints = false
+
+        nameLabel.text = fileName
+        nameLabel.font = .preferredFont(forTextStyle: .subheadline)
+        nameLabel.textColor = .white
+        nameLabel.textAlignment = .center
+        nameLabel.lineBreakMode = .byTruncatingMiddle
+        nameLabel.numberOfLines = 1
+        nameLabel.translatesAutoresizingMaskIntoConstraints = false
+
+        badgeView.addSubview(symbolView)
+        view.addSubview(badgeView)
+        view.addSubview(nameLabel)
+
+        NSLayoutConstraint.activate([
+            badgeView.topAnchor.constraint(equalTo: view.topAnchor, constant: 16),
+            badgeView.centerXAnchor.constraint(equalTo: view.centerXAnchor),
+            badgeView.widthAnchor.constraint(equalToConstant: 96),
+            badgeView.heightAnchor.constraint(equalToConstant: 96),
+            symbolView.centerXAnchor.constraint(equalTo: badgeView.centerXAnchor),
+            symbolView.centerYAnchor.constraint(equalTo: badgeView.centerYAnchor),
+            symbolView.widthAnchor.constraint(equalToConstant: 44),
+            symbolView.heightAnchor.constraint(equalToConstant: 44),
+            badgeView.bottomAnchor.constraint(lessThanOrEqualTo: nameLabel.topAnchor, constant: -6),
             nameLabel.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 12),
             nameLabel.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -12),
             nameLabel.bottomAnchor.constraint(equalTo: view.bottomAnchor, constant: -8),
