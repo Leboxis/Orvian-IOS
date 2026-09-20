@@ -113,6 +113,7 @@ struct FileCardView: View {
         VStack(spacing: 5) {
             thumbnailArea
                 .overlay(alignment: .center) { playBadge }
+                .overlay(alignment: .bottomLeading) { gifBadge }
 
             Text(file.name)
                 .font(.footnote)
@@ -141,6 +142,9 @@ struct FileCardView: View {
                 CardInteraction(
                     previewImage: hasQuickPreview ? thumbnail : nil,
                     previewName: file.name,
+                    previewSubtitle: subtitle,
+                    previewIsVideo: file.isVideo,
+                    previewIsGIF: file.isGIF,
                     accessibilityLabel: file.name,
                     menuItems: menuItems,
                     onTap: {
@@ -243,8 +247,8 @@ struct FileCardView: View {
         }
     }
 
-    /// Étoile de favori posée directement sur la miniature, sans pastille ni
-    /// contour : une ombre portée suffit à la détacher des fonds clairs.
+    /// Étoile de favori sur pastille givrée : lisible sur miniature claire
+    /// comme sombre, sans masquer l'image.
     @ViewBuilder
     private var favoriteBadge: some View {
         if file.isFavorite == true {
@@ -252,9 +256,14 @@ struct FileCardView: View {
                 onToggleFavorite?()
             } label: {
                 Image(systemName: "star.fill")
-                    .font(.system(size: 14, weight: .semibold))
+                    .font(.system(size: 12, weight: .semibold))
                     .foregroundStyle(.yellow)
-                    .shadow(color: .black.opacity(0.55), radius: 2, x: 0, y: 1)
+                    .padding(7)
+                    .background(.ultraThinMaterial, in: Circle())
+                    .overlay {
+                        Circle().strokeBorder(.white.opacity(0.45), lineWidth: 0.8)
+                    }
+                    .shadow(color: .black.opacity(0.35), radius: 3, x: 0, y: 1)
             }
             .buttonStyle(.plain)
             .accessibilityLabel("Retirer des favoris")
@@ -263,12 +272,19 @@ struct FileCardView: View {
         }
     }
 
-    /// Cocher de sélection (mode sélection de la corbeille).
+    /// Cocher de sélection (mode sélection de la corbeille) : pastille
+    /// givrée à l'état vide pour rester visible sur fond clair.
     @ViewBuilder
     private var selectionBadge: some View {
         Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
             .font(.system(size: 20, weight: .medium))
             .foregroundStyle(isSelected ? Color.accentColor : .white)
+            .padding(4)
+            .background {
+                if !isSelected {
+                    Circle().fill(.ultraThinMaterial)
+                }
+            }
             .shadow(color: .black.opacity(isSelected ? 0 : 0.35), radius: 3, y: 1)
             .padding(8)
             .contentShape(Rectangle())
@@ -282,10 +298,29 @@ struct FileCardView: View {
                 .font(.system(size: 15, weight: .bold))
                 .foregroundStyle(.white)
                 .padding(10)
-                .background(.black.opacity(0.48), in: Circle())
+                .background(.black.opacity(0.55), in: Circle())
                 .overlay {
-                    Circle().strokeBorder(.white.opacity(0.35), lineWidth: 0.8)
+                    Circle().strokeBorder(.white.opacity(0.4), lineWidth: 0.9)
                 }
+                .shadow(color: .black.opacity(0.4), radius: 4, y: 1)
+        }
+    }
+
+    /// Pastille « GIF » en bas de la vignette : distingue les animés des
+    /// images fixes d'un coup d'œil.
+    @ViewBuilder
+    private var gifBadge: some View {
+        if file.isGIF {
+            Text("GIF")
+                .font(.system(size: 10, weight: .bold))
+                .foregroundStyle(.white)
+                .padding(.horizontal, 6)
+                .padding(.vertical, 3)
+                .background(.black.opacity(0.55), in: Capsule())
+                .overlay {
+                    Capsule().strokeBorder(.white.opacity(0.4), lineWidth: 0.7)
+                }
+                .padding(7)
         }
     }
 
@@ -440,6 +475,10 @@ private struct CardInteraction: UIViewRepresentable {
     /// Miniature en cache pour l'aperçu ; nil pour les dossiers et documents.
     let previewImage: UIImage?
     let previewName: String
+    /// Légende de l'aperçu (poids ou type) + pastilles.
+    let previewSubtitle: String?
+    let previewIsVideo: Bool
+    let previewIsGIF: Bool
     let accessibilityLabel: String
     let menuItems: [CardMenuItem]
     let onTap: () -> Void
@@ -559,7 +598,13 @@ private struct CardInteraction: UIViewRepresentable {
                 identifier: nil,
                 previewProvider: { [weak self] in
                     guard let self, let image = self.parent.previewImage else { return nil }
-                    let preview = QuickLookPreviewViewController(image: image, fileName: self.parent.previewName)
+                    let preview = QuickLookPreviewViewController(
+                        image: image,
+                        fileName: self.parent.previewName,
+                        subtitle: self.parent.previewSubtitle,
+                        isVideo: self.parent.previewIsVideo,
+                        isGIF: self.parent.previewIsGIF
+                    )
                     preview.preferredContentSize = self.previewSize(for: image, in: interaction)
                     return preview
                 },
@@ -612,15 +657,15 @@ private struct CardInteraction: UIViewRepresentable {
         }
 
         /// Taille de l'aperçu détaché : ratio de l'image préservé, borné à
-        /// ~85 % de la largeur et ~62 % de la hauteur d'écran (+ légende).
-        /// Sans `preferredContentSize`, le platter système tombe sur une
-        /// taille petite et imprévisible.
+        /// ~85 % de la largeur et ~62 % de la hauteur d'écran (+ légende
+        /// deux lignes et marges). Sans `preferredContentSize`, le platter
+        /// système tombe sur une taille petite et imprévisible.
         private func previewSize(for image: UIImage, in interaction: UIContextMenuInteraction) -> CGSize {
             let screenBounds = interaction.view?.window?.windowScene?.screen.bounds
                 ?? UIScreen.main.bounds
             let maxWidth = min(screenBounds.width * 0.85, 420)
             let maxHeight = screenBounds.height * 0.62
-            let captionHeight: CGFloat = 32
+            let captionHeight: CGFloat = 58
             let ratio = image.size.height / max(image.size.width, 1)
             guard ratio.isFinite, ratio > 0 else {
                 return CGSize(width: maxWidth, height: min(maxHeight, maxWidth + captionHeight))
@@ -647,18 +692,33 @@ private struct CardInteraction: UIViewRepresentable {
     }
 }
 
-/// Aperçu rapide : image agrandie sur fond noir avec nom en légende.
+/// Aperçu rapide, style Photos : image flottante aux coins arrondis sur
+/// fond flouté de la même image, pastille givrée Vidéo/GIF, bouton
+/// lecture pour les vidéos et légende nom + détails. Épuré : aucun
+/// chrome superflu, même langage givré que les badges de la carte.
 /// Le tap sur l'aperçu ouvre le fichier (commit géré par le coordinateur).
 private final class QuickLookPreviewViewController: UIViewController {
     private let image: UIImage
     private let fileName: String
+    private let subtitle: String?
+    private let isVideo: Bool
+    private let isGIF: Bool
 
+    private let backdropView = UIImageView()
     private let imageView = UIImageView()
-    private let nameLabel = UILabel()
 
-    init(image: UIImage, fileName: String) {
+    init(
+        image: UIImage,
+        fileName: String,
+        subtitle: String? = nil,
+        isVideo: Bool = false,
+        isGIF: Bool = false
+    ) {
         self.image = image
         self.fileName = fileName
+        self.subtitle = subtitle
+        self.isVideo = isVideo
+        self.isGIF = isGIF
         super.init(nibName: nil, bundle: nil)
     }
 
@@ -667,37 +727,172 @@ private final class QuickLookPreviewViewController: UIViewController {
 
     override func viewDidLoad() {
         super.viewDidLoad()
-        // Fond noir (style Fichiers.app) : la légende blanche reste lisible
-        // en mode clair comme en mode sombre.
         view.backgroundColor = .black
+
+        // Même image en remplissage flouté : plus de bandes noires vides
+        // sur les panoramas et portraits, rendu plein et lumineux.
+        backdropView.image = image
+        backdropView.contentMode = .scaleAspectFill
+        backdropView.clipsToBounds = true
+        backdropView.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(backdropView)
+        let blur = UIVisualEffectView(effect: UIBlurEffect(style: .systemMaterialDark))
+        blur.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(blur)
+        let dim = UIView()
+        dim.backgroundColor = UIColor.black.withAlphaComponent(0.3)
+        dim.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(dim)
 
         imageView.image = image
         imageView.contentMode = .scaleAspectFit
         imageView.clipsToBounds = true
-        imageView.layer.cornerRadius = 16
+        imageView.layer.cornerRadius = 14
         imageView.layer.cornerCurve = .continuous
         imageView.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(imageView)
 
+        if isVideo || isGIF {
+            let pill = makePill(text: isVideo ? "Vidéo" : "GIF", systemIcon: isVideo ? "play.fill" : nil)
+            view.addSubview(pill)
+            NSLayoutConstraint.activate([
+                pill.topAnchor.constraint(equalTo: imageView.topAnchor, constant: 10),
+                pill.leadingAnchor.constraint(equalTo: imageView.leadingAnchor, constant: 10),
+            ])
+        }
+        if isVideo {
+            let play = makePlayButton()
+            play.isUserInteractionEnabled = false
+            view.addSubview(play)
+            NSLayoutConstraint.activate([
+                play.centerXAnchor.constraint(equalTo: imageView.centerXAnchor),
+                play.centerYAnchor.constraint(equalTo: imageView.centerYAnchor),
+                play.widthAnchor.constraint(equalToConstant: 60),
+                play.heightAnchor.constraint(equalToConstant: 60),
+            ])
+        }
+
+        let caption = UIStackView()
+        caption.axis = .vertical
+        caption.alignment = .center
+        caption.spacing = 2
+        caption.translatesAutoresizingMaskIntoConstraints = false
+        let nameLabel = UILabel()
         nameLabel.text = fileName
-        nameLabel.font = .preferredFont(forTextStyle: .subheadline)
+        nameLabel.font = .systemFont(ofSize: 15, weight: .semibold)
         nameLabel.textColor = .white
         nameLabel.textAlignment = .center
         nameLabel.lineBreakMode = .byTruncatingMiddle
-        nameLabel.translatesAutoresizingMaskIntoConstraints = false
-
-        view.addSubview(imageView)
-        view.addSubview(nameLabel)
+        caption.addArrangedSubview(nameLabel)
+        if let subtitle, !subtitle.isEmpty {
+            let detailLabel = UILabel()
+            detailLabel.text = subtitle
+            detailLabel.font = .systemFont(ofSize: 12)
+            detailLabel.textColor = UIColor.white.withAlphaComponent(0.65)
+            detailLabel.textAlignment = .center
+            caption.addArrangedSubview(detailLabel)
+        }
+        view.addSubview(caption)
 
         NSLayoutConstraint.activate([
-            imageView.topAnchor.constraint(equalTo: view.topAnchor),
-            imageView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
-            imageView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-            imageView.bottomAnchor.constraint(equalTo: nameLabel.topAnchor, constant: -12),
-            nameLabel.leadingAnchor.constraint(equalTo: view.leadingAnchor),
-            nameLabel.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-            nameLabel.bottomAnchor.constraint(equalTo: view.bottomAnchor),
-            nameLabel.heightAnchor.constraint(equalToConstant: 20),
+            backdropView.topAnchor.constraint(equalTo: view.topAnchor),
+            backdropView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            backdropView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            backdropView.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+            blur.topAnchor.constraint(equalTo: view.topAnchor),
+            blur.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            blur.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            blur.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+            dim.topAnchor.constraint(equalTo: view.topAnchor),
+            dim.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            dim.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            dim.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+            imageView.topAnchor.constraint(equalTo: view.topAnchor, constant: 10),
+            imageView.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 10),
+            imageView.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -10),
+            imageView.bottomAnchor.constraint(equalTo: caption.topAnchor, constant: -10),
+            caption.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 16),
+            caption.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -16),
+            caption.bottomAnchor.constraint(equalTo: view.bottomAnchor, constant: -12),
         ])
+    }
+
+    /// Pastille flottante givrée (type de média) : même langage que les
+    /// badges de la carte, adoucie — flou sombre, contour fin discret.
+    private func makePill(text: String, systemIcon: String?) -> UIView {
+        let container = UIView()
+        container.layer.cornerRadius = 11
+        container.layer.cornerCurve = .continuous
+        container.layer.borderWidth = 0.7
+        container.layer.borderColor = UIColor.white.withAlphaComponent(0.25).cgColor
+        container.clipsToBounds = true
+        container.translatesAutoresizingMaskIntoConstraints = false
+        let blur = UIVisualEffectView(effect: UIBlurEffect(style: .systemThinMaterialDark))
+        blur.translatesAutoresizingMaskIntoConstraints = false
+        container.addSubview(blur)
+        let stack = UIStackView()
+        stack.axis = .horizontal
+        stack.alignment = .center
+        stack.spacing = 4
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        if let systemIcon, let iconImage = UIImage(systemName: systemIcon) {
+            let icon = UIImageView(image: iconImage)
+            icon.tintColor = .white
+            icon.contentMode = .scaleAspectFit
+            icon.translatesAutoresizingMaskIntoConstraints = false
+            NSLayoutConstraint.activate([
+                icon.widthAnchor.constraint(equalToConstant: 9),
+                icon.heightAnchor.constraint(equalToConstant: 9),
+            ])
+            stack.addArrangedSubview(icon)
+        }
+        let label = UILabel()
+        label.text = text
+        label.font = .systemFont(ofSize: 11, weight: .semibold)
+        label.textColor = .white
+        stack.addArrangedSubview(label)
+        container.addSubview(stack)
+        NSLayoutConstraint.activate([
+            blur.topAnchor.constraint(equalTo: container.topAnchor),
+            blur.leadingAnchor.constraint(equalTo: container.leadingAnchor),
+            blur.trailingAnchor.constraint(equalTo: container.trailingAnchor),
+            blur.bottomAnchor.constraint(equalTo: container.bottomAnchor),
+            stack.topAnchor.constraint(equalTo: container.topAnchor, constant: 5),
+            stack.bottomAnchor.constraint(equalTo: container.bottomAnchor, constant: -5),
+            stack.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 9),
+            stack.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -9),
+        ])
+        return container
+    }
+
+    /// Bouton lecture givré (vidéos), purement indicatif : tout tap
+    /// sur l'aperçu ouvre le fichier.
+    private func makePlayButton() -> UIView {
+        let container = UIView()
+        container.layer.cornerRadius = 30
+        container.layer.borderWidth = 0.9
+        container.layer.borderColor = UIColor.white.withAlphaComponent(0.35).cgColor
+        container.clipsToBounds = true
+        container.translatesAutoresizingMaskIntoConstraints = false
+        let blur = UIVisualEffectView(effect: UIBlurEffect(style: .systemThinMaterialDark))
+        blur.translatesAutoresizingMaskIntoConstraints = false
+        container.addSubview(blur)
+        let icon = UIImageView(image: UIImage(systemName: "play.fill"))
+        icon.tintColor = .white
+        icon.contentMode = .scaleAspectFit
+        icon.translatesAutoresizingMaskIntoConstraints = false
+        container.addSubview(icon)
+        NSLayoutConstraint.activate([
+            blur.topAnchor.constraint(equalTo: container.topAnchor),
+            blur.leadingAnchor.constraint(equalTo: container.leadingAnchor),
+            blur.trailingAnchor.constraint(equalTo: container.trailingAnchor),
+            blur.bottomAnchor.constraint(equalTo: container.bottomAnchor),
+            icon.centerXAnchor.constraint(equalTo: container.centerXAnchor, constant: 2),
+            icon.centerYAnchor.constraint(equalTo: container.centerYAnchor),
+            icon.widthAnchor.constraint(equalToConstant: 22),
+            icon.heightAnchor.constraint(equalToConstant: 22),
+        ])
+        return container
     }
 }
 
