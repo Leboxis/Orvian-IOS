@@ -522,7 +522,10 @@ private struct CardInteraction: UIViewRepresentable {
                 identifier: nil,
                 previewProvider: { [weak self] in
                     guard let self, let image = self.parent.previewImage else { return nil }
-                    return QuickLookPreviewViewController(image: image, fileName: self.parent.previewName)
+                    // Micro-pas B (Jev) : taille bornée, ratio préservé.
+                    let preview = QuickLookPreviewViewController(image: image, fileName: self.parent.previewName)
+                    preview.preferredContentSize = self.previewSize(for: image, in: interaction)
+                    return preview
                 },
                 actionProvider: { [weak self] _ in
                     guard let self else { return nil }
@@ -564,6 +567,31 @@ private struct CardInteraction: UIViewRepresentable {
             return UITargetedPreview(view: highlightView, parameters: parameters)
         }
 
+        /// Micro-pas B (Jev) : taille de l'aperçu détaché, ratio préservé,
+        /// bornée à ~85 % largeur et ~62 % hauteur d'écran (+ légende).
+        /// Sans `preferredContentSize`, le platter système tombe sur une
+        /// taille petite et imprévisible.
+        private func previewSize(for image: UIImage, in interaction: UIContextMenuInteraction) -> CGSize {
+            let screenBounds = interaction.view?.window?.windowScene?.screen.bounds
+                ?? UIScreen.main.bounds
+            let maxWidth = min(screenBounds.width * 0.85, 420)
+            let maxHeight = screenBounds.height * 0.62
+            // 6pt image→légende + 20pt légende : resserré pour le paysage,
+            // sinon le titre flotte loin de la miniature.
+            let captionHeight: CGFloat = 26
+            let ratio = image.size.height / max(image.size.width, 1)
+            guard ratio.isFinite, ratio > 0 else {
+                return CGSize(width: maxWidth, height: min(maxHeight, maxWidth + captionHeight))
+            }
+            var width = maxWidth
+            var height = width * ratio + captionHeight
+            if height > maxHeight {
+                height = maxHeight
+                width = max((height - captionHeight) / max(ratio, 0.01), 200)
+            }
+            return CGSize(width: max(width, 200), height: max(height, 200))
+        }
+
         private func buildMenu() -> UIMenu {
             let actions = parent.menuItems.map { item in
                 UIAction(
@@ -597,7 +625,9 @@ private final class QuickLookPreviewViewController: UIViewController {
 
     override func viewDidLoad() {
         super.viewDidLoad()
-        view.backgroundColor = .clear
+        // Micro-pas B (Jev) : fond noir style Fichiers.app, légende blanche
+        // lisible en clair comme en sombre. Indissociable de la taille fixe.
+        view.backgroundColor = .black
 
         imageView.image = image
         imageView.contentMode = .scaleAspectFit
@@ -620,7 +650,7 @@ private final class QuickLookPreviewViewController: UIViewController {
             imageView.topAnchor.constraint(equalTo: view.topAnchor),
             imageView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             imageView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-            imageView.bottomAnchor.constraint(equalTo: nameLabel.topAnchor, constant: -12),
+            imageView.bottomAnchor.constraint(equalTo: nameLabel.topAnchor, constant: -6),
             nameLabel.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             nameLabel.trailingAnchor.constraint(equalTo: view.trailingAnchor),
             nameLabel.bottomAnchor.constraint(equalTo: view.bottomAnchor),
