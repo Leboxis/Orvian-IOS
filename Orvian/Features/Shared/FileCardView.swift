@@ -146,6 +146,12 @@ struct FileCardView: View {
                         } else {
                             action()
                         }
+                    },
+                    // Micro-pas C (Jev) : tap sur l'aperçu détaché = ouverture.
+                    onCommit: {
+                        if !selectionMode {
+                            action()
+                        }
                     }
                 )
                 // Micro-pas A (Jev) : force pleine taille. Un UIViewRepresentable
@@ -434,6 +440,8 @@ private struct CardInteraction: UIViewRepresentable {
     let previewName: String
     let menuItems: [CardMenuItem]
     let onTap: () -> Void
+    /// Tap sur l'aperçu détaché (commit) = ouverture du fichier.
+    let onCommit: () -> Void
 
     func makeCoordinator() -> Coordinator {
         Coordinator(parent: self)
@@ -551,6 +559,18 @@ private struct CardInteraction: UIViewRepresentable {
             targetedPreview(for: interaction)
         }
 
+        /// Micro-pas C (Jev) : tap sur l'aperçu détaché = ouverture du fichier
+        /// (pattern Fichiers.app). En mode sélection, pas d'ouverture.
+        func contextMenuInteraction(
+            _ interaction: UIContextMenuInteraction,
+            willCommitWithAnimator animator: UIContextMenuInteractionCommitAnimating
+        ) {
+            animator.addCompletion { [weak self] in
+                guard let self else { return }
+                self.parent.onCommit()
+            }
+        }
+
         private func targetedPreview(for interaction: UIContextMenuInteraction) -> UITargetedPreview? {
             guard let interactionView = interaction.view as? InteractionView,
                   let highlightView = interactionView.highlightView else { return nil }
@@ -576,9 +596,9 @@ private struct CardInteraction: UIViewRepresentable {
                 ?? UIScreen.main.bounds
             let maxWidth = min(screenBounds.width * 0.85, 420)
             let maxHeight = screenBounds.height * 0.62
-            // 6pt image→légende + 20pt légende : resserré pour le paysage,
-            // sinon le titre flotte loin de la miniature.
-            let captionHeight: CGFloat = 26
+            // 6pt image→légende + 20pt légende + 8pt marge basse : le nom
+            // long reste dans le cadre avec "..." visible, sans flotter en paysage.
+            let captionHeight: CGFloat = 34
             let ratio = image.size.height / max(image.size.width, 1)
             guard ratio.isFinite, ratio > 0 else {
                 return CGSize(width: maxWidth, height: min(maxHeight, maxWidth + captionHeight))
@@ -605,8 +625,8 @@ private struct CardInteraction: UIViewRepresentable {
     }
 }
 
-/// Contrôleur plein écran de l'aperçu rapide : image agrandie animée depuis
-/// la position de la carte, nom en légende. Tap sur l'image = fermeture.
+/// Aperçu rapide : image agrandie sur fond noir avec nom en légende.
+/// Le tap sur l'aperçu ouvre le fichier (commit géré par le coordinateur).
 private final class QuickLookPreviewViewController: UIViewController {
     private let image: UIImage
     private let fileName: String
@@ -641,19 +661,22 @@ private final class QuickLookPreviewViewController: UIViewController {
         nameLabel.textColor = .white
         nameLabel.textAlignment = .center
         nameLabel.lineBreakMode = .byTruncatingMiddle
+        nameLabel.numberOfLines = 1
         nameLabel.translatesAutoresizingMaskIntoConstraints = false
 
         view.addSubview(imageView)
         view.addSubview(nameLabel)
 
+        // Marges latérales + basse : sans elles un nom long touche les bords
+        // arrondis du platter et sort du cadre sans "..." visible.
         NSLayoutConstraint.activate([
             imageView.topAnchor.constraint(equalTo: view.topAnchor),
             imageView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             imageView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
             imageView.bottomAnchor.constraint(equalTo: nameLabel.topAnchor, constant: -6),
-            nameLabel.leadingAnchor.constraint(equalTo: view.leadingAnchor),
-            nameLabel.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-            nameLabel.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+            nameLabel.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 12),
+            nameLabel.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -12),
+            nameLabel.bottomAnchor.constraint(equalTo: view.bottomAnchor, constant: -8),
             nameLabel.heightAnchor.constraint(equalToConstant: 20),
         ])
     }
