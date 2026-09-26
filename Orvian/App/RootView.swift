@@ -35,6 +35,7 @@ struct RootView: View {
                 }
             }
         }
+        .reduceMotionGate()
         .onAppear { privacy.contentDidAppear() }
         .allowsHitTesting(privacy.allowsInteraction(snapshot))
         .accessibilityHidden(!privacy.allowsInteraction(snapshot))
