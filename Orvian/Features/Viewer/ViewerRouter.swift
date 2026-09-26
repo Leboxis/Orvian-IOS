@@ -20,6 +20,21 @@ struct MediaViewerContext: Identifiable {
     let startIndex: Int
 
     var id: String { "\(driveId)-\(files.map(\.id).hashValue)-\(startIndex)" }
+
+    /// Source de la grille d'origine, déduite du vue-modèle qui l'a ouverte.
+    /// `nil` pour les listes sans vue-modèle (aperçus du Profil) : la
+    /// visionneuse se comporte alors comme si le serveur n'avait ni filtré
+    /// ni trié, ce qui est le cas de ces courtes listes.
+    var source: FileSource? { viewModel?.source }
+
+    /// Recherche à réappliquer à chaque page chargée, calquée sur
+    /// `FileGridView.effectiveSearchText` : quand le serveur a déjà filtré
+    /// (source `.search`), relancer les mots-clés en local retirerait du
+    /// pager les fichiers trouvés par pertinence mais dont le nom ne
+    /// contient pas la requête — liste vide ou saut vers le premier fichier.
+    var localSearchText: String {
+        source?.isServerFiltered == true ? "" : searchText
+    }
 }
 
 /// Ouvre les visionneuses plein écran depuis n'importe quelle grille.

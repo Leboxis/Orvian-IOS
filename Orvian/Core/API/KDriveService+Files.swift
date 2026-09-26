@@ -8,11 +8,6 @@ extension KDriveService {
         let file: DriveFile?
     }
 
-    private static let browsableOrderingFields: Set<String> = [
-        "added_at", "last_modified_at", "mime_type", "name",
-        "revised_at", "size", "type", "updated_at",
-    ]
-
     func page(
         _ source: FileSource,
         driveId: Int,
@@ -34,14 +29,14 @@ extension KDriveService {
                 .directoryContent(driveId: driveId, directoryId: directoryId, cursor: cursor),
                 requested: orderBy,
                 order: order,
-                allowed: Self.browsableOrderingFields
+                allowed: FileSource.browsableOrderingFields
             )
         case let .favorites(limit):
             endpoint = safeOrdering(
                 .favorites(driveId: driveId, cursor: cursor, limit: limit),
                 requested: orderBy,
                 order: order,
-                allowed: Self.browsableOrderingFields
+                allowed: FileSource.browsableOrderingFields
             )
         case let .recents(limit):
             // 1) Priorité /files/last_modified (fichiers modifiés/uploadés récemment sur le drive).
@@ -126,7 +121,7 @@ extension KDriveService {
                 .trashContent(driveId: driveId, cursor: cursor),
                 requested: orderBy,
                 order: order,
-                allowed: Self.browsableOrderingFields
+                allowed: FileSource.browsableOrderingFields
             )
         case let .search(query, directoryId):
             endpoint = safeOrdering(
@@ -143,6 +138,11 @@ extension KDriveService {
     /// Chaque endpoint kDrive possède sa propre liste de valeurs `order_by`.
     /// Un tri non pris en charge reste local dans `FileFilters` au lieu de
     /// transformer une page valide en erreur HTTP 400.
+    ///
+    /// La décision inverse — « le serveur va-t-il vraiment trier ? » — vit
+    /// dans `FileSource.supportedServerOrdering`, qui reprend l'intersection
+    /// des `allowed:`/`aliases:` ci-dessous. Les deux doivent rester en
+    /// accord : ici on protège la requête, là on décide du tri local.
     private func safeOrdering(
         _ endpoint: Endpoint,
         requested: [String]?,

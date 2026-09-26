@@ -183,8 +183,9 @@ struct MediaPagerView: View {
         guard let viewModel = context.viewModel else { return }
         let visible = context.filters.visible(
             viewModel.items,
-            searchText: context.searchText,
-            metadata: MediaMetadataStore.shared.snapshot(driveId: context.driveId, items: viewModel.items)
+            searchText: context.localSearchText,
+            metadata: MediaMetadataStore.shared.snapshot(driveId: context.driveId, items: viewModel.items),
+            source: context.source
         )
         let media = visible.filter { $0.isImage || $0.isVideo }
         guard media.map(\.id) != settled.map(\.id) else { return }
@@ -268,8 +269,9 @@ struct MediaPagerView: View {
         // sans importance, seul l'ensemble des candidats compte.
         let candidates = filters.visible(
             viewModel.items,
-            searchText: context.searchText,
-            metadata: VideoMetadataSnapshot()
+            searchText: context.localSearchText,
+            metadata: VideoMetadataSnapshot(),
+            source: context.source
         )
         return candidates.contains {
             $0.isVideo && MediaMetadataStore.shared.info(driveId: context.driveId, for: $0.id) == nil

@@ -399,10 +399,10 @@ struct FileGridView: View {
 
     /// Source déjà filtrée par le serveur : relancer les mots-clés en local
     /// masquerait des résultats trouvés par l'API selon des règles plus larges
-    /// que `localizedStandardContains` sur le nom.
+    /// que `localizedStandardContains` sur le nom. La règle unique vit dans
+    /// `FileSource.isServerFiltered`, partagée avec la visionneuse.
     private var effectiveSearchText: String {
-        if case .search = viewModel.source { return "" }
-        return searchText
+        viewModel.source.isServerFiltered ? "" : searchText
     }
 
     /// Éléments après filtres (type, orientation, recherche) et tri.
@@ -870,7 +870,8 @@ struct VisibleItemsCache {
         var result = key.filters.visible(
             items,
             searchText: key.searchText,
-            metadata: mediaMetadata.snapshot(driveId: key.driveId, items: items)
+            metadata: mediaMetadata.snapshot(driveId: key.driveId, items: items),
+            source: key.source
         )
         if key.foldersFirst {
             result = result.filter(\.isDirectory) + result.filter { !$0.isDirectory }

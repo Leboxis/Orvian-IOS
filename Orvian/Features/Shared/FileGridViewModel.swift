@@ -257,6 +257,34 @@ final class FileGridViewModel {
         mutationErrorMessage = nil
     }
 
+    /// Applique le tri courant sans recharger. Un vue-modèle neuf (recherche)
+    /// part ainsi de l'ordre demandé par l'écran au lieu de l'ordre
+    /// d'origine : sans cela, lancer un tri puis rechercher laissait les
+    /// résultats dans l'ordre de pertinence, le tri local étant lui aussi
+    /// ignoré au profit d'un serveur censé avoir trié.
+    func applySort(_ filters: FileFilters) {
+        orderBy = filters.serverOrderBy ?? []
+        order = filters.serverOrder
+    }
+
+    /// Realigne le tri sur l'état du menu de filtres, en rechargeant seulement
+    /// si l'ordre serveur a réellement changé. La grille ne recharge que le
+    /// vue-modèle qu'elle affiche : un tri modifié pendant la recherche ne
+    /// parvenait donc jamais au vue-modèle du dossier, qui repartait de son
+    /// ancien ordre une fois la recherche effacée, alors que le menu affiche
+    /// encore le tri choisi.
+    func syncSort(with filters: FileFilters) async {
+        let newOrder = filters.serverOrderBy ?? []
+        let newDirection = filters.serverOrder
+        guard orderBy != newOrder || order != newDirection else { return }
+        guard loadedOnce else {
+            // Rien à recharger : le prochargement partira du bon ordre.
+            applySort(filters)
+            return
+        }
+        await reload(sortedBy: filters, forceNetwork: true, refreshCount: false)
+    }
+
     /// Rafraîchit en conservant les anciennes cartes à l'écran.
     ///
     /// `forceNetwork` (pull-to-refresh, changement de tri, rafraîchissement

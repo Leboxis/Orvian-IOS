@@ -111,12 +111,9 @@ struct DirectoryView: View {
     }
 
     private var currentVisibleItemsContext: VisibleItemsContext {
-        let effectiveSearchText: String
-        if case .search = activeViewModel.source {
-            effectiveSearchText = ""
-        } else {
-            effectiveSearchText = searchText
-        }
+        // Même règle que `FileGridView.effectiveSearchText` : la source
+        // `.search` est déjà filtrée par le serveur.
+        let effectiveSearchText = activeViewModel.source.isServerFiltered ? "" : searchText
         return VisibleItemsContext(
             viewModelID: ObjectIdentifier(activeViewModel),
             source: activeViewModel.source,
@@ -328,6 +325,11 @@ struct DirectoryView: View {
         .task(id: SearchTaskKey(query: searchText, restricted: searchRestrictedToFolder)) {
             let trimmed = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !trimmed.isEmpty else {
+                // Le tri a pu changer pendant la recherche : la grille ne
+                // recharge que le vue-modèle qu'elle affiche, jamais celui du
+                // dossier. Le resynchroniser ici évite qu'il reparte de son
+                // ancien ordre alors que le menu affiche encore le tri choisi.
+                await viewModel.syncSort(with: filters)
                 searchViewModel = nil
                 searchQuery = ""
                 searchResultsReady = false
@@ -355,6 +357,10 @@ struct DirectoryView: View {
                 return
             }
             let searchVM = FileGridViewModel(source: source, driveId: driveId)
+            // Le tri de l'écran s'applique aussi à la recherche : sans lui,
+            // le vue-modèle neuf repart de l'ordre d'origine et les résultats
+            // arrivent dans l'ordre de pertinence, quel que soit le tri affiché.
+            searchVM.applySort(filters)
             searchQuery = trimmed
             searchViewModel = searchVM
             searchResultsReady = false

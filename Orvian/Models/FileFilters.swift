@@ -177,9 +177,15 @@ struct FileFilters: Equatable, Hashable {
     /// et le tri local (durée) sur une liste brute. Partagé entre la grille et
     /// la visionneuse pour garantir exactement le même ordre des éléments.
     ///
-    /// Les tris pris en charge par l'API sont également appliqués localement.
-    /// Cela garde le tri opérationnel sur les sources qui ne prennent pas
-    /// `order_by[]` en charge (notamment les tags et les médias consultés).
+    /// `source` indique d'où vient la liste. Quand son endpoint honore
+    /// `serverOrderBy` (voir `FileSource.supportedServerOrdering`), le tri
+    /// serveur suffit et le tri local est ignoré : re-trier ne ferait que
+    /// répéter le travail et risquerait de dériver du comparateur serveur.
+    /// Quand l'endpoint n'accepte pas l'ordre demandé — recherche et tags
+    /// n'autorisent que la date de modification, la cascade `recents` non
+    /// plus — le tri local prend le relais, sinon `Taille`, `Type` et
+    /// `Date d'importation` n'auraient aucun effet sur ces écrans.
+    /// `nil` (source inconnue) vaut « trier en local ».
     ///
     /// La fonction ne dépend plus d'un type isolé : `nonisolated`, et les
     /// métadonnées vidéo arrivent sous forme d'instantané (`VideoMetadataSnapshot`)
@@ -190,7 +196,8 @@ struct FileFilters: Equatable, Hashable {
     nonisolated func visible(
         _ items: [DriveFile],
         searchText: String,
-        metadata: VideoMetadataSnapshot
+        metadata: VideoMetadataSnapshot,
+        source: FileSource?
     ) -> [DriveFile] {
         var result = items
 
@@ -231,16 +238,24 @@ struct FileFilters: Equatable, Hashable {
             result = result.filter { $0.matchesSearchKeywords(keywords) }
         }
 
-        result = sorted(result, metadata: metadata)
+        result = sorted(result, metadata: metadata, source: source)
 
         return result
     }
 
     nonisolated private func sorted(
         _ files: [DriveFile],
-        metadata: VideoMetadataSnapshot
+        metadata: VideoMetadataSnapshot,
+        source: FileSource?
     ) -> [DriveFile] {
-        guard sort != .original, serverOrderBy == nil else { return files }
+        guard sort != .original else { return files }
+        // L'ordre demandé est déjà celui du serveur : trier en local ne
+        // ferait que le refaire sur les seules pages chargées.
+        if let source,
+           let requested = serverOrderBy,
+           requested.allSatisfy({ source.supportedServerOrdering.contains($0) }) {
+            return files
+        }
 
         return files.sorted { lhs, rhs in
             switch sort {

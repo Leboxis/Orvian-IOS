@@ -133,3 +133,31 @@ enum TokenStore {
         "Orvian/Features/Shared/FileGridMutationCenter.swift",
         "Tests/MutationSafetyChecks.swift",
     ]]])
+
+    # Real sorting/search pipeline: the actual FileFilters, the actual
+    # FileSource ordering rules and the actual models. Only the AVFoundation
+    # metadata types are replaced, because the filters only read their table.
+    filters_dependencies = temp / "FileFiltersDependencies.swift"
+    filters_dependencies.write_text(
+        "import Foundation\n" + source_type
+        + "\nstruct VideoMetadataInfo: Sendable {\n"
+        + "    let duration: Double\n"
+        + "    let orientation: FileFilters.Orientation\n"
+        + "    let maximumDimension: CGFloat\n"
+        + "    var is4KOrAbove: Bool { maximumDimension >= 3_840 }\n"
+        + "}\n"
+        + "struct VideoMetadataSnapshot: Sendable {\n"
+        + "    private let infos: [Int: VideoMetadataInfo]\n"
+        + "    init(infos: [Int: VideoMetadataInfo] = [:]) { self.infos = infos }\n"
+        + "    func info(for fileId: Int) -> VideoMetadataInfo? { infos[fileId] }\n"
+        + "}\n",
+        encoding="utf-8",
+    )
+    run_check(temp / "file-filters", [filters_dependencies, *[ROOT / path for path in [
+        "Orvian/Core/API/FileSource+Ordering.swift",
+        "Orvian/Models/FileFilters.swift",
+        "Orvian/Models/DriveFile.swift",
+        "Orvian/Models/Category.swift",
+        "Orvian/Core/Utils/FileKind.swift",
+        "Tests/FileFiltersChecks.swift",
+    ]]])
