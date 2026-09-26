@@ -16,13 +16,15 @@ struct FloatingTabBar: View {
                         onReselect?(tab)
                     } else {
                         onSelect?(tab)
-                        withAnimation(.snappy(duration: 0.25)) {
-                            selection = tab
-                        }
+                        selection = tab
                     }
                 }
             }
         }
+        // L'animation est attachée à la **valeur** et non au geste : un
+        // changement d'onglet obtenu autrement (remise à zéro au second appui,
+        // ouverture automatique) s'anime exactement comme un tap.
+        .animation(Motion.animation(.snappy(duration: 0.25)), value: selection)
         .padding(.horizontal, 10)
         .padding(.vertical, 8)
         .floatingChrome(RoundedRectangle(cornerRadius: DS.tabBarRadius, style: .continuous))
@@ -56,7 +58,7 @@ private struct TabButton: View {
             VStack(spacing: 3) {
                 Image(systemName: isSelected ? tab.symbolFilled : tab.symbol)
                     .font(.system(size: 19, weight: .medium))
-                    .symbolEffect(.bounce, value: isSelected)
+                    .modifier(SymbolBounce(enabled: isSelected && Motion.animationsEnabled))
                 if showsTitle {
                     Text(tab.title)
                         .font(.caption2.weight(isSelected ? .semibold : .regular))
@@ -78,6 +80,20 @@ private struct TabButton: View {
         .buttonStyle(.plain)
         .accessibilityLabel(tab.title)
         .accessibilityAddTraits(isSelected ? .isSelected : [])
+    }
+}
+
+/// Rebond de l'icône à la sélection, désactivé quand l'utilisateur a demandé
+/// moins de mouvement.
+private struct SymbolBounce: ViewModifier {
+    let enabled: Bool
+
+    func body(content: Content) -> some View {
+        if enabled {
+            content.symbolEffect(.bounce, value: enabled)
+        } else {
+            content
+        }
     }
 }
 
