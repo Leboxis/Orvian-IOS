@@ -57,6 +57,11 @@ final class MainTabShellState {
     /// Onglet courant. `var` (et non `let`) pour permettre les bindings
     /// `$shell.tab` dans `MainTabView`.
     var tab: AppTab = .home
+    /// Onglets déjà visités. Un onglet conservé (`AppTab.isKeptAlive`) n'est
+    /// monté qu'à partir de sa première visite : le gain du point 3 — pas de
+    /// squelette, pas de perte de position au retour — sans charger trois
+    /// grilles au lancement.
+    private(set) var visitedTabs: Set<AppTab> = [.home]
     /// Routeur des visionneuses plein écran. Recréé par drive ; `var` pour les
     /// bindings `$shell.router.mediaContext`.
     var router: ViewerRouter
@@ -66,5 +71,11 @@ final class MainTabShellState {
     init(driveId: Int) {
         self.driveId = driveId
         self.router = ViewerRouter(driveId: driveId)
+    }
+
+    /// Marque un onglet comme visité, avant de le sélectionner pour que la vue
+    /// puisse se monter dans le même tour.
+    func markVisited(_ tab: AppTab) {
+        visitedTabs.insert(tab)
     }
 }

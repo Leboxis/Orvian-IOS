@@ -3,10 +3,10 @@ import SwiftUI
 /// Conteneur des 5 onglets + barre flottante + visionneuses plein écran + suivi d'upload.
 ///
 /// Barre, de gauche à droite : Réglages · Tag · Accueil · Favoris · Profil.
-/// Accueil, Favoris et Tag restent montés en permanence : leurs données et
-/// leur position de scroll survivent aux changements d'onglet. Réglages et
-/// Profil sont recréés à chaque visite (leur pile de navigation vit dans
-/// `TabNavigationState`), ce qui limite la mémoire consommée.
+/// Accueil, Favoris et Tag restent montés d'une visite à l'autre : leurs
+/// données et leur position de scroll survivent aux changements d'onglet.
+/// Réglages et Profil sont recréés à chaque visite (leur pile de navigation
+/// vit dans `TabNavigationState`), ce qui limite la mémoire consommée.
 ///
 /// Le verrouillage couvre cet arbre sans le démonter. Les présentations,
 /// positions de défilement et piles survivent au passage en arrière-plan.
@@ -49,6 +49,9 @@ struct MainTabView: View {
                 FloatingTabBar(
                     selection: $shell.tab,
                     onSelect: { targetTab in
+                        // Avant la sélection : l'onglet doit pouvoir se monter
+                        // dans le même tour pour ne pas afficher un cadre vide.
+                        shell.markVisited(targetTab)
                         guard targetTab == .profile else { return }
                         // Démarre au clic, avant que ProfileView soit montée.
                         // Sa propre tâche rejoint ensuite la même requête.
@@ -125,11 +128,12 @@ struct MainTabView: View {
 
     @ViewBuilder
     private func tabPane(_ target: AppTab, @ViewBuilder content: () -> some View) -> some View {
-        // Accueil, Favoris et Tag restent montés (données et position de
-        // défilement conservées) ; Réglages et Profil ne sont montés que
-        // lorsqu'ils sont sélectionnés, ce qui libère leurs vues à chaque
-        // changement d'onglet.
-        if target.isKeptAlive || target == shell.tab {
+        // Accueil, Favoris et Tag restent montés une fois visités (données et
+        // position de défilement conservées) ; Réglages et Profil ne sont
+        // montés que lorsqu'ils sont sélectionnés, ce qui libère leurs vues à
+        // chaque changement d'onglet. `isSelected` évite le montage anticipé
+        // d'un onglet conservé jamais ouvert.
+        if target == shell.tab || (target.isKeptAlive && shell.visitedTabs.contains(target)) {
             content()
                 .opacity(shell.tab == target ? 1 : 0)
                 .allowsHitTesting(shell.tab == target)
@@ -140,7 +144,6 @@ struct MainTabView: View {
                 .accessibilityHidden(true)
         }
     }
-
 }
 
 /// Isole les mises à jour fréquentes de progression de la racine qui héberge

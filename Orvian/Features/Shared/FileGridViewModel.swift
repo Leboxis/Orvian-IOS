@@ -227,8 +227,8 @@ final class FileGridViewModel {
             }
             // L'ordre des affectations importe : `items` en dernier déclenche
             // la resynchronisation du cache avec un état déjà complet.
-            // Restauration depuis un snapshot existant : inutile de réécrire
-            // le même snapshot (1 `didSet` évité).
+            // `withoutSnapshot` ne change rien ici : `items` n'est affecté
+            // qu'une fois, donc une seule révision et une seule écriture.
             withoutSnapshot {
                 orderBy = snapshot.orderBy
                 order = snapshot.order
@@ -403,7 +403,7 @@ final class FileGridViewModel {
 
     /// Écrit (ou réécrit) l'instantané de la liste dans le cache mémoire.
     /// Appelé après un chargement complet, et à chaque mutation de `items`
-    /// via `didSet` tant que la liste a été chargé au moins une fois.
+    /// via `didSet` tant que la liste a été chargée au moins une fois.
     ///
     /// L'écriture est **différée au tour suivant du MainActor** et les appels
     /// se regroupent : le store mémoire conserve le tableau `items` vivant, si
@@ -418,13 +418,15 @@ final class FileGridViewModel {
         snapshotWriteScheduled = true
         // La tâche hérite du MainActor : elle attend le tour suivant, puis
         // écrit l'état le plus récent — les mutations intermédiaires de la
-        // même salve sont donc regroupées.
-        Task { [weak self] in
+        // même salve sont donc regroupées. `self` est capturé fort : une
+        // écriture perdue laisserait le cache disque des favoris en retrait
+        // de la dernière mutation confirmée. Aucun cycle n'est créé, la tâche
+        // ne vit que le temps d'un tour.
+        Task {
             await Task.yield()
-            guard let self else { return }
-            self.snapshotWriteScheduled = false
-            guard self.loadedOnce else { return }
-            self.commitListSnapshot()
+            snapshotWriteScheduled = false
+            guard loadedOnce else { return }
+            commitListSnapshot()
         }
     }
 
@@ -483,6 +485,10 @@ final class FileGridViewModel {
             resortAfterMerge()
         }
         if broadcast {
+            // L'écriture groupée de l'instantané est différée : la vider
+            // d'abord, sinon `mergeRecentUploads` fusionnerait avec une entrée
+            // antérieure à l'import au lieu de l'état qui vient d'être fusionné.
+            flushPendingSnapshot()
             DirectoryListStore.shared.mergeRecentUploads(driveId: driveId, files: merged)
             FileGridMutationCenter.shared.publish(.uploaded(driveId: driveId, files: merged))
         }

@@ -36,8 +36,8 @@ actor APIClient {
     /// Unique cache réseau de l'app. Le `URLCache.shared` n'est plus
     /// redimensionné au lancement : l'app ne conserve donc plus deux fois la
     /// même revalidation HTTP, et les deux justifications contradictoires
-    /// (150 Mo de part et d'autre) ont disparu. Le capacitif vient des
-    /// Réglages, comme celui du cache d'images.
+    /// (150 Mo de part et d'autre) ont disparu. Le volume restant, lui, est
+    /// piloté par les Réglages comme celui du cache d'images.
     private static func apiConfiguration() -> URLSessionConfiguration {
         let configuration = URLSessionConfiguration.default
         configuration.urlCache = URLCache(
@@ -50,23 +50,34 @@ actor APIClient {
     }
 
     /// Capacité du cache réseau en Mo, lue dans les Réglages. `0` = illimité.
+    ///
+    /// 100 Mo par défaut : l'app retenait 150 Mo de réponses dans le cache
+    /// partagé *et* 150 Mo dans celui-ci, soit 300 Mo dont l'utilisateur
+    /// ne contrôlait rien. La moitié inutile disparaît avec le doublon, et le
+    /// reste est réduit d'un tiers et adjustable.
     static func currentCacheLimitMB() -> Int {
         let stored = UserDefaults.standard.object(forKey: "networkCacheLimitMB") as? Int
-        return stored ?? 50
+        return stored ?? 100
     }
 
     private static func currentCacheLimitBytes() -> Int {
         let megabytes = currentCacheLimitMB()
-        return megabytes > 0 ? megabytes * 1024 * 1024 : Int.max
+        // `0` est la valeur documentée par URLCache pour « illimité ».
+        return megabytes > 0 ? megabytes * 1024 * 1024 : 0
     }
 
     /// Applique une nouvelle limite sans redémarrer : la session est
-    /// reconstruite autour d'un `URLCache` redimensionné. Le magasin disque
-    /// porte le même `diskPath`, iOS éjecte donc au-delà de la nouvelle
-    /// capacité. Les requêtes déjà en vol se terminent sur l'ancienne session,
-    /// dont l'annulation n'a jamais lieu.
+    /// reconstruite autour d'un `URLCache` redimensionné. L'ancien magasin est
+    /// vidé dans la foulée — il partage le même `diskPath`, deux caches n'y
+    /// peuvent pas cohabiter durablement et la nouvelle capacité ne serait pas
+    /// la seule appliquée. Seules les requêtes encore en vol peuvent y écrire
+    /// quelques kilo-octets avant l'arrêt, éjectés au lancement suivant.
+    /// L'annulation de la session, elle, n'a jamais lieu : elle tuerait les
+    /// requêtes en vol.
     func applyCacheSettings() {
+        let previous = session.configuration.urlCache
         session = URLSession(configuration: Self.apiConfiguration())
+        previous?.removeAllCachedResponses()
     }
 
     // MARK: - Requêtes

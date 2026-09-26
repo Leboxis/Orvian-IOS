@@ -16,15 +16,14 @@ struct MediaTitlePill: View {
     @State private var resetTask: Task<Void, Never>?
 
     var body: some View {
-        // La largeur utile est celle **offerte** par l'écran, relevée sur un
-        // gabarit transparent qui la remplit : `Color.clear` est souple aussi
-        // en hauteur, d'où le `.frame(height: 0)` — sans lui la pastille
-        // prendrait toute la hauteur disponible. Mesurer la pastille elle-même
-        // créait une boucle de retour : son padding dépendait de sa propre
-        // largeur, donc la première mesure était fausse (le titre prenait
-        // toute la place), le titre était ensuite repoussé et une seconde
-        // mesure se déclenchait — un saut à l'apparition, deux images pour se
-        // stabiliser en rotation.
+        // La réserve de part et d'autre du titre vient de la largeur **offerte**
+        // par l'écran, relevée sur une sonde transparente dédiée. Sonder la
+        // pastille elle-même liait sa largeur au padding calculé sur cette
+        // largeur : la mesure ne pouvait se stabiliser qu'après une seconde
+        // passe, d'où le titre qui se replace à l'apparition et à chaque
+        // rotation. `Color.clear` étant souple aussi en hauteur, la sonde est
+        // bridée à zéro : sans cela la pastille prendrait toute la hauteur
+        // disponible.
         ZStack {
             Color.clear
                 .frame(maxWidth: .infinity)

@@ -28,7 +28,7 @@ struct SettingsView: View {
     @AppStorage("prefetchVideoURLs") private var prefetchVideoURLs = true
     @AppStorage("prefetchOnWiFiOnly") private var prefetchOnWiFiOnly = true
     @AppStorage("thumbnailCacheLimitMB") private var thumbnailCacheLimitMB = 250
-    @AppStorage("networkCacheLimitMB") private var networkCacheLimitMB = 50
+    @AppStorage("networkCacheLimitMB") private var networkCacheLimitMB = 100
     @AppStorage("hapticFeedbackEnabled") private var hapticFeedbackEnabled = true
     @AppStorage("defaultFolderColor") private var defaultFolderColor = "#4285F5"
     @AppStorage(PerfTimer.settingsKey) private var networkPerfEnabled = true

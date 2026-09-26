@@ -34,6 +34,12 @@ struct FileCardView: View {
     /// Affiche l'étoile de favori sur la miniature, avec retrait au tap. La
     /// préférence globale `showFavoriteStars` est déjà résolue par la grille.
     var showsFavoriteBadge = true
+    /// Préférence globale : conserve le type comme repère lorsque le poids est masqué.
+    /// Lue par la grille et transmise : une carte sur 150 n'a plus à observer
+    /// elle-même les Réglages.
+    var showFileSizes = true
+    /// Couleur de repli des dossiers sans couleur API, lue par la grille.
+    var defaultFolderColor = "#4285F5"
     var onToggleSelection: (() -> Void)?
     var onToggleFavorite: (() -> Void)?
     var onMove: (() -> Void)?
@@ -41,12 +47,6 @@ struct FileCardView: View {
     var onPresent: ((Intent) -> Void)?
     var action: () -> Void
 
-    /// Préférence globale : conserve le type comme repère lorsque le poids est masqué.
-    /// Lue par la grille et transmise : une carte sur 150 n'a plus à observer
-    /// elle-même les Réglages.
-    var showFileSizes = true
-    /// Couleur de repli des dossiers sans couleur API, lue par la grille.
-    var defaultFolderColor = "#4285F5"
     @State private var thumbnail: UIImage?
     @State private var thumbnailLoaded = false
 
@@ -199,6 +199,7 @@ struct FileCardView: View {
                         .foregroundStyle(tint)
                         .padding(14)
                 }
+                .transition(.opacity)
             } else {
                 ZStack {
                     Rectangle().fill(.quaternary.opacity(0.5))
@@ -209,11 +210,12 @@ struct FileCardView: View {
                             .padding(14)
                     }
                 }
+                .transition(.opacity)
             }
         }
-        // L'animation est portée par le conteneur, pas par l'image : c'est
-        // l'insertion/remplacement de la branche qui doit être en fondu. Sur un
-        // scroll rapide, la substitution instantanée scintillait.
+        // L'animation est portée par le conteneur, pas par l'image : ce sont
+        // les deux branches qui s'échangent qu'il faut estomper. Sur un scroll
+        // rapide, la substitution instantanée scintillait.
         .animation(Motion.animation(.easeOut(duration: 0.2)), value: thumbnail != nil)
     }
 

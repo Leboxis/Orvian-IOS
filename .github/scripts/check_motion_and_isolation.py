@@ -48,9 +48,38 @@ assert api.count("URLCache(") == 1, "Un seul URLCache dans le client API"
 assert "networkCacheLimitMB" in api
 assert "func applyCacheSettings()" in api
 assert "currentCacheLimitBytes()" in api
+assert "previous?.removeAllCachedResponses()" in api, \
+    "Deux URLCache ne peuvent pas cohabiter sur le même diskPath"
 settings = source("Orvian/Features/Settings/SettingsView.swift")
-assert '@AppStorage("networkCacheLimitMB")' in settings
+assert '@AppStorage("networkCacheLimitMB") private var networkCacheLimitMB = 100' in settings
 assert "APIClient.shared.applyCacheSettings()" in settings
+
+# --- L'ordre des arguments de FileCardView suit l'ordre de déclaration ----
+# Swift synthétise l'initialiseur membre dans l'ordre des propriétés stockées
+# et refuse un appel qui avance puis revient en arrière.
+card = source("Orvian/Features/Shared/FileCardView.swift")
+card_body = card[:card.index("struct FolderColorPickerSheet")]
+declarations = [
+    line for line in card_body.splitlines()
+    if line.startswith("    let ") or line.startswith("    var ")
+]
+positions = {}
+for index, line in enumerate(declarations):
+    positions.setdefault(line.split()[1].rstrip(":"), index)
+grid_body = source("Orvian/Features/Shared/FileGridView.swift")
+call = grid_body[grid_body.index("FileCardView("):]
+call = call[:call.index("\n        )")]
+label = re.compile(r"^\s*([A-Za-z_][A-Za-z0-9_]*):")
+passed = [
+    match.group(1)
+    for line in call.splitlines()
+    if (match := label.match(line))
+]
+unknown = [name for name in passed if name not in positions]
+assert not unknown, "Propriétés de FileCardView inconnues : " + ", ".join(unknown)
+assert len(passed) >= 10, "L'appel de FileCardView n'a pas été analysé en entier"
+assert passed == sorted(passed, key=positions.__getitem__), \
+    "FileCardView est appelé hors de l'ordre de déclaration : " + ", ".join(passed)
 
 # --- Le cache du filtre ne vit plus dans un @State de la vue ---------------
 grid = source("Orvian/Features/Shared/FileGridView.swift")
@@ -72,13 +101,11 @@ assert "guard seen.insert(key).inserted else { continue }" in thumbnails
 assert "newestKeys.contains(key)" not in thumbnails
 
 # --- Les préférences sont lues par la grille, pas par chaque carte ---------
-card = source("Orvian/Features/Shared/FileCardView.swift")
 assert "@AppStorage" not in card, "Une carte ne doit observer aucun réglage"
 assert "var showFileSizes = true" in card
 assert 'var defaultFolderColor = "#4285F5"' in card
 assert "showFileSizes: showFileSizes," in grid
 assert "defaultFolderColor: defaultFolderColor," in grid
-
 # --- Onglets conservés, pastille flottante, animation pilotée par la valeur -
 tabbar = source("Orvian/UI/FloatingTabBar.swift")
 assert "var isKeptAlive: Bool" in tabbar
@@ -89,14 +116,18 @@ assert "withAnimation(.snappy(duration: 0.25))" not in tabbar
 main_tabs = source("Orvian/App/MainTabView.swift")
 assert "safeAreaInset(edge: .bottom" not in main_tabs, \
     "La pastille de transfert ne doit plus pousser la grille"
-assert "target.isKeptAlive || target == shell.tab" in main_tabs
+assert "target == shell.tab || (target.isKeptAlive && shell.visitedTabs.contains(target))" in main_tabs, \
+    "Un onglet conservé ne doit être monté qu'à partir de sa première visite"
+assert "shell.markVisited(targetTab)" in main_tabs
+assert "private(set) var visitedTabs: Set<AppTab> = [.home]" in source("Orvian/App/TabNavigationState.swift")
 assert "let floatingBarInset: CGFloat = 130" in source("Orvian/UI/DesignSystem.swift"), \
     "La grille doit réserver la place de la pastille flottante"
 
 # --- Le titre de la visionneuse se mesure sur le conteneur ----------------
 chrome = source("Orvian/UI/MediaChrome.swift")
 assert "containerWidth" in chrome
-assert "availableWidth" not in chrome, "Mesurer la pastille elle-même reboucle"
+assert "availableWidth" not in chrome, "Sonder la pastille liait sa largeur à son padding"
+assert ".frame(height: 0)" in chrome, "La sonde doit être bridée en hauteur"
 
 # --- Le double-tap vidéo diffère la bascule des contrôles -----------------
 video = source("Orvian/Features/Viewer/VideoPlayerView.swift")
