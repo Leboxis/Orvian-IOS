@@ -4,7 +4,7 @@
 
 **Goal:** Corriger les points 2, 3, 5, 6, 7, 10, 11, 12, 13, 15, 16, 17 et 18 de l'audit, dans l'ordre qui minimise le risque de régression, puis vérifier et pousser sur `main`.
 
-**Architecture:** Trois familles de corrections. (a) Des invariants d'isolation : le cache réseau, le cache d'instantanés de grille et la mémoïsation du filtre ne doivent pas se concurrencer. (b) Des corrections d'accessibilité et deanjar visuel : un interrupteur global « réduire l'animation » et des行为的 plus sobres. (c) Des corrections de cycle de vie d'interface : onglets conservés, pastille flottante, double-tap vidéo. L'ordre d'exécution suit les dépendances réelles : d'abord les invariants purs (aucune dépendance UI), ensuite la grille (10 avant 12 et 16), ensuite les cartes (7 avant 16), ensuite les visionneuses, enfin le chrome, et l'interrupteur d'accessibilité **en dernier** pour qu'il enveloppe aussi les animations introduites par les tâches précédentes.
+**Architecture:** Trois familles de corrections. (a) Des invariants d'isolation : le cache réseau, le cache d'instantanés de grille et la mémoïsation du filtre ne doivent pas se concurrencer. (b) Des corrections d'accessibilité et de confort visuel : un interrupteur global « réduire l'animation » et des comportements plus sobres. (c) Des corrections de cycle de vie d'interface : onglets conservés, pastille flottante, double-tap vidéo. L'ordre d'exécution suit les dépendances réelles : d'abord les invariants purs (aucune dépendance UI), ensuite la grille (10 avant 12 et 16), ensuite les cartes (7 avant 16), ensuite les visionneuses, enfin le chrome, et l'interrupteur d'accessibilité **en dernier** pour qu'il enveloppe aussi les animations introduites par les tâches précédentes.
 
 **Tech Stack:** Swift 5 language mode, SwiftUI, iOS 26 deployment target, XcodeGen (`project.yml`), CI GitHub Actions (macOS 26) avec scripts de vérification Python + `swiftc`.
 
@@ -17,7 +17,7 @@
 - `check_performance_regressions.py` assert notamment `shouldRetry: shouldRetryThumbnail` dans `FileCardView.swift`, `SharedRequests<String, ImageResult>()` dans `HiresImageStore.swift`, et l'ordre disque-avant-réseau dans `ThumbnailProvider.swift`.
 - Commentaire et documentation en français, dans le style du fichier (justification du *pourquoi*, pas du *quoi*).
 - Zéro commentaire de code ajouté au-delà de ceux justifiant un invariant non évident ; pas de refactor non demandé.
-- Ne pas toucher aux points 1, 4, 8, 9, 14 ni aux和产品 sujets.
+- Ne pas toucher aux points 1, 4, 8, 9, 14, ni aux sujets produit.
 
 ## Review Focus
 
