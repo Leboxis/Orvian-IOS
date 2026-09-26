@@ -14,7 +14,7 @@ actor APIClient {
 
     static let baseURL = URL(string: "https://api.infomaniak.com")!
 
-    private let session: URLSession
+    private var session: URLSession
     /// GET identiques actuellement en vol, par empreinte (compte + jeton,
     /// politique de cache, URL complète). Une même ressource demandée par
     /// deux vues en même temps ne part qu'une fois sur le réseau ; les
@@ -29,20 +29,45 @@ actor APIClient {
     ///   dossier déjà consulté ;
     /// - huit connexions par hôte, comme le régulateur de miniatures.
     /// Les uploads utilisent une autre session partagée.
-    init(session: URLSession = URLSession(configuration: APIClient.apiConfiguration)) {
-        self.session = session
+    init(session: URLSession? = nil) {
+        self.session = session ?? URLSession(configuration: APIClient.apiConfiguration())
     }
 
-    private static let apiConfiguration: URLSessionConfiguration = {
+    /// Unique cache réseau de l'app. Le `URLCache.shared` n'est plus
+    /// redimensionné au lancement : l'app ne conserve donc plus deux fois la
+    /// même revalidation HTTP, et les deux justifications contradictoires
+    /// (150 Mo de part et d'autre) ont disparu. Le capacitif vient des
+    /// Réglages, comme celui du cache d'images.
+    private static func apiConfiguration() -> URLSessionConfiguration {
         let configuration = URLSessionConfiguration.default
         configuration.urlCache = URLCache(
-            memoryCapacity: 20 * 1024 * 1024,
-            diskCapacity: 150 * 1024 * 1024,
+            memoryCapacity: 8 * 1024 * 1024,
+            diskCapacity: currentCacheLimitBytes(),
             diskPath: "api-url-cache"
         )
         configuration.httpMaximumConnectionsPerHost = 8
         return configuration
-    }()
+    }
+
+    /// Capacité du cache réseau en Mo, lue dans les Réglages. `0` = illimité.
+    static func currentCacheLimitMB() -> Int {
+        let stored = UserDefaults.standard.object(forKey: "networkCacheLimitMB") as? Int
+        return stored ?? 50
+    }
+
+    private static func currentCacheLimitBytes() -> Int {
+        let megabytes = currentCacheLimitMB()
+        return megabytes > 0 ? megabytes * 1024 * 1024 : Int.max
+    }
+
+    /// Applique une nouvelle limite sans redémarrer : la session est
+    /// reconstruite autour d'un `URLCache` redimensionné. Le magasin disque
+    /// porte le même `diskPath`, iOS éjecte donc au-delà de la nouvelle
+    /// capacité. Les requêtes déjà en vol se terminent sur l'ancienne session,
+    /// dont l'annulation n'a jamais lieu.
+    func applyCacheSettings() {
+        session = URLSession(configuration: Self.apiConfiguration())
+    }
 
     // MARK: - Requêtes
 

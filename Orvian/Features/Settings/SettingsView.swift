@@ -28,6 +28,7 @@ struct SettingsView: View {
     @AppStorage("prefetchVideoURLs") private var prefetchVideoURLs = true
     @AppStorage("prefetchOnWiFiOnly") private var prefetchOnWiFiOnly = true
     @AppStorage("thumbnailCacheLimitMB") private var thumbnailCacheLimitMB = 250
+    @AppStorage("networkCacheLimitMB") private var networkCacheLimitMB = 50
     @AppStorage("hapticFeedbackEnabled") private var hapticFeedbackEnabled = true
     @AppStorage("defaultFolderColor") private var defaultFolderColor = "#4285F5"
     @AppStorage(PerfTimer.settingsKey) private var networkPerfEnabled = true
@@ -105,6 +106,11 @@ struct SettingsView: View {
                 await ThumbnailProvider.shared.enforceDiskLimit()
                 cacheSize = await ThumbnailProvider.shared.diskCacheSize()
             }
+        }
+        // Le cache réseau est de taille fixe : la session est reconstruite
+        // autour d'un URLCache redimensionné, sans toucher aux requêtes en vol.
+        .onChange(of: networkCacheLimitMB) { _, _ in
+            Task { await APIClient.shared.applyCacheSettings() }
         }
     }
 
@@ -320,6 +326,13 @@ struct SettingsView: View {
                 Picker("Limite du cache", selection: $thumbnailCacheLimitMB) {
                     Text("250 Mo").tag(250); Text("500 Mo").tag(500)
                     Text("1 Go").tag(1_024); Text("Sans limite").tag(0)
+                }
+            }
+            if matches("cache reseau réseau requetes api") {
+                Picker("Cache réseau", selection: $networkCacheLimitMB) {
+                    Text("25 Mo").tag(25); Text("50 Mo").tag(50)
+                    Text("100 Mo").tag(100); Text("250 Mo").tag(250)
+                    Text("Sans limite").tag(0)
                 }
             }
             if matches("vider cache effacer") {
