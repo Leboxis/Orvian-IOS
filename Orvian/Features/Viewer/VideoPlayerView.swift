@@ -126,6 +126,10 @@ struct VideoPlayerView: View {
     // Masquage automatique des contrôles après 2.5 secondes
     @State private var showControls = true
     @State private var hideControlsTask: Task<Void, Never>?
+    /// Bascule des contrôles en attente : le premier tap d'un double-tap ne
+    /// doit pas les masquer, sinon le second les fait revenir — un
+    /// clignotement de 0 à 300 ms à chaque saut de 10 s.
+    @State private var pendingToggleTask: Task<Void, Never>?
     /// Hauteurs réellement rendues, réutilisées par les zones gestuelles
     /// transparentes lorsque le chrome est masqué.
     @State private var topControlsHeight: CGFloat = 44
@@ -221,6 +225,8 @@ struct VideoPlayerView: View {
             } else {
                 // Page quittée : la lecture s'arrête, le lecteur reste prêt.
                 hideControlsTask?.cancel()
+                pendingToggleTask?.cancel()
+                pendingToggleTask = nil
                 pausePlayback()
                 cancelPendingSeek()
                 _ = transport.endScrub()
@@ -231,6 +237,8 @@ struct VideoPlayerView: View {
             isDisappeared = true
             loadGeneration &+= 1
             hideControlsTask?.cancel()
+            pendingToggleTask?.cancel()
+            pendingToggleTask = nil
             onControlsInteractionChanged(false)
             teardown()
         }
@@ -322,6 +330,8 @@ struct VideoPlayerView: View {
             .simultaneousGesture(controlRegionGesture)
             .onTapGesture {
                 guard !showControls else { return }
+                pendingToggleTask?.cancel()
+                pendingToggleTask = nil
                 toggleControls()
             }
     }
@@ -1147,9 +1157,12 @@ struct VideoPlayerView: View {
 
     // MARK: - Double-tap ±10 s
 
-    /// Simple tap instantané : bascule les contrôles, sauf si un tap très
-    /// rapproché au même endroit révèle un double-tap — alors la bascule est
-    /// annulée (rattrapage) et remplacée par le saut de 10 s.
+    /// Simple tap : la bascule des contrôles est différée de 250 ms, soit la
+    /// fenêtre de désambiguïsation du double-tap. Un second tap annule
+    /// l'attente et ne fait que sauter de 10 s : les contrôles ne bougent donc
+    /// plus du tout, ni à l'aller ni au retour. L'ancien rattrapage
+    /// (`cancelPendingToggle`) les faisait disparaître puis revenir à chaque
+    /// double-tap.
     private func handleVideoTap(at location: CGPoint) {
         let now = Date()
         let isDoubleTap = lastTapDate.map {
@@ -1159,8 +1172,8 @@ struct VideoPlayerView: View {
         } ?? false
 
         if isDoubleTap {
-            // Second tap d'un double : annule l'effet du premier tap.
-            cancelPendingToggle()
+            pendingToggleTask?.cancel()
+            pendingToggleTask = nil
             lastTapDate = nil
             guard player != nil, !hasFailedSetup, !isScrubbing, !isSeeking else { return }
             let onLeftHalf = location.x * 2 < videoAreaWidth
@@ -1170,16 +1183,18 @@ struct VideoPlayerView: View {
         } else {
             lastTapDate = now
             lastTapLocation = location
-            toggleControls()
+            pendingToggleTask?.cancel()
+            pendingToggleTask = Task {
+                do {
+                    try await Task.sleep(for: .milliseconds(250))
+                } catch {
+                    return
+                }
+                guard !Task.isCancelled else { return }
+                pendingToggleTask = nil
+                toggleControls()
+            }
         }
-    }
-
-    /// Retour visuel si le premier tap d'un double a masqué les contrôles.
-    private func cancelPendingToggle() {
-        withAnimation(.easeInOut(duration: 0.2)) {
-            showControls = true
-        }
-        scheduleControlsAutoHide(delay: 2.5)
     }
 
     private func skipTime(by delta: Double) {
