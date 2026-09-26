@@ -11,43 +11,53 @@ struct MediaTitlePill: View {
     /// (0,2 = 20 % de chaque côté, comme les barres historiques).
     let sideInsetFraction: CGFloat = 0.2
 
-    @State private var availableWidth: CGFloat = 0
+    @State private var containerWidth: CGFloat = 0
     @State private var copied = false
     @State private var resetTask: Task<Void, Never>?
 
     var body: some View {
-        Group {
-            if copied {
-                Label("Copié", systemImage: "doc.on.doc")
-                    .font(.footnote.weight(.medium))
-            } else {
-                Text(name)
-                    .font(.body.weight(.medium))
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.6)
+        // La largeur utile est celle **offerte** par l'écran, relevée sur un
+        // gabarit transparent qui la remplit. Mesurer la pastille elle-même
+        // créait une boucle de retour : son padding dépendait de sa propre
+        // largeur, donc la première mesure était fausse (le titre prenait
+        // toute la place), le titre était ensuite repoussé et une seconde
+        // mesure se déclenchait — un saut à l'apparition, deux images pour se
+        // stabiliser en rotation.
+        Color.clear
+            .frame(maxWidth: .infinity)
+            .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { containerWidth = $0 }
+            .overlay {
+                Group {
+                    if copied {
+                        Label("Copié", systemImage: "doc.on.doc")
+                            .font(.footnote.weight(.medium))
+                    } else {
+                        Text(name)
+                            .font(.body.weight(.medium))
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.6)
+                    }
+                }
+                .foregroundStyle(.white)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 6)
+                .background(.black.opacity(0.25), in: Capsule())
+                .contentShape(Capsule())
+                .padding(.horizontal, containerWidth * sideInsetFraction)
+                .onTapGesture {
+                    UIPasteboard.general.string = name
+                    copied = true
+                    scheduleReset()
+                }
             }
-        }
-        .foregroundStyle(.white)
-        .padding(.horizontal, 14)
-        .padding(.vertical, 6)
-        .background(.black.opacity(0.25), in: Capsule())
-        .contentShape(Capsule())
-        .onTapGesture {
-            UIPasteboard.general.string = name
-            copied = true
-            scheduleReset()
-        }
-        .onChange(of: name) { _, _ in
-            // Changement de média : l'accusé « Copié » ne doit pas suivre.
-            resetTask?.cancel()
-            copied = false
-        }
-        .onDisappear {
-            resetTask?.cancel()
-        }
-        .padding(.horizontal, availableWidth * sideInsetFraction)
-        .frame(maxWidth: .infinity)
-        .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { availableWidth = $0 }
+            .onChange(of: name) { _, _ in
+                // Changement de média : l'accusé « Copié » ne doit pas suivre.
+                resetTask?.cancel()
+                copied = false
+            }
+            .onDisappear {
+                resetTask?.cancel()
+            }
     }
 
     private func scheduleReset() {
@@ -55,7 +65,7 @@ struct MediaTitlePill: View {
         resetTask = Task {
             try? await Task.sleep(for: .seconds(1.5))
             guard !Task.isCancelled else { return }
-            withAnimation(.easeInOut(duration: 0.2)) {
+            withAnimation(Motion.animation(.easeInOut(duration: 0.2))) {
                 copied = false
             }
         }
