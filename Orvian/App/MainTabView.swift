@@ -3,9 +3,9 @@ import SwiftUI
 /// Conteneur des 5 onglets + barre flottante + visionneuses plein écran + suivi d'upload.
 ///
 /// Barre, de gauche à droite : Réglages · Tag · Accueil · Favoris · Profil.
-/// Seul l'onglet Accueil reste monté en permanence : ses données et sa
-/// position de scroll survivent aux changements d'onglet. Les autres onglets
-/// sont recréés à chaque visite (leur pile de navigation vit dans
+/// Accueil, Favoris et Tag restent montés en permanence : leurs données et
+/// leur position de scroll survivent aux changements d'onglet. Réglages et
+/// Profil sont recréés à chaque visite (leur pile de navigation vit dans
 /// `TabNavigationState`), ce qui limite la mémoire consommée.
 ///
 /// Le verrouillage couvre cet arbre sans le démonter. Les présentations,
@@ -125,10 +125,11 @@ struct MainTabView: View {
 
     @ViewBuilder
     private func tabPane(_ target: AppTab, @ViewBuilder content: () -> some View) -> some View {
-        // Seul l'Accueil reste monté en permanence (état de scroll et données
-        // conservés) ; les autres onglets ne sont montés que lorsqu'ils sont
-        // sélectionnés, ce qui libère leurs vues à chaque changement d'onglet.
-        if target == .home || target == shell.tab {
+        // Accueil, Favoris et Tag restent montés (données et position de
+        // défilement conservées) ; Réglages et Profil ne sont montés que
+        // lorsqu'ils sont sélectionnés, ce qui libère leurs vues à chaque
+        // changement d'onglet.
+        if target.isKeptAlive || target == shell.tab {
             content()
                 .opacity(shell.tab == target ? 1 : 0)
                 .allowsHitTesting(shell.tab == target)

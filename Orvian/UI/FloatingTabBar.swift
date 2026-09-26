@@ -101,6 +101,18 @@ enum AppTab: String, CaseIterable, Identifiable {
         }
     }
 
+    /// Onglets conservés montés entre deux visites : leurs données et leur
+    /// position de défilement survivent, ce qui supprime le squelette et le
+    /// retour en haut à chaque aller-retour. Profil et Réglages sont recréés à
+    /// chaque visite — leur contenu est peu coûteux à reconstruire et le gain
+    /// de mémoire vaut le coup.
+    var isKeptAlive: Bool {
+        switch self {
+        case .home, .favorites, .tag: return true
+        case .settings, .profile: return false
+        }
+    }
+
     var symbol: String {
         switch self {
         case .settings: return "gearshape"
