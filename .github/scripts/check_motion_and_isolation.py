@@ -135,4 +135,35 @@ assert "pendingToggleTask" in video
 assert "cancelPendingToggle" not in video, "Le rattrapaire clignotant ne doit plus exister"
 assert "try await Task.sleep(for: .milliseconds(250))" in video
 
+# --- Garde syntaxique : `return`/`break`/`continue` sortent d'un `defer` ------
+# Interdit par Swift (« 'return' cannot transfer control out of a defer
+# statement »). Erreur de compilation, donc invisible ici sans Xcode.
+def blank(match):
+    return "\n" * match.group(0).count("\n")
+
+
+def strip_noise(text):
+    text = re.sub(r'"""(?:.|\n)*?"""', blank, text)
+    text = re.sub(r"/\*(?:.|\n)*?\*/", blank, text)
+    text = re.sub(r"//[^\n]*", "", text)
+    return re.sub(r'"(?:[^"\\\n]|\\.)*"', '""', text)
+
+
+TRANSFER = re.compile(r"\b(?:return|break|continue)\b")
+hazards = []
+for path in every_swift():
+    clean = strip_noise(path.read_text(encoding="utf-8"))
+    for match in re.finditer(r"\bdefer\s*\{", clean):
+        depth, cursor = 1, match.end()
+        while cursor < len(clean) and depth:
+            if clean[cursor] == "{":
+                depth += 1
+            elif clean[cursor] == "}":
+                depth -= 1
+            cursor += 1
+        if depth == 0 and TRANSFER.search(clean[match.end():cursor - 1]):
+            line = clean[:match.start()].count("\n") + 1
+            hazards.append(f"{path.relative_to(ROOT)}:{line}")
+assert not hazards, "Transfert de contrôle dans un `defer` : " + ", ".join(hazards)
+
 print("Motion and isolation checks passed")

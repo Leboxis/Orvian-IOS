@@ -115,16 +115,18 @@ final class FileGridViewModel {
         defer {
             snapshotSuppressionDepth = max(0, snapshotSuppressionDepth - 1)
             // Imbrication : seule l'opération la plus externe publie.
-            guard snapshotSuppressionDepth == 0 else { return }
-            // La révision d'abord : la grille re-rend avec un compteur à jour,
-            // puis l'instantané est écrit.
-            if revisionBumpPending {
-                revisionBumpPending = false
-                itemsRevision &+= 1
-            }
-            if snapshotDirtyWhileSuppressed, loadedOnce {
-                snapshotDirtyWhileSuppressed = false
-                storeListSnapshot()
+            // (`return` est interdit dans un `defer`, d'où le `if`.)
+            if snapshotSuppressionDepth == 0 {
+                // La révision d'abord : la grille re-rend avec un compteur à
+                // jour, puis l'instantané est écrit.
+                if revisionBumpPending {
+                    revisionBumpPending = false
+                    itemsRevision &+= 1
+                }
+                if snapshotDirtyWhileSuppressed, loadedOnce {
+                    snapshotDirtyWhileSuppressed = false
+                    storeListSnapshot()
+                }
             }
         }
         return work()
