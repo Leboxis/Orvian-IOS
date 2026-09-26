@@ -54,7 +54,7 @@ struct AppLockSetupSheet: View {
 
                     CodeDots(filledCount: code.count, length: codeLength, isError: errorMessage != nil)
                         .modifier(ShakeEffect(animatableData: CGFloat(shakeTrigger)))
-                        .animation(.easeInOut(duration: 0.45), value: shakeTrigger)
+                        .animation(Motion.animation(.easeInOut(duration: 0.45)), value: shakeTrigger)
 
                     if let errorMessage {
                         Label(errorMessage, systemImage: "exclamationmark.triangle.fill")
@@ -188,10 +188,10 @@ struct AppLockSetupSheet: View {
     private func fail(_ message: String, then cleanup: (() -> Void)? = nil) {
         isRecoveringError = true
         AppLockHaptics.failure()
-        withAnimation(.snappy(duration: 0.2)) { errorMessage = message }
+        withAnimation(Motion.animation(.snappy(duration: 0.2))) { errorMessage = message }
         shakeTrigger += 1
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.85) {
-            withAnimation(.snappy(duration: 0.2)) { code = "" }
+            withAnimation(Motion.animation(.snappy(duration: 0.2))) { code = "" }
             cleanup?()
             isRecoveringError = false
         }

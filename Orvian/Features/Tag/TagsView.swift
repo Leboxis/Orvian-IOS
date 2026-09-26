@@ -50,7 +50,7 @@ struct TagsView: View {
                 .toolbar {
                     ToolbarItemGroup(placement: .topBarTrailing) {
                         Button {
-                            withAnimation(.snappy(duration: 0.25)) {
+                            withAnimation(Motion.animation(.snappy(duration: 0.25))) {
                                 layout = layout == .grid ? .list : .grid
                             }
                         } label: {
@@ -315,7 +315,7 @@ struct TagsView: View {
               let toIndex = ordered.firstIndex(where: { $0.id == target.id }),
               fromIndex != toIndex
         else { return }
-        withAnimation(.snappy(duration: 0.25)) {
+        withAnimation(Motion.animation(.snappy(duration: 0.25))) {
             ordered.move(
                 fromOffsets: IndexSet(integer: fromIndex),
                 toOffset: toIndex > fromIndex ? toIndex + 1 : toIndex
@@ -677,7 +677,7 @@ private struct CreateTagSheet: View {
         ) {
             ForEach(TagPalette.colors, id: \.self) { hex in
                 Button {
-                    withAnimation(.snappy(duration: 0.2)) {
+                    withAnimation(Motion.animation(.snappy(duration: 0.2))) {
                         color = hex
                         if let c = Color(hex: hex) {
                             customColor = c

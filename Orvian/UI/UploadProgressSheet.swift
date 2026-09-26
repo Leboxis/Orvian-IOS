@@ -54,7 +54,7 @@ struct UploadProgressSheet: View {
                 ToolbarItem(placement: .topBarLeading) {
                     if manager.activeTasksCount == 0 && !manager.tasks.isEmpty {
                         Button("Effacer") {
-                            withAnimation {
+                            withAnimation(Motion.animation(.default)) {
                                 manager.clearCompleted()
                             }
                         }

@@ -184,7 +184,7 @@ struct DirectoryView: View {
                 }
                 .padding(.top, showBreadcrumb ? 2 : 4)
                 .padding(.bottom, 2)
-                .animation(.snappy(duration: 0.25), value: searchBarPresented)
+                .animation(Motion.animation(.snappy(duration: 0.25)), value: searchBarPresented)
             }
         }
         .toolbar {

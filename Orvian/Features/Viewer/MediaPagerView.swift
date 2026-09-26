@@ -312,7 +312,7 @@ struct MediaPagerView: View {
                 if canDismissCurrentImage, isVertical, abs(value.translation.height) > 130 {
                     dismiss()
                 } else {
-                    withAnimation(.snappy(duration: 0.25)) {
+                    withAnimation(Motion.animation(.snappy(duration: 0.25))) {
                         dismissOffset = 0
                     }
                 }
@@ -705,7 +705,7 @@ private struct ZoomablePhotoPage: View {
             .scaleEffect(scale)
             .offset(panOffset)
             .onTapGesture(count: 2) {
-                withAnimation(.snappy(duration: 0.3)) {
+                withAnimation(Motion.animation(.snappy(duration: 0.3))) {
                     if isZoomed {
                         scale = 1
                         offset = .zero
@@ -762,13 +762,13 @@ private struct ZoomablePhotoPage: View {
             }
             .onEnded { _ in
                 if scale < 1.15 {
-                    withAnimation(.snappy(duration: 0.28)) {
+                    withAnimation(Motion.animation(.snappy(duration: 0.28))) {
                         scale = 1
                         offset = .zero
                     }
                 } else {
                     let clamped = clampOffset(offset, screenSize: screenSize, currentScale: scale)
-                    withAnimation(.snappy(duration: 0.2)) {
+                    withAnimation(Motion.animation(.snappy(duration: 0.2))) {
                         offset = clamped
                     }
                 }
@@ -790,7 +790,7 @@ private struct ZoomablePhotoPage: View {
                     height: offset.height + value.translation.height
                 )
                 let clamped = clampOffset(newRaw, screenSize: screenSize, currentScale: scale)
-                withAnimation(.snappy(duration: 0.2)) {
+                withAnimation(Motion.animation(.snappy(duration: 0.2))) {
                     offset = clamped
                     dragOffset = .zero
                 }
@@ -845,7 +845,7 @@ private struct ZoomablePhotoPage: View {
             )
             guard !Task.isCancelled else { return }
             if let image {
-                withAnimation(.easeIn(duration: 0.2)) {
+                withAnimation(Motion.animation(.easeIn(duration: 0.2))) {
                     displayImage = image
                 }
                 return
@@ -858,7 +858,7 @@ private struct ZoomablePhotoPage: View {
     private func loadFullResolutionImage() async {
         let image = await HiresImageStore.shared.fullResolutionImage(driveId: driveId, fileId: file.id)
         guard !Task.isCancelled, let image else { return }
-        withAnimation(.easeIn(duration: 0.2)) {
+        withAnimation(Motion.animation(.easeIn(duration: 0.2))) {
             fullImage = image
         }
     }

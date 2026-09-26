@@ -377,7 +377,7 @@ struct FileGridView: View {
             .scrollIndicators(.hidden)
             .onChange(of: scrollToTopRequest) { oldValue, newValue in
                 guard oldValue != newValue else { return }
-                withAnimation(.snappy(duration: 0.3)) {
+                withAnimation(Motion.animation(.snappy(duration: 0.3))) {
                     proxy.scrollTo("file-grid-top", anchor: .top)
                 }
             }

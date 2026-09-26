@@ -191,7 +191,7 @@ struct FavoritesView: View {
                     }
                     .padding(.top, 4)
                     .padding(.bottom, 2)
-                    .animation(.snappy(duration: 0.25), value: searchBarVisible)
+                    .animation(Motion.animation(.snappy(duration: 0.25)), value: searchBarVisible)
                 }
             }
             .toolbar {

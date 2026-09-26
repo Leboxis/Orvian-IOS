@@ -525,7 +525,7 @@ private struct AppearanceSpace: View {
                                 .frame(height: 44)
                         }
                     }
-                    .animation(.snappy, value: fileGridColumns)
+                    .animation(Motion.animation(.snappy), value: fileGridColumns)
                     .accessibilityHidden(true)
                 }
                 .padding(.vertical, 4)
@@ -703,7 +703,7 @@ private struct StorageSpace: View {
                 Capsule()
                     .fill(ratio > 0.85 ? .orange : .green)
                     .frame(width: proxy.size.width * max(0.04, ratio), height: 8)
-                    .animation(.snappy, value: ratio)
+                    .animation(Motion.animation(.snappy), value: ratio)
             }
         }
         .frame(height: 8)

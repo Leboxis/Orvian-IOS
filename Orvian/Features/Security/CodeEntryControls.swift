@@ -20,7 +20,7 @@ struct CodeDots: View {
                     }
                     .frame(width: 18, height: 18)
                     .scaleEffect(filledCount == index + 1 ? 1.12 : 1)
-                    .animation(.snappy(duration: 0.18), value: filledCount)
+                    .animation(Motion.animation(.snappy(duration: 0.18)), value: filledCount)
             }
         }
     }
@@ -86,7 +86,7 @@ private struct KeypadButtonStyle: ButtonStyle {
         configuration.label
             .scaleEffect(configuration.isPressed ? 0.92 : 1)
             .opacity(configuration.isPressed ? 0.65 : 1)
-            .animation(.snappy(duration: 0.12), value: configuration.isPressed)
+            .animation(Motion.animation(.snappy(duration: 0.12)), value: configuration.isPressed)
     }
 }
 

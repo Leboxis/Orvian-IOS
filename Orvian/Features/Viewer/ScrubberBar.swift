@@ -52,7 +52,7 @@ struct ScrubberBar: View {
             onDragChanged(target)
             onDragEnded(target)
         }
-        .animation(.snappy(duration: 0.18), value: isScrubbing)
+        .animation(Motion.animation(.snappy(duration: 0.18)), value: isScrubbing)
         .onChange(of: isDragging) { _, dragging in
             // GestureState se réinitialise aussi si le système annule le geste,
             // alors que onEnded n'est appelé qu'en cas de fin normale.

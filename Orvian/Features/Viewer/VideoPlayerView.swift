@@ -200,7 +200,7 @@ struct VideoPlayerView: View {
             .opacity(showControls ? 1 : 0)
             .allowsHitTesting(showControls)
             .accessibilityHidden(!showControls)
-            .animation(.easeInOut(duration: 0.25), value: showControls)
+            .animation(Motion.animation(.easeInOut(duration: 0.25)), value: showControls)
         }
         .onAppear {
             isDisappeared = false
@@ -343,7 +343,7 @@ struct VideoPlayerView: View {
             try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
             guard !Task.isCancelled else { return }
             if !isScrubbing, !isSeeking {
-                withAnimation(.easeInOut(duration: 0.25)) {
+                withAnimation(Motion.animation(.easeInOut(duration: 0.25))) {
                     showControls = false
                 }
             }
@@ -352,7 +352,7 @@ struct VideoPlayerView: View {
 
     private func toggleControls() {
         guard !voiceOverEnabled else { showControls = true; return }
-        withAnimation(.easeInOut(duration: 0.25)) {
+        withAnimation(Motion.animation(.easeInOut(duration: 0.25))) {
             showControls.toggle()
         }
         if showControls {
@@ -1212,14 +1212,14 @@ struct VideoPlayerView: View {
     }
 
     private func showSkipFeedback(_ direction: SkipDirection) {
-        withAnimation(.snappy(duration: 0.15)) {
+        withAnimation(Motion.animation(.snappy(duration: 0.15))) {
             skipFeedback = direction
         }
         skipFeedbackResetTask?.cancel()
         skipFeedbackResetTask = Task {
             try? await Task.sleep(for: .seconds(0.6))
             guard !Task.isCancelled else { return }
-            withAnimation(.easeOut(duration: 0.25)) {
+            withAnimation(Motion.animation(.easeOut(duration: 0.25))) {
                 skipFeedback = nil
             }
         }
@@ -1302,7 +1302,7 @@ private struct TransportTimeView: View {
                 .foregroundStyle(.white.opacity(0.85))
                 .scaleEffect(isScrubbing ? 1.18 : 1, anchor: .trailing)
                 .contentTransition(.numericText())
-                .animation(.snappy(duration: 0.2), value: Int(displayedTime))
+                .animation(Motion.animation(.snappy(duration: 0.2)), value: Int(displayedTime))
                 .frame(minWidth: 34, alignment: .trailing)
 
             ScrubberBar(
@@ -1322,7 +1322,7 @@ private struct TransportTimeView: View {
                 .foregroundStyle(.white.opacity(0.85))
                 .scaleEffect(isScrubbing ? 1.18 : 1, anchor: .leading)
                 .contentTransition(.numericText())
-                .animation(.snappy(duration: 0.2), value: Int(clock.duration))
+                .animation(Motion.animation(.snappy(duration: 0.2)), value: Int(clock.duration))
                 .frame(minWidth: 34, alignment: .leading)
         }
     }

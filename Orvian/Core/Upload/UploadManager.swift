@@ -663,7 +663,7 @@ private static let fallbackDateFormatter: DateFormatter = {
             try? await Task.sleep(for: .seconds(5))
             guard !Task.isCancelled else { return }
             if activeTasksCount == 0 && !hasFailures {
-                withAnimation(.snappy(duration: 0.3)) {
+                withAnimation(Motion.animation(.snappy(duration: 0.3))) {
                     isPillVisible = false
                 }
             }

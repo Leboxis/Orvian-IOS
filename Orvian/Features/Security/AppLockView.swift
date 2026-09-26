@@ -113,7 +113,7 @@ struct AppLockView: View {
 
             CodeDots(filledCount: code.count, length: codeLength, isError: showWrong)
                 .modifier(ShakeEffect(animatableData: CGFloat(shakeTrigger)))
-                .animation(.easeInOut(duration: 0.45), value: shakeTrigger)
+                .animation(Motion.animation(.easeInOut(duration: 0.45)), value: shakeTrigger)
 
             statusMessage
         }
@@ -182,11 +182,11 @@ struct AppLockView: View {
         let context = LAContext()
         var error: NSError?
         guard context.canEvaluatePolicy(.deviceOwnerAuthenticationWithBiometrics, error: &error) else {
-            withAnimation(.snappy(duration: 0.2)) {
+            withAnimation(Motion.animation(.snappy(duration: 0.2))) {
                 biometricsMessage = "\(biometryName) indisponible sur cet appareil."
             }
             DispatchQueue.main.asyncAfter(deadline: .now() + 2.4) {
-                withAnimation(.snappy(duration: 0.2)) { biometricsMessage = nil }
+                withAnimation(Motion.animation(.snappy(duration: 0.2))) { biometricsMessage = nil }
             }
             return
         }
@@ -212,13 +212,13 @@ struct AppLockView: View {
                     // voyait Face ID réussir son animation sans comprendre
                     // pourquoi l'app restait verrouillée (verrouillage Face ID
                     // après trop d'essais, annulation…). On l'affiche.
-                    withAnimation(.snappy(duration: 0.2)) {
+                    withAnimation(Motion.animation(.snappy(duration: 0.2))) {
                         biometricsMessage = (error as? LAError)?.localizedDescription
                             ?? error?.localizedDescription
                             ?? "Échec de Face ID : utilisez votre code."
                     }
                     DispatchQueue.main.asyncAfter(deadline: .now() + 2.4) {
-                        withAnimation(.snappy(duration: 0.2)) { biometricsMessage = nil }
+                        withAnimation(Motion.animation(.snappy(duration: 0.2))) { biometricsMessage = nil }
                     }
                 }
             }
@@ -251,10 +251,10 @@ struct AppLockView: View {
                 biometricsMessage = error.localizedDescription
             }
             AppLockHaptics.failure()
-            withAnimation(.snappy(duration: 0.2)) { showWrong = true }
+            withAnimation(Motion.animation(.snappy(duration: 0.2))) { showWrong = true }
             shakeTrigger += 1
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.85) {
-                withAnimation(.snappy(duration: 0.2)) {
+                withAnimation(Motion.animation(.snappy(duration: 0.2))) {
                     code = ""
                     showWrong = false
                 }

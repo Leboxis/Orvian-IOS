@@ -71,7 +71,7 @@ struct TextFileViewer: View {
                 ToolbarItemGroup(placement: .topBarTrailing) {
                     if !isLoading && loadError == nil {
                         Button {
-                            withAnimation(.snappy(duration: 0.2)) {
+                            withAnimation(Motion.animation(.snappy(duration: 0.2))) {
                                 isSearching.toggle()
                             }
                             if isSearching {
@@ -246,7 +246,7 @@ struct TextFileViewer: View {
             }
 
             Button {
-                withAnimation(.snappy(duration: 0.2)) {
+                withAnimation(Motion.animation(.snappy(duration: 0.2))) {
                     isSearching = false
                     searchQuery = ""
                 }
