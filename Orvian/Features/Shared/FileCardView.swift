@@ -184,34 +184,37 @@ struct FileCardView: View {
 
     @ViewBuilder
     private var content: some View {
-        if let thumbnail {
-            Image(uiImage: thumbnail)
-                .resizable()
-                .scaledToFill()
-                // L'image remplace l'icône typée sans coupure : sur un scroll
-                // rapide, la substitution instantanée scintillait.
-                .transition(.opacity)
-                .animation(Motion.animation(.easeOut(duration: 0.2)), value: thumbnail)
-        } else if thumbnailLoaded {
-            // Fichier sans miniature : vignette typée, teinte très légère.
-            ZStack {
-                Rectangle().fill(tint.opacity(0.10))
-                Image(systemName: kind.symbolName)
-                    .font(.system(size: 30, weight: .light))
-                    .foregroundStyle(tint)
-                    .padding(14)
-            }
-        } else {
-            ZStack {
-                Rectangle().fill(.quaternary.opacity(0.5))
-                if kind == .folder {
+        Group {
+            if let thumbnail {
+                Image(uiImage: thumbnail)
+                    .resizable()
+                    .scaledToFill()
+                    .transition(.opacity)
+            } else if thumbnailLoaded {
+                // Fichier sans miniature : vignette typée, teinte très légère.
+                ZStack {
+                    Rectangle().fill(tint.opacity(0.10))
                     Image(systemName: kind.symbolName)
                         .font(.system(size: 30, weight: .light))
-                        .foregroundStyle(tint.opacity(0.8))
+                        .foregroundStyle(tint)
                         .padding(14)
+                }
+            } else {
+                ZStack {
+                    Rectangle().fill(.quaternary.opacity(0.5))
+                    if kind == .folder {
+                        Image(systemName: kind.symbolName)
+                            .font(.system(size: 30, weight: .light))
+                            .foregroundStyle(tint.opacity(0.8))
+                            .padding(14)
+                    }
                 }
             }
         }
+        // L'animation est portée par le conteneur, pas par l'image : c'est
+        // l'insertion/remplacement de la branche qui doit être en fondu. Sur un
+        // scroll rapide, la substitution instantanée scintillait.
+        .animation(Motion.animation(.easeOut(duration: 0.2)), value: thumbnail != nil)
     }
 
     private var subtitle: String {
