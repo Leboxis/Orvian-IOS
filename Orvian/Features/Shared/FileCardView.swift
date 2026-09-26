@@ -42,10 +42,11 @@ struct FileCardView: View {
     var action: () -> Void
 
     /// Préférence globale : conserve le type comme repère lorsque le poids est masqué.
-    @AppStorage("showFileSizes") private var showFileSizes = true
-    /// Préférence globale : affiche ou masque l'étoile des favoris sur les cartes.
-    @AppStorage("showFavoriteStars") private var showFavoriteStars = true
-    @AppStorage("defaultFolderColor") private var defaultFolderColor = "#4285F5"
+    /// Lue par la grille et transmise : une carte sur 150 n'a plus à observer
+    /// elle-même les Réglages.
+    var showFileSizes = true
+    /// Couleur de repli des dossiers sans couleur API, lue par la grille.
+    var defaultFolderColor = "#4285F5"
     @State private var thumbnail: UIImage?
     @State private var thumbnailLoaded = false
 
@@ -151,7 +152,7 @@ struct FileCardView: View {
         .overlay(alignment: .topTrailing) {
             if selectionMode {
                 selectionBadge
-            } else if showsFavoriteBadge && showFavoriteStars {
+            } else if showsFavoriteBadge {
                 favoriteBadge
             }
         }
@@ -187,6 +188,10 @@ struct FileCardView: View {
             Image(uiImage: thumbnail)
                 .resizable()
                 .scaledToFill()
+                // L'image remplace l'icône typée sans coupure : sur un scroll
+                // rapide, la substitution instantanée scintillait.
+                .transition(.opacity)
+                .animation(Motion.animation(.easeOut(duration: 0.2)), value: thumbnail)
         } else if thumbnailLoaded {
             // Fichier sans miniature : vignette typée, teinte très légère.
             ZStack {

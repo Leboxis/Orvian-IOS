@@ -47,6 +47,10 @@ struct FileGridView: View {
     var scrollToTopRequest = 0
 
     private let mediaMetadata = MediaMetadataStore.shared
+    // Les préférences ci-dessous sont lues **une seule fois par grille** puis
+    // transmises aux cartes :observées par chaque vignette, elles faisaient
+    // 450 abonnements sur une grille de 150 cartes, et un simple changement de
+    // réglage redessinait toutes les vignettes.
     @AppStorage("prefetchThumbnails") private var prefetchThumbnails = true
     @AppStorage("prefetchVideoURLs") private var prefetchVideoURLs = true
     @AppStorage("prefetchOnWiFiOnly") private var prefetchOnWiFiOnly = true
@@ -55,6 +59,8 @@ struct FileGridView: View {
     /// Préférence globale : affiche l'étoile des favoris sur les cartes,
     /// y compris dans l'onglet Favoris où elle était autrefois masquée d'office.
     @AppStorage("showFavoriteStars") private var showFavoriteStars = true
+    @AppStorage("showFileSizes") private var showFileSizes = true
+    @AppStorage("defaultFolderColor") private var defaultFolderColor = "#4285F5"
     @State private var metadataRevision = 0
     @State private var prefetchTask: Task<Void, Never>?
     /// Demande de préchargement la plus récente. Une rafale d'apparitions de
@@ -636,6 +642,8 @@ struct FileGridView: View {
             isTrashed: viewModel.source == .trash,
             isSelected: selectedIDs.contains(file.id),
             showsFavoriteBadge: showFavoriteStars,
+            showFileSizes: showFileSizes,
+            defaultFolderColor: defaultFolderColor,
             onToggleSelection: onToggleSelection == nil ? nil : { onToggleSelection?(file) },
             onToggleFavorite: {
                 Task { await viewModel.toggleFavorite(file) }
