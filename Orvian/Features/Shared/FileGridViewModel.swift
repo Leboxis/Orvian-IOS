@@ -416,8 +416,10 @@ final class FileGridViewModel {
         guard credentialFingerprint == TokenStore.credentialFingerprint() else { return }
         guard !snapshotWriteScheduled else { return }
         snapshotWriteScheduled = true
-        Task { @MainActor [weak self] in
-            // Laisse les mutations synchrones du même tour se réunir.
+        // La tâche hérite du MainActor : elle attend le tour suivant, puis
+        // écrit l'état le plus récent — les mutations intermédiaires de la
+        // même salve sont donc regroupées.
+        Task { [weak self] in
             await Task.yield()
             guard let self else { return }
             self.snapshotWriteScheduled = false
