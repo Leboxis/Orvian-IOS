@@ -17,10 +17,6 @@ struct MainTabView: View {
     /// Navigation possédée par la session, remplacée au changement de drive.
     let shell: MainTabShellState
     @State private var showUploadSheet = false
-    /// Hauteur mesurée des pastilles superposées à la barre d'onglets (bandeau
-    /// de téléchargement + pilule d'upload). Zéro quand rien n'est affiché : la
-    /// barre et les grilles gardent alors exactement leur apparence actuelle.
-    @State private var overlayChromeHeight: CGFloat = 0
     @AppStorage("favoritesReselectScrollToTop") private var favoritesReselectScrollToTop = true
 
     private let uploadManager = UploadManager.shared
@@ -37,22 +33,17 @@ struct MainTabView: View {
         @Bindable var shell = shell
         ZStack(alignment: .bottom) {
             tabs
-                // Réserve exactement la place des pastilles flottant au-dessus
-                // de la barre : sans cela, elles recouvraient le bouton « + »
-                // et la dernière rangée des grilles, dont les marges basses
-                // sont calibrées pour la barre seule. Mesurée (et non
-                // devinée) : elle suit la taille réelle du texte (Dynamic
-                // Type) et s'anime avec l'apparition des pastilles.
-                .safeAreaInset(edge: .bottom, spacing: 0) {
-                    Color.clear.frame(height: max(0, overlayChromeHeight))
-                        .animation(.snappy(duration: 0.28), value: overlayChromeHeight)
-                }
 
+            // Barre et pastilles partagent un seul bloc ancré en bas : la
+            // pastille apparaît **au-dessus** de la grille, qui ne se décale
+            // plus. Une réservation d'espace était ajoutée autrefois sous le
+            // contenu, puis animée : un import poussait la liste de 110 points
+            // sous le doigt du milieu d'un scroll. `DS.floatingBarInset`
+            // réserve déjà la hauteur de la barre et de la pastille.
             VStack(spacing: 0) {
                 TransferOverlayChrome(
                     uploadManager: uploadManager,
-                    onShowUploads: { showUploadSheet = true },
-                    onHeightChange: { overlayChromeHeight = $0 }
+                    onShowUploads: { showUploadSheet = true }
                 )
 
                 FloatingTabBar(
@@ -156,7 +147,6 @@ struct MainTabView: View {
 private struct TransferOverlayChrome: View {
     let uploadManager: UploadManager
     let onShowUploads: () -> Void
-    let onHeightChange: (CGFloat) -> Void
 
     @StateObject private var downloadService = FileDownloadService.shared
 
@@ -186,13 +176,8 @@ private struct TransferOverlayChrome: View {
                 Color.clear.frame(height: 8)
             }
         }
-        .onGeometryChange(for: CGFloat.self) { proxy in
-            proxy.size.height
-        } action: { height in
-            onHeightChange(height)
-        }
-        .animation(.snappy(duration: 0.28), value: uploadManager.isPillVisible)
-        .animation(.snappy(duration: 0.28), value: downloadService.isDownloading)
+        .animation(Motion.animation(.snappy(duration: 0.28)), value: uploadManager.isPillVisible)
+        .animation(Motion.animation(.snappy(duration: 0.28)), value: downloadService.isDownloading)
         .alert("Téléchargement impossible", isPresented: downloadErrorBinding) {
             Button("OK", role: .cancel) {}
         } message: {

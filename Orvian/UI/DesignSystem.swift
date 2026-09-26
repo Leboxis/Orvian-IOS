@@ -42,8 +42,11 @@ enum DS {
 
     // MARK: - Marges basses du contenu
 
-    /// Espace réservé sous une grille pour la barre d'onglets flottante.
-    static let floatingBarInset: CGFloat = 110
+    /// Espace réservé sous une grille pour la barre d'onglets flottante **et**
+    /// pour la pastille de transfert qui flotte au-dessus d'elle. Égal à
+    /// `floatingPillInset` : sans cela, une pastille visible recouvrirait le
+    /// bas de la dernière rangée de cartes.
+    static let floatingBarInset: CGFloat = 130
     /// Marge basse des actions superposées à la barre (bouton « + »).
     static let floatingActionInset: CGFloat = 104
     /// Marge basse des pastilles de progression centrées au-dessus de la barre.
