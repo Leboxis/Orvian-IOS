@@ -84,6 +84,24 @@ final class FileGridViewModel {
     /// Au moins un `items` muté pendant l'opération groupée en cours : la
     /// révision n'est comptée qu'une fois, quand la profondeur revient à zéro.
     private var revisionBumpPending = false
+    /// Mémoïsation du filtre/tri de la grille. Elle vit ici, et non dans un
+    /// `@State` de la vue : la muter pendant l'évaluation du `body` est
+    /// précisément ce que SwiftUI signale comme écriture d'état pendant une
+    /// mise à jour (comportement non défini, avertissements en console,
+    /// redessins en boucle). Le composant qui possède les données possède donc
+    /// aussi le calcul dérivé, et rien n'est écrit pendant le rendu.
+    @ObservationIgnored private var visibleItemsCache = VisibleItemsCache()
+
+    /// Éléments après filtres, recherche et tri, mémoïsés par `key`. La clé
+    /// est purement incrémentale : sa comparaison est O(1) au lieu de relire
+    /// tout le tableau à chaque rendu.
+    func visibleItems(key: VisibleItemsKey, mediaMetadata: MediaMetadataStore) -> [DriveFile] {
+        visibleItemsCache.visibleItems(
+            key: key,
+            items: items,
+            mediaMetadata: mediaMetadata
+        )
+    }
 
     /// Exécute `work` en ne comptant qu'une seule révision et en ne stockant
     /// qu'un seul snapshot à la fin, même si `items` est muté plusieurs fois.

@@ -79,10 +79,6 @@ struct FileGridView: View {
     @State private var renameRequest: FilePresentation?
     /// Texte de l'alerte de renommage, conservé entre l'ouverture et la validation.
     @State private var renameText = ""
-    /// Cache du calcul `visibleItems` : les filtres/tri/regroupement ne sont
-    /// recalculés que si les données, les filtres, la recherche ou les
-    /// métadonnées vidéo changent — pas à chaque rendu du body.
-    @State private var visibleItemsCache = VisibleItemsCache()
 
     private var needsVideoMetadata: Bool {
         filters.sort == .duration || filters.orientation != nil || filters.highResolutionVideosOnly
@@ -405,13 +401,10 @@ struct FileGridView: View {
 
     /// Éléments après filtres (type, orientation, recherche) et tri.
     /// La clé de mémoïsation est purement incrémentale : sa comparaison est
-    /// O(1) au lieu de relire tout le tableau à chaque rendu.
+    /// O(1) au lieu de relire tout le tableau à chaque rendu. Le cache lui-même
+    /// appartient au vue-modèle, jamais à un `@State` de la vue.
     private var visibleItems: [DriveFile] {
-        visibleItemsCache.visibleItems(
-            key: visibleItemsKey,
-            items: viewModel.items,
-            mediaMetadata: mediaMetadata
-        )
+        viewModel.visibleItems(key: visibleItemsKey, mediaMetadata: mediaMetadata)
     }
 
     private var visibleItemsKey: VisibleItemsKey {
@@ -821,25 +814,35 @@ private struct MetadataRevisionGate: ViewModifier {
     }
 }
 
-/// Clé de mémoïsation du résultat des filtres/tri de la grille : la version
-/// incrémentale du contenu (itemsRevision) remplace la comparaison du
-/// tableau complet — tant que les données, les filtres, la recherche et la
-/// révision des métadonnées vidéo n'ont pas changé, la liste visible n'est
-/// pas recalculée à chaque rendu. La source et le drive protègent du
-/// remplacement du vue-modèle (recherche ↔ dossier) dans la même vue.
-fileprivate struct VisibleItemsKey: Hashable {
-    let source: FileSource
-    let driveId: Int
-    let itemsRevision: Int
-    let filters: FileFilters
-    let searchText: String
-    let metadataRevision: Int
-    let foldersFirst: Bool
-}
+    /// Clé de mémoïsation du résultat des filtres/tri de la grille : la version
+    /// incrémentale du contenu (itemsRevision) remplace la comparaison du
+    /// tableau complet — tant que les données, les filtres, la recherche et la
+    /// révision des métadonnées vidéo n'ont pas changé, la liste visible n'est
+    /// pas recalculée à chaque rendu. La source et le drive protègent du
+    /// remplacement du vue-modèle (recherche ↔ dossier) dans la même vue.
+    ///
+    /// Le type est interne (et non `fileprivate`) parce que le cache vit
+    /// désormais dans `FileGridViewModel`, qui le mute.
+    struct VisibleItemsKey: Hashable {
+        let source: FileSource
+        let driveId: Int
+        let itemsRevision: Int
+        let filters: FileFilters
+        let searchText: String
+        let metadataRevision: Int
+        let foldersFirst: Bool
+    }
 
 /// Mémoïse le résultat des filtres/tri de la grille.
+///
+/// Ce cache était un `@State` de la vue, muté depuis `visibleItems` — donc
+/// **pendant l'évaluation du `body`**. SwiftUI signale ce genre d'écriture
+/// comme un comportement défini de façon indéterminée : avertissements en
+/// console, redessins en boucle, gel bref lors d'un gros changement. Il est
+/// donc détenu par `FileGridViewModel`, le composant qui possède déjà les
+/// données de la grille, et rien n'est écrit pendant le rendu.
 @MainActor
-private struct VisibleItemsCache {
+struct VisibleItemsCache {
     private var cachedKey: VisibleItemsKey?
     private var cachedResult: [DriveFile] = []
 
