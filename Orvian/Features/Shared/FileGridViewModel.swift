@@ -15,7 +15,15 @@ final class FileGridViewModel {
             // listes. Toute mutation passe ici, y compris la modification
             // d'un élément (nom, favori, couleur, tags), le tri ou l'ajout
             // paginé, car un tableau valeur est réécrit en entier.
-            itemsRevision &+= 1
+            // Dans une opération groupée (`withoutSnapshot`), la révision
+            // n'est comptée qu'une fois, à la fin : `mergeUploaded` faisait
+            // removeAll + append + sort, donc trois redessins de la grille
+            // pour un seul import confirmé.
+            if snapshotSuppressionDepth > 0 {
+                revisionBumpPending = true
+            } else {
+                itemsRevision &+= 1
+            }
             // Les mutations locales (corbeille, déplacement, import, favoris,
             // renommage…) resynchronisent l'entrée de cache : une réouverture
             // de la liste affiche immédiatement l'état à jour.
@@ -73,15 +81,27 @@ final class FileGridViewModel {
     /// snapshots mémoire (et 3 révisions) pour une seule opération logique.
     private var snapshotSuppressionDepth = 0
     private var snapshotDirtyWhileSuppressed = false
+    /// Au moins un `items` muté pendant l'opération groupée en cours : la
+    /// révision n'est comptée qu'une fois, quand la profondeur revient à zéro.
+    private var revisionBumpPending = false
 
-    /// Exécute `work` en ne stockant qu'un seul snapshot à la fin, même si
-    /// `items` est muté plusieurs fois. Les lectures concurrentes sur le
-    /// MainActor ne peuvent pas observer d'état intermédiaire.
+    /// Exécute `work` en ne comptant qu'une seule révision et en ne stockant
+    /// qu'un seul snapshot à la fin, même si `items` est muté plusieurs fois.
+    /// Les lectures concurrentes sur le MainActor ne peuvent pas observer
+    /// d'état intermédiaire.
     private func withoutSnapshot<T>(_ work: () -> T) -> T {
         snapshotSuppressionDepth += 1
         defer {
             snapshotSuppressionDepth = max(0, snapshotSuppressionDepth - 1)
-            if snapshotSuppressionDepth == 0, snapshotDirtyWhileSuppressed, loadedOnce {
+            // Imbrication : seule l'opération la plus externe publie.
+            guard snapshotSuppressionDepth == 0 else { return }
+            // La révision d'abord : la grille re-rend avec un compteur à jour,
+            // puis l'instantané est écrit.
+            if revisionBumpPending {
+                revisionBumpPending = false
+                itemsRevision &+= 1
+            }
+            if snapshotDirtyWhileSuppressed, loadedOnce {
                 snapshotDirtyWhileSuppressed = false
                 storeListSnapshot()
             }

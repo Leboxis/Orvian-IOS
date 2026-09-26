@@ -284,6 +284,7 @@ actor ThumbnailProvider {
     /// Préchargement discret avec régulation de concurrence et abandon des requêtes lointaines.
     func prefetch(driveId: Int, fileIds: [Int], isTrashed: Bool = false) {
         let credentialFingerprint = Self.currentCredentialFingerprint()
+        var seen = Set<Key>()
         var newestKeys: [Key] = []
         for fileId in fileIds {
             let key = Key(
@@ -296,9 +297,11 @@ actor ThumbnailProvider {
                   Self.memory.object(forKey: key.nsString) == nil,
                   !hasDiskEntry(key)
             else { continue }
-            if !newestKeys.contains(key) {
-                newestKeys.append(key)
-            }
+            // `Set` plutôt que `contains` sur le tableau : préparer 100
+            // fichiers coûtait ~5 000 comparaisons de clés, de quoi bloquer
+            // le chargement des miniatures sur un très gros dossier.
+            guard seen.insert(key).inserted else { continue }
+            newestKeys.append(key)
         }
 
         // La dernière position visible remplace les anciennes demandes encore
