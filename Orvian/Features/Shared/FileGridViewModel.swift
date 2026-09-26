@@ -84,6 +84,9 @@ final class FileGridViewModel {
     /// Au moins un `items` muté pendant l'opération groupée en cours : la
     /// révision n'est comptée qu'une fois, quand la profondeur revient à zéro.
     private var revisionBumpPending = false
+    /// Une écriture d'instantané est en attente : les mutations suivantes se
+    /// regrouperont avec elle au lieu d'en écrire une chacune.
+    private var snapshotWriteScheduled = false
     /// Mémoïsation du filtre/tri de la grille. Elle vit ici, et non dans un
     /// `@State` de la vue : la muter pendant l'évaluation du `body` est
     /// précisément ce que SwiftUI signale comme écriture d'état pendant une
@@ -155,6 +158,10 @@ final class FileGridViewModel {
     /// relancés à chaque bascule d'onglet.
     func loadIfNeeded() async {
         guard !isInitialLoading, !isReloading else { return }
+        // L'écriture de l'instantané est différée : la vider d'abord, sinon
+        // une grille qui remonte pourrait lire une entrée antérieure à la
+        // dernière mutation confirmée.
+        flushPendingSnapshot()
         if loadedOnce {
             // SwiftUI peut conserver le view model alors que l'abonnement au
             // PassthroughSubject de sa vue est démonté. Vérifier aussi cet état
@@ -396,8 +403,38 @@ final class FileGridViewModel {
 
     /// Écrit (ou réécrit) l'instantané de la liste dans le cache mémoire.
     /// Appelé après un chargement complet, et à chaque mutation de `items`
-    /// via `didSet` tant que la liste a été chargée au moins une fois.
+    /// via `didSet` tant que la liste a été chargé au moins une fois.
+    ///
+    /// L'écriture est **différée au tour suivant du MainActor** et les appels
+    /// se regroupent : le store mémoire conserve le tableau `items` vivant, si
+    /// bien que la mutation suivante devait recopier la liste entière (5 000
+    /// fiches sur un gros dossier) sur le fil principal. Chaque étoile posée
+    /// payait donc ce prix. En n'écrivant qu'une fois par salve, le tampon
+    /// reste unique entre deux écritures et les mutations redeviennent en
+    /// place, sans copie.
     private func storeListSnapshot() {
+        guard credentialFingerprint == TokenStore.credentialFingerprint() else { return }
+        guard !snapshotWriteScheduled else { return }
+        snapshotWriteScheduled = true
+        Task { @MainActor [weak self] in
+            // Laisse les mutations synchrones du même tour se réunir.
+            await Task.yield()
+            guard let self else { return }
+            self.snapshotWriteScheduled = false
+            guard self.loadedOnce else { return }
+            self.commitListSnapshot()
+        }
+    }
+
+    /// Écrit l'instantané en attente sans attendre : un état plus récent ne
+    /// doit jamais être masqué par une entrée plus ancienne au remontage.
+    private func flushPendingSnapshot() {
+        guard snapshotWriteScheduled else { return }
+        snapshotWriteScheduled = false
+        commitListSnapshot()
+    }
+
+    private func commitListSnapshot() {
         guard credentialFingerprint == TokenStore.credentialFingerprint() else { return }
         DirectoryListStore.shared.store(
             source: source,
@@ -534,11 +571,17 @@ final class FileGridViewModel {
         let oldValue = items[index].isFavorite
         let newValue = !(oldValue ?? false)
         let shouldRemove = source == .favorites && !newValue
-        items[index].isFavorite = newValue
+        // Une seule révision et un seul instantané pour l'étoile posée, puis
+        // pour le retrait de la carte dans l'onglet Favoris.
+        withoutSnapshot {
+            items[index].isFavorite = newValue
+        }
         do {
             try await service.setFavorite(driveId: driveId, fileId: file.id, favorite: newValue)
             if shouldRemove {
-                items.removeAll { $0.id == file.id }
+                withoutSnapshot {
+                    items.removeAll { $0.id == file.id }
+                }
             }
             FileGridMutationCenter.shared.publish(
                 .favorite(driveId: driveId, fileId: file.id, isFavorite: newValue)
@@ -547,7 +590,9 @@ final class FileGridViewModel {
         } catch {
             if let restoredIndex = items.firstIndex(where: { $0.id == file.id }),
                items[restoredIndex].isFavorite == newValue {
-                items[restoredIndex].isFavorite = oldValue
+                withoutSnapshot {
+                    items[restoredIndex].isFavorite = oldValue
+                }
             }
             mutationErrorMessage = "Impossible de modifier le favori : \((error as? APIError)?.errorDescription ?? error.localizedDescription)"
             return false
