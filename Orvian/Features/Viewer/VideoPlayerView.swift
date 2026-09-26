@@ -1160,9 +1160,8 @@ struct VideoPlayerView: View {
     /// Simple tap : la bascule des contrôles est différée de 250 ms, soit la
     /// fenêtre de désambiguïsation du double-tap. Un second tap annule
     /// l'attente et ne fait que sauter de 10 s : les contrôles ne bougent donc
-    /// plus du tout, ni à l'aller ni au retour. L'ancien rattrapage
-    /// (`cancelPendingToggle`) les faisait disparaître puis revenir à chaque
-    /// double-tap.
+    /// plus du tout, ni à l'aller ni au retour. Le rattrapage précédent les
+    /// faisait disparaître puis revenir à chaque double-tap.
     private func handleVideoTap(at location: CGPoint) {
         let now = Date()
         let isDoubleTap = lastTapDate.map {

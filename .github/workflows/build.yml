@@ -92,6 +92,9 @@ jobs:
       - name: Check favorites disk cache
         run: python3 .github/scripts/check_favorites_cache.py
 
+      - name: Check motion switch and isolation invariants
+        run: python3 .github/scripts/check_motion_and_isolation.py
+
       - name: Check security, transfers and metadata isolation
         run: python3 .github/scripts/check_ios_regressions.py
 
