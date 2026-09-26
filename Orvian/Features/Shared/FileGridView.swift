@@ -48,7 +48,7 @@ struct FileGridView: View {
 
     private let mediaMetadata = MediaMetadataStore.shared
     // Les préférences ci-dessous sont lues **une seule fois par grille** puis
-    // transmises aux cartes :observées par chaque vignette, elles faisaient
+    // transmises aux cartes : observées par chaque vignette, elles faisaient
     // 450 abonnements sur une grille de 150 cartes, et un simple changement de
     // réglage redessinait toutes les vignettes.
     @AppStorage("prefetchThumbnails") private var prefetchThumbnails = true
@@ -822,24 +822,24 @@ private struct MetadataRevisionGate: ViewModifier {
     }
 }
 
-    /// Clé de mémoïsation du résultat des filtres/tri de la grille : la version
-    /// incrémentale du contenu (itemsRevision) remplace la comparaison du
-    /// tableau complet — tant que les données, les filtres, la recherche et la
-    /// révision des métadonnées vidéo n'ont pas changé, la liste visible n'est
-    /// pas recalculée à chaque rendu. La source et le drive protègent du
-    /// remplacement du vue-modèle (recherche ↔ dossier) dans la même vue.
-    ///
-    /// Le type est interne (et non `fileprivate`) parce que le cache vit
-    /// désormais dans `FileGridViewModel`, qui le mute.
-    struct VisibleItemsKey: Hashable {
-        let source: FileSource
-        let driveId: Int
-        let itemsRevision: Int
-        let filters: FileFilters
-        let searchText: String
-        let metadataRevision: Int
-        let foldersFirst: Bool
-    }
+/// Clé de mémoïsation du résultat des filtres/tri de la grille : la version
+/// incrémentale du contenu (itemsRevision) remplace la comparaison du
+/// tableau complet — tant que les données, les filtres, la recherche et la
+/// révision des métadonnées vidéo n'ont pas changé, la liste visible n'est
+/// pas recalculée à chaque rendu. La source et le drive protègent du
+/// remplacement du vue-modèle (recherche ↔ dossier) dans la même vue.
+///
+/// Le type est interne (et non `fileprivate`) parce que le cache vit
+/// désormais dans `FileGridViewModel`, qui le mute.
+struct VisibleItemsKey: Hashable {
+    let source: FileSource
+    let driveId: Int
+    let itemsRevision: Int
+    let filters: FileFilters
+    let searchText: String
+    let metadataRevision: Int
+    let foldersFirst: Bool
+}
 
 /// Mémoïse le résultat des filtres/tri de la grille.
 ///
