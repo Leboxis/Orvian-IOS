@@ -158,6 +158,7 @@ actor APIClient {
         try Task.checkCancellation()
         guard credentialFingerprint == TokenStore.credentialFingerprint() else { throw CancellationError() }
         var request = try request(for: endpoint, method: method, cachePolicy: .reloadIgnoringLocalCacheData)
+        guard Self.credentialFingerprint(for: request) == credentialFingerprint else { throw CancellationError() }
         if let body {
             request.httpBody = body
             if let contentType {
@@ -178,6 +179,7 @@ actor APIClient {
         try Task.checkCancellation()
         guard credentialFingerprint == TokenStore.credentialFingerprint() else { throw CancellationError() }
         var request = try request(for: endpoint, method: "POST", cachePolicy: .reloadIgnoringLocalCacheData)
+        guard Self.credentialFingerprint(for: request) == credentialFingerprint else { throw CancellationError() }
         request.httpBody = body
         request.setValue(contentType, forHTTPHeaderField: "Content-Type")
         let (data, response, _) = try await transmit(
@@ -221,6 +223,7 @@ actor APIClient {
         try Task.checkCancellation()
         guard credentialFingerprint == TokenStore.credentialFingerprint() else { throw CancellationError() }
         var request = try request(for: endpoint, method: "PUT", cachePolicy: .reloadIgnoringLocalCacheData)
+        guard Self.credentialFingerprint(for: request) == credentialFingerprint else { throw CancellationError() }
         request.httpBody = body
         request.setValue(contentType, forHTTPHeaderField: "Content-Type")
         let (data, response, _) = try await transmit(
