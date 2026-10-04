@@ -69,10 +69,10 @@ struct PerfView: View {
                         Spacer()
                         Text("\(stat.count)×")
                             .foregroundStyle(.secondary)
-                            .font(.callout.monospaced())
+                            .font(.callout.monospacedDigit())
                         Text("\(stat.averageMs) ms moy · \(stat.maxMs) ms max")
                             .foregroundStyle(stat.averageMs > 800 ? .red : (stat.averageMs > 300 ? .orange : .green))
-                            .font(.callout.monospaced())
+                            .font(.callout.monospacedDigit())
                     }
                 }
             }
@@ -100,18 +100,18 @@ struct PerfView: View {
                         }
                         Spacer()
                         Text("\(entry.durationMs) ms")
-                            .font(.callout.monospaced().weight(.semibold))
+                            .font(.callout.monospacedDigit().weight(.semibold))
                             .foregroundStyle(entry.durationMs > 800 ? .red : (entry.durationMs > 300 ? .orange : .green))
                     }
                     HStack {
                         Text(entry.path)
-                            .font(.caption.monospaced())
+                            .font(.caption.monospacedDigit())
                             .foregroundStyle(.secondary)
                             .lineLimit(1)
                             .truncationMode(.middle)
                         Spacer()
                         Text("\(entry.status) · \(entry.bytes) o")
-                            .font(.caption.monospaced())
+                            .font(.caption.monospacedDigit())
                             .foregroundStyle(entry.status >= 400 ? .red : .secondary)
                     }
                     Text(entry.date.formatted(date: .omitted, time: .standard))
