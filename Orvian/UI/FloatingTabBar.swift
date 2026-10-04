@@ -108,7 +108,7 @@ private struct TabButton: View {
         Button(action: action) {
             VStack(spacing: 3) {
                 Image(systemName: isSelected ? tab.symbolFilled : tab.symbol)
-                    .font(.system(size: iconOnly ? 26 : 23, weight: .medium))
+                    .font(.system(size: iconOnly ? 23 : 20, weight: .regular))
                     .symbolRenderingMode(.monochrome)
                 if showsTitle {
                     Text(tab.title)
