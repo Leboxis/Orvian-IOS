@@ -54,7 +54,7 @@ enum TokenStore { static func credentialFingerprint() -> String? { "account-a" }
 struct DriveFile {
     let id: Int
     var isDirectory: Bool { false }
-    var updatedAt: Double? { nil }
+    var updatedAt: Double? = Date().timeIntervalSince1970
     var lastModifiedAt: Double? { nil }
     var addedAt: Double? { nil }
 }
@@ -108,3 +108,4 @@ struct KDriveService {
 ''' + (ROOT / "Orvian/Core/Cache/RecentUploadsLoader.swift").read_text(encoding="utf-8")
         + "\n" + (ROOT / "Tests/RecentLoaderChecks.swift").read_text(encoding="utf-8"), encoding="utf-8")
     run(temp / "recent", [recent])
+

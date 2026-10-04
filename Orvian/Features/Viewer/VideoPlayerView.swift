@@ -144,6 +144,7 @@ struct VideoPlayerView: View {
     @State private var lastTapLocation: CGPoint = .zero
     @GestureState private var isTouchingControls = false
 
+    @State private var mutationCredentialFingerprint = TokenStore.credentialFingerprint()
     private let service = KDriveService()
 
     init(
@@ -293,7 +294,7 @@ struct VideoPlayerView: View {
                         appliedCategoryIds.remove(category.id)
                     }
                     FileGridMutationCenter.shared.publish(
-                        .category(driveId: driveId, fileId: file.id, category: category, applied: applied)
+                        .category(driveId: driveId, fileId: file.id, category: category, applied: applied), credentialFingerprint: mutationCredentialFingerprint
                     )
                 }
             )
@@ -768,17 +769,20 @@ struct VideoPlayerView: View {
     // MARK: - Favori & tags
 
     private func toggleFavorite() async {
+        guard mutationCredentialFingerprint == TokenStore.credentialFingerprint(), !Task.isCancelled else { return }
         guard !isFavoriteMutationInProgress else { return }
         isFavoriteMutationInProgress = true
         defer { isFavoriteMutationInProgress = false }
         let newValue = !isFavorite
         isFavorite = newValue
         do {
-            try await service.setFavorite(driveId: driveId, fileId: file.id, favorite: newValue)
+            try await service.setFavorite(driveId: driveId, fileId: file.id, favorite: newValue, credentialFingerprint: mutationCredentialFingerprint)
+            guard mutationCredentialFingerprint == TokenStore.credentialFingerprint(), !Task.isCancelled else { return }
             FileGridMutationCenter.shared.publish(
-                .favorite(driveId: driveId, fileId: file.id, isFavorite: newValue)
+                .favorite(driveId: driveId, fileId: file.id, isFavorite: newValue), credentialFingerprint: mutationCredentialFingerprint
             )
         } catch {
+            guard mutationCredentialFingerprint == TokenStore.credentialFingerprint(), !Task.isCancelled else { return }
             isFavorite = !newValue
             errorMessage = "Impossible de modifier le favori : \((error as? APIError)?.errorDescription ?? error.localizedDescription)"
         }
@@ -1326,3 +1330,4 @@ private struct TransportTimeView: View {
         }
     }
 }
+

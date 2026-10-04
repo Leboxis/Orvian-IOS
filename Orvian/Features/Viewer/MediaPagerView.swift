@@ -46,6 +46,7 @@ struct MediaPagerView: View {
     @State private var tagSheetFile: DriveFile?
     @State private var favoriteErrorMessage: String?
 
+    @State private var mutationCredentialFingerprint = TokenStore.credentialFingerprint()
     private let service = KDriveService()
 
     init(context: MediaViewerContext) {
@@ -406,7 +407,7 @@ struct MediaPagerView: View {
                     }
                     appliedCategoryIdsByFileID[sheetFile.id] = ids
                     FileGridMutationCenter.shared.publish(
-                        .category(driveId: context.driveId, fileId: sheetFile.id, category: category, applied: applied)
+                        .category(driveId: context.driveId, fileId: sheetFile.id, category: category, applied: applied), credentialFingerprint: mutationCredentialFingerprint
                     )
                 }
             )
@@ -461,17 +462,20 @@ struct MediaPagerView: View {
     }
 
     private func toggleFavorite(for file: DriveFile) async {
+        guard mutationCredentialFingerprint == TokenStore.credentialFingerprint(), !Task.isCancelled else { return }
         guard !favoriteMutationsInFlight.contains(file.id) else { return }
         favoriteMutationsInFlight.insert(file.id)
         defer { favoriteMutationsInFlight.remove(file.id) }
         let newValue = !isFavorite(file)
         favoriteByFileID[file.id] = newValue
         do {
-            try await service.setFavorite(driveId: context.driveId, fileId: file.id, favorite: newValue)
+            try await service.setFavorite(driveId: context.driveId, fileId: file.id, favorite: newValue, credentialFingerprint: mutationCredentialFingerprint)
+            guard mutationCredentialFingerprint == TokenStore.credentialFingerprint(), !Task.isCancelled else { return }
             FileGridMutationCenter.shared.publish(
-                .favorite(driveId: context.driveId, fileId: file.id, isFavorite: newValue)
+                .favorite(driveId: context.driveId, fileId: file.id, isFavorite: newValue), credentialFingerprint: mutationCredentialFingerprint
             )
         } catch {
+            guard mutationCredentialFingerprint == TokenStore.credentialFingerprint(), !Task.isCancelled else { return }
             if favoriteByFileID[file.id] == newValue {
                 favoriteByFileID[file.id] = !newValue
             }
@@ -663,6 +667,7 @@ private struct ZoomablePhotoPage: View {
     /// Marge haute réservée à la barre du pager : hauteur de la safe area
     /// (barre d'état) plus la barre elle-même, plafonnée pour ne pas écraser
     /// l'image sur les grands écrans.
+
     private func topBarClearance(in proxy: GeometryProxy) -> CGFloat {
         let safeTop = proxy.safeAreaInsets.top
         return min(160, safeTop + 56)
@@ -865,3 +870,4 @@ private struct ZoomablePhotoPage: View {
         }
     }
 }
+

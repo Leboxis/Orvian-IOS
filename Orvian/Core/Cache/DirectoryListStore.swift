@@ -118,6 +118,7 @@ final class DirectoryListStore {
     /// toujours l'index serveur, qui peut mettre quelques secondes à converger.
     func mergeRecentUploads(driveId: Int, files: [DriveFile], limit: Int = 12) {
         guard !files.isEmpty else { return }
+        RecentUploadsLoader.shared.recordLocalUploads(driveId: driveId, files: files)
         let source = FileSource.recents(limit: limit)
         let previous = snapshot(source: source, driveId: driveId, orderBy: [], order: "asc")
         let uploadedIDs = Set(files.map(\.id))
@@ -170,3 +171,4 @@ private extension FileSource {
         }
     }
 }
+

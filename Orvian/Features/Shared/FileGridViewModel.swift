@@ -65,6 +65,16 @@ final class FileGridViewModel {
     private var loadedOnce = false
     private var fetchedAt = Date.distantPast
     private let credentialFingerprint = TokenStore.credentialFingerprint()
+    private var isCurrentSession: Bool {
+        !Task.isCancelled && credentialFingerprint != nil
+            && credentialFingerprint == TokenStore.credentialFingerprint()
+    }
+
+    private func publish(_ mutation: FileGridMutation) {
+        guard isCurrentSession else { return }
+        FileGridMutationCenter.shared.publish(mutation, credentialFingerprint: credentialFingerprint)
+    }
+
     private(set) var isReloading = false
     /// Invalide toute réponse appartenant à un rechargement ou une pagination
     /// antérieur. Un ancien tri ne peut ainsi jamais remplacer le plus récent.
@@ -339,17 +349,26 @@ final class FileGridViewModel {
                 order: requestedOrder,
                 forceNetwork: forceNetwork
             )
-            let freshCount = await countTask
             guard !Task.isCancelled, dataGeneration == requestGeneration,
                   credentialFingerprint == TokenStore.credentialFingerprint() else { return }
             // Curseur et compteur d'abord, items en dernier : la sauvegarde
             // déclenchée par `didSet` capture toujours un état cohérent.
             cursor = page.cursor
             hasMore = page.hasMore ?? false
-            totalItemCount = freshCount
             fetchedAt = Date()
             loadedOnce = true
             items = filterItemsIfNeeded(page.data ?? [])
+            let countItemsRevision = itemsRevision
+            // Release the skeleton/pager as soon as the page arrives.
+            isReloading = false
+            isInitialLoading = false
+            let freshCount = await countTask
+            guard isCurrentSession, dataGeneration == requestGeneration,
+                  itemsRevision == countItemsRevision else { return }
+            if let freshCount {
+                totalItemCount = freshCount
+                storeListSnapshot()
+            }
         } catch {
             guard !Task.isCancelled, dataGeneration == requestGeneration,
                   credentialFingerprint == TokenStore.credentialFingerprint() else { return }
@@ -491,7 +510,7 @@ final class FileGridViewModel {
     }
 
     private func mergeUploaded(_ uploadedFiles: [DriveFile], broadcast: Bool) {
-        guard !uploadedFiles.isEmpty else { return }
+        guard isCurrentSession, !uploadedFiles.isEmpty else { return }
         let now = Date().timeIntervalSince1970
         // La réponse d'upload n'annonce pas toujours les dates ; les compléter
         // avec l'instant de l'import garantit qu'un tri « Date d'importation »
@@ -520,7 +539,7 @@ final class FileGridViewModel {
             // antérieure à l'import au lieu de l'état qui vient d'être fusionné.
             flushPendingSnapshot()
             DirectoryListStore.shared.mergeRecentUploads(driveId: driveId, files: merged)
-            FileGridMutationCenter.shared.publish(.uploaded(driveId: driveId, files: merged))
+            publish(.uploaded(driveId: driveId, files: merged))
         }
     }
 
@@ -601,6 +620,7 @@ final class FileGridViewModel {
     /// n'est retirée qu'après confirmation du serveur.
     @discardableResult
     func toggleFavorite(_ file: DriveFile) async -> Bool {
+        guard isCurrentSession else { return false }
         guard !favoriteMutationsInFlight.contains(file.id),
               let index = items.firstIndex(where: { $0.id == file.id }) else { return false }
         favoriteMutationsInFlight.insert(file.id)
@@ -615,17 +635,19 @@ final class FileGridViewModel {
             items[index].isFavorite = newValue
         }
         do {
-            try await service.setFavorite(driveId: driveId, fileId: file.id, favorite: newValue)
+            try await service.setFavorite(driveId: driveId, fileId: file.id, favorite: newValue, credentialFingerprint: credentialFingerprint)
+            guard isCurrentSession else { return false }
             if shouldRemove {
                 withoutSnapshot {
                     items.removeAll { $0.id == file.id }
                 }
             }
-            FileGridMutationCenter.shared.publish(
+            publish(
                 .favorite(driveId: driveId, fileId: file.id, isFavorite: newValue)
             )
             return true
         } catch {
+            guard isCurrentSession else { return false }
             if let restoredIndex = items.firstIndex(where: { $0.id == file.id }),
                items[restoredIndex].isFavorite == newValue {
                 withoutSnapshot {
@@ -643,10 +665,11 @@ final class FileGridViewModel {
     /// confirmation de l'API, pour que les pastilles des cartes suivent
     /// immédiatement (éditeur de tags et fiche détail).
     func updateCategories(for file: DriveFile, category: Category, applied: Bool) {
+        guard isCurrentSession else { return }
         applyCategoryChange(fileId: file.id, category: category, applied: applied)
         // TagsEditorSheet exécute addCategory/removeCategory et n'appelle ce
         // callback qu'après succès : aucune seconde requête n'est lancée ici.
-        FileGridMutationCenter.shared.publish(
+        publish(
             .category(driveId: driveId, fileId: file.id, category: category, applied: applied)
         )
     }
@@ -656,7 +679,7 @@ final class FileGridViewModel {
     /// repeter l'appel API.
     @discardableResult
     func apply(_ mutation: FileGridMutation) -> Bool {
-        guard mutation.driveId == driveId else { return false }
+        guard isCurrentSession, mutation.driveId == driveId else { return false }
         return withoutSnapshot {
             switch mutation {
             case let .favorite(_, fileId, isFavorite):
@@ -692,6 +715,15 @@ final class FileGridViewModel {
                 }
                 items.removeAll { fileIds.contains($0.id) }
                 return false
+            case let .restored(_, fileIds, destinationDirectoryIds):
+                if case .trash = source {
+                    items.removeAll { fileIds.contains($0.id) }
+                    return false
+                }
+                if case let .directory(directoryId) = source {
+                    return destinationDirectoryIds.contains(directoryId)
+                }
+                return true
             case let .uploaded(_, files):
                 if case .recents = source {
                     mergeUploaded(files, broadcast: false)
@@ -745,14 +777,17 @@ final class FileGridViewModel {
     // MARK: - Suppression, renommage & déplacement
 
     func trash(_ file: DriveFile) async {
+        guard isCurrentSession else { return }
         do {
-            try await service.trash(driveId: driveId, fileId: file.id)
+            try await service.trash(driveId: driveId, fileId: file.id, credentialFingerprint: credentialFingerprint)
+            guard isCurrentSession else { return }
             adjustItemCount(by: -1)
             items.removeAll { $0.id == file.id }
-            FileGridMutationCenter.shared.publish(
+            publish(
                 .trashed(driveId: driveId, fileIds: [file.id])
             )
         } catch {
+            guard isCurrentSession else { return }
             mutationErrorMessage = "Suppression impossible : \((error as? APIError)?.errorDescription ?? error.localizedDescription)"
         }
     }
@@ -768,9 +803,13 @@ final class FileGridViewModel {
         ids: Set<Int>,
         operation: @escaping @Sendable (Int) async throws -> Void
     ) async -> (succeeded: Set<Int>, firstError: Error?) {
+        let credential = credentialFingerprint
+        guard isCurrentSession else { return ([], CancellationError()) }
         let orderedIDs = Array(ids)
         let results = await mapBounded(orderedIDs, concurrency: 4) { id -> Result<Void, Error> in
             do {
+                try Task.checkCancellation()
+                guard credential == TokenStore.credentialFingerprint() else { throw CancellationError() }
                 try await operation(id)
                 return .success(())
             } catch {
@@ -778,6 +817,7 @@ final class FileGridViewModel {
             }
         }
 
+        guard isCurrentSession else { return ([], CancellationError()) }
         var succeeded: Set<Int> = []
         var firstError: Error?
         for (index, result) in results.enumerated() {
@@ -811,18 +851,21 @@ final class FileGridViewModel {
     /// dans `mutationErrorMessage` sans bloquer les autres suppressions.
     @discardableResult
     func trash(ids: Set<Int>) async -> Set<Int> {
+        guard isCurrentSession else { return [] }
         mutationErrorMessage = nil
         let service = self.service
         let driveId = self.driveId
+        let credential = credentialFingerprint
         let (trashedIDs, firstError) = await performConcurrently(ids: ids) { id in
-            try await service.trash(driveId: driveId, fileId: id)
+            try await service.trash(driveId: driveId, fileId: id, credentialFingerprint: credential)
         }
+        guard isCurrentSession else { return [] }
         adjustItemCount(by: -trashedIDs.count)
         items.removeAll { trashedIDs.contains($0.id) }
         // Les grilles ouvertes du même drive (ex. recherche au-dessus du
         // dossier) retirent les cartes confirmées sans rechargement réseau.
         if !trashedIDs.isEmpty {
-            FileGridMutationCenter.shared.publish(.trashed(driveId: driveId, fileIds: trashedIDs))
+            publish(.trashed(driveId: driveId, fileIds: trashedIDs))
         }
         reportPartialFailure(
             total: ids.count,
@@ -835,15 +878,18 @@ final class FileGridViewModel {
     }
 
     func rename(_ file: DriveFile, name: String) async {
+        guard isCurrentSession else { return }
         guard let index = items.firstIndex(where: { $0.id == file.id }) else { return }
         let oldName = items[index].name
         items[index].name = name
         do {
-            try await service.rename(driveId: driveId, fileId: file.id, name: name)
-            FileGridMutationCenter.shared.publish(
+            try await service.rename(driveId: driveId, fileId: file.id, name: name, credentialFingerprint: credentialFingerprint)
+            guard isCurrentSession else { return }
+            publish(
                 .rename(driveId: driveId, fileId: file.id, name: name)
             )
         } catch {
+            guard isCurrentSession else { return }
             if let restoredIndex = items.firstIndex(where: { $0.id == file.id }),
                items[restoredIndex].name == name {
                 items[restoredIndex].name = oldName
@@ -855,15 +901,18 @@ final class FileGridViewModel {
     /// Change la couleur d'un dossier : mise à jour optimiste, retour arrière
     /// si l'API refuse.
     func setColor(_ file: DriveFile, color: String) async {
+        guard isCurrentSession else { return }
         guard let index = items.firstIndex(where: { $0.id == file.id }) else { return }
         let oldColor = items[index].color
         items[index].color = color
         do {
-            try await service.setFolderColor(driveId: driveId, fileId: file.id, color: color)
-            FileGridMutationCenter.shared.publish(
+            try await service.setFolderColor(driveId: driveId, fileId: file.id, color: color, credentialFingerprint: credentialFingerprint)
+            guard isCurrentSession else { return }
+            publish(
                 .color(driveId: driveId, fileId: file.id, color: color)
             )
         } catch {
+            guard isCurrentSession else { return }
             if let restoredIndex = items.firstIndex(where: { $0.id == file.id }),
                items[restoredIndex].color == color {
                 items[restoredIndex].color = oldColor
@@ -876,19 +925,22 @@ final class FileGridViewModel {
     /// les réussites ; les listes de favoris et de tags les conservent.
     @discardableResult
     func move(ids: Set<Int>, to destinationDirectoryId: Int) async -> Set<Int> {
+        guard isCurrentSession else { return [] }
         mutationErrorMessage = nil
         let service = self.service
         let driveId = self.driveId
+        let credential = credentialFingerprint
         let destination = destinationDirectoryId
         let (movedIDs, firstError) = await performConcurrently(ids: ids) { id in
-            try await service.move(driveId: driveId, fileId: id, destinationDirectoryId: destination)
+            try await service.move(driveId: driveId, fileId: id, destinationDirectoryId: destination, credentialFingerprint: credential)
         }
+        guard isCurrentSession else { return [] }
         if !movedIDs.isEmpty {
             let mutation = FileGridMutation.moved(
                 driveId: driveId, fileIds: movedIDs, destinationDirectoryId: destination
             )
             let needsReload = apply(mutation)
-            FileGridMutationCenter.shared.publish(mutation)
+            publish(mutation)
             if needsReload { await reload(forceNetwork: true) }
         }
         reportPartialFailure(
@@ -905,10 +957,13 @@ final class FileGridViewModel {
 
     /// Supprime définitivement un fichier de la corbeille.
     func permanentlyDelete(_ file: DriveFile) async {
+        guard isCurrentSession else { return }
         do {
-            try await service.permanentlyDelete(driveId: driveId, fileId: file.id)
+            try await service.permanentlyDelete(driveId: driveId, fileId: file.id, credentialFingerprint: credentialFingerprint)
+            guard isCurrentSession else { return }
             items.removeAll { $0.id == file.id }
         } catch {
+            guard isCurrentSession else { return }
             mutationErrorMessage = "Suppression définitive impossible : \((error as? APIError)?.errorDescription ?? error.localizedDescription)"
         }
     }
@@ -918,12 +973,15 @@ final class FileGridViewModel {
     /// suppressions. Renvoie les identifiants réellement supprimés.
     @discardableResult
     func permanentlyDelete(ids: Set<Int>) async -> Set<Int> {
+        guard isCurrentSession else { return [] }
         mutationErrorMessage = nil
         let service = self.service
         let driveId = self.driveId
+        let credential = credentialFingerprint
         let (deletedIds, firstError) = await performConcurrently(ids: ids) { id in
-            try await service.permanentlyDelete(driveId: driveId, fileId: id)
+            try await service.permanentlyDelete(driveId: driveId, fileId: id, credentialFingerprint: credential)
         }
+        guard isCurrentSession else { return [] }
         items.removeAll { deletedIds.contains($0.id) }
         reportPartialFailure(
             total: ids.count,
@@ -938,54 +996,61 @@ final class FileGridViewModel {
     /// Restaure un fichier de la corbeille vers son dossier d'origine ; si ce
     /// dossier n'existe plus, retente vers la racine du drive (id 1).
     func restore(_ file: DriveFile) async -> Bool {
-        let destination = file.parentId ?? 1
+        guard isCurrentSession else { return false }
         do {
-            try await service.restore(driveId: driveId, fileId: file.id, destinationDirectoryId: destination)
+            let destination = try await service.restoreToOriginalOrRoot(
+                driveId: driveId, fileId: file.id, originalDirectoryId: file.parentId ?? 1,
+                credentialFingerprint: credentialFingerprint
+            )
+            guard isCurrentSession else { return false }
             items.removeAll { $0.id == file.id }
+            publish(.restored(driveId: driveId, fileIds: [file.id], destinationDirectoryIds: [destination]))
             return true
         } catch {
-            guard destination != 1 else {
-                mutationErrorMessage = "Restauration impossible : \((error as? APIError)?.errorDescription ?? error.localizedDescription)"
-                return false
-            }
-            do {
-                try await service.restore(driveId: driveId, fileId: file.id, destinationDirectoryId: 1)
-                items.removeAll { $0.id == file.id }
-                return true
-            } catch {
-                mutationErrorMessage = "Restauration impossible : \((error as? APIError)?.errorDescription ?? error.localizedDescription)"
-                return false
-            }
+            guard isCurrentSession else { return false }
+            mutationErrorMessage = "Restauration impossible : \((error as? APIError)?.errorDescription ?? error.localizedDescription)"
+            return false
         }
     }
 
-    /// Restaure une sélection entière de la corbeille ; les échecs partiels
-    /// sont signalés dans `mutationErrorMessage` sans bloquer les autres
-    /// restaurations.
     @discardableResult
     func restore(ids: Set<Int>) async -> Set<Int> {
+        guard isCurrentSession else { return [] }
         mutationErrorMessage = nil
         let service = self.service
         let driveId = self.driveId
-        // Les destinations d'origine sont figées avant le lancement des
-        // requêtes : la closure des tâches enfants n'accède pas à `items`.
+        let credential = credentialFingerprint
         let destinations = Dictionary(uniqueKeysWithValues: ids.map { id in
             (id, items.first(where: { $0.id == id })?.parentId ?? 1)
         })
-        let (restoredIDs, firstError) = await performConcurrently(ids: ids) { id in
-            let destination = destinations[id] ?? 1
+        let results = await mapBounded(Array(ids), concurrency: 4) { id -> Result<(Int, Int), Error> in
             do {
-                try await service.restore(driveId: driveId, fileId: id, destinationDirectoryId: destination)
-            } catch {
-                guard destination != 1 else { throw error }
-                try await service.restore(driveId: driveId, fileId: id, destinationDirectoryId: 1)
+                let destination = try await service.restoreToOriginalOrRoot(
+                    driveId: driveId, fileId: id, originalDirectoryId: destinations[id] ?? 1,
+                    credentialFingerprint: credential
+                )
+                return .success((id, destination))
+            } catch { return .failure(error) }
+        }
+        guard isCurrentSession else { return [] }
+        var restoredIDs: Set<Int> = []
+        var restoredDestinations: Set<Int> = []
+        var firstError: Error?
+        for result in results {
+            switch result {
+            case let .success((id, destination)):
+                restoredIDs.insert(id)
+                restoredDestinations.insert(destination)
+            case let .failure(error):
+                if firstError == nil { firstError = error }
             }
         }
         items.removeAll { restoredIDs.contains($0.id) }
+        if !restoredIDs.isEmpty {
+            publish(.restored(driveId: driveId, fileIds: restoredIDs, destinationDirectoryIds: restoredDestinations))
+        }
         reportPartialFailure(
-            total: ids.count,
-            succeeded: restoredIDs.count,
-            firstError: firstError,
+            total: ids.count, succeeded: restoredIDs.count, firstError: firstError,
             singular: "Un élément n’a pas pu être restauré : %@",
             plural: "%d éléments n’ont pas pu être restaurés : %@"
         )
@@ -1013,3 +1078,4 @@ final class FileGridViewModel {
         return buckets.map { Group(title: title($0.0), files: $0.1) }
     }
 }
+

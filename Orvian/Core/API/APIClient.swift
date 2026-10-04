@@ -144,16 +144,21 @@ actor APIClient {
     }
 
     /// Requête « vide » (POST/DELETE renvoyant `{result, data}`).
-    func sendEmpty(_ endpoint: Endpoint, method: String) async throws {
-        try await send(endpoint, method: method, body: nil, contentType: nil)
+    func sendEmpty(_ endpoint: Endpoint, method: String, credentialFingerprint: String? = TokenStore.credentialFingerprint()) async throws {
+        try Task.checkCancellation()
+        guard credentialFingerprint == TokenStore.credentialFingerprint() else { throw CancellationError() }
+        try await send(endpoint, method: method, body: nil, contentType: nil, credentialFingerprint: credentialFingerprint)
     }
 
     /// Mutation avec corps optionnel (ex. DELETE groupé `{"file_ids": […]}`).
     /// Le retrait groupé de tags exige un corps JSON sur un DELETE, ce que
     /// `sendEmpty` ne permet pas. Lève une erreur si le statut n'est pas 2xx ;
     /// le contenu de la réponse est ignoré.
-    func send(_ endpoint: Endpoint, method: String, body: Data?, contentType: String?) async throws {
+    func send(_ endpoint: Endpoint, method: String, body: Data?, contentType: String?, credentialFingerprint: String? = TokenStore.credentialFingerprint()) async throws {
+        try Task.checkCancellation()
+        guard credentialFingerprint == TokenStore.credentialFingerprint() else { throw CancellationError() }
         var request = try request(for: endpoint, method: method, cachePolicy: .reloadIgnoringLocalCacheData)
+        guard Self.credentialFingerprint(for: request) == credentialFingerprint else { throw CancellationError() }
         if let body {
             request.httpBody = body
             if let contentType {
@@ -170,8 +175,11 @@ actor APIClient {
 
     /// POST avec corps brut (JSON, octet-stream…). Lève une erreur si le
     /// statut HTTP n'est pas 2xx ; le contenu de la réponse est ignoré.
-    func post(_ endpoint: Endpoint, body: Data, contentType: String) async throws {
+    func post(_ endpoint: Endpoint, body: Data, contentType: String, credentialFingerprint: String? = TokenStore.credentialFingerprint()) async throws {
+        try Task.checkCancellation()
+        guard credentialFingerprint == TokenStore.credentialFingerprint() else { throw CancellationError() }
         var request = try request(for: endpoint, method: "POST", cachePolicy: .reloadIgnoringLocalCacheData)
+        guard Self.credentialFingerprint(for: request) == credentialFingerprint else { throw CancellationError() }
         request.httpBody = body
         request.setValue(contentType, forHTTPHeaderField: "Content-Type")
         let (data, response, _) = try await transmit(
@@ -211,8 +219,11 @@ actor APIClient {
     }
 
     /// PUT avec corps brut (JSON…). Lève une erreur si le statut HTTP n'est pas 2xx.
-    func put(_ endpoint: Endpoint, body: Data, contentType: String = "application/json") async throws {
+    func put(_ endpoint: Endpoint, body: Data, contentType: String = "application/json", credentialFingerprint: String? = TokenStore.credentialFingerprint()) async throws {
+        try Task.checkCancellation()
+        guard credentialFingerprint == TokenStore.credentialFingerprint() else { throw CancellationError() }
         var request = try request(for: endpoint, method: "PUT", cachePolicy: .reloadIgnoringLocalCacheData)
+        guard Self.credentialFingerprint(for: request) == credentialFingerprint else { throw CancellationError() }
         request.httpBody = body
         request.setValue(contentType, forHTTPHeaderField: "Content-Type")
         let (data, response, _) = try await transmit(
@@ -581,3 +592,4 @@ extension JSONDecoder {
         return decoder
     }()
 }
+

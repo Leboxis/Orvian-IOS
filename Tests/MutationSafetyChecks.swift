@@ -44,7 +44,7 @@ struct MutationSafetyChecks {
         let snapshot = DirectoryListSnapshot(items: [file], cursor: nil, hasMore: false,
                                              totalItemCount: 1, orderBy: [], order: "asc",
                                              fetchedAt: Date(timeIntervalSinceNow: -10))
-        center.publish(move)
+        center.publish(move, credentialFingerprint: TokenStore.credentialFingerprint())
         precondition(center.isSnapshotStale(snapshot, source: .favorites, driveId: 7))
         var corrected = snapshot
         move.applyMove(to: &corrected.items, source: .favorites)
@@ -54,6 +54,23 @@ struct MutationSafetyChecks {
         empty.items = []
         precondition(center.isSnapshotStale(empty, source: .directory(20), driveId: 7))
         precondition(!center.isSnapshotStale(empty, source: .directory(10), driveId: 7))
-        print("Move and cache consistency checks passed")
+        let oldCredential = TokenStore.credentialFingerprint()
+        var deliveries = 0
+        let observer = center.mutations.sink { _ in deliveries += 1 }
+        TokenStore.value = "another-account"
+        center.publish(.rename(driveId: 7, fileId: file.id, name: "Late response"),
+                       credentialFingerprint: oldCredential)
+        precondition(deliveries == 0, "An old credential must not deliver into the new session")
+        precondition(!center.isSnapshotStale(snapshot, source: .favorites, driveId: 7))
+        TokenStore.value = "test-account"
+        center.publish(.restored(driveId: 7, fileIds: [file.id], destinationDirectoryIds: [20]),
+                       credentialFingerprint: TokenStore.credentialFingerprint())
+        precondition(deliveries == 1)
+        precondition(center.isSnapshotStale(empty, source: .directory(20), driveId: 7))
+        precondition(center.isSnapshotStale(snapshot, source: .trash, driveId: 7))
+        precondition(!center.isSnapshotStale(empty, source: .directory(99), driveId: 7))
+        observer.cancel()
+        print("Move, restoration, session isolation and cache consistency checks passed")
     }
 }
+

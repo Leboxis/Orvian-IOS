@@ -17,15 +17,29 @@ jobs:
     if: github.event_name != 'push' || github.actor != 'github-actions[bot]'
     name: Build unsigned IPA (LiveContainer ready)
     runs-on: macos-26
+    concurrency:
+      # Serialize release writers, while PR builds remain independent.
+      group: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && 'orvian-publish-main' || format('orvian-build-{0}', github.run_id) }}
+      cancel-in-progress: false
     steps:
       - name: Checkout
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
+      - name: Skip outdated publication
+        id: publication
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: |
+          REMOTE_HEAD=$(git ls-remote origin refs/heads/main | cut -f1)
+          if [ "$REMOTE_HEAD" != "$GITHUB_SHA" ]; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "A newer main commit exists; build this revision without publishing it."
+          fi
+
       - name: Compute next LiveContainer version
         id: version
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.publication.outputs.skip != 'true'
         shell: bash
         run: |
           # Règle de numérotation : patch +1 à chaque push, minor +1 tous les
@@ -61,7 +75,7 @@ jobs:
           echo "previous_tag=$LATEST_TAG" >> "$GITHUB_OUTPUT"
 
       - name: Set release version
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.publication.outputs.skip != 'true'
         env:
           VERSION: ${{ steps.version.outputs.value }}
         run: |
@@ -97,6 +111,11 @@ jobs:
 
       - name: Check security, transfers and metadata isolation
         run: python3 .github/scripts/check_ios_regressions.py
+
+      - name: Check audit regressions
+        run: |
+          python3 -m unittest discover -s Tests -p 'test_audit_integration.py'
+          python3 .github/scripts/check_audit_regressions.py
 
       - name: Check GIF decoding
         run: |
@@ -139,11 +158,19 @@ jobs:
           path: Orvian-*-unsigned.ipa
 
       - name: Publish LiveContainer version
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        id: release
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.publication.outputs.skip != 'true'
         env:
           VERSION: ${{ steps.version.outputs.value }}
           PREVIOUS_TAG: ${{ steps.version.outputs.previous_tag }}
         run: |
+          # A user may push while the build is running. Never publish that
+          # superseded revision or rebase generated release metadata onto it.
+          REMOTE_HEAD=$(git ls-remote origin refs/heads/main | cut -f1)
+          if [ "$REMOTE_HEAD" != "$GITHUB_SHA" ]; then
+            echo "Main changed during the build; skip publication."
+            exit 0
+          fi
           SIZE=$(stat -f%z "Orvian-${VERSION}-unsigned.ipa")
           TODAY=$(date +%Y-%m-%d)
           TAG="v${VERSION}"
@@ -159,14 +186,15 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add project.yml repo.json
           git commit -m "Release Orvian $VERSION (LiveContainer)"
-          git push origin HEAD:main
           git tag -a "$TAG" -m "Orvian $VERSION"
-          git push origin "$TAG"
+          git push --atomic origin HEAD:main "refs/tags/$TAG"
+          echo "published=true" >> "$GITHUB_OUTPUT"
 
       - name: Create GitHub Release
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        if: steps.release.outputs.published == 'true'
         uses: softprops/action-gh-release@v2
         with:
           tag_name: v${{ steps.version.outputs.value }}
           files: Orvian-${{ steps.version.outputs.value }}-unsigned.ipa
           generate_release_notes: true
+

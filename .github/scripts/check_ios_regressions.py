@@ -124,7 +124,12 @@ enum TokenStore {
     snapshot_type = cache[cache.index("struct DirectoryListSnapshot"):cache.index("/// Mémoire")]
     mutation_dependencies.write_text(
         "import Foundation\n" + source_type + snapshot_type
-        + 'enum TokenStore { static func credentialFingerprint() -> String? { "test-account" } }\n',
+        + '''enum TokenStore { static var value = "test-account"; static func credentialFingerprint() -> String? { value } }
+@MainActor final class RecentUploadsLoader {
+    static let shared = RecentUploadsLoader()
+    func removeLocalUploads(driveId: Int, fileIds: Set<Int>) {}
+}
+''',
         encoding="utf-8",
     )
     run_check(temp / "mutation-safety", [mutation_dependencies, *[ROOT / path for path in [
@@ -161,3 +166,4 @@ enum TokenStore {
         "Orvian/Core/Utils/FileKind.swift",
         "Tests/FileFiltersChecks.swift",
     ]]])
+

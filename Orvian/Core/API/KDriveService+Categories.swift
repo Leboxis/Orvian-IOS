@@ -34,13 +34,13 @@ extension KDriveService {
     }
 
     /// Applique une catégorie (tag) sur un fichier.
-    func addCategory(driveId: Int, fileId: Int, categoryId: Int) async throws {
-        try await api.sendEmpty(.fileCategory(driveId: driveId, fileId: fileId, categoryId: categoryId), method: "POST")
+    func addCategory(driveId: Int, fileId: Int, categoryId: Int, credentialFingerprint: String? = TokenStore.credentialFingerprint()) async throws {
+        try await api.sendEmpty(.fileCategory(driveId: driveId, fileId: fileId, categoryId: categoryId), method: "POST", credentialFingerprint: credentialFingerprint)
     }
 
     /// Retire une catégorie (tag) d'un fichier.
-    func removeCategory(driveId: Int, fileId: Int, categoryId: Int) async throws {
-        try await api.sendEmpty(.fileCategory(driveId: driveId, fileId: fileId, categoryId: categoryId), method: "DELETE")
+    func removeCategory(driveId: Int, fileId: Int, categoryId: Int, credentialFingerprint: String? = TokenStore.credentialFingerprint()) async throws {
+        try await api.sendEmpty(.fileCategory(driveId: driveId, fileId: fileId, categoryId: categoryId), method: "DELETE", credentialFingerprint: credentialFingerprint)
     }
 
     private struct BulkCategoryRequest: Encodable {
@@ -53,15 +53,16 @@ extension KDriveService {
 
     /// Applique une catégorie (tag) sur plusieurs fichiers en un seul appel
     /// (`POST /2/drive/{id}/files/categories/{id}`, corps `{"file_ids": […]}`).
-    func addCategory(driveId: Int, fileIds: [Int], categoryId: Int) async throws {
+    func addCategory(driveId: Int, fileIds: [Int], categoryId: Int, credentialFingerprint: String? = TokenStore.credentialFingerprint()) async throws {
         let body = try JSONEncoder().encode(BulkCategoryRequest(fileIds: fileIds))
-        try await api.post(.bulkFileCategory(driveId: driveId, categoryId: categoryId), body: body, contentType: "application/json")
+        try await api.post(.bulkFileCategory(driveId: driveId, categoryId: categoryId), body: body, contentType: "application/json", credentialFingerprint: credentialFingerprint)
     }
 
     /// Retire une catégorie (tag) de plusieurs fichiers en un seul appel
     /// (`DELETE /2/drive/{id}/files/categories/{id}`, même corps JSON).
-    func removeCategory(driveId: Int, fileIds: [Int], categoryId: Int) async throws {
+    func removeCategory(driveId: Int, fileIds: [Int], categoryId: Int, credentialFingerprint: String? = TokenStore.credentialFingerprint()) async throws {
         let body = try JSONEncoder().encode(BulkCategoryRequest(fileIds: fileIds))
-        try await api.send(.bulkFileCategory(driveId: driveId, categoryId: categoryId), method: "DELETE", body: body, contentType: "application/json")
+        try await api.send(.bulkFileCategory(driveId: driveId, categoryId: categoryId), method: "DELETE", body: body, contentType: "application/json", credentialFingerprint: credentialFingerprint)
     }
 }
+

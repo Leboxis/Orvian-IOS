@@ -199,6 +199,7 @@ final class UploadManager {
     /// dédiée aux gros fichiers), plusieurs fichiers peuvent donc partir en
     /// parallèle sans verrou côté serveur.
     private static let maxConcurrentUploads = 4
+    private let uploadPermits = AsyncPermitPool(capacity: 4)
 
     private init() {}
 
@@ -271,8 +272,10 @@ final class UploadManager {
             let work: [(item: PhotosPickerItem, taskId: UUID, itemIndex: Int)] = items.enumerated().map { entry in
                 (item: entry.element, taskId: newTasks[entry.offset].id, itemIndex: entry.offset)
             }
-            let results = await mapBounded(work, concurrency: Self.maxConcurrentUploads) { entry in
-                await self.prepareAndUploadPhoto(
+            let results = await mapBounded(work, concurrency: Self.maxConcurrentUploads) { entry -> DriveFile? in
+                do { try await self.uploadPermits.acquire() } catch { return nil }
+                defer { Task { await self.uploadPermits.release() } }
+                return await self.prepareAndUploadPhoto(
                     item: entry.item,
                     taskId: entry.taskId,
                     itemIndex: entry.itemIndex,
@@ -407,8 +410,10 @@ private static let fallbackDateFormatter: DateFormatter = {
             let work: [(url: URL, taskId: UUID)] = urls.enumerated().map { entry in
                 (url: entry.element, taskId: newTasks[entry.offset].id)
             }
-            let results = await mapBounded(work, concurrency: Self.maxConcurrentUploads) { entry in
-                await self.prepareAndUploadDocument(
+            let results = await mapBounded(work, concurrency: Self.maxConcurrentUploads) { entry -> DriveFile? in
+                do { try await self.uploadPermits.acquire() } catch { return nil }
+                defer { Task { await self.uploadPermits.release() } }
+                return await self.prepareAndUploadDocument(
                     url: entry.url,
                     taskId: entry.taskId,
                     driveId: driveId,
@@ -576,6 +581,9 @@ private static let fallbackDateFormatter: DateFormatter = {
             guard let self else { return }
             defer { self.uploadJobs.removeValue(forKey: jobID) }
 
+            do { try await self.uploadPermits.acquire() } catch { return }
+            defer { Task { await self.uploadPermits.release() } }
+            guard !Task.isCancelled else { return }
             let uploadedFile: DriveFile?
             switch context.source {
             case let .photo(item, itemIndex):
@@ -670,3 +678,4 @@ private static let fallbackDateFormatter: DateFormatter = {
         }
     }
 }
+

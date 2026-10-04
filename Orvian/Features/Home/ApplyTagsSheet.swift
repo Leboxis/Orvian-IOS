@@ -45,6 +45,11 @@ struct ApplyTagsSheet: View {
     @State private var busy = false
     @State private var errorMessage: String?
 
+    @State private var mutationCredentialFingerprint = TokenStore.credentialFingerprint()
+    private var isCurrentMutationSession: Bool {
+        !Task.isCancelled && mutationCredentialFingerprint != nil
+            && mutationCredentialFingerprint == TokenStore.credentialFingerprint()
+    }
     private let service = KDriveService()
 
     private enum TagState {
@@ -208,6 +213,7 @@ struct ApplyTagsSheet: View {
     }
 
     private func apply() async {
+        guard isCurrentMutationSession else { return }
         busy = true
         defer { busy = false }
         let toAdd = addIDs
@@ -222,10 +228,12 @@ struct ApplyTagsSheet: View {
         var firstErrorDescription: String?
 
         for categoryId in toRemove.sorted() {
+            guard isCurrentMutationSession else { return }
             do {
-                try await service.removeCategory(driveId: driveId, fileIds: fileIds, categoryId: categoryId)
+                try await service.removeCategory(driveId: driveId, fileIds: fileIds, categoryId: categoryId, credentialFingerprint: mutationCredentialFingerprint)
                 appliedChanges += files.map { TagChange(file: $0, categoryId: categoryId, isAdd: false) }
             } catch {
+                guard isCurrentMutationSession else { return }
                 let fallback = await applyOneByOne(categoryId: categoryId, isAdd: false)
                 appliedChanges += fallback.changes
                 if firstErrorDescription == nil {
@@ -234,10 +242,12 @@ struct ApplyTagsSheet: View {
             }
         }
         for categoryId in toAdd.sorted() {
+            guard isCurrentMutationSession else { return }
             do {
-                try await service.addCategory(driveId: driveId, fileIds: fileIds, categoryId: categoryId)
+                try await service.addCategory(driveId: driveId, fileIds: fileIds, categoryId: categoryId, credentialFingerprint: mutationCredentialFingerprint)
                 appliedChanges += files.map { TagChange(file: $0, categoryId: categoryId, isAdd: true) }
             } catch {
+                guard isCurrentMutationSession else { return }
                 let fallback = await applyOneByOne(categoryId: categoryId, isAdd: true)
                 appliedChanges += fallback.changes
                 if firstErrorDescription == nil {
@@ -248,6 +258,7 @@ struct ApplyTagsSheet: View {
 
         // Les modifications confirmées parviennent aux grilles même en cas
         // d'échec partiel : seules les paires en erreur restent à refaire.
+        guard isCurrentMutationSession else { return }
         if !appliedChanges.isEmpty {
             await onDone(appliedChanges)
         }
@@ -274,12 +285,15 @@ struct ApplyTagsSheet: View {
     /// récupère les succès partiels au lieu de perdre toute la sélection.
     private func applyOneByOne(categoryId: Int, isAdd: Bool) async -> (changes: [TagChange], error: String?) {
         let results = await mapBounded(files, concurrency: 4) { file -> Result<TagChange, TagApplyError> in
+            guard await self.isCurrentMutationSession else {
+                return .failure(TagApplyError(message: "Session terminée"))
+            }
             do {
                 if isAdd {
-                    try await self.service.addCategory(driveId: self.driveId, fileId: file.id, categoryId: categoryId)
+                    try await self.service.addCategory(driveId: self.driveId, fileId: file.id, categoryId: categoryId, credentialFingerprint: self.mutationCredentialFingerprint)
                     return .success(TagChange(file: file, categoryId: categoryId, isAdd: true))
                 } else {
-                    try await self.service.removeCategory(driveId: self.driveId, fileId: file.id, categoryId: categoryId)
+                    try await self.service.removeCategory(driveId: self.driveId, fileId: file.id, categoryId: categoryId, credentialFingerprint: self.mutationCredentialFingerprint)
                     return .success(TagChange(file: file, categoryId: categoryId, isAdd: false))
                 }
             } catch {
@@ -299,3 +313,4 @@ struct ApplyTagsSheet: View {
         return (changes, firstError)
     }
 }
+

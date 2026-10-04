@@ -113,7 +113,7 @@ struct FavoritesDiskCacheChecks {
         let categoryUpdate = functionBody(startingAt: "func updateCategories(", endingAt: "/// Applique une mutation")
         precondition(!categoryUpdate.contains("service.addCategory") && !categoryUpdate.contains("service.removeCategory"),
                      "TagsEditorSheet alone must execute the category API")
-        precondition(categoryUpdate.components(separatedBy: "FileGridMutationCenter.shared.publish(").count == 2,
+        precondition(categoryUpdate.components(separatedBy: "publish(").count == 2,
                      "A confirmed category change must be published exactly once")
         precondition(!tagsEditorSource.contains("FileGridMutationCenter.shared.publish("),
                      "TagsEditorSheet must report success without publishing a second mutation")
@@ -161,3 +161,4 @@ struct FavoritesDiskCacheChecks {
         print("Favorites disk cache checks passed")
     }
 }
+
