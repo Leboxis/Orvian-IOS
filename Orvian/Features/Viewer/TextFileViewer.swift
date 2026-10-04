@@ -477,8 +477,8 @@ private struct TextFileTextView: UIViewRepresentable {
 
     func makeUIView(context: Context) -> UITextView {
         let textView = UITextView()
-        let baseFont = UIFont.monospacedSystemFont(ofSize: UIFont.systemFontSize, weight: .regular)
-        textView.font = UIFontMetrics(forTextStyle: .body).scaledFont(for: baseFont)
+        let baseFont = UIFont.preferredFont(forTextStyle: .body)
+        textView.font = baseFont
         textView.adjustsFontForContentSizeCategory = true
         textView.backgroundColor = .clear
         textView.textColor = .label
