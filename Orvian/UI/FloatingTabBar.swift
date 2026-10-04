@@ -110,6 +110,7 @@ private struct TabButton: View {
                 Image(systemName: isSelected ? tab.symbolFilled : tab.symbol)
                     .font(.system(size: iconOnly ? 23 : 20, weight: .regular))
                     .symbolRenderingMode(.monochrome)
+                    .frame(width: 28, height: 26)
                 if showsTitle {
                     Text(tab.title)
                         .font(.caption2.weight(.medium))
@@ -162,21 +163,21 @@ enum AppTab: String, CaseIterable, Identifiable {
 
     var symbol: String {
         switch self {
-        case .settings: return "gearshape"
+        case .settings: return "slider.horizontal.3"
         case .tag: return "tag"
         case .home: return "house.fill"
-        case .favorites: return "star"
-        case .profile: return "person"
+        case .favorites: return "heart"
+        case .profile: return "person.crop.circle"
         }
     }
 
     var symbolFilled: String {
         switch self {
-        case .settings: return "gearshape.fill"
+        case .settings: return "slider.horizontal.3"
         case .tag: return "tag.fill"
         case .home: return "house.fill"
-        case .favorites: return "star.fill"
-        case .profile: return "person.fill"
+        case .favorites: return "heart.fill"
+        case .profile: return "person.crop.circle.fill"
         }
     }
 }
