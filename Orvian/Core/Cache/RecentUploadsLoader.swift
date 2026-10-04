@@ -28,6 +28,38 @@ final class RecentUploadsLoader {
 
     private var inFlightByDrive: [Int: InFlight] = [:]
     private var restoredFromDisk: Set<Int> = []
+    private struct LocalUpload {
+        let file: DriveFile
+        let credential: String
+        let expiresAt: Date
+    }
+    private var pendingLocalUploadsByDrive: [Int: [Int: LocalUpload]] = [:]
+
+    func recordLocalUploads(driveId: Int, files: [DriveFile]) {
+        guard let credential = TokenStore.credentialFingerprint() else { return }
+        let expiresAt = Date().addingTimeInterval(Self.recentUploadGraceInterval)
+        for file in files where !file.isDirectory {
+            pendingLocalUploadsByDrive[driveId, default: [:]][file.id] = LocalUpload(
+                file: file, credential: credential, expiresAt: expiresAt
+            )
+        }
+    }
+
+    func removeLocalUploads(driveId: Int, fileIds: Set<Int>) {
+        for id in fileIds { pendingLocalUploadsByDrive[driveId]?[id] = nil }
+    }
+
+    private func pendingLocalUploads(driveId: Int, serverFiles: [DriveFile]) -> [DriveFile] {
+        let serverIDs = Set(serverFiles.map(\.id))
+        let credential = TokenStore.credentialFingerprint()
+        let now = Date()
+        let pending = (pendingLocalUploadsByDrive[driveId] ?? [:]).filter {
+            $0.value.credential == credential && $0.value.expiresAt > now
+                && !serverIDs.contains($0.key)
+        }
+        pendingLocalUploadsByDrive[driveId] = pending.isEmpty ? nil : pending
+        return pending.values.sorted { $0.expiresAt > $1.expiresAt }.map(\.file)
+    }
     private let service = KDriveService()
 
     private init() {}
@@ -82,7 +114,6 @@ final class RecentUploadsLoader {
 
         let credential = TokenStore.credentialFingerprint()
         let requestID = UUID()
-        let requestStartedAt = Date().timeIntervalSince1970
         let task = Task<DirectoryListSnapshot?, Never> { [service] in
             guard !Task.isCancelled,
                   let page = try? await service.page(
@@ -104,41 +135,9 @@ final class RecentUploadsLoader {
             }
             guard !Task.isCancelled, credential == TokenStore.credentialFingerprint() else { return nil }
             let serverFiles = (page.data ?? []).filter { !$0.isDirectory }
-            let serverIDs = Set(serverFiles.map(\.id))
-            // L'aperçu affiche d'abord le cache (disque/mémoire, avec les
-            // uploads fusionnés localement), puis cette réponse réseau ~1 s
-            // plus tard. Si l'index serveur est encore en retard, elle ne
-            // contient pas les fichiers importés juste avant l'ouverture de
-            // l'onglet : sans garde, leurs cartes sont remplacées par des
-            // éléments plus anciens. On conserve donc les ajouts locaux
-            // récents absents du serveur — terminés pendant l'aller-retour
-            // ou dans les minutes précédentes. Un élément absent du serveur
-            // avec un horodatage ancien suit le serveur (suppression réelle
-            // ou sortie du top 12) au lieu d'être ressuscité.
-            let now = Date().timeIntervalSince1970
-            let afterItems = DirectoryListStore.shared.snapshot(
-                source: Self.source, driveId: driveId, orderBy: [], order: "asc"
-            )?.items ?? []
-            let beforeIDs = Set(cached?.items.map(\.id) ?? [])
-            var seenCandidate = Set<Int>()
-            var candidates: [DriveFile] = []
-            candidates.reserveCapacity(afterItems.count + (cached?.items.count ?? 0))
-            for item in afterItems + (cached?.items ?? []) {
-                guard seenCandidate.insert(item.id).inserted else { continue }
-                candidates.append(item)
-            }
-            let localAdditions = candidates.filter { item in
-                guard !serverIDs.contains(item.id), !item.isDirectory else { return false }
-                let ts = item.updatedAt ?? item.lastModifiedAt ?? item.addedAt ?? 0
-                if ts <= 0 {
-                    // Date inconnue : conserver uniquement une fusion survenue
-                    // pendant l'aller-retour, jamais un ancien élément.
-                    return !beforeIDs.contains(item.id)
-                }
-                // Terminé pendant l'aller-retour, ou upload récent dont
-                // l'index serveur n'a pas encore convergé.
-                return ts >= requestStartedAt || (now - ts) <= Self.recentUploadGraceInterval
-            }
+            // Preserve only uploads confirmed in this session, never every
+            // recently modified cached file absent from the server.
+            let localAdditions = pendingLocalUploads(driveId: driveId, serverFiles: serverFiles)
             let localIDs = Set(localAdditions.map(\.id))
             let files = localAdditions + serverFiles.filter { !localIDs.contains($0.id) }
             let snapshot = DirectoryListSnapshot(
@@ -152,10 +151,10 @@ final class RecentUploadsLoader {
             )
             // Ne pas écraser une grille déjà paginée avec les seules 12
             // cartes de l'aperçu. Le Profil reçoit tout de même `snapshot`.
-            let existingCount = DirectoryListStore.shared.snapshot(
+            let existing = DirectoryListStore.shared.snapshot(
                 source: Self.source, driveId: driveId, orderBy: [], order: "asc"
-            )?.items.count ?? 0
-            if existingCount <= files.count {
+            )
+            if (existing?.items.count ?? 0) <= 12 {
                 DirectoryListStore.shared.store(
                     source: Self.source,
                     driveId: driveId,
@@ -186,6 +185,7 @@ final class RecentUploadsLoader {
         inFlightByDrive.values.forEach { $0.task.cancel() }
         inFlightByDrive.removeAll()
         restoredFromDisk.removeAll()
+        pendingLocalUploadsByDrive.removeAll()
     }
 
     func prefetch(driveId: Int) async {
@@ -193,3 +193,4 @@ final class RecentUploadsLoader {
         _ = await refresh(driveId: driveId)
     }
 }
+

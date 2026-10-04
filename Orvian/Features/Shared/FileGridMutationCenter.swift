@@ -16,6 +16,7 @@ enum FileGridMutation {
     /// Fichiers dont l'upload vient d'être confirmé : les vues « récents »
     /// peuvent les afficher avant que l'index serveur ait convergé.
     case uploaded(driveId: Int, files: [DriveFile])
+    case restored(driveId: Int, fileIds: Set<Int>, destinationDirectoryIds: Set<Int>)
 
     var driveId: Int {
         switch self {
@@ -23,7 +24,7 @@ enum FileGridMutation {
              let .rename(driveId, _, _), let .color(driveId, _, _),
              let .removal(driveId, _), let .trashed(driveId, _),
              let .moved(driveId, _, _),
-             let .uploaded(driveId, _):
+             let .uploaded(driveId, _), let .restored(driveId, _, _):
             return driveId
         }
     }
@@ -57,6 +58,7 @@ enum FileGridMutation {
     }
 }
 
+@MainActor
 final class FileGridMutationCenter {
     static let shared = FileGridMutationCenter()
 
@@ -77,20 +79,25 @@ final class FileGridMutationCenter {
 
     private init() {}
 
-    func publish(_ mutation: FileGridMutation) {
+    func publish(_ mutation: FileGridMutation, credentialFingerprint: String?) {
+        guard let credentialFingerprint,
+              credentialFingerprint == TokenStore.credentialFingerprint() else { return }
+        switch mutation {
+        case let .trashed(driveId, ids), let .removal(driveId, ids):
+            RecentUploadsLoader.shared.removeLocalUploads(driveId: driveId, fileIds: ids)
+        default: break
+        }
         let now = Date()
         pruneRecords(at: now)
-        if let credentialFingerprint = TokenStore.credentialFingerprint() {
-            recordedMutations.append(
-                RecordedMutation(
-                    mutation: mutation,
-                    recordedAt: now,
-                    credentialFingerprint: credentialFingerprint
-                )
+        recordedMutations.append(
+            RecordedMutation(
+                mutation: mutation,
+                recordedAt: now,
+                credentialFingerprint: credentialFingerprint
             )
-            if recordedMutations.count > recordCapacity {
-                recordedMutations.removeFirst(recordedMutations.count - recordCapacity)
-            }
+        )
+        if recordedMutations.count > recordCapacity {
+            recordedMutations.removeFirst(recordedMutations.count - recordCapacity)
         }
         mutations.send(mutation)
     }
@@ -166,9 +173,21 @@ final class FileGridMutationCenter {
             }
             return items.allSatisfy { !fileIds.contains($0.id) }
 
+        case let .restored(_, fileIds, destinationDirectoryIds):
+            if case .trash = source {
+                return items.allSatisfy { !fileIds.contains($0.id) }
+            }
+            if case let .directory(directoryId) = source {
+                return !destinationDirectoryIds.contains(directoryId)
+                    || fileIds.isSubset(of: Set(items.map(\.id)))
+            }
+            // Favorites, tags and searches can regain restored files.
+            return false
+
         case .uploaded:
             // Le flux d'upload met déjà à jour son cache dédié avant de publier.
             return true
         }
     }
 }
+

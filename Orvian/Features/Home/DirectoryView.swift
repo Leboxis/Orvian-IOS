@@ -12,6 +12,7 @@ struct DirectoryView: View {
     let isActive: Bool
     @Environment(\.scenePhase) private var scenePhase
 
+    @State private var mutationCredentialFingerprint = TokenStore.credentialFingerprint()
     @State private var viewModel: FileGridViewModel
     @State private var searchViewModel: FileGridViewModel?
     @State private var addBusy = false
@@ -623,7 +624,8 @@ struct DirectoryView: View {
             if activeViewModel !== viewModel {
                 viewModel.apply(mutation)
             }
-            FileGridMutationCenter.shared.publish(mutation)
+            FileGridMutationCenter.shared.publish(mutation, credentialFingerprint: mutationCredentialFingerprint
+        )
         }
     }
 
@@ -825,3 +827,4 @@ struct DirectoryView: View {
             && (usesVisibleItemCount || activeViewModel.totalItemCount == nil)
     }
 }
+

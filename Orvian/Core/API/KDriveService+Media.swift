@@ -2,8 +2,8 @@ import Foundation
 
 /// Médias : favoris, URL temporaires et miniatures.
 extension KDriveService {
-    func setFavorite(driveId: Int, fileId: Int, favorite: Bool) async throws {
-        try await api.sendEmpty(.favorite(driveId: driveId, fileId: fileId), method: favorite ? "POST" : "DELETE")
+    func setFavorite(driveId: Int, fileId: Int, favorite: Bool, credentialFingerprint: String? = TokenStore.credentialFingerprint()) async throws {
+        try await api.sendEmpty(.favorite(driveId: driveId, fileId: fileId), method: favorite ? "POST" : "DELETE", credentialFingerprint: credentialFingerprint)
     }
 
     func temporaryURL(driveId: Int, fileId: Int) async throws -> URL {
@@ -23,3 +23,4 @@ extension KDriveService {
         return try await api.data(endpoint, cachePolicy: .reloadIgnoringLocalCacheData)
     }
 }
+

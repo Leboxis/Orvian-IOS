@@ -1,6 +1,7 @@
 import SwiftUI
 
 struct FavoritesView: View {
+    @State private var mutationCredentialFingerprint = TokenStore.credentialFingerprint()
     @State private var viewModel: FileGridViewModel
     @State private var filters = FileFilters()
     private let router: ViewerRouter
@@ -540,7 +541,9 @@ struct FavoritesView: View {
                 applied: change.isAdd
             )
             viewModel.apply(mutation)
-            FileGridMutationCenter.shared.publish(mutation)
+            FileGridMutationCenter.shared.publish(mutation, credentialFingerprint: mutationCredentialFingerprint
+        )
         }
     }
 }
+

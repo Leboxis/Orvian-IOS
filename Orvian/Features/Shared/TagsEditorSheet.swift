@@ -21,6 +21,7 @@ struct TagsEditorSheet: View {
     @State private var errorMessage: String?
     @State private var loadError: String?
 
+    @State private var mutationCredentialFingerprint = TokenStore.credentialFingerprint()
     private let service = KDriveService()
     /// Colonnes pilotées par Réglages → Affichage → Colonnes des tags.
     @AppStorage("tagGridColumns") private var tagGridColumns = 2
@@ -159,7 +160,8 @@ struct TagsEditorSheet: View {
 
     @MainActor
     private func toggle(_ category: Category) async {
-        guard pendingCategoryIds.insert(category.id).inserted else { return }
+        guard mutationCredentialFingerprint == TokenStore.credentialFingerprint(), !Task.isCancelled,
+              pendingCategoryIds.insert(category.id).inserted else { return }
         defer { pendingCategoryIds.remove(category.id) }
         let isApplying = !appliedCategoryIds.contains(category.id)
         if isApplying {
@@ -170,10 +172,11 @@ struct TagsEditorSheet: View {
         errorMessage = nil
         do {
             if isApplying {
-                try await service.addCategory(driveId: driveId, fileId: file.id, categoryId: category.id)
+                try await service.addCategory(driveId: driveId, fileId: file.id, categoryId: category.id, credentialFingerprint: mutationCredentialFingerprint)
             } else {
-                try await service.removeCategory(driveId: driveId, fileId: file.id, categoryId: category.id)
+                try await service.removeCategory(driveId: driveId, fileId: file.id, categoryId: category.id, credentialFingerprint: mutationCredentialFingerprint)
             }
+            guard mutationCredentialFingerprint == TokenStore.credentialFingerprint(), !Task.isCancelled else { return }
             onChanged?(category, isApplying)
         } catch {
             if isApplying {
@@ -185,3 +188,4 @@ struct TagsEditorSheet: View {
         }
     }
 }
+
