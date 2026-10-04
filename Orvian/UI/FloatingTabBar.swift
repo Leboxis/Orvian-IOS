@@ -1,40 +1,92 @@
 import SwiftUI
 
-/// Barre d'onglets flottante translucide à coins arrondis.
+/// Disposition Apple Music : quatre onglets dans une capsule et Profil à part.
+/// La coque des onglets reste propriétaire de leur état et de leur navigation.
 struct FloatingTabBar: View {
     @Binding var selection: AppTab
     /// Appelé au toucher d'un onglet différent, juste avant sa sélection.
     var onSelect: ((AppTab) -> Void)? = nil
     var onReselect: ((AppTab) -> Void)? = nil
     @AppStorage("hapticFeedbackEnabled") private var hapticFeedbackEnabled = true
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+    @Namespace private var selectionAnimation
+
+    private let height: CGFloat = 64
+    private let spacing: CGFloat = 8
+    private let inset: CGFloat = 4
+    private let groupedTabs: [AppTab] = [.settings, .tag, .home, .favorites]
 
     var body: some View {
-        HStack(spacing: 4) {
-            ForEach(AppTab.allCases) { tab in
-                TabButton(tab: tab, isSelected: selection == tab) {
-                    if selection == tab {
-                        onReselect?(tab)
-                    } else {
-                        onSelect?(tab)
-                        selection = tab
+        GlassEffectContainer(spacing: spacing) {
+            HStack(spacing: spacing) {
+                HStack(spacing: 0) {
+                    ForEach(groupedTabs) { tab in
+                        TabButton(
+                            tab: tab,
+                            isSelected: selection == tab,
+                            height: height - inset * 2
+                        ) {
+                            select(tab)
+                        }
+                        .background {
+                            if selection == tab {
+                                Capsule()
+                                    .fill(.primary.opacity(0.10))
+                                    .matchedGeometryEffect(id: "selection", in: selectionAnimation)
+                            }
+                        }
                     }
                 }
+                .padding(inset)
+                .frame(height: height)
+                .modifier(TabGlassSurface(shape: Capsule(), opaque: reduceTransparency))
+
+                TabButton(
+                    tab: .profile,
+                    isSelected: selection == .profile,
+                    height: height,
+                    iconOnly: true
+                ) {
+                    select(.profile)
+                }
+                .frame(width: height, height: height)
+                .modifier(TabGlassSurface(shape: Circle(), opaque: reduceTransparency))
             }
         }
-        // L'animation est attachée à la **valeur** et non au geste : un
-        // changement d'onglet obtenu autrement (remise à zéro au second appui,
-        // ouverture automatique) s'anime exactement comme un tap.
+        // La valeur couvre aussi les changements d'onglet programmatiques.
         .animation(Motion.animation(.snappy(duration: 0.25)), value: selection)
-        .padding(.horizontal, 10)
-        .padding(.vertical, 8)
-        .floatingChrome(RoundedRectangle(cornerRadius: DS.tabBarRadius, style: .continuous))
-        // Bornée sur iPad : sans cette largeur maximale, les cinq onglets
-        // s'étirent sur toute la largeur de l'écran. Sur iPhone, la largeur
-        // proposée est déjà inférieure : la barre ne bouge pas.
         .frame(maxWidth: DS.maxTabBarWidth)
-        .padding(.horizontal, DS.gridMargin + 8)
+        .padding(.horizontal, 16)
         .sensoryFeedback(.selection, trigger: selection) { oldValue, newValue in
             hapticFeedbackEnabled && oldValue != newValue
+        }
+    }
+
+    private func select(_ tab: AppTab) {
+        if selection == tab {
+            onReselect?(tab)
+        } else {
+            onSelect?(tab)
+            selection = tab
+        }
+    }
+}
+
+/// Un seul verre par surface : aucun verre imbriqué dans la capsule.
+/// Le projet cible iOS 26 ; un fond opaque respecte Réduire la transparence.
+private struct TabGlassSurface<S: Shape>: ViewModifier {
+    let shape: S
+    let opaque: Bool
+
+    func body(content: Content) -> some View {
+        if opaque {
+            content
+                .background(Color(uiColor: .systemBackground), in: shape)
+                .overlay {
+                    shape.stroke(.primary.opacity(0.15), lineWidth: 0.5)
+                }
+        } else {
+            content.glassEffect(.regular.interactive(), in: shape)
         }
     }
 }
@@ -42,58 +94,37 @@ struct FloatingTabBar: View {
 private struct TabButton: View {
     let tab: AppTab
     let isSelected: Bool
+    let height: CGFloat
+    var iconOnly = false
     let action: () -> Void
 
-    /// Au-delà d'Accessibility 1, les cinq libellés ne tiennent plus dans la
-    /// largeur d'un onglet. Ils sont alors masqués : l'icône reste seule, et
-    /// le nom continue d'être lu par VoiceOver (`accessibilityLabel`).
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
-    private var showsTitle: Bool { dynamicTypeSize < .accessibility1 }
+    private var showsTitle: Bool {
+        !iconOnly && dynamicTypeSize < .accessibility1
+    }
 
     var body: some View {
-        Button {
-            action()
-        } label: {
+        Button(action: action) {
             VStack(spacing: 3) {
                 Image(systemName: isSelected ? tab.symbolFilled : tab.symbol)
-                    .font(.system(size: 19, weight: .medium))
-                    .modifier(SymbolBounce(enabled: isSelected && Motion.animationsEnabled))
+                    .font(.system(size: iconOnly ? 26 : 23, weight: .medium))
+                    .symbolRenderingMode(.monochrome)
                 if showsTitle {
                     Text(tab.title)
-                        .font(.caption2.weight(isSelected ? .semibold : .regular))
+                        .font(.caption2.weight(.medium))
                         .lineLimit(1)
                         .minimumScaleFactor(0.75)
                 }
             }
-            .foregroundStyle(isSelected ? Color.accentColor : .secondary)
+            .foregroundStyle(isSelected ? Color.accentColor : Color.primary)
             .frame(maxWidth: .infinity)
-            .padding(.vertical, 6)
-            .background {
-                if isSelected {
-                    Capsule()
-                        .fill(Color.accentColor.opacity(0.12))
-                }
-            }
-            .contentShape(Rectangle())
+            .frame(height: height)
+            .contentShape(Capsule())
         }
         .buttonStyle(.plain)
         .accessibilityLabel(tab.title)
         .accessibilityAddTraits(isSelected ? .isSelected : [])
-    }
-}
-
-/// Rebond de l'icône à la sélection, désactivé quand l'utilisateur a demandé
-/// moins de mouvement.
-private struct SymbolBounce: ViewModifier {
-    let enabled: Bool
-
-    func body(content: Content) -> some View {
-        if enabled {
-            content.symbolEffect(.bounce, value: enabled)
-        } else {
-            content
-        }
     }
 }
 
