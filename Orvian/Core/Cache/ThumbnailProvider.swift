@@ -112,6 +112,24 @@ actor ThumbnailProvider {
         return await thumbnail(for: key)
     }
 
+    /// A new classification must see current bytes: the UI cache is keyed by
+    /// file ID rather than content revision, so never reuse it for inference.
+    func classificationImageData(driveId: Int, fileId: Int) async throws -> Data {
+        let capturedCredential = Self.currentCredentialFingerprint()
+        try Task.checkCancellation()
+        guard capturedCredential != "signed-out" else { throw CancellationError() }
+        let service = service
+        let data = try await throttler.withPermit {
+            try Task.checkCancellation()
+            guard capturedCredential == Self.currentCredentialFingerprint() else { throw CancellationError() }
+            return try await service.thumbnailData(driveId: driveId, fileId: fileId)
+        }
+        try Task.checkCancellation()
+        guard capturedCredential == Self.currentCredentialFingerprint() else { throw CancellationError() }
+        guard !data.isEmpty else { throw ClassificationError.invalidImage }
+        return data
+    }
+
     /// La clé est capturée une seule fois par demande afin que les attentes,
     /// retries et prefetch ne basculent jamais silencieusement de session.
     private func thumbnail(for key: Key) async -> UIImage? {
