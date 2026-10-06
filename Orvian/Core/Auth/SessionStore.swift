@@ -71,6 +71,8 @@ final class SessionStore {
 
     /// Connexion avec un token collé par l'utilisateur.
     func signIn(token: String) async throws {
+        FolderImageScanner.shared.resetSession()
+        ImageClassificationStore.shared.resetSession()
         sessionGeneration &+= 1
         let generation = sessionGeneration
         discardMediaLinks()
@@ -106,6 +108,8 @@ final class SessionStore {
     }
 
     private func clearSession(message: String?) {
+        FolderImageScanner.shared.resetSession()
+        ImageClassificationStore.shared.resetSession()
         sessionGeneration &+= 1
         discardMediaLinks()
         // Annuler avant d'effacer le token afin que les URLSession actives

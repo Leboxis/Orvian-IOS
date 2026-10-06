@@ -205,4 +205,19 @@ capacité et l’expiration des URLs. `OrvianTests` (dont `PrivacyWindowTests`)
 reste jouable en local via Xcode sur simulateur : protection d’une
 présentation plein écran et disposition compacte du pavé, avec captures
 clair/sombre dans le résultat XCTest. La CI ne l’exécute plus (retirée pour
-la durée des runs) : ces parcours sont à vérifier à la main.
+la durée des runs) : ces parcours sont à vérifier à la main. La CI exécute
+uniquement les nouveaux tests de classification ; les autres tests iOS restent
+disponibles pour une exécution locale.
+
+## Scan du dossier ouvert
+
+- Ouvrir un dossier de plus de 60 éléments contenant images, vidéos et sous-dossiers.
+- Scanner via le bouton de viseur : toutes les images directes sont comptées, aucune image des sous-dossiers.
+- Tester un dossier vide, l'annulation, la relance (scores réutilisés), une erreur réseau et une image sans miniature.
+- Modifier une image à distance puis relancer : son score est invalidé et des octets actuels sont analysés.
+- Filtrer SFW / NSFW / Non analysés avec recherche et tri ; vérifier la même sélection dans la visionneuse.
+- Modifier le seuil pendant le scan et vérifier les compteurs / filtres sans nouvelles inférences.
+- Naviguer pendant le scan, fermer et rouvrir la feuille ; passer en arrière-plan interrompt le scan.
+- Changer de compte pendant une requête : aucun résultat de l'ancien compte dans le nouveau.
+- Mesurer mémoire, température et latence sur iPhone ; évaluer les faux positifs / négatifs sur des miniatures représentatives.
+- Vérifier une image orientée / non carrée et un GIF (une seule image fixe).

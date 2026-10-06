@@ -11,7 +11,42 @@ permissions:
   contents: write
 
 jobs:
+  classification-tests:
+    name: Verify classification model and iOS behavior
+    runs-on: macos-26
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install model verification tools
+        run: python -m pip install -r scripts/nsfw/requirements.txt
+      - name: Verify model transformation and embedded weights
+        run: |
+          python -m unittest discover -s Tests -p 'test_nsfw_model.py'
+          python scripts/nsfw/verify_model.py
+          python scripts/nsfw/convert_model.py --fetch-only --upstream "$RUNNER_TEMP/nsfw-reference.mlpackage"
+          python scripts/nsfw/verify_model.py --reference "$RUNNER_TEMP/nsfw-reference.mlpackage"
+      - name: Verify classification policy
+        run: python .github/scripts/check_image_classification.py
+      - name: Install XcodeGen
+        run: brew install xcodegen
+      - name: Generate project and run hosted iOS tests
+        shell: bash
+        run: |
+          set -o pipefail
+          xcodegen generate
+          SIMULATOR_ID=$(xcrun simctl list devices available -j | python -c 'import json,sys; d=json.load(sys.stdin); print(next(x["udid"] for k,v in d["devices"].items() if "iOS" in k for x in v if "iPhone" in x["name"]))')
+          xcodebuild -project Orvian.xcodeproj -scheme Orvian \
+            -destination "platform=iOS Simulator,id=$SIMULATOR_ID" \
+            -configuration Debug -derivedDataPath "$RUNNER_TEMP/orvian-tests" \
+            -only-testing:OrvianTests/NSFWClassifierTests \
+            -only-testing:OrvianTests/ImageClassificationStoreTests \
+            -only-testing:OrvianTests/FolderImageScannerTests \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO test
+
   build:
+    needs: classification-tests
     # La mise à jour du catalogue LiveContainer est poussée par ce workflow.
     # Elle ne doit pas déclencher une seconde publication.
     if: github.event_name != 'push' || github.actor != 'github-actions[bot]'
@@ -145,6 +180,7 @@ jobs:
       - name: Package IPA
         run: |
           APP="build/Build/Products/Release-iphoneos/Orvian.app"
+          test -d "$APP/NSFWClassifier.mlmodelc"
           VERSION=$(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" "$APP/Info.plist")
           mkdir -p Payload
           cp -R "$APP" Payload/
@@ -197,4 +233,3 @@ jobs:
           tag_name: v${{ steps.version.outputs.value }}
           files: Orvian-${{ steps.version.outputs.value }}-unsigned.ipa
           generate_release_notes: true
-

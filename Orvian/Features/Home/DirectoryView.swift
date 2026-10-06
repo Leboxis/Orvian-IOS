@@ -32,6 +32,8 @@ struct DirectoryView: View {
     /// bouton loupe (et le focus / une recherche active) la révèle.
     @State private var searchRevealed = false
     @State private var filters = FileFilters()
+    @State private var showsFolderScan = false
+    private let folderScanner = FolderImageScanner.shared
     @State private var selectionMode = false
     @State private var selectedIDs: Set<Int> = []
     @State private var visibleItemsReport: VisibleItemsReport?
@@ -254,6 +256,15 @@ struct DirectoryView: View {
                     randomFileButton
 
                     Button {
+                        folderScanner.start(driveId: driveId, directory: directory)
+                        showsFolderScan = true
+                    } label: {
+                        Image(systemName: folderScanner.isRunning ? "viewfinder.circle.fill" : "viewfinder")
+                    }
+                    .accessibilityLabel("Scanner ce dossier")
+                    .accessibilityHint("Classer les images de ce dossier en SFW ou NSFW")
+
+                    Button {
                         startSelection()
                     } label: {
                         Label("Sélectionner", systemImage: "checkmark.circle")
@@ -276,6 +287,9 @@ struct DirectoryView: View {
             Button("OK", role: .cancel) {}
         } message: {
             Text(addError ?? "")
+        }
+        .sheet(isPresented: $showsFolderScan) {
+            FolderScanSheet(scanner: folderScanner, store: ImageClassificationStore.shared)
         }
         .sheet(item: $pendingMove) { request in
             MoveDestinationPicker(
