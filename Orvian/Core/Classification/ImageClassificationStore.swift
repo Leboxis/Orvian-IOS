@@ -9,12 +9,15 @@ final class ImageClassificationStore {
     static let shared = ImageClassificationStore()
     private(set) var revision = 0
     private(set) var persistenceError: String?
+    private var thresholdValue: Float
     var threshold: Float {
-        didSet {
-            if !threshold.isFinite { threshold = oldValue; return }
-            threshold = min(0.99, max(0.50, threshold))
-            guard threshold != oldValue else { return }
-            defaults?.set(threshold, forKey: "imageClassificationThreshold")
+        get { thresholdValue }
+        set {
+            guard newValue.isFinite else { return }
+            let clamped = min(0.99, max(0.50, newValue))
+            guard clamped != thresholdValue else { return }
+            thresholdValue = clamped
+            defaults?.set(clamped, forKey: "imageClassificationThreshold")
             revision &+= 1
         }
     }
@@ -35,7 +38,7 @@ final class ImageClassificationStore {
         self.defaults = defaults
         let saved = defaults?.object(forKey: "imageClassificationThreshold") as? NSNumber
         let value = saved?.floatValue ?? 0.80
-        threshold = value.isFinite ? min(0.99, max(0.50, value)) : 0.80
+        thresholdValue = value.isFinite ? min(0.99, max(0.50, value)) : 0.80
         currentCredential = credential
         let root = directory ?? FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("ImageClassification", isDirectory: true)

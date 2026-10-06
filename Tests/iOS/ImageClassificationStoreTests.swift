@@ -56,6 +56,22 @@ final class ImageClassificationStoreTests: XCTestCase {
         }
     }
 
+    func testThresholdClampsOnceAndRejectsNonFiniteValues() {
+        let store = ImageClassificationStore(defaults: nil, credential: { "account" })
+        let initialRevision = store.revision
+        store.threshold = 2
+        XCTAssertEqual(store.threshold, 0.99)
+        XCTAssertEqual(store.revision, initialRevision + 1)
+        store.threshold = 2
+        XCTAssertEqual(store.revision, initialRevision + 1)
+        store.threshold = -1
+        XCTAssertEqual(store.threshold, 0.50)
+        XCTAssertEqual(store.revision, initialRevision + 2)
+        for value in [Float.nan, .infinity, -.infinity] { store.threshold = value }
+        XCTAssertEqual(store.threshold, 0.50)
+        XCTAssertEqual(store.revision, initialRevision + 2)
+    }
+
     func testVisibleItemsCacheInvalidatesOnScoreAndThreshold() async throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: directory) }
