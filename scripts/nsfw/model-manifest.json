@@ -1,0 +1,31 @@
+{
+  "version": "marqo-384-fp16-softmax-v1",
+  "upstream_repository": "https://github.com/zorrobyte/NSFWScanner",
+  "upstream_revision": "c8ff10d90d80e3d4f65d75b9a745a529c2defb78",
+  "upstream_model_sha256": "3c1d7b908dd2576a6c2dfb9a39f68dcba68ff726cf5040828dadf196ba8b7afe",
+  "model": "https://huggingface.co/Marqo/nsfw-image-detection-384",
+  "labels": [
+    "NSFW",
+    "SFW"
+  ],
+  "input": [
+    384,
+    384,
+    "RGB"
+  ],
+  "preprocessing": {
+    "scale": 0.00784313725490196,
+    "bias": [
+      -1,
+      -1,
+      -1
+    ],
+    "vision_crop": "centerCrop"
+  },
+  "modification": "FP32 softmax on logits before classify; backbone and weights unchanged",
+  "files": {
+    "Data/com.apple.CoreML/model.mlmodel": "c3908174f317a0fde38de99189f220021facedd6a7127c03444719c10e552073",
+    "Data/com.apple.CoreML/weights/weight.bin": "25f0a6ee9ddd1c5756a87f3fc61e5c0ae40e3803a36b890369a47b372079ce2d",
+    "Manifest.json": "67825c7f09832df7a27f45002446f87cf58f636bee156440de015c9d96c54f2a"
+  }
+}
