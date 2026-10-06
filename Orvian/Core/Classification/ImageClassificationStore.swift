@@ -68,8 +68,9 @@ final class ImageClassificationStore {
     func score(driveId: Int, file: DriveFile) -> Float? {
         guard loaded, credentialFingerprint == currentCredential(),
               let entry = entries[key(driveId: driveId, fileId: file.id)],
-              entry.modelVersion == NSFWClassifier.modelVersion,
+              entry.modelVersion == NSFWImageClassifier.modelVersion,
               entry.contentRevision == ImageContentRevision(file: file),
+              entry.contentRevision != nil || entry.fileSize == file.size,
               entry.score.isFinite, (0...1).contains(entry.score) else { return nil }
         return entry.score
     }
@@ -90,6 +91,7 @@ final class ImageClassificationStore {
         }
         entries[key(driveId: driveId, fileId: file.id)] = ImageClassificationRecord(
             score: score, contentRevision: ImageContentRevision(file: file),
+            fileSize: file.size,
             modelVersion: modelVersion, analyzedAt: Date())
         if entries.count > 20_100 {
             entries = Dictionary(uniqueKeysWithValues: entries.sorted { $0.value.analyzedAt > $1.value.analyzedAt }.prefix(20_000))

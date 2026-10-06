@@ -573,21 +573,23 @@ struct FileGridView: View {
         await viewModel.loadMoreIfNeeded()
     }
 
-    private struct EmptyFilteredPageTaskKey: Hashable {
+    struct EmptyFilteredPageTaskKey: Hashable {
         /// Version incrémentale du contenu : toute mutation de la liste
         /// change la clé, sans recalculer une empreinte O(n) à chaque rendu.
         let source: FileSource
         let itemsRevision: Int
+        let classificationRevision: Int
         let filters: FileFilters
         let searchText: String
         let hasMore: Bool
         let isReloading: Bool
     }
 
-    private var emptyFilteredPageTaskKey: EmptyFilteredPageTaskKey {
+    var emptyFilteredPageTaskKey: EmptyFilteredPageTaskKey {
         EmptyFilteredPageTaskKey(
             source: viewModel.source,
             itemsRevision: viewModel.itemsRevision,
+            classificationRevision: filters.classification == .all ? 0 : classificationStore.revision,
             filters: filters,
             searchText: effectiveSearchText,
             hasMore: viewModel.hasMore,

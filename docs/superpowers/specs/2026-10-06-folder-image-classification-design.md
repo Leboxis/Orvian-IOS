@@ -1,7 +1,7 @@
 # Analyse SFW / NSFW du dossier actuel
 
 Date : 6 octobre 2026
-Statut : périmètre confirmé en conversation ; plan d'implémentation à revoir.
+Statut : périmètre et plan approuvés en conversation ; implémentation locale préparée, validation native iOS en attente.
 
 ## Objectif et demandes confirmées
 

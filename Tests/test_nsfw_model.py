@@ -39,6 +39,25 @@ class ModelConversionTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             conversion.add_softmax(Model.Model())
 
+    def test_embedded_model_normalizes_classifier_and_preserves_image_contract(self):
+        Model, MIL = conversion.model_types()
+        model = Model.Model()
+        package = ROOT / 'Orvian/Resources/NSFWClassifier.mlpackage'
+        model.ParseFromString((package / conversion.MODEL_PATH).read_bytes())
+        image = model.description.input[0]
+        self.assertEqual(image.name, 'image')
+        self.assertEqual((image.type.imageType.width, image.type.imageType.height), (384, 384))
+        self.assertEqual(model.description.metadata.versionString, conversion.MODEL_VERSION)
+        block = model.mlProgram.functions['main'].block_specializations['CoreML6']
+        softmax, classifier = block.operations[-2:]
+        self.assertEqual(softmax.type, 'softmax')
+        self.assertEqual(softmax.outputs[0].type.tensorType.dataType, MIL.FLOAT32)
+        self.assertEqual(classifier.type, 'classify')
+        self.assertEqual(classifier.inputs['probabilities'].arguments[0].name, softmax.outputs[0].name)
+        classes = classifier.inputs['classes'].arguments[0].value.immediateValue.list.values
+        self.assertEqual([c.immediateValue.tensor.strings.values[0] for c in classes], ['NSFW', 'SFW'])
+        self.assertEqual(conversion.sha256(package / conversion.WEIGHTS_PATH), conversion.WEIGHTS_SHA256)
+
 
 if __name__ == '__main__':
     unittest.main()

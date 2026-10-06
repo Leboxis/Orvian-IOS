@@ -24,6 +24,7 @@ struct ImageContentRevision: Codable, Hashable, Sendable {
 struct ImageClassificationRecord: Codable, Sendable {
     let score: Float
     let contentRevision: ImageContentRevision?
+    let fileSize: Int?
     let modelVersion: String
     let analyzedAt: Date
 }

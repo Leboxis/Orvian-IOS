@@ -11,7 +11,7 @@ final class NSFWClassifierTests: XCTestCase {
             UIColor.white.setFill()
             context.fill(CGRect(x: 0, y: 0, width: 384, height: 384))
         }
-        let classifier = NSFWClassifier()
+        let classifier = NSFWImageClassifier()
         try await classifier.prepare()
         let score = try await classifier.classify(imageData: data)
         XCTAssertTrue(score.isFinite)
@@ -28,7 +28,7 @@ final class NSFWClassifierTests: XCTestCase {
     }
 
     func testUnreadableImageThrows() async throws {
-        let classifier = NSFWClassifier()
+        let classifier = NSFWImageClassifier()
         do {
             _ = try await classifier.classify(imageData: Data([0, 1, 2]))
             XCTFail("Unreadable images must not receive a SFW score")

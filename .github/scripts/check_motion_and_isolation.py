@@ -86,7 +86,7 @@ grid = source("Orvian/Features/Shared/FileGridView.swift")
 model = source("Orvian/Features/Shared/FileGridViewModel.swift")
 assert "@State private var visibleItemsCache" not in grid
 assert "@ObservationIgnored private var visibleItemsCache" in model
-assert "func visibleItems(key: VisibleItemsKey, mediaMetadata: MediaMetadataStore)" in model
+assert "func visibleItems(key: VisibleItemsKey, mediaMetadata: MediaMetadataStore, classificationStore: ImageClassificationStore)" in model
 
 # --- Une révision de liste et une écriture d'instantané par salve ---------
 assert "private var revisionBumpPending = false" in model

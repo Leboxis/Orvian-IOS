@@ -45,8 +45,8 @@ final class FolderImageScanner {
          imageData: @escaping (Int, Int) async throws -> Data = { drive, file in
              try await ThumbnailProvider.shared.classificationImageData(driveId: drive, fileId: file)
          },
-         prepare: @escaping () async throws -> Void = { try await NSFWClassifier.shared.prepare() },
-         classify: @escaping (Data) async throws -> Float = { try await NSFWClassifier.shared.classify(imageData: $0) }) {
+         prepare: @escaping () async throws -> Void = { try await NSFWImageClassifier.shared.prepare() },
+         classify: @escaping (Data) async throws -> Float = { try await NSFWImageClassifier.shared.classify(imageData: $0) }) {
         self.store = store ?? .shared
         self.credential = credential
         self.page = page
@@ -123,7 +123,8 @@ final class FolderImageScanner {
             }
             for file in images {
                 try check(credential: captured, generation: capturedGeneration)
-                if let score = store.score(driveId: driveId, file: file) {
+                if ImageContentRevision(file: file) != nil,
+                   let score = store.score(driveId: driveId, file: file) {
                     resultScores.append(score)
                     progress?.reused += 1
                 } else {
@@ -133,7 +134,7 @@ final class FolderImageScanner {
                         let score = try await classify(data)
                         try check(credential: captured, generation: capturedGeneration)
                         try await store.record(score: score, file: file, driveId: driveId,
-                                               credentialFingerprint: captured, modelVersion: NSFWClassifier.modelVersion)
+                                               credentialFingerprint: captured, modelVersion: NSFWImageClassifier.modelVersion)
                         try check(credential: captured, generation: capturedGeneration)
                         resultScores.append(score)
                     } catch {

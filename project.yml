@@ -56,9 +56,6 @@ schemes:
     build:
       targets:
         Orvian: all
-    test:
-      targets:
-        - OrvianTests
     run:
       config: Debug
     test:

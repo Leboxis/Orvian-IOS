@@ -5,10 +5,12 @@ import XCTest
 final class FolderImageScannerTests: XCTestCase {
     private var directories: [URL] = []
 
-    override func tearDown() {
-        for directory in directories { try? FileManager.default.removeItem(at: directory) }
-        directories = []
-        super.tearDown()
+    override nonisolated func tearDown() async throws {
+        await MainActor.run {
+            for directory in self.directories { try? FileManager.default.removeItem(at: directory) }
+            self.directories = []
+        }
+        try await super.tearDown()
     }
 
     private func makeStore(credential: @escaping () -> String?) -> ImageClassificationStore {
@@ -16,8 +18,8 @@ final class FolderImageScannerTests: XCTestCase {
         directories.append(directory)
         return ImageClassificationStore(directory: directory, defaults: nil, credential: credential)
     }
-    private func file(_ id: Int, kind: String = "image", modified: Int = 1) throws -> DriveFile {
-        let json = "{\"id\":\(id),\"name\":\"item\",\"type\":\"\(kind == "dir" ? "dir" : "file")\",\"extension_type\":\"\(kind)\",\"last_modified_at\":\(modified)}"
+    private func file(_ id: Int, kind: String = "image", modified: Int? = 1) throws -> DriveFile {
+        let json = "{\"id\":\(id),\"name\":\"item\",\"type\":\"\(kind == "dir" ? "dir" : "file")\",\"extension_type\":\"\(kind)\"\(modified.map { ",\"last_modified_at\":\($0)" } ?? "")}"
         return try JSONDecoder().decode(DriveFile.self, from: Data(json.utf8))
     }
 
@@ -97,6 +99,23 @@ final class FolderImageScannerTests: XCTestCase {
 
     func testAccountChangeRejectsLateResults() async throws {
         try await checkLateResult(changeAccount: true)
+    }
+
+    func testRescanReanalyzesTimestampUnknownImage() async throws {
+        let image = try file(1, modified: nil)
+        let folder = try file(70, kind: "dir")
+        let store = makeStore(credential: { "account" })
+        var calls = 0
+        let scanner = FolderImageScanner(store: store, credential: { "account" },
+            page: { _, _, _ in CursorPage(data: [image], hasMore: false) },
+            imageData: { _, _ in Data() }, prepare: {}, classify: { _ in calls += 1; return 0.9 })
+        scanner.start(driveId: 1, directory: folder)
+        await scanner.task?.value
+        XCTAssertEqual(store.score(driveId: 1, file: image), 0.9)
+        scanner.start(driveId: 1, directory: folder)
+        await scanner.task?.value
+        XCTAssertEqual(calls, 2)
+        XCTAssertEqual(scanner.progress?.reused, 0)
     }
 
     private func checkLateResult(changeAccount: Bool) async throws {

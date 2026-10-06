@@ -4,8 +4,8 @@ import ImageIO
 import Foundation
 
 /// Sérialise les inférences hors du MainActor. Le package inclut le softmax.
-actor NSFWClassifier {
-    static let shared = NSFWClassifier()
+actor NSFWImageClassifier {
+    static let shared = NSFWImageClassifier()
     static let modelVersion = "marqo-384-fp16-softmax-v1"
     private var model: VNCoreMLModel?
 

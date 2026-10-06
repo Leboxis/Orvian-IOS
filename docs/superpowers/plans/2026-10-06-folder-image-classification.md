@@ -6,7 +6,7 @@
 
 **Architecture:** Un coordinateur observable énumère la source `.directory(directoryId)` indépendamment de la grille et classe ses images séquentiellement. Un actor Core ML / Vision produit les probabilités ; un store observable conserve les scores isolés par compte et publie des instantanés pour le filtrage commun de la grille et de la visionneuse.
 
-**Tech Stack:** Swift 5, SwiftUI / Observation, Foundation, Core ML, Vision, iOS 26, XcodeGen. Python / PyTorch / timm / coremltools pour préparer le modèle, hors du runtime de l'app.
+**Tech Stack:** Swift 5, SwiftUI / Observation, Foundation, Core ML, Vision, iOS 26, XcodeGen. Python / coremltools pour ajouter softmax au package Core ML amont épinglé, hors du runtime de l'app. Les poids et le réseau de classification sont conservés.
 
 **Spec:** `docs/superpowers/specs/2026-10-06-folder-image-classification-design.md`.
 
@@ -35,7 +35,7 @@
 
 - `Orvian/Core/Classification/ImageClassification.swift` : révision du contenu, score, snapshot et politique de seuil, sans dépendances UIKit / Vision.
 - `Orvian/Core/Classification/ImageClassificationStore.swift` : cache mémoire / disque observable et isolation par compte.
-- `Orvian/Core/Classification/NSFWClassifier.swift` : actor de chargement et inférence du modèle.
+- `Orvian/Core/Classification/NSFWImageClassifier.swift` : actor de chargement et inférence du modèle, avec un nom distinct de la classe générée pour le modèle.
 - `Orvian/Core/Classification/FolderImageScanner.swift` : coordinateur, pagination, progression et annulation.
 - `Orvian/Features/Shared/FolderScanSheet.swift` : progression, seuil, annulation et résumé.
 - `Orvian/Resources/NSFWClassifier.mlpackage/` : modèle réel compilé par Xcode ; jamais une simple référence Git LFS.
@@ -46,7 +46,7 @@
 
 ## Tâche 1 : modèle embarqué produisant des probabilités
 
-**Files:** créer les scripts `scripts/nsfw/`, le package et sa notice ; adapter `project.yml` si nécessaire ; créer `Tests/iOS/NSFWClassifierTests.swift` et `Orvian/Core/Classification/NSFWClassifier.swift`.
+**Files:** créer les scripts `scripts/nsfw/`, le package et sa notice ; adapter `project.yml` si nécessaire ; créer `Tests/iOS/NSFWClassifierTests.swift` et `Orvian/Core/Classification/NSFWImageClassifier.swift`.
 
 **Interfaces:** actor `NSFWClassifier`, `func prepare() async throws`, `func classify(imageData: Data) async throws -> Float` ; le Float retourné est la probabilité de la classe NSFW, jamais la confiance de la classe gagnante.
 
