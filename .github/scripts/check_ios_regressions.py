@@ -161,6 +161,7 @@ enum TokenStore {
     run_check(temp / "file-filters", [filters_dependencies, *[ROOT / path for path in [
         "Orvian/Core/API/FileSource+Ordering.swift",
         "Orvian/Models/FileFilters.swift",
+        "Orvian/Core/Classification/ImageClassification.swift",
         "Orvian/Models/DriveFile.swift",
         "Orvian/Models/Category.swift",
         "Orvian/Core/Utils/FileKind.swift",

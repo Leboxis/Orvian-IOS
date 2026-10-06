@@ -14,10 +14,36 @@ struct FileFiltersChecks {
         checkOriginalAndDurationSorts()
         checkDirectionAndTieBreak()
         checkSearchThenSort()
+        checkClassificationFilters()
         print("FileFilters ordering, search and source gating checks passed")
     }
 
     // MARK: - Capacités de la source
+
+    static func checkClassificationFilters() {
+        let images = [file(1, "photo-a.jpg", extensionType: "image"),
+                      file(2, "photo-b.jpg", extensionType: "image"),
+                      file(3, "photo-c.jpg", extensionType: "image")]
+        let scores = ImageClassificationSnapshot(scores: [1: 0.79, 2: 0.80])
+        var filters = FileFilters()
+        filters.classification = .nsfw
+        precondition(filters.isActive)
+        precondition(filters.visible(images, searchText: "", metadata: .init(), source: nil,
+                                     classification: scores).map(\.id) == [2])
+        filters.classification = .sfw
+        precondition(filters.visible(images, searchText: "", metadata: .init(), source: nil,
+                                     classification: scores).map(\.id) == [1])
+        filters.classification = .unscanned
+        precondition(filters.visible(images, searchText: "", metadata: .init(), source: nil,
+                                     classification: scores).map(\.id) == [3])
+        filters.classification = .nsfw
+        precondition(filters.visible(images, searchText: "photo-a", metadata: .init(), source: nil,
+                                     classification: scores).isEmpty)
+        precondition(filters.visible(images, searchText: "", metadata: .init(), source: nil,
+                                     classification: scores, nsfwThreshold: 0.9).isEmpty)
+        precondition(!FileFilters().isActive)
+        precondition(FileFilters().visible(images, searchText: "", metadata: .init(), source: nil).count == 3)
+    }
 
     /// Le contrat partagé avec `KDriveService.safeOrdering` : ces endpoints
     /// n'acceptent que la date de modification, tout autre tri doit donc

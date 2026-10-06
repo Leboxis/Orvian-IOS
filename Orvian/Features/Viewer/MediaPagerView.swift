@@ -167,6 +167,10 @@ struct MediaPagerView: View {
                 Task { await loadMoreMediaIfNeeded(around: newID) }
             }
         }
+        .onChange(of: ImageClassificationStore.shared.revision) { _, _ in
+            guard context.filters.classification != .all else { return }
+            refreshFiles()
+        }
     }
 
     /// Reconstruit la liste des médias après un chargement de page : réapplique
@@ -186,7 +190,9 @@ struct MediaPagerView: View {
             viewModel.items,
             searchText: context.localSearchText,
             metadata: MediaMetadataStore.shared.snapshot(driveId: context.driveId, items: viewModel.items),
-            source: context.source
+            source: context.source,
+            classification: ImageClassificationStore.shared.snapshot(driveId: context.driveId, items: viewModel.items),
+            nsfwThreshold: ImageClassificationStore.shared.threshold
         )
         let media = visible.filter { $0.isImage || $0.isVideo }
         guard media.map(\.id) != settled.map(\.id) else { return }
@@ -272,7 +278,9 @@ struct MediaPagerView: View {
             viewModel.items,
             searchText: context.localSearchText,
             metadata: VideoMetadataSnapshot(),
-            source: context.source
+            source: context.source,
+            classification: ImageClassificationStore.shared.snapshot(driveId: context.driveId, items: viewModel.items),
+            nsfwThreshold: ImageClassificationStore.shared.threshold
         )
         return candidates.contains {
             $0.isVideo && MediaMetadataStore.shared.info(driveId: context.driveId, for: $0.id) == nil

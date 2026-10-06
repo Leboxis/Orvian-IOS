@@ -108,11 +108,12 @@ final class FileGridViewModel {
     /// Éléments après filtres, recherche et tri, mémoïsés par `key`. La clé
     /// est purement incrémentale : sa comparaison est O(1) au lieu de relire
     /// tout le tableau à chaque rendu.
-    func visibleItems(key: VisibleItemsKey, mediaMetadata: MediaMetadataStore) -> [DriveFile] {
+    func visibleItems(key: VisibleItemsKey, mediaMetadata: MediaMetadataStore, classificationStore: ImageClassificationStore) -> [DriveFile] {
         visibleItemsCache.visibleItems(
             key: key,
             items: items,
-            mediaMetadata: mediaMetadata
+            mediaMetadata: mediaMetadata,
+            classificationStore: classificationStore
         )
     }
 

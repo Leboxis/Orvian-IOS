@@ -47,6 +47,7 @@ struct FileGridView: View {
     var scrollToTopRequest = 0
 
     private let mediaMetadata = MediaMetadataStore.shared
+    private let classificationStore = ImageClassificationStore.shared
     // Les préférences ci-dessous sont lues **une seule fois par grille** puis
     // transmises aux cartes : observées par chaque vignette, elles faisaient
     // 450 abonnements sur une grille de 150 cartes, et un simple changement de
@@ -95,6 +96,11 @@ struct FileGridView: View {
             .background(Color(uiColor: .systemGroupedBackground))
             .task(id: viewModel.source) {
                 await viewModel.loadIfNeeded()
+            }
+            .task(id: TokenStore.credentialFingerprint()) {
+                if let credential = TokenStore.credentialFingerprint() {
+                    await classificationStore.load(credentialFingerprint: credential)
+                }
             }
             // Un déclencheur de pagination avalé pendant un rechargement ne
             // se répète pas tout seul (`onAppear` déjà consommé pour ces
@@ -410,7 +416,7 @@ struct FileGridView: View {
     /// O(1) au lieu de relire tout le tableau à chaque rendu. Le cache lui-même
     /// appartient au vue-modèle, jamais à un `@State` de la vue.
     private var visibleItems: [DriveFile] {
-        viewModel.visibleItems(key: visibleItemsKey, mediaMetadata: mediaMetadata)
+        viewModel.visibleItems(key: visibleItemsKey, mediaMetadata: mediaMetadata, classificationStore: classificationStore)
     }
 
     private var visibleItemsKey: VisibleItemsKey {
@@ -421,6 +427,7 @@ struct FileGridView: View {
             filters: filters,
             searchText: effectiveSearchText,
             metadataRevision: metadataRevision,
+            classificationRevision: filters.classification == .all ? 0 : classificationStore.revision,
             foldersFirst: foldersFirstInTags && sourceIsCategory
         )
     }
@@ -838,6 +845,7 @@ struct VisibleItemsKey: Hashable {
     let filters: FileFilters
     let searchText: String
     let metadataRevision: Int
+    let classificationRevision: Int
     let foldersFirst: Bool
 }
 
@@ -861,7 +869,8 @@ struct VisibleItemsCache {
     mutating func visibleItems(
         key: VisibleItemsKey,
         items: [DriveFile],
-        mediaMetadata: MediaMetadataStore
+        mediaMetadata: MediaMetadataStore,
+        classificationStore: ImageClassificationStore
     ) -> [DriveFile] {
         if key == cachedKey {
             return cachedResult
@@ -871,7 +880,9 @@ struct VisibleItemsCache {
             items,
             searchText: key.searchText,
             metadata: mediaMetadata.snapshot(driveId: key.driveId, items: items),
-            source: key.source
+            source: key.source,
+            classification: key.filters.classification == .all ? .init() : classificationStore.snapshot(driveId: key.driveId, items: items),
+            nsfwThreshold: classificationStore.threshold
         )
         if key.foldersFirst {
             result = result.filter(\.isDirectory) + result.filter { !$0.isDirectory }

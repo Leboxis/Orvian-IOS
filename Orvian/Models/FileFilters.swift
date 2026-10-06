@@ -140,6 +140,29 @@ struct FileFilters: Equatable, Hashable {
         }
     }
 
+    enum ClassificationFilter: String, CaseIterable, Identifiable {
+        case all, sfw, nsfw, unscanned
+
+        var id: String { rawValue }
+        var title: String {
+            switch self {
+            case .all: return "Tous"
+            case .sfw: return "SFW"
+            case .nsfw: return "NSFW"
+            case .unscanned: return "Non analysés"
+            }
+        }
+
+        var safety: ImageSafety? {
+            switch self {
+            case .all: return nil
+            case .sfw: return .sfw
+            case .nsfw: return .nsfw
+            case .unscanned: return .unscanned
+            }
+        }
+    }
+
     var sort: SortMode = .original
     var direction: Direction = .descending
     var orientation: Orientation? = nil
@@ -149,6 +172,7 @@ struct FileFilters: Equatable, Hashable {
     /// Ne garder que les fichiers, en masquant les dossiers (les dossiers
     /// réapparaissent dès que l'option est désactivée).
     var filesOnly = false
+    var classification: ClassificationFilter = .all
 
     /// Tris exprimables par l'API kDrive (`order_by[]`) : les appliquer côté
     /// serveur garantit que la pagination entière respecte le tri, pas
@@ -170,7 +194,7 @@ struct FileFilters: Equatable, Hashable {
 
     /// Vrai dès qu'un tri ou un filtre diffère du comportement par défaut.
     var isActive: Bool {
-        sort != .original || orientation != nil || highResolutionVideosOnly || media != .all || filesOnly
+        sort != .original || orientation != nil || highResolutionVideosOnly || media != .all || filesOnly || classification != .all
     }
 
     /// Applique les filtres (média, orientation et définition vidéo, recherche)
@@ -197,7 +221,9 @@ struct FileFilters: Equatable, Hashable {
         _ items: [DriveFile],
         searchText: String,
         metadata: VideoMetadataSnapshot,
-        source: FileSource?
+        source: FileSource?,
+        classification: ImageClassificationSnapshot = .init(),
+        nsfwThreshold: Float = 0.80
     ) -> [DriveFile] {
         var result = items
 
@@ -212,6 +238,12 @@ struct FileFilters: Equatable, Hashable {
         // Ne garder que les fichiers de la liste : les dossiers sont masqués.
         if filesOnly {
             result = result.filter { !$0.isDirectory }
+        }
+
+        if let safety = self.classification.safety {
+            result = result.filter {
+                $0.isImage && classification.classification(for: $0.id, threshold: nsfwThreshold) == safety
+            }
         }
 
         if let orientation {
