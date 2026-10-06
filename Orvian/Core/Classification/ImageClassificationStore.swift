@@ -94,7 +94,8 @@ final class ImageClassificationStore {
             fileSize: file.size,
             modelVersion: modelVersion, analyzedAt: Date())
         if entries.count > 20_100 {
-            entries = Dictionary(uniqueKeysWithValues: entries.sorted { $0.value.analyzedAt > $1.value.analyzedAt }.prefix(20_000))
+            entries = Dictionary(uniqueKeysWithValues: entries.sorted { $0.value.analyzedAt > $1.value.analyzedAt }
+                .prefix(20_000).map { ($0.key, $0.value) })
         }
         revision &+= 1
         scheduleSave()
@@ -140,7 +141,7 @@ final class ImageClassificationStore {
 
     private func persistentRecords() -> [String: ImageClassificationRecord] {
         Dictionary(uniqueKeysWithValues: entries.filter { $0.value.contentRevision != nil }
-            .sorted { $0.value.analyzedAt > $1.value.analyzedAt }.prefix(20_000))
+            .sorted { $0.value.analyzedAt > $1.value.analyzedAt }.prefix(20_000).map { ($0.key, $0.value) })
     }
 
     private func scheduleSave() {
@@ -173,7 +174,7 @@ private actor ClassificationDiskStore {
         guard let data = try? Data(contentsOf: url), data.count <= 16 * 1024 * 1024,
               let records = try? JSONDecoder().decode([String: ImageClassificationRecord].self, from: data) else { return [:] }
         return Dictionary(uniqueKeysWithValues: records.filter { $0.value.contentRevision != nil }
-            .sorted { $0.value.analyzedAt > $1.value.analyzedAt }.prefix(20_000))
+            .sorted { $0.value.analyzedAt > $1.value.analyzedAt }.prefix(20_000).map { ($0.key, $0.value) })
     }
 
     func save(_ records: [String: ImageClassificationRecord], credential: String, sequence: UInt64) throws {
