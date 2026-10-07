@@ -82,7 +82,7 @@ Tous, Aucun, Nudité / sperme, Pieds ou À analyser. Le seuil reclasse les score
 Nudité / sperme est prioritaire si des pieds sont aussi détectés. Aucun signifie
 qu'aucun score n'atteint le seuil ; les pieds couverts ne déclenchent pas Pieds.
 
-Core ML / Vision exécute **NudeNet 320n et JoyTag en fp16** sur l'appareil.
+Core ML / Vision exécute **NudeNet 320n en fp16 et JoyTag en fp32** sur l'appareil.
 NudeNet détecte les parties intimes exposées et les pieds nus ; JoyTag fournit
 le score du tag exact `cum` (sigmoid). Ces scores sont indépendants.
 Les miniatures à analyser sont récupérées

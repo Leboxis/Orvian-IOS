@@ -119,6 +119,9 @@ def convert(cache, output):
     exports = [('NudeNet320n', wrappers[0], 320, 'detections', [1, 22, 2100]),
                ('JoyTag', wrappers[1], 448, 'semenScore', [1, 1])]
     manifest = {'version': VERSION, 'sources': LOCK, 'models': {}}
+    # NudeNet tolerates fp16; JoyTag's attention produces NaN in fp16 Core ML
+    # (native 0.10 -> [[nan]]), so it stays float32.
+    precision = {'NudeNet320n': ct.precision.FLOAT16, 'JoyTag': ct.precision.FLOAT32}
     for name, wrapper, size, feature, shape in exports:
         example = torch.zeros(1, 3, size, size)
         with torch.inference_mode(), exportable_attention():
@@ -128,13 +131,14 @@ def convert(cache, output):
                 raise ValueError(f'Unexpected {name} output: {list(actual.shape)}')
         model = ct.convert(
             traced, convert_to='mlprogram', minimum_deployment_target=ct.target.iOS16,
-            compute_precision=ct.precision.FLOAT16,
+            compute_precision=precision[name],
             inputs=[ct.ImageType(name='image', shape=example.shape,
                                  color_layout=ct.colorlayout.RGB, scale=1 / 255.0)],
             outputs=[ct.TensorType(name=feature, dtype=np.float32)],
         )
         model.version = VERSION
-        model.short_description = f'{name}; local fp16 image content analysis for Orvian'
+        tag = 'fp16' if name == 'NudeNet320n' else 'fp32'
+        model.short_description = f'{name}; local {tag} image content analysis for Orvian'
         model.license = 'AGPL-3.0' if name == 'NudeNet320n' else 'Apache-2.0'
         model.user_defined_metadata['orvian.pipelineVersion'] = VERSION
         if name == 'JoyTag':

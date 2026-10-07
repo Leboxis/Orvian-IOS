@@ -1,5 +1,5 @@
 {
-  "pipeline_version": "nudenet320n-joytag-fp16-v1",
+  "pipeline_version": "nudenet320n-fp16-joytag-fp32-v1",
   "assets": {
     "nudenet/320n.pt": {
       "url": "https://github.com/notAI-tech/NudeNet/releases/download/v3.4-weights/320n.pt",

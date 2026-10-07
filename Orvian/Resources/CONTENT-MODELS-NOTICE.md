@@ -14,7 +14,8 @@ Weights revision: 6b7f16331a6ccf0fdce37d5a9564715f6e772b22
 Source revision: ce0c4a451e31b69a92df24c8bcd1c0418e3e4feb
 License: Apache License 2.0, reproduced in JOYTAG-LICENSE.txt.
 
-Both exports use fp16 internal weights and return Float32 scores or detections.
+NudeNet uses fp16 internal weights and JoyTag uses fp32 (fp16 produces NaN);
+both return Float32 scores or detections.
 Source hashes and input/output contracts: scripts/content_models/assets.json.
 Reproducible conversion and reference verification: scripts/content_models/.
 The generated content-model-manifest.json contains exported package hashes.

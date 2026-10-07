@@ -1,4 +1,4 @@
-"""Verify references everywhere; verify fp16 Core ML numerics on macOS.
+"""Verify references everywhere; verify mixed-precision Core ML numerics on macOS.
 
 Synthetic fixtures test conversion fidelity, not real-world classification accuracy.
 """
@@ -55,13 +55,16 @@ def check_package(output, name, size, feature, shape, manifest):
     if output_feature.name != feature or list(output_feature.type.multiArrayType.shape) != shape:
         raise ValueError('Unexpected Core ML output shape or name')
     if output_feature.type.multiArrayType.dataType != FeatureTypes_pb2.ArrayFeatureType.FLOAT32:
-        raise ValueError('Runtime expects Float32 outputs with fp16 internal weights')
+        raise ValueError('Runtime expects Float32 outputs')
     constants = [op for function in spec.mlProgram.functions.values()
                  for block in function.block_specializations.values()
                  for op in block.operations if op.type == 'const']
-    if not any(op.outputs[0].type.tensorType.dataType == MIL_pb2.FLOAT16
-               and op.attributes['val'].HasField('blobFileValue') for op in constants):
+    has_fp16 = any(op.outputs[0].type.tensorType.dataType == MIL_pb2.FLOAT16
+               and op.attributes['val'].HasField('blobFileValue') for op in constants)
+    if name == 'NudeNet320n' and not has_fp16:
         raise ValueError('No fp16 weight blobs found in package')
+    if name == 'JoyTag' and has_fp16:
+        raise ValueError('JoyTag must stay float32; fp16 produces NaN')
     expected_files = manifest['models'][name]['files']
     actual_files = {p.relative_to(package).as_posix(): sha256(p)
                     for p in package.rglob('*') if p.is_file()}
@@ -156,10 +159,11 @@ def verify(cache, output, reference_only=False, check_conversion=False):
                 from coremltools.converters.mil.mil.types import type_mapping
                 assert np.dtype(np.intc).itemsize == 4
                 type_mapping._NPTYPES_TO_STRINGS.setdefault(np.dtype(np.intc), 'int32')
-            # Exercise the entire fp16 lowering on Windows too, without requiring
+            # Exercise the entire lowering on Windows too, without requiring
             # the macOS Core ML execution or weight-blob libraries.
+            expected_precision = ct.precision.FLOAT16 if name == 'NudeNet320n' else ct.precision.FLOAT32
             ct.convert(trace, convert_to='milinternal', minimum_deployment_target=ct.target.iOS16,
-                       compute_precision=ct.precision.FLOAT16,
+                       compute_precision=expected_precision,
                        inputs=[ct.ImageType(name='image', shape=(1, 3, size, size),
                            color_layout=ct.colorlayout.RGB, scale=1 / 255.0)],
                        outputs=[ct.TensorType(name=feature, dtype=np.float32)])

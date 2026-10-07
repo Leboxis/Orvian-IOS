@@ -7,7 +7,7 @@ import UIKit
 /// Runs both local models sequentially off the main actor.
 actor NSFWImageClassifier {
     static let shared = NSFWImageClassifier()
-    static let modelVersion = "nudenet320n-joytag-fp16-v1"
+    static let modelVersion = "nudenet320n-fp16-joytag-fp32-v1"
     private var nudeModel: VNCoreMLModel?
     private var joyModel: VNCoreMLModel?
 
