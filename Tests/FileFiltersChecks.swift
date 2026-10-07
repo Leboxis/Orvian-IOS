@@ -24,7 +24,7 @@ struct FileFiltersChecks {
         let images = [file(1, "photo-a.jpg", extensionType: "image"),
                       file(2, "photo-b.jpg", extensionType: "image"),
                       file(3, "photo-c.jpg", extensionType: "image")]
-        let scores = ImageClassificationSnapshot(scores: [1: 0.79, 2: 0.80])
+        let scores = ImageClassificationSnapshot(scores: [1: .init(nudity: 0.1, semen: 0.2, feet: 0.1), 2: .init(nudity: 0.8, semen: 0.1, feet: 0.9)])
         var filters = FileFilters()
         filters.classification = .nsfw
         precondition(filters.isActive)

@@ -36,6 +36,11 @@ Le dépôt ne contient **pas** de `.xcodeproj` : il est généré par [XcodeGen]
 
 ```bash
 brew install xcodegen
+python3.12 -m venv .model-tools
+source .model-tools/bin/activate
+python -m pip install -r scripts/content_models/requirements.txt
+python scripts/content_models/convert_models.py
+python scripts/content_models/verify_models.py
 xcodegen generate
 open Orvian.xcodeproj   # puis Cmd+R avec son certificat de développement
 ```
@@ -66,17 +71,21 @@ hors Mac, la CI valide chaque push.
 
 ## Architecture
 
-### Scan SFW / NSFW du dossier ouvert
+### Scan Nudité / sperme, Pieds ou Aucun
 
 Dans un dossier, le bouton **Scanner ce dossier** (icône de viseur dans la barre
 supérieure) analyse ses images directement contenues, sur toutes ses pages.
-La feuille indique la progression, les résultats SFW / NSFW et les erreurs ;
-elle permet d'annuler le scan et de régler le seuil NSFW (80 % par défaut).
+La feuille indique la progression, les trois catégories et les erreurs ;
+elle permet d'annuler le scan et de régler le seuil (50 % par défaut, de 30 à 99 %).
 Les résultats se retrouvent dans **Filtres → Classification des images** :
-Tous, SFW, NSFW ou À analyser. Le seuil reclasse les scores sans nouvelle analyse.
+Tous, Aucun, Nudité / sperme, Pieds ou À analyser. Le seuil reclasse les scores sans nouvelle analyse.
+Nudité / sperme est prioritaire si des pieds sont aussi détectés. Aucun signifie
+qu'aucun score n'atteint le seuil ; les pieds couverts ne déclenchent pas Pieds.
 
-Core ML / Vision réalise la classification sur l'appareil avec le modèle
-Marqo ViT-Tiny embarqué (~11 Mo). Les miniatures à analyser sont récupérées
+Core ML / Vision exécute **NudeNet 320n et JoyTag en fp16** sur l'appareil.
+NudeNet détecte les parties intimes exposées et les pieds nus ; JoyTag fournit
+le score du tag exact `cum` (sigmoid). Ces scores sont indépendants.
+Les miniatures à analyser sont récupérées
 depuis votre espace de fichiers ; aucune image ou classification n'est envoyée à un service d'IA.
 Les scores restent locaux, isolés par compte / drive, et sont réanalysés après
 une modification du fichier. La navigation conserve le scan au premier plan ;
@@ -85,9 +94,21 @@ passer l'app en arrière-plan l'interrompt en gardant les résultats obtenus.
 Le scan concerne le dossier ouvert uniquement. Les sous-dossiers et les vidéos
 ne sont pas parcourus ; un GIF est classé à partir d'une miniature fixe.
 Le classement dépend des miniatures, du modèle et du seuil, et peut se tromper.
-Une erreur reste Non analysée. Préparation reproductible du modèle :
-`scripts/nsfw/convert_model.py` ; vérifications : `scripts/nsfw/verify_model.py`.
-Les attributions figurent dans `Orvian/Resources/NSFW-MODEL-NOTICE.md`.
+Une erreur de l'un des modèles reste Non analysée. Préparation reproductible :
+`scripts/content_models/convert_models.py` ; vérifications :
+`scripts/content_models/verify_models.py`. La CI macOS télécharge les sources
+verrouillées par SHA-256, exporte les deux packages Core ML, vérifie leur parité
+sur des images synthétiques, exécute les tests iOS puis les intègre à l'IPA.
+Les packages générés et le cache des poids ne sont pas versionnés. La conversion
+et la vérification native nécessitent macOS ; `--fetch-only` et les vérifications
+`--reference-only --check-conversion` fonctionnent sous Windows.
+Les attributions et licences figurent dans `Orvian/Resources/CONTENT-MODELS-NOTICE.md`.
+Pour obtenir les poids autonomes fp16 (PyTorch et safetensors), exécutez
+`python scripts/content_models/export_weights.py` : ils sont écrits dans
+`model-cache/fp16/` avec un manifeste SHA-256. NudeNet 320n est déjà distribué
+en fp16 ; JoyTag est converti, sauvegardé puis relu pour vérifier ses tenseurs.
+La précision sur vos images et le temps de scan sur iPhone restent à mesurer ;
+JoyTag a été entraîné principalement sur des illustrations de type Danbooru.
 
 ```
 View (SwiftUI) → ViewModel (@MainActor @Observable) → Repository

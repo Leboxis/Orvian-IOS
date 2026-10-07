@@ -19,3 +19,10 @@ xcuserdata/
 .zcode/
 
 __pycache__/
+
+# Local model tooling and reproducible Core ML exports (generated in macOS CI)
+.model-tools/
+model-cache/
+Orvian/Resources/NudeNet320n.mlpackage/
+Orvian/Resources/JoyTag.mlpackage/
+Orvian/Resources/content-model-manifest.json

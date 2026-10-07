@@ -14,10 +14,10 @@ final class ImageClassificationStore {
         get { thresholdValue }
         set {
             guard newValue.isFinite else { return }
-            let clamped = min(0.99, max(0.50, newValue))
+            let clamped = min(0.99, max(0.30, newValue))
             guard clamped != thresholdValue else { return }
             thresholdValue = clamped
-            defaults?.set(clamped, forKey: "imageClassificationThreshold")
+            defaults?.set(clamped, forKey: "imageContentClassificationThreshold")
             revision &+= 1
         }
     }
@@ -36,9 +36,9 @@ final class ImageClassificationStore {
     init(directory: URL? = nil, defaults: UserDefaults? = .standard,
          credential: @escaping () -> String? = { TokenStore.credentialFingerprint() }) {
         self.defaults = defaults
-        let saved = defaults?.object(forKey: "imageClassificationThreshold") as? NSNumber
-        let value = saved?.floatValue ?? 0.80
-        thresholdValue = value.isFinite ? min(0.99, max(0.50, value)) : 0.80
+        let saved = defaults?.object(forKey: "imageContentClassificationThreshold") as? NSNumber
+        let value = saved?.floatValue ?? 0.50
+        thresholdValue = value.isFinite ? min(0.99, max(0.30, value)) : 0.50
         currentCredential = credential
         let root = directory ?? FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("ImageClassification", isDirectory: true)
@@ -68,32 +68,32 @@ final class ImageClassificationStore {
         revision &+= 1
     }
 
-    func score(driveId: Int, file: DriveFile) -> Float? {
+    func scores(driveId: Int, file: DriveFile) -> ImageContentScores? {
         guard loaded, credentialFingerprint == currentCredential(),
               let entry = entries[key(driveId: driveId, fileId: file.id)],
               entry.modelVersion == NSFWImageClassifier.modelVersion,
               entry.contentRevision == ImageContentRevision(file: file),
-              entry.contentRevision != nil || entry.fileSize == file.size,
-              entry.score.isFinite, (0...1).contains(entry.score) else { return nil }
-        return entry.score
+              entry.contentRevision != nil || entry.fileSize == file.size else { return nil }
+        return entry.scores
     }
 
     func snapshot(driveId: Int, items: [DriveFile]) -> ImageClassificationSnapshot {
-        var scores: [Int: Float] = [:]
+        var scores: [Int: ImageContentScores] = [:]
         for file in items where file.isImage {
-            if let value = score(driveId: driveId, file: file) { scores[file.id] = value }
+            if let value = self.scores(driveId: driveId, file: file) { scores[file.id] = value }
         }
         return ImageClassificationSnapshot(scores: scores)
     }
 
-    func record(score: Float, file: DriveFile, driveId: Int,
+    func record(scores: ImageContentScores, file: DriveFile, driveId: Int,
                 credentialFingerprint credential: String, modelVersion: String) async throws {
-        guard score.isFinite, (0...1).contains(score) else { throw ClassificationError.invalidScores }
+        guard scores.isValid else { throw ClassificationError.invalidScores }
         guard loaded, credential == credentialFingerprint, credential == currentCredential() else {
             throw CancellationError()
         }
         entries[key(driveId: driveId, fileId: file.id)] = ImageClassificationRecord(
-            score: score, contentRevision: ImageContentRevision(file: file),
+            score: scores.nudity, semenScore: scores.semen, feetScore: scores.feet,
+            contentRevision: ImageContentRevision(file: file),
             fileSize: file.size,
             modelVersion: modelVersion, analyzedAt: Date())
         if entries.count > 20_100 {
