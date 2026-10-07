@@ -164,7 +164,7 @@ struct TextFileViewer: View {
             }
             Button("Continuer la modification", role: .cancel) {}
         } message: {
-            Text("Le brouillon n’a pas encore été enregistré dans kDrive.")
+            Text("Le brouillon n’a pas encore été enregistré.")
         }
         .onChange(of: searchQuery) { _, _ in
             scheduleSearchUpdate()

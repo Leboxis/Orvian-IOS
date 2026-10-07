@@ -137,7 +137,8 @@ struct FavoritesView: View {
     }
 
     private var playableFiles: [DriveFile] {
-        viewModel.items.filter { !$0.isDirectory }
+        // Le rapport est invalidé dès que la recherche ou les filtres changent.
+        visibleSelectionItems.filter { !$0.isDirectory }
     }
 
 
@@ -386,7 +387,7 @@ struct FavoritesView: View {
                 .frame(width: 32, height: 32)
                 .contentShape(Rectangle())
         }
-        .disabled(playableFiles.isEmpty )
+        .disabled(playableFiles.isEmpty)
         .accessibilityLabel("Ouvrir un fichier au hasard")
     }
 

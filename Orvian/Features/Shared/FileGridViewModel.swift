@@ -72,6 +72,9 @@ final class FileGridViewModel {
 
     private func publish(_ mutation: FileGridMutation) {
         guard isCurrentSession else { return }
+        // Enregistrer aussi les confirmations originaires de cette grille :
+        // elle peut ne pas être montée (donc ne pas recevoir son propre broadcast).
+        confirmedMutationGeneration &+= 1
         FileGridMutationCenter.shared.publish(mutation, credentialFingerprint: credentialFingerprint)
     }
 
@@ -79,6 +82,12 @@ final class FileGridViewModel {
     /// Invalide toute réponse appartenant à un rechargement ou une pagination
     /// antérieur. Un ancien tri ne peut ainsi jamais remplacer le plus récent.
     private var dataGeneration = 0
+    /// Un nouveau tri doit obtenir sa première page avant de paginer.
+    private var orderingNeedsReload = false
+    /// Les GET commencés avant une confirmation ne peuvent plus publier ni page
+    /// ni compteur. Séparé de dataGeneration : les defer du propriétaire de la
+    /// requête libèrent encore les flags, même si une mutation la rend obsolète.
+    private var confirmedMutationGeneration = 0
     /// Tri serveur en cours (`order_by[]` + sens) : conservé pour que la
     /// pagination continue dans le même ordre que la première page.
     private var orderBy: [String] = []
@@ -176,6 +185,14 @@ final class FileGridViewModel {
         // dernière mutation confirmée.
         flushPendingSnapshot()
         if loadedOnce {
+            if source == RecentUploadsLoader.source, orderBy.isEmpty,
+               let head = RecentUploadsLoader.shared.cachedMemorySnapshot(driveId: driveId),
+               head.fetchedAt > fetchedAt {
+                // Le Profil a déjà revalidé la tête : adopter cette page via le
+                // loader partagé, sans lancer un second GET ni mélanger les curseurs.
+                await reload(refreshCount: false)
+                return
+            }
             // SwiftUI peut conserver le view model alors que l'abonnement au
             // PassthroughSubject de sa vue est démonté. Vérifier aussi cet état
             // vivant au remontage, sans invalider les autres sources du drive.
@@ -189,7 +206,7 @@ final class FileGridViewModel {
                 fetchedAt: fetchedAt
             )
             let hasExpired = Date().timeIntervalSince(fetchedAt) > Self.freshSnapshotInterval
-            if hasExpired || FileGridMutationCenter.shared.isSnapshotStale(
+            if orderingNeedsReload || hasExpired || FileGridMutationCenter.shared.isSnapshotStale(
                 currentSnapshot,
                 source: source,
                 driveId: driveId
@@ -199,12 +216,18 @@ final class FileGridViewModel {
             return
         }
         let restoreGeneration = dataGeneration
-        let memorySnapshot = DirectoryListStore.shared.snapshot(
-            source: source,
-            driveId: driveId,
-            orderBy: orderBy,
-            order: order
-        )
+        let restoreMutationGeneration = confirmedMutationGeneration
+        let memorySnapshot: DirectoryListSnapshot?
+        if source == RecentUploadsLoader.source, orderBy.isEmpty {
+            memorySnapshot = RecentUploadsLoader.shared.cachedMemorySnapshot(driveId: driveId)
+        } else {
+            memorySnapshot = DirectoryListStore.shared.snapshot(
+                source: source,
+                driveId: driveId,
+                orderBy: orderBy,
+                order: order
+            )
+        }
         // Une lecture disque n'empêche pas SwiftUI de rendre l'écran.
         // Réserver le chargement pendant l'attente évite deux restaurations.
         isInitialLoading = true
@@ -226,6 +249,10 @@ final class FileGridViewModel {
         isInitialLoading = false
         guard !Task.isCancelled,
               credentialFingerprint == TokenStore.credentialFingerprint() else { return }
+        if confirmedMutationGeneration != restoreMutationGeneration {
+            await reload(forceNetwork: true)
+            return
+        }
         if let snapshot = memorySnapshot ?? diskSnapshot {
             // Les onglets hors Home sont démontés et manquent donc les valeurs
             // du PassthroughSubject. Ne restaurer ni servir 60 s un snapshot
@@ -275,7 +302,7 @@ final class FileGridViewModel {
     /// ignoré au profit d'un serveur censé avoir trié.
     func applySort(_ filters: FileFilters) {
         orderBy = filters.serverOrderBy ?? []
-        order = filters.serverOrder
+        order = source == RecentUploadsLoader.source && orderBy.isEmpty ? "asc" : filters.serverOrder
     }
 
     /// Realigne le tri sur l'état du menu de filtres, en rechargeant seulement
@@ -286,7 +313,7 @@ final class FileGridViewModel {
     /// encore le tri choisi.
     func syncSort(with filters: FileFilters) async {
         let newOrder = filters.serverOrderBy ?? []
-        let newDirection = filters.serverOrder
+        let newDirection = source == RecentUploadsLoader.source && newOrder.isEmpty ? "asc" : filters.serverOrder
         guard orderBy != newOrder || order != newDirection else { return }
         guard loadedOnce else {
             // Rien à recharger : le prochargement partira du bon ordre.
@@ -311,11 +338,24 @@ final class FileGridViewModel {
             // Un tri serveur (dates, type, poids) remplace l'ordre par défaut
             // ; les tris restants (durée, médias, orientation) sont locaux et
             // n'exigent aucune relecture ordonnée.
-            orderBy = sortedBy.serverOrderBy ?? []
-            order = sortedBy.serverOrder
+            let newOrderBy = sortedBy.serverOrderBy ?? []
+            let newOrder = source == RecentUploadsLoader.source && newOrderBy.isEmpty ? "asc" : sortedBy.serverOrder
+            if orderBy != newOrderBy || order != newOrder {
+                orderingNeedsReload = true
+                cursor = nil
+                hasMore = false
+            }
+            orderBy = newOrderBy
+            order = newOrder
+        }
+        if source == RecentUploadsLoader.source, orderBy.isEmpty {
+            // Sans champs de tri, le serveur ignore le sens ; garder la clé
+            // canonique du loader pour préserver les pages et le curseur au retour.
+            order = "asc"
         }
         dataGeneration &+= 1
         let requestGeneration = dataGeneration
+        let requestMutationGeneration = confirmedMutationGeneration
         let requestedOrderBy = orderBy
         let requestedOrder = order
         isLoadingMore = false
@@ -342,22 +382,55 @@ final class FileGridViewModel {
             // le badge « N éléments » n'attend plus la fin de la liste.
             let currentCount = totalItemCount
             async let countTask: Int? = refreshCount ? fetchDirectoryCount() : currentCount
-            let page = try await service.page(
-                source,
-                driveId: driveId,
-                cursor: nil,
-                orderBy: requestedOrderBy.isEmpty ? nil : requestedOrderBy,
-                order: requestedOrder,
-                forceNetwork: forceNetwork
-            )
+            let page: (data: [DriveFile]?, cursor: String?, hasMore: Bool?, fetchedAt: Date)
+            if source == RecentUploadsLoader.source, requestedOrderBy.isEmpty {
+                // L'aperçu Profil et « Uploads récents » attendent la même première
+                // page et partagent le cache. La pagination reste indépendante.
+                guard let snapshot = await RecentUploadsLoader.shared.refresh(
+                    driveId: driveId, forceNetwork: forceNetwork
+                ) else {
+                    try Task.checkCancellation()
+                    throw APIError.invalidResponse
+                }
+                page = (snapshot.items, snapshot.cursor, snapshot.hasMore, snapshot.fetchedAt)
+            } else {
+                let response = try await service.page(
+                    source,
+                    driveId: driveId,
+                    cursor: nil,
+                    orderBy: requestedOrderBy.isEmpty ? nil : requestedOrderBy,
+                    order: requestedOrder,
+                    forceNetwork: forceNetwork
+                )
+                page = (response.data, response.cursor, response.hasMore, Date())
+            }
             guard !Task.isCancelled, dataGeneration == requestGeneration,
-                  credentialFingerprint == TokenStore.credentialFingerprint() else { return }
+                  confirmedMutationGeneration == requestMutationGeneration,
+                  credentialFingerprint == TokenStore.credentialFingerprint() else {
+                // La sortie attend encore le count async let. Libérer dès maintenant
+                // les flags de cette requête, sans toucher ceux d’un reload plus récent.
+                if dataGeneration == requestGeneration {
+                    isReloading = false
+                    isInitialLoading = false
+                    if (!loadedOnce || orderingNeedsReload), isCurrentSession,
+                       confirmedMutationGeneration != requestMutationGeneration {
+                        // Un premier chargement ou un nouveau tri a besoin de sa page.
+                        // Relancer hors du count obsolète, sans réutiliser un ancien curseur.
+                        Task {
+                            guard isCurrentSession, dataGeneration == requestGeneration else { return }
+                            await reload(forceNetwork: true, refreshCount: refreshCount)
+                        }
+                    }
+                }
+                return
+            }
             // Curseur et compteur d'abord, items en dernier : la sauvegarde
             // déclenchée par `didSet` capture toujours un état cohérent.
             cursor = page.cursor
             hasMore = page.hasMore ?? false
-            fetchedAt = Date()
+            fetchedAt = page.fetchedAt
             loadedOnce = true
+            orderingNeedsReload = false
             items = filterItemsIfNeeded(page.data ?? [])
             let countItemsRevision = itemsRevision
             // Release the skeleton/pager as soon as the page arrives.
@@ -365,6 +438,7 @@ final class FileGridViewModel {
             isInitialLoading = false
             let freshCount = await countTask
             guard isCurrentSession, dataGeneration == requestGeneration,
+                  confirmedMutationGeneration == requestMutationGeneration,
                   itemsRevision == countItemsRevision else { return }
             if let freshCount {
                 totalItemCount = freshCount
@@ -373,6 +447,17 @@ final class FileGridViewModel {
         } catch {
             guard !Task.isCancelled, dataGeneration == requestGeneration,
                   credentialFingerprint == TokenStore.credentialFingerprint() else { return }
+            if confirmedMutationGeneration != requestMutationGeneration {
+                // Une erreur obsolète ne doit pas laisser le premier écran vide
+                // sans erreur ni possibilité de reprise.
+                if (!loadedOnce || orderingNeedsReload), isCurrentSession {
+                    Task {
+                        guard isCurrentSession, dataGeneration == requestGeneration else { return }
+                        await reload(forceNetwork: true, refreshCount: refreshCount)
+                    }
+                }
+                return
+            }
             errorMessage = (error as? APIError)?.errorDescription ?? error.localizedDescription
         }
     }
@@ -387,8 +472,9 @@ final class FileGridViewModel {
 
     /// Pagination infinie : déclenché par l'apparition des dernières cartes.
     func loadMoreIfNeeded() async {
-        guard hasMore, !isLoadingMore, !isInitialLoading, !isReloading else { return }
+        guard hasMore, !orderingNeedsReload, !isLoadingMore, !isInitialLoading, !isReloading else { return }
         let requestGeneration = dataGeneration
+        let requestMutationGeneration = confirmedMutationGeneration
         let requestedCursor = cursor
         let requestedOrderBy = orderBy
         let requestedOrder = order
@@ -411,6 +497,7 @@ final class FileGridViewModel {
                 order: requestedOrder
             )
             guard !Task.isCancelled, dataGeneration == requestGeneration,
+                  confirmedMutationGeneration == requestMutationGeneration,
                   credentialFingerprint == TokenStore.credentialFingerprint() else { return }
             let existing = Set(items.map(\.id))
             let filtered = filterItemsIfNeeded(page.data ?? [])
@@ -430,6 +517,7 @@ final class FileGridViewModel {
             items.append(contentsOf: appended)
         } catch {
             guard !Task.isCancelled, dataGeneration == requestGeneration,
+                  confirmedMutationGeneration == requestMutationGeneration,
                   credentialFingerprint == TokenStore.credentialFingerprint() else { return }
             errorMessage = (error as? APIError)?.errorDescription ?? error.localizedDescription
         }
@@ -489,7 +577,9 @@ final class FileGridViewModel {
     }
 
     private func commitListSnapshot() {
-        guard credentialFingerprint == TokenStore.credentialFingerprint() else { return }
+        // Les cartes de l’ancien ordre ne doivent pas être enregistrées sous
+        // la clé du nouveau tri avant sa première page validée.
+        guard !orderingNeedsReload, credentialFingerprint == TokenStore.credentialFingerprint() else { return }
         DirectoryListStore.shared.store(
             source: source,
             driveId: driveId,
@@ -638,6 +728,9 @@ final class FileGridViewModel {
         do {
             try await service.setFavorite(driveId: driveId, fileId: file.id, favorite: newValue, credentialFingerprint: credentialFingerprint)
             guard isCurrentSession else { return false }
+            // Un GET a pu arriver pendant la phase optimiste. Réaffirmer la
+            // valeur confirmée, même sans abonnement de vue au broadcast.
+            _ = applyFavoriteChange(fileId: file.id, isFavorite: newValue)
             if shouldRemove {
                 withoutSnapshot {
                     items.removeAll { $0.id == file.id }
@@ -681,6 +774,7 @@ final class FileGridViewModel {
     @discardableResult
     func apply(_ mutation: FileGridMutation) -> Bool {
         guard isCurrentSession, mutation.driveId == driveId else { return false }
+        confirmedMutationGeneration &+= 1
         return withoutSnapshot {
             switch mutation {
             case let .favorite(_, fileId, isFavorite):
@@ -701,6 +795,7 @@ final class FileGridViewModel {
                 }
                 return false
             case let .removal(_, fileIds):
+                adjustItemCount(by: -items.filter { fileIds.contains($0.id) }.count)
                 items.removeAll { fileIds.contains($0.id) }
                 return false
             case .moved:
@@ -714,6 +809,7 @@ final class FileGridViewModel {
                     let existingIds = Set(items.map(\.id))
                     return !fileIds.isSubset(of: existingIds)
                 }
+                adjustItemCount(by: -items.filter { fileIds.contains($0.id) }.count)
                 items.removeAll { fileIds.contains($0.id) }
                 return false
             case let .restored(_, fileIds, destinationDirectoryIds):
@@ -726,8 +822,15 @@ final class FileGridViewModel {
                 }
                 return true
             case let .uploaded(_, files):
-                if case .recents = source {
-                    mergeUploaded(files, broadcast: false)
+                switch source {
+                case .recents:
+                    mergeUploaded(filterItemsIfNeeded(files), broadcast: false)
+                case let .directory(directoryId):
+                    // Une autre grille peut avoir confirmé cet import. Ne fusionner
+                    // que les fichiers dont le parent confirme cette appartenance.
+                    mergeUploaded(files.filter { $0.parentId == directoryId }, broadcast: false)
+                default:
+                    break
                 }
                 return false
             }
@@ -886,6 +989,9 @@ final class FileGridViewModel {
         do {
             try await service.rename(driveId: driveId, fileId: file.id, name: name, credentialFingerprint: credentialFingerprint)
             guard isCurrentSession else { return }
+            if let confirmedIndex = items.firstIndex(where: { $0.id == file.id }) {
+                items[confirmedIndex].name = name
+            }
             publish(
                 .rename(driveId: driveId, fileId: file.id, name: name)
             )
@@ -909,6 +1015,9 @@ final class FileGridViewModel {
         do {
             try await service.setFolderColor(driveId: driveId, fileId: file.id, color: color, credentialFingerprint: credentialFingerprint)
             guard isCurrentSession else { return }
+            if let confirmedIndex = items.firstIndex(where: { $0.id == file.id }) {
+                items[confirmedIndex].color = color
+            }
             publish(
                 .color(driveId: driveId, fileId: file.id, color: color)
             )
@@ -963,6 +1072,7 @@ final class FileGridViewModel {
             try await service.permanentlyDelete(driveId: driveId, fileId: file.id, credentialFingerprint: credentialFingerprint)
             guard isCurrentSession else { return }
             items.removeAll { $0.id == file.id }
+            publish(.removal(driveId: driveId, fileIds: [file.id]))
         } catch {
             guard isCurrentSession else { return }
             mutationErrorMessage = "Suppression définitive impossible : \((error as? APIError)?.errorDescription ?? error.localizedDescription)"
@@ -984,6 +1094,7 @@ final class FileGridViewModel {
         }
         guard isCurrentSession else { return [] }
         items.removeAll { deletedIds.contains($0.id) }
+        if !deletedIds.isEmpty { publish(.removal(driveId: driveId, fileIds: deletedIds)) }
         reportPartialFailure(
             total: ids.count,
             succeeded: deletedIds.count,

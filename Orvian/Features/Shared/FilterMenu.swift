@@ -73,18 +73,23 @@ struct FilterMenu: View {
                 }
                 .pickerStyle(.palette)
                 .accessibilityLabel("Type de média")
-                Toggle(isOn: $filters.filesOnly) {
-                    Label("Fichiers uniquement", systemImage: "doc")
-                }
-                .disabled(filters.media == .folders)
             }
 
             Section("Classification des images") {
-                Picker("Contenu", selection: classificationBinding) {
+                // `.inline` déroule les choix verticalement dans un Menu.
+                // Comme le sélecteur de médias, `.palette` conserve une
+                // rangée horizontale et la sélection native, y compris « Tous ».
+                Picker(selection: classificationBinding) {
                     ForEach(FileFilters.ClassificationFilter.allCases) { classification in
-                        Text(classification.title).tag(classification)
+                        Text(classification == .unscanned ? "À analyser" : classification.title)
+                            .accessibilityLabel(classification.title)
+                            .tag(classification)
                     }
+                } label: {
+                    EmptyView()
                 }
+                .pickerStyle(.palette)
+                .accessibilityLabel("Classification des images")
             }
 
             if filters.isActive {
@@ -135,8 +140,8 @@ struct FilterMenu: View {
 
     /// Choisir « Images », « Dossiers » ou « Autres » retire les critères
     /// vidéo devenus sans objet (orientation, 4K+). Choisir « Dossiers »
-    /// réactive l'affichage des dossiers si « Fichiers uniquement » le
-    /// masquait (sinon la combinaison n'afficherait rien).
+    /// retire aussi un éventuel ancien critère `filesOnly`, toujours pris
+    /// en charge par le modèle mais plus proposé dans ce menu.
     private var mediaBinding: Binding<FileFilters.MediaFilter> {
         Binding(
             get: { filters.media },

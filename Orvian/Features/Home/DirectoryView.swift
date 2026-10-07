@@ -245,13 +245,6 @@ struct DirectoryView: View {
                     }
                 }
 
-                ToolbarItem(placement: .principal) {
-                    Text(crumbs.last ?? directory.name)
-                        .font(.headline)
-                        .lineLimit(1)
-                        .truncationMode(.tail)
-                }
-
                 ToolbarItemGroup(placement: .topBarTrailing) {
                     randomFileButton
 
@@ -486,7 +479,7 @@ struct DirectoryView: View {
         .accessibilityHint("Affiche ou masque la barre de recherche")
     }
 
-    /// Bouton dé : ouvre au hasard un fichier parmi les éléments du dossier actuel.
+    /// Bouton dé : ouvre au hasard un fichier parmi les cartes visibles.
     private var randomFileButton: some View {
         Button {
             openRandomFile()
@@ -502,7 +495,8 @@ struct DirectoryView: View {
     }
 
     private var playableFiles: [DriveFile] {
-        activeViewModel.items.filter { !$0.isDirectory }
+        // Même population que les cartes visibles, jamais la liste brute.
+        visibleSelectionItems.filter { !$0.isDirectory }
     }
 
     private func openRandomFile() {

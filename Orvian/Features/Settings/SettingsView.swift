@@ -332,7 +332,7 @@ struct SettingsView: View {
                 Picker("Cache réseau", selection: $networkCacheLimitMB) {
                     Text("25 Mo").tag(25); Text("50 Mo").tag(50)
                     Text("100 Mo").tag(100); Text("250 Mo").tag(250)
-                    Text("Sans limite").tag(0)
+                    Text("Désactivé sur disque").tag(0)
                 }
             }
             if matches("vider cache effacer") {

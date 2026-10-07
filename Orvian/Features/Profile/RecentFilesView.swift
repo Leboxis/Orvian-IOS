@@ -15,9 +15,17 @@ struct RecentFilesView: View {
     init(driveId: Int, title: String, source: FileSource, router: ViewerRouter) {
         self.driveId = driveId
         self.title = title
-        self.source = source
+        // Le petit flux récent et l’aperçu Profil partagent exactement la
+        // même clé et la même taille de page ; les favoris restent inchangés.
+        let sharedSource: FileSource
+        if case .recents = source {
+            sharedSource = RecentUploadsLoader.source
+        } else {
+            sharedSource = source
+        }
+        self.source = sharedSource
         self.router = router
-        _viewModel = State(initialValue: FileGridViewModel(source: source, driveId: driveId))
+        _viewModel = State(initialValue: FileGridViewModel(source: sharedSource, driveId: driveId))
     }
 
     var body: some View {

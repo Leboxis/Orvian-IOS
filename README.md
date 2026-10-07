@@ -1,6 +1,6 @@
 # Orvian
 
-Client iOS natif non officiel pour **kDrive** (Infomaniak), en Swift + SwiftUI.
+Application iOS native pour parcourir, organiser et consulter vos fichiers, en Swift + SwiftUI.
 Pensé pour une expérience « Apple Photos » : grilles de miniatures fluides,
 visionneuse photos avec zoom, lecteur vidéo AVPlayer quasi instantané.
 
@@ -9,11 +9,11 @@ visionneuse photos avec zoom, lecteur vidéo AVPlayer quasi instantané.
 
 ### 1. Token API
 
-L'app se configure avec un **token API Infomaniak** :
+L'app se configure avec un **token API** :
 
-1. Connectez-vous sur [manager.infomaniak.com](https://manager.infomaniak.com)
-2. Profil → Développeur → **Tokens API** (ou via [developer.infomaniak.com](https://developer.infomaniak.com))
-3. Créez un token pour le produit **kDrive** avec les droits de lecture
+1. Connectez-vous au portail de gestion de votre service de fichiers.
+2. Ouvrez Profil → Développeur → **Tokens API**.
+3. Créez un token autorisant l’accès à vos fichiers ; les opérations d’import et de modification nécessitent les droits correspondants.
 4. Au premier lancement d'Orvian, collez ce token — il est stocké dans le Keychain
    (repli automatique sur UserDefaults si le Keychain est indisponible, ex. LiveContainer)
 
@@ -73,11 +73,11 @@ supérieure) analyse ses images directement contenues, sur toutes ses pages.
 La feuille indique la progression, les résultats SFW / NSFW et les erreurs ;
 elle permet d'annuler le scan et de régler le seuil NSFW (80 % par défaut).
 Les résultats se retrouvent dans **Filtres → Classification des images** :
-Tous, SFW, NSFW ou Non analysés. Le seuil reclasse les scores sans nouvelle analyse.
+Tous, SFW, NSFW ou À analyser. Le seuil reclasse les scores sans nouvelle analyse.
 
 Core ML / Vision réalise la classification sur l'appareil avec le modèle
 Marqo ViT-Tiny embarqué (~11 Mo). Les miniatures à analyser sont récupérées
-depuis kDrive ; aucune image ou classification n'est envoyée à un service d'IA.
+depuis votre espace de fichiers ; aucune image ou classification n'est envoyée à un service d'IA.
 Les scores restent locaux, isolés par compte / drive, et sont réanalysés après
 une modification du fichier. La navigation conserve le scan au premier plan ;
 passer l'app en arrière-plan l'interrompt en gardant les résultats obtenus.
@@ -90,16 +90,16 @@ Une erreur reste Non analysée. Préparation reproductible du modèle :
 Les attributions figurent dans `Orvian/Resources/NSFW-MODEL-NOTICE.md`.
 
 ```
-View (SwiftUI) → ViewModel (@MainActor @Observable) → KDriveService (Repository)
+View (SwiftUI) → ViewModel (@MainActor @Observable) → Repository
                                                         → APIClient (actor, URLSession)
-                                                        → kDrive API v2/v3
+                                                        → API de fichiers v2/v3
 ```
 
 ```
 Orvian/
 ├── App/            OrvianApp, RootView, MainTabView (5 onglets vivants en ZStack)
 ├── Core/
-│   ├── API/        APIClient (actor), Endpoints, KDriveService, APIError
+│   ├── API/        APIClient (actor), Endpoints, Repository, APIError
 │   ├── Auth/       TokenStore (Keychain + repli), SessionStore (session @Observable)
 │   ├── Cache/      ThumbnailProvider (mémoire→disque→réseau), DiskImageCache (LRU)
 │   ├── Media/      MediaURLCache (URLs temporaires), HiresImageStore (ImageIO)
@@ -121,11 +121,10 @@ Points clés :
 ## Sécurité
 
 - `.env.local` (token, IDs) est **exclu du dépôt** via `.gitignore` — aucun secret n'est commité.
-- Le token est envoyé uniquement à `api.infomaniak.com` et aux hôtes HTTPS
-  dédiés `*.upload.kdrive.infomaniak.com` explicitement renvoyés par une
-  session d'upload Infomaniak ; toute autre URL, y compris après redirection,
-  est refusée.
-- `Api infomaniak.json` (spec OpenAPI officielle, licence MIT) est conservée comme référence.
+- Le token est envoyé uniquement aux hôtes HTTPS autorisés de l’API et des
+  sessions d’upload de votre service de fichiers. Toute autre destination,
+  y compris après redirection, est refusée.
+- La spécification OpenAPI officielle (licence MIT) est conservée dans le dépôt comme référence.
 
 ## Compatibilité
 

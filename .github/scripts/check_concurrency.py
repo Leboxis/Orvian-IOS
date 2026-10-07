@@ -95,6 +95,10 @@ struct KDriveService {
         await FakeServer.shared.page(force: forceNetwork)
     }
 }
+@MainActor final class FileGridMutationCenter {
+    static let shared = FileGridMutationCenter()
+    func isSnapshotStale(_ snapshot: DirectoryListSnapshot, source: FileSource, driveId: Int) -> Bool { false }
+}
 @MainActor final class DirectoryListStore {
     static let shared = DirectoryListStore()
     var saved: DirectoryListSnapshot?

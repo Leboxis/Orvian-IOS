@@ -150,6 +150,10 @@ jobs:
       - name: Check audit regressions
         run: |
           python3 -m unittest discover -s Tests -p 'test_audit_integration.py'
+          python3 -m unittest discover -s Tests -p 'test_requested_fixes.py'
+          python3 -m unittest discover -s Tests -p 'test_filter_menu.py'
+          python3 -m unittest discover -s Tests -p 'test_recent_sharing.py'
+          python3 -m unittest discover -s Tests -p 'test_ui_cleanup.py'
           python3 .github/scripts/check_audit_regressions.py
 
       - name: Check GIF decoding

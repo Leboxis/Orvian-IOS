@@ -22,25 +22,18 @@ struct ApplyTagsSheet: View {
     let files: [DriveFile]
     let onDone: ([TagChange]) async -> Void
 
-    private let initialTagCounts: [Int: Int]
-
     init(driveId: Int, files: [DriveFile], onDone: @escaping ([TagChange]) async -> Void) {
         self.driveId = driveId
         self.files = files
         self.onDone = onDone
-        var counts: [Int: Int] = [:]
-        for file in files {
-            for id in Set((file.categories ?? []).map(\.categoryId)) {
-                counts[id, default: 0] += 1
-            }
-        }
-        initialTagCounts = counts
     }
 
     @Environment(\.dismiss) private var dismiss
     @State private var categories: [Category] = []
     @State private var addIDs: Set<Int> = []
     @State private var removeIDs: Set<Int> = []
+    // Only API-confirmed membership overrides the immutable opening snapshot.
+    @State private var confirmedTagOverrides: [Int: [Int: Bool]] = [:]
     @State private var isLoading = true
     @State private var busy = false
     @State private var errorMessage: String?
@@ -87,6 +80,7 @@ struct ApplyTagsSheet: View {
                                         rowSymbol(category)
                                     }
                                 }
+                                .disabled(busy)
                             }
                         } header: {
                             Text("Tags des \(files.count) élément\(files.count > 1 ? "s" : "") sélectionné\(files.count > 1 ? "s" : "")")
@@ -162,7 +156,25 @@ struct ApplyTagsSheet: View {
     /// Nombre d'éléments sélectionnés portant déjà ce tag (les listes kDrive
     /// renvoient `categories` avec `with=is_favorite,categories`).
     private func countHaving(_ categoryId: Int) -> Int {
-        initialTagCounts[categoryId, default: 0]
+        files.filter { hasCategory(categoryId, file: $0) }.count
+    }
+
+    private func hasCategory(_ categoryId: Int, file: DriveFile) -> Bool {
+        confirmedTagOverrides[file.id]?[categoryId]
+            ?? (file.categories ?? []).contains { $0.categoryId == categoryId }
+    }
+
+    /// Retry (or a corrected selection) only targets membership not yet confirmed.
+    private func pendingFiles(categoryId: Int, isAdd: Bool) -> [DriveFile] {
+        files.filter { hasCategory(categoryId, file: $0) != isAdd }
+    }
+
+    private func reconcile(_ changes: [TagChange]) {
+        for change in changes {
+            confirmedTagOverrides[change.file.id, default: [:]][change.categoryId] = change.isAdd
+        }
+        addIDs = Set(addIDs.filter { !pendingFiles(categoryId: $0, isAdd: true).isEmpty })
+        removeIDs = Set(removeIDs.filter { !pendingFiles(categoryId: $0, isAdd: false).isEmpty })
     }
 
     private func state(of categoryId: Int) -> TagState {
@@ -173,6 +185,8 @@ struct ApplyTagsSheet: View {
     }
 
     private func toggle(_ category: Category) {
+        guard !busy else { return }
+        errorMessage = nil
         let id = category.id
         switch state(of: id) {
         case .none:
@@ -213,12 +227,12 @@ struct ApplyTagsSheet: View {
     }
 
     private func apply() async {
-        guard isCurrentMutationSession else { return }
+        guard !busy, isCurrentMutationSession else { return }
         busy = true
+        errorMessage = nil
         defer { busy = false }
         let toAdd = addIDs
         let toRemove = removeIDs
-        let fileIds = files.map(\.id)
 
         // Appel groupé du doc (`POST/DELETE …/files/categories/{id}` avec
         // `{"file_ids": […]}`) : une requête par tag au lieu d'une par fichier.
@@ -229,29 +243,39 @@ struct ApplyTagsSheet: View {
 
         for categoryId in toRemove.sorted() {
             guard isCurrentMutationSession else { return }
+            let targets = pendingFiles(categoryId: categoryId, isAdd: false)
+            guard !targets.isEmpty else { continue }
+            let fileIds = targets.map(\.id)
             do {
                 try await service.removeCategory(driveId: driveId, fileIds: fileIds, categoryId: categoryId, credentialFingerprint: mutationCredentialFingerprint)
-                appliedChanges += files.map { TagChange(file: $0, categoryId: categoryId, isAdd: false) }
+                guard isCurrentMutationSession else { return }
+                appliedChanges += targets.map { TagChange(file: $0, categoryId: categoryId, isAdd: false) }
             } catch {
                 guard isCurrentMutationSession else { return }
-                let fallback = await applyOneByOne(categoryId: categoryId, isAdd: false)
+                let fallback = await applyOneByOne(files: targets, categoryId: categoryId, isAdd: false)
+                guard isCurrentMutationSession else { return }
                 appliedChanges += fallback.changes
                 if firstErrorDescription == nil {
-                    firstErrorDescription = fallback.error ?? (error as? APIError)?.errorDescription ?? error.localizedDescription
+                    firstErrorDescription = fallback.error
                 }
             }
         }
         for categoryId in toAdd.sorted() {
             guard isCurrentMutationSession else { return }
+            let targets = pendingFiles(categoryId: categoryId, isAdd: true)
+            guard !targets.isEmpty else { continue }
+            let fileIds = targets.map(\.id)
             do {
                 try await service.addCategory(driveId: driveId, fileIds: fileIds, categoryId: categoryId, credentialFingerprint: mutationCredentialFingerprint)
-                appliedChanges += files.map { TagChange(file: $0, categoryId: categoryId, isAdd: true) }
+                guard isCurrentMutationSession else { return }
+                appliedChanges += targets.map { TagChange(file: $0, categoryId: categoryId, isAdd: true) }
             } catch {
                 guard isCurrentMutationSession else { return }
-                let fallback = await applyOneByOne(categoryId: categoryId, isAdd: true)
+                let fallback = await applyOneByOne(files: targets, categoryId: categoryId, isAdd: true)
+                guard isCurrentMutationSession else { return }
                 appliedChanges += fallback.changes
                 if firstErrorDescription == nil {
-                    firstErrorDescription = fallback.error ?? (error as? APIError)?.errorDescription ?? error.localizedDescription
+                    firstErrorDescription = fallback.error
                 }
             }
         }
@@ -259,9 +283,11 @@ struct ApplyTagsSheet: View {
         // Les modifications confirmées parviennent aux grilles même en cas
         // d'échec partiel : seules les paires en erreur restent à refaire.
         guard isCurrentMutationSession else { return }
+        reconcile(appliedChanges)
         if !appliedChanges.isEmpty {
             await onDone(appliedChanges)
         }
+        guard isCurrentMutationSession else { return }
         if let firstErrorDescription {
             var details: [String] = []
             if !appliedChanges.isEmpty {
@@ -283,7 +309,7 @@ struct ApplyTagsSheet: View {
 
     /// Repli un-par-un (4 requêtes simultanées) quand l'appel groupé échoue :
     /// récupère les succès partiels au lieu de perdre toute la sélection.
-    private func applyOneByOne(categoryId: Int, isAdd: Bool) async -> (changes: [TagChange], error: String?) {
+    private func applyOneByOne(files: [DriveFile], categoryId: Int, isAdd: Bool) async -> (changes: [TagChange], error: String?) {
         let results = await mapBounded(files, concurrency: 4) { file -> Result<TagChange, TagApplyError> in
             guard await self.isCurrentMutationSession else {
                 return .failure(TagApplyError(message: "Session terminée"))

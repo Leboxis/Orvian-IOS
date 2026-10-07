@@ -20,13 +20,13 @@ struct TokenSetupView: View {
                 VStack(spacing: 8) {
                     Text("Orvian")
                         .font(.largeTitle.bold())
-                    Text("Votre kDrive, en natif.")
+                    Text("Vos fichiers, en natif.")
                         .font(.title3)
                         .foregroundStyle(.secondary)
                 }
 
                 VStack(alignment: .leading, spacing: 10) {
-                    Text("Token API Infomaniak")
+                    Text("Token API")
                         .font(.subheadline.weight(.semibold))
                     SecureField("Coller le token…", text: $token)
                         .textFieldStyle(.roundedBorder)
@@ -34,7 +34,7 @@ struct TokenSetupView: View {
                         .autocorrectionDisabled()
                         .onSubmit(connect)
 
-                    Text("Le token est stocké dans le Keychain de l'app et n'est jamais envoyé ailleurs qu'à api.infomaniak.com.")
+                    Text("Le token est conservé sur cet appareil et utilisé uniquement pour accéder à votre service de fichiers.")
                         .font(.caption)
                         .foregroundStyle(.tertiary)
                 }
@@ -110,7 +110,7 @@ private struct TokenHelpSheet: View {
             Label("Créer un token API", systemImage: "key.fill")
                 .font(.headline)
             steps
-            Link("Ouvrir developer.infomaniak.com", destination: URL(string: "https://developer.infomaniak.com")!)
+            Link("Ouvrir le portail développeur", destination: URL(string: "https://developer.infomaniak.com")!)
                 .font(.footnote.weight(.semibold))
         }
         .padding(24)
@@ -119,9 +119,9 @@ private struct TokenHelpSheet: View {
 
     private var steps: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text("1. Connectez-vous au manager Infomaniak.")
-            Text("2. Profil → Développeur → Tokens API (ou developer.infomaniak.com).")
-            Text("3. Créez un token avec le produit kDrive et les droits de lecture.")
+            Text("1. Connectez-vous au portail de gestion de votre service.")
+            Text("2. Ouvrez Profil → Développeur → Tokens API.")
+            Text("3. Créez un token autorisant l’accès à vos fichiers.")
             Text("4. Copiez-le et collez-le ici.")
         }
         .font(.subheadline)

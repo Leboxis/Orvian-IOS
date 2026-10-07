@@ -229,11 +229,13 @@ extension KDriveService {
             directoryId: directoryId,
             lastModifiedAt: lastModifiedAt
         )
+        let credential = try await api.captureUploadCredential()
         let body = try JSONEncoder().encode(request)
         let response = try await api.postDecoded(
             DataResponse<UploadSession>.self,
             .startUploadSession(driveId: driveId),
-            body: body
+            body: body,
+            originatingCredential: credential.fingerprint
         )
         guard response.result == nil || response.result == "success" || response.result == "asynchronous",
               let session = response.data,
@@ -243,6 +245,7 @@ extension KDriveService {
               APIClient.isTrustedUploadURL(uploadURL)
         else { throw APIError.invalidResponse }
 
+        var cleanup = try await api.uploadSessionCleanup(driveId: driveId, sessionToken: token, credential: credential)
         var finishRequested = false
         do {
             let reader = try UploadChunkReader(url: fileURL)
@@ -270,6 +273,7 @@ extension KDriveService {
                     payload: chunk,
                     number: number,
                     totalChunks: totalChunks,
+                    originatingCredential: credential.fingerprint,
                     progress: progress
                 )
             }
@@ -278,25 +282,24 @@ extension KDriveService {
             let finished = try await api.postDecoded(
                 DataResponse<FinishedUpload>.self,
                 .finishUploadSession(driveId: driveId, token: token),
-                body: try JSONEncoder().encode(FinishUploadSessionRequest(lastModifiedAt: lastModifiedAt))
+                body: try JSONEncoder().encode(FinishUploadSessionRequest(lastModifiedAt: lastModifiedAt)),
+                originatingCredential: credential.fingerprint
             )
             guard finished.result == nil || finished.result == "success" || finished.result == "asynchronous",
                   let file = finished.data?.file
             else { throw APIError.invalidResponse }
+            cleanup.confirmed()
             progress(1)
             return file
         } catch {
-            // Une annulation volontaire (même après le finish) n'a jamais
-            // créé de fichier : on propage sans message de doute.
-            if UploadSafety.isCancellation(error) { throw error }
-            // Une clôture acceptée peut avoir créé le fichier malgré une réponse perdue.
-            if finishRequested && UploadSafety.outcomeMayBeUnknown(error) {
+            // Après l'envoi du finish, une réponse perdue (y compris annulée)
+            // ne prouve pas l'absence de fichier : ne jamais le supprimer à l'aveugle.
+            if finishRequested && (UploadSafety.isCancellation(error) || UploadSafety.outcomeMayBeUnknown(error)) {
                 throw UploadOutcomeUnknown()
             }
-            try? await api.sendEmpty(
-                .cancelUploadSession(driveId: driveId, token: token),
-                method: "DELETE"
-            )
+            // La requête DELETE garde l'identité d'origine et survit à l'annulation
+            // de cette tâche, même lorsque la déconnexion a déjà effacé le token.
+            await cleanup.cancel()
             throw error
         }
     }
@@ -310,6 +313,7 @@ extension KDriveService {
         payload: ChunkPayload,
         number: Int,
         totalChunks: Int,
+        originatingCredential: String,
         progress: @escaping @Sendable (Double) -> Void
     ) async throws {
         var lastError: Error = APIError.invalidResponse
@@ -323,6 +327,7 @@ extension KDriveService {
                     to: url,
                     fileURL: payload.url,
                     contentType: "application/octet-stream",
+                    originatingCredential: originatingCredential,
                     progress: { chunkProgress in
                         let completedChunks = Double(number - 1)
                         progress((completedChunks + chunkProgress) / Double(totalChunks))

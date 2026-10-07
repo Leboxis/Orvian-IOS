@@ -12,6 +12,9 @@ struct ProfileView: View {
 
     @State private var recentUploads: [DriveFile] = []
     @State private var isLoadingRecents = true
+    @State private var previewRequestID = UUID()
+    @State private var previewDriveId: Int?
+    @State private var previewCredential: String?
 
     private let recentUploadsLoader = RecentUploadsLoader.shared
 
@@ -28,7 +31,7 @@ struct ProfileView: View {
             .navigationTitle("Profil")
             .navigationBarTitleDisplayMode(.large)
         }
-        .task {
+        .task(id: session.selectedDrive?.id) {
             await loadPreviews()
         }
         .onChange(of: isSelected) { _, selected in
@@ -84,7 +87,7 @@ struct ProfileView: View {
                     RecentFilesView(
                         driveId: drive.id,
                         title: "Uploads récents",
-                        source: .recents(limit: 12),
+                        source: RecentUploadsLoader.source,
                         router: router
                     )
                 } label: {
@@ -154,7 +157,7 @@ struct ProfileView: View {
         } header: {
             Text("À propos")
         } footer: {
-            Text("Orvian est un client non officiel pour kDrive (Infomaniak).")
+            Text("Orvian vous permet de parcourir, organiser et consulter vos fichiers.")
         }
     }
 
@@ -178,24 +181,51 @@ struct ProfileView: View {
     }
 
     private func loadPreviews(forceNetwork: Bool = false) async {
-        guard let drive = session.selectedDrive else { return }
+        let requestID = UUID()
+        previewRequestID = requestID
+        guard let drive = session.selectedDrive,
+              let credential = TokenStore.credentialFingerprint() else {
+            recentUploads = []
+            isLoadingRecents = false
+            previewDriveId = nil
+            previewCredential = nil
+            return
+        }
+        if previewDriveId != drive.id || previewCredential != credential {
+            recentUploads = []
+            isLoadingRecents = true
+            previewDriveId = drive.id
+            previewCredential = credential
+        }
+        func isCurrentRequest() -> Bool {
+            !Task.isCancelled && previewRequestID == requestID
+                && session.selectedDrive?.id == drive.id
+                && TokenStore.credentialFingerprint() == credential
+        }
 
         // Mémoire puis disque : les cartes connues apparaissent avant la
         // requête `last_modified`, y compris au premier accès après lancement.
         if !forceNetwork, let snapshot = await recentUploadsLoader.cachedSnapshot(driveId: drive.id) {
+            guard isCurrentRequest() else { return }
             recentUploads = Self.previewOrder(snapshot.items.filter { !$0.isDirectory })
             isLoadingRecents = false
         }
 
+        guard isCurrentRequest() else { return }
         if let snapshot = await recentUploadsLoader.refresh(
             driveId: drive.id, forceNetwork: forceNetwork
         ) {
+            guard isCurrentRequest() else { return }
             recentUploads = Self.previewOrder(snapshot.items.filter { !$0.isDirectory })
         }
+        guard isCurrentRequest() else { return }
         isLoadingRecents = false
     }
 
     private func mergeUploaded(_ files: [DriveFile]) {
+        guard previewDriveId == session.selectedDrive?.id,
+              previewCredential == TokenStore.credentialFingerprint() else { return }
+        let files = files.filter { !$0.isDirectory }
         let uploadedIDs = Set(files.map(\.id))
         recentUploads = Array(Self.previewOrder(
             files + recentUploads.filter { !uploadedIDs.contains($0.id) }

@@ -60,7 +60,55 @@ import Foundation
         let late = await leavingAccount.value
         precondition(late == nil && DirectoryListStore.shared.saved == nil,
                      "Logout must invalidate late results and their disk writes")
-        print("Forced refresh upgrade, response ordering and logout checks passed")
+        // Home/recent grid, tab prefetch and Profile join the same cold request.
+        let cold = Task { await loader.refresh(driveId: 1) }
+        while FakeServer.shared.requests.count < 9 { await Task.yield() }
+        let profile = Task { await loader.refresh(driveId: 1) }
+        for _ in 0..<20 { await Task.yield() }
+        precondition(FakeServer.shared.requests.count == 9, "Cold consumers must share one first page")
+        FakeServer.shared.complete(8, fileID: 10)
+        let firstPage = await cold.value
+        let profilePage = await profile.value
+        precondition(firstPage?.items.map(\.id) == profilePage?.items.map(\.id))
+        _ = await loader.refresh(driveId: 1)
+        precondition(FakeServer.shared.requests.count == 9, "Fresh results must be reused")
+
+        // Even with a fresh cache, an ordinary consumer joins a forced refresh.
+        let forced = Task { await loader.refresh(driveId: 1, forceNetwork: true) }
+        while FakeServer.shared.requests.count < 10 { await Task.yield() }
+        let joiningFreshCache = Task { await loader.refresh(driveId: 1) }
+        for _ in 0..<20 { await Task.yield() }
+        FakeServer.shared.complete(9, fileID: 11)
+        _ = await forced.value
+        let joined = await joiningFreshCache.value
+        precondition(joined?.items.first?.id == 11, "In-flight revalidation must win over cached content")
+
+        // A credential change must not join another account's in-flight task,
+        // even if its drive ID is the same and clear() has not yet run.
+        let previousCredential = Task { await loader.refresh(driveId: 1, forceNetwork: true) }
+        while FakeServer.shared.requests.count < 11 { await Task.yield() }
+        TokenStore.value = "account-c"
+        DirectoryListStore.shared.saved = nil
+        let currentCredential = Task { await loader.refresh(driveId: 1) }
+        while FakeServer.shared.requests.count < 12 { await Task.yield() }
+        FakeServer.shared.complete(10, fileID: 12)
+        let previousResult = await previousCredential.value
+        precondition(previousResult == nil)
+        FakeServer.shared.complete(11, fileID: 13)
+        let currentResult = await currentCredential.value
+        precondition(currentResult?.items.first?.id == 13)
+
+        // Cancelling one waiter must not cancel the request used by another view.
+        let owner = Task { await loader.refresh(driveId: 1, forceNetwork: true) }
+        while FakeServer.shared.requests.count < 13 { await Task.yield() }
+        let cancelledWaiter = Task { await loader.refresh(driveId: 1) }
+        for _ in 0..<20 { await Task.yield() }
+        cancelledWaiter.cancel()
+        FakeServer.shared.complete(12, fileID: 14)
+        let ownerResult = await owner.value
+        let cancelledResult = await cancelledWaiter.value
+        precondition(ownerResult?.items.first?.id == 14 && cancelledResult == nil)
+        print("Recent sharing, cache reuse, refresh ordering, credentials and logout checks passed")
     }
 }
 

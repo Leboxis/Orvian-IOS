@@ -34,6 +34,6 @@ enum UploadSafety {
 
 struct UploadOutcomeUnknown: LocalizedError {
     var errorDescription: String? {
-        "Le fichier a peut-être été enregistré dans kDrive, mais sa confirmation n’a pas été reçue. Vérifiez le dossier de destination avant de l’importer à nouveau pour éviter un doublon."
+        "Le fichier a peut-être été enregistré, mais sa confirmation n’a pas été reçue. Vérifiez le dossier de destination avant de l’importer à nouveau pour éviter un doublon."
     }
 }

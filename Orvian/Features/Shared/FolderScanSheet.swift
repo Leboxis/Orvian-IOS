@@ -66,7 +66,7 @@ struct FolderScanSheet: View {
                         }
                     }
                     Section {
-                        Text("Analyse locale sur cet appareil. Les miniatures nécessaires sont récupérées depuis kDrive. Les GIF sont analysés sur une image fixe.")
+                        Text("Analyse locale sur cet appareil. Les miniatures nécessaires sont récupérées depuis votre espace de fichiers. Les GIF sont analysés sur une image fixe.")
                             .font(.footnote)
                             .foregroundStyle(.secondary)
                         Text("Retrouvez les résultats dans Filtres → Classification des images.")

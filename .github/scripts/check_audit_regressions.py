@@ -1,6 +1,7 @@
 """Execute production restoration, upload permits and page/count ordering."""
 from pathlib import Path
 import subprocess
+import sys
 import tempfile
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -32,7 +33,7 @@ with tempfile.TemporaryDirectory() as temporary:
     grid = temp / "GridLoading.swift"
     grid.write_text('''import Foundation
 struct DriveFile { let id: Int }
-enum FileSource { case directory(Int) }
+enum FileSource: Equatable { case directory(Int), recents }
 struct FileFilters {
     var serverOrderBy: [String]? { nil }
     var serverOrder: String { "asc" }
@@ -61,6 +62,17 @@ struct KDriveService {
         await CountServer.shared.count()
     }
 }
+struct RecentSnapshot {
+    var items: [DriveFile] = []
+    var cursor: String?
+    var hasMore = false
+    var fetchedAt = Date()
+}
+@MainActor final class RecentUploadsLoader {
+    static let shared = RecentUploadsLoader()
+    static let source = FileSource.recents
+    func refresh(driveId: Int, forceNetwork: Bool) async -> RecentSnapshot? { nil }
+}
 @MainActor final class CategoryLibrary {
     static let shared = CategoryLibrary()
     func ensureLoaded(for driveId: Int) async {}
@@ -76,6 +88,8 @@ struct KDriveService {
     var order = "asc"
     var cursor: String?
     var dataGeneration = 0
+    var confirmedMutationGeneration = 0
+    var orderingNeedsReload = false
     var isLoadingMore = false
     var isReloading = false
     var isInitialLoading = false
@@ -90,3 +104,7 @@ struct KDriveService {
 ''' + session_guard + reload_methods + "\n}\n", encoding="utf-8")
     run(temp / "grid-loading", [grid, ROOT / "Orvian/Core/API/APIError.swift",
                                 ROOT / "Tests/GridLoadChecks.swift"])
+
+for script in ["check_grid_mutation_regressions.py", "check_tag_apply_regressions.py",
+               "check_requested_regressions.py", "check_recent_sharing.py"]:
+    subprocess.run([sys.executable, str(ROOT / ".github/scripts" / script)], check=True)

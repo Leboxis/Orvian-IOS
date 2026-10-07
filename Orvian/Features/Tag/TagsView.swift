@@ -151,7 +151,7 @@ struct TagsView: View {
                 EmptyStateView(
                     symbol: "tag",
                     title: "Aucun tag",
-                    message: "Les catégories créées dans kDrive apparaîtront ici."
+                    message: "Vos tags apparaîtront ici une fois créés."
                 )
             } else if layout == .grid {
                 grid

@@ -49,7 +49,8 @@ actor APIClient {
         return configuration
     }
 
-    /// Capacité du cache réseau en Mo, lue dans les Réglages. `0` = illimité.
+    /// Capacité du cache réseau sur disque en Mo. `0` désactive le cache disque.
+    /// Le cache mémoire de 8 Mo reste actif, indépendamment de cette limite.
     ///
     /// 100 Mo par défaut : l'app retenait 150 Mo de réponses dans le cache
     /// partagé *et* 150 Mo dans celui-ci, soit 300 Mo dont l'utilisateur
@@ -62,7 +63,7 @@ actor APIClient {
 
     private static func currentCacheLimitBytes() -> Int {
         let megabytes = currentCacheLimitMB()
-        // `0` est la valeur documentée par URLCache pour « illimité ».
+        // Une capacité de zéro octet désactive le stockage sur disque.
         return megabytes > 0 ? megabytes * 1024 * 1024 : 0
     }
 
@@ -78,6 +79,23 @@ actor APIClient {
         let previous = session.configuration.urlCache
         session = URLSession(configuration: Self.apiConfiguration())
         previous?.removeAllCachedResponses()
+    }
+
+    /// Snapshot privé, conservé uniquement le temps d'un upload et de son nettoyage.
+    func captureUploadCredential() throws -> UploadCredential {
+        try Task.checkCancellation()
+        guard let value = TokenStore.current() else { throw APIError.notSignedIn }
+        return UploadCredential(bearer: value, fingerprint: TokenStore.fingerprint(of: value))
+    }
+
+    func uploadSessionCleanup(driveId: Int, sessionToken: String, credential: UploadCredential) throws -> UploadSessionCleanup {
+        let endpoint = Endpoint.cancelUploadSession(driveId: driveId, token: sessionToken)
+        guard var components = URLComponents(url: Self.baseURL, resolvingAgainstBaseURL: false) else {
+            throw APIError.invalidURL
+        }
+        components.path = endpoint.path
+        guard let url = components.url else { throw APIError.invalidURL }
+        return UploadSessionCleanup(url: url, credential: credential)
     }
 
     // MARK: - Requêtes
@@ -196,9 +214,14 @@ actor APIClient {
         _ type: T.Type = T.self,
         _ endpoint: Endpoint,
         body: Data? = nil,
-        contentType: String = "application/json"
+        contentType: String = "application/json",
+        originatingCredential: String? = nil
     ) async throws -> T {
+        try Task.checkCancellation()
         var request = try request(for: endpoint, method: "POST", cachePolicy: .reloadIgnoringLocalCacheData)
+        if let originatingCredential {
+            guard Self.credentialFingerprint(for: request) == originatingCredential else { throw CancellationError() }
+        }
         if let body {
             request.httpBody = body
             request.setValue(contentType, forHTTPHeaderField: "Content-Type")
@@ -279,9 +302,14 @@ actor APIClient {
         to url: URL,
         fileURL: URL,
         contentType: String,
+        originatingCredential: String? = nil,
         progress: @escaping @Sendable (Double) -> Void
     ) async throws -> Data {
+        try Task.checkCancellation()
         var request = try uploadRequest(for: url, method: "POST")
+        if let originatingCredential {
+            guard Self.credentialFingerprint(for: request) == originatingCredential else { throw CancellationError() }
+        }
         request.timeoutInterval = 300
         request.setValue(contentType, forHTTPHeaderField: "Content-Type")
         let credentialFingerprint = Self.credentialFingerprint(for: request)
