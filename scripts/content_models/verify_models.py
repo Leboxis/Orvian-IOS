@@ -24,7 +24,15 @@ def fixtures():
 
 def check_array(actual, shape, probabilities=False):
     if list(actual.shape) != shape or not np.isfinite(actual).all():
-        raise ValueError(f'Invalid inference output {actual.shape}; expected {shape}')
+        finite = bool(np.isfinite(actual).all())
+        detail = {'shape': list(actual.shape), 'expected': shape, 'dtype': str(actual.dtype),
+                  'finite': finite}
+        try:
+            detail['min'] = float(np.nanmin(actual))
+            detail['max'] = float(np.nanmax(actual))
+        except Exception:
+            pass
+        raise ValueError(f'Invalid inference output {actual.shape}; expected {shape}; detail={detail}')
     values = actual if probabilities else actual[:, 4:, :]
     if ((values < 0) | (values > 1)).any():
         raise ValueError('Scores must be probabilities in [0,1]')
@@ -100,7 +108,13 @@ def verify(cache, output, reference_only=False, check_conversion=False):
                 np.testing.assert_allclose(native[:, :4], original[:, :4], rtol=1e-4, atol=0.02)
                 np.testing.assert_allclose(native[:, 4:], original[:, 4:], rtol=1e-3, atol=1e-5)
             if compiled is not None:
-                actual = np.asarray(compiled.predict({'image': padded})[feature])
+                raw = compiled.predict({'image': padded})[feature]
+                actual = np.asarray(raw)
+                if kind == 'joytag':
+                    print(json.dumps({'model': name, 'fixture': fixture_index,
+                        'actual_shape': list(actual.shape), 'actual_dtype': str(actual.dtype),
+                        'finite': bool(np.isfinite(actual).all()),
+                        'native': float(native.reshape(-1)[0])}), flush=True)
                 check_array(actual, shape, probabilities=kind == 'joytag')
                 if kind == 'nudenet':
                     max_coord_error = float(np.abs(actual[:, :4] - native[:, :4]).max())
