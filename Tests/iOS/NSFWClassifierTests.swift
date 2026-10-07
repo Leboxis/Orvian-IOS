@@ -6,6 +6,45 @@ import UIKit
 
 @MainActor
 final class NSFWClassifierTests: XCTestCase {
+    func testTemporaryDiagnoseBundledModelContracts() async throws {
+        // TEMPORARY CI diagnostic: pinpoint which classify guard throws invalidModelContract.
+        for name in ["NudeNet320n", "JoyTag"] {
+            let url = try XCTUnwrap(Bundle.main.url(forResource: name, withExtension: "mlmodelc"))
+            let model = try MLModel(contentsOf: url)
+            let desc = model.modelDescription
+            let meta = desc.metadata[.creatorDefinedKey] as? [String: String]
+            print("DIAG \(name) pipeline=\(meta?["orvian.pipelineVersion"] ?? "nil") tag=\(meta?["orvian.tag"] ?? "nil")")
+            for input in desc.inputDescriptions {
+                if let c = input.imageConstraint {
+                    print("DIAG \(name) input \(input.name) \(c.pixelsWide)x\(c.pixelsHigh)")
+                } else {
+                    print("DIAG \(name) input \(input.name) non-image")
+                }
+            }
+            for output in desc.outputDescriptions {
+                if let m = output.multiArrayConstraint {
+                    print("DIAG \(name) output \(output.name) shape=\(m.shape) dtype=\(m.dataType.rawValue)")
+                } else {
+                    print("DIAG \(name) output \(output.name) non-multiarray")
+                }
+            }
+        }
+        let classifier = NSFWImageClassifier()
+        try await classifier.prepare()
+        print("DIAG prepare ok")
+        do {
+            let data = UIGraphicsImageRenderer(size: CGSize(width: 600, height: 300)).pngData { context in
+                UIColor.white.setFill()
+                context.fill(CGRect(x: 0, y: 0, width: 600, height: 300))
+            }
+            let scores = try await classifier.classify(imageData: data)
+            print("DIAG classify ok nudity=\(scores.nudity) semen=\(scores.semen) feet=\(scores.feet) valid=\(scores.isValid)")
+        } catch {
+            print("DIAG classify threw: \(error)")
+            throw error
+        }
+    }
+
     func testBothBundledModelsProduceIndependentValidScores() async throws {
         let data = UIGraphicsImageRenderer(size: CGSize(width: 600, height: 300)).pngData { context in
             UIColor.white.setFill()
