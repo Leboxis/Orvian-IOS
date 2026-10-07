@@ -85,7 +85,7 @@ def verify(cache, output, reference_only=False, check_conversion=False):
         with torch.inference_mode(), exportable_attention():
             trace = torch.jit.trace(wrapper, torch.zeros(1, 3, size, size), check_trace=False)
         compiled = None if reference_only else check_package(output, name, size, feature, shape, manifest)
-        for image in fixtures():
+        for fixture_index, image in enumerate(fixtures()):
             padded = prepare_image(image, kind)
             tensor = torch.from_numpy(image_tensor(padded))
             with torch.inference_mode():
@@ -103,6 +103,19 @@ def verify(cache, output, reference_only=False, check_conversion=False):
                 actual = np.asarray(compiled.predict({'image': padded})[feature])
                 check_array(actual, shape, probabilities=kind == 'joytag')
                 if kind == 'nudenet':
+                    print(json.dumps({'model': name, 'fixture': fixture_index,
+                        'max_coordinate_error': float(np.abs(actual[:, :4] - native[:, :4]).max()),
+                        'max_score_error': float(np.abs(actual[:, 4:] - native[:, 4:]).max()),
+                        'active_candidates': int((native[:, 4:].max(axis=1) > 0.25).sum())}), flush=True)
+                    if not np.allclose(actual[:, :4], native[:, :4], rtol=0.01, atol=1.0):
+                        import coremltools as ct
+                        cpu_model = ct.models.MLModel(str(output / f'{name}.mlpackage'),
+                            compute_units=ct.ComputeUnit.CPU_ONLY)
+                        cpu_result = np.asarray(cpu_model.predict({'image': padded})[feature])
+                        print(json.dumps({'diagnostic': 'same package on CPU',
+                            'max_coordinate_error': float(np.abs(cpu_result[:, :4] - native[:, :4]).max()),
+                            'max_score_error': float(np.abs(cpu_result[:, 4:] - native[:, 4:]).max()),
+                            'coordinate_parity': bool(np.allclose(cpu_result[:, :4], native[:, :4], rtol=0.01, atol=1.0))}), flush=True)
                     np.testing.assert_allclose(actual[:, :4], native[:, :4], rtol=0.01, atol=1.0)
                     np.testing.assert_allclose(actual[:, 4:], native[:, 4:], rtol=0.01, atol=0.01)
                 else:
