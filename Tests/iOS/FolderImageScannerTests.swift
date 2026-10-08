@@ -40,7 +40,7 @@ final class FolderImageScannerTests: XCTestCase {
                 case "a": return CursorPage(data: [folder], cursor: "b", hasMore: true)
                 default: return CursorPage(data: [images[0], images[1]], hasMore: false)
                 }
-            }, imageData: { _, _ in Data() }, prepare: {}, classify: { _ in classified += 1; return ImageContentScores(nudity: 0.9, semen: 0.2, feet: 0.7) })
+            }, imageData: { _, _ in Data() }, prepare: {}, classify: { _ in classified += 1; return 0.9 })
         scanner.start(driveId: 3, directory: directory)
         await scanner.task?.value
         XCTAssertEqual(requests, [70, 70, 70])
@@ -57,45 +57,17 @@ final class FolderImageScannerTests: XCTestCase {
     func testRepeatedCursorFailsInsteadOfReportingSuccess() async throws {
         let scanner = FolderImageScanner(credential: { "account" },
             page: { _, _, _ in CursorPage(data: [], cursor: "same", hasMore: true) },
-            imageData: { _, _ in Data() }, prepare: {}, classify: { _ in ImageContentScores(nudity: 0.1, semen: 0.2, feet: 0.7) })
+            imageData: { _, _ in Data() }, prepare: {}, classify: { _ in 0.1 })
         scanner.start(driveId: 1, directory: try file(70, kind: "dir"))
         await scanner.task?.value
         XCTAssertEqual(scanner.progress?.phase, .failed)
         XCTAssertNotNil(scanner.progress?.errorMessage)
     }
 
-    func testThreeCategoryCountsAndInvalidModelResultRemainConsistent() async throws {
-        let images = try (1...5).map { try file($0) }
-        let store = makeStore(credential: { "account" })
-        let results: [ImageContentScores] = [
-            .init(nudity: 0.6, semen: 0.1, feet: 0.95),
-            .init(nudity: 0.1, semen: 0.8, feet: 0.1),
-            .init(nudity: 0.1, semen: 0.1, feet: 0.8),
-            .init(nudity: 0.1, semen: 0.1, feet: 0.1),
-            .init(nudity: 0.1, semen: .nan, feet: 0.1)
-        ]
-        let scanner = FolderImageScanner(store: store, credential: { "account" },
-            page: { _, _, _ in CursorPage(data: images, hasMore: false) },
-            imageData: { _, id in Data([UInt8(id - 1)]) }, prepare: {},
-            classify: { results[Int($0[0])] })
-        scanner.start(driveId: 1, directory: try file(70, kind: "dir"))
-        await scanner.task?.value
-        XCTAssertEqual(scanner.progress?.phase, .completed)
-        XCTAssertEqual(scanner.progress?.failed, 1)
-        XCTAssertEqual(scanner.nsfwCount, 2)
-        XCTAssertEqual(scanner.feetCount, 1)
-        XCTAssertEqual(scanner.sfwCount, 1)
-        XCTAssertNil(store.scores(driveId: 1, file: images[4]))
-        store.threshold = 0.9
-        XCTAssertEqual(scanner.nsfwCount, 0)
-        XCTAssertEqual(scanner.feetCount, 1)
-        XCTAssertEqual(scanner.sfwCount, 3)
-    }
-
     func testPageFailureIsNotSuccess() async throws {
         let scanner = FolderImageScanner(credential: { "account" },
             page: { _, _, _ in throw ClassificationError.invalidPagination },
-            imageData: { _, _ in Data() }, prepare: {}, classify: { _ in ImageContentScores(nudity: 0.1, semen: 0.2, feet: 0.7) })
+            imageData: { _, _ in Data() }, prepare: {}, classify: { _ in 0.1 })
         scanner.start(driveId: 1, directory: try file(70, kind: "dir"))
         await scanner.task?.value
         XCTAssertEqual(scanner.progress?.phase, .failed)
@@ -108,12 +80,12 @@ final class FolderImageScannerTests: XCTestCase {
         let scanner = FolderImageScanner(store: store, credential: { "account" },
             page: { _, _, _ in CursorPage(data: empty ? [] : images, hasMore: false) },
             imageData: { _, id in if id == 1 { throw ClassificationError.invalidImage }; return Data() },
-            prepare: {}, classify: { _ in ImageContentScores(nudity: 0.1, semen: 0.2, feet: 0.7) })
+            prepare: {}, classify: { _ in 0.1 })
         scanner.start(driveId: 1, directory: try file(70, kind: "dir"))
         await scanner.task?.value
         XCTAssertEqual(scanner.progress?.failed, 1)
         XCTAssertEqual(scanner.progress?.processed, 2)
-        XCTAssertNil(store.scores(driveId: 1, file: images[0]))
+        XCTAssertNil(store.score(driveId: 1, file: images[0]))
         empty = true
         scanner.start(driveId: 1, directory: try file(70, kind: "dir"))
         await scanner.task?.value
@@ -136,10 +108,10 @@ final class FolderImageScannerTests: XCTestCase {
         var calls = 0
         let scanner = FolderImageScanner(store: store, credential: { "account" },
             page: { _, _, _ in CursorPage(data: [image], hasMore: false) },
-            imageData: { _, _ in Data() }, prepare: {}, classify: { _ in calls += 1; return ImageContentScores(nudity: 0.9, semen: 0.2, feet: 0.7) })
+            imageData: { _, _ in Data() }, prepare: {}, classify: { _ in calls += 1; return 0.9 })
         scanner.start(driveId: 1, directory: folder)
         await scanner.task?.value
-        XCTAssertEqual(store.scores(driveId: 1, file: image), ImageContentScores(nudity: 0.9, semen: 0.2, feet: 0.7))
+        XCTAssertEqual(store.score(driveId: 1, file: image), 0.9)
         scanner.start(driveId: 1, directory: folder)
         await scanner.task?.value
         XCTAssertEqual(calls, 2)
@@ -151,7 +123,7 @@ final class FolderImageScannerTests: XCTestCase {
         let folder = try file(70, kind: "dir")
         var account = "account"
         let store = makeStore(credential: { account })
-        var continuation: CheckedContinuation<ImageContentScores, Never>?
+        var continuation: CheckedContinuation<Float, Never>?
         var calls = 0
         let started = expectation(description: "classification started")
         let scanner = FolderImageScanner(store: store, credential: { account },
@@ -166,9 +138,9 @@ final class FolderImageScannerTests: XCTestCase {
         scanner.start(driveId: 1, directory: folder)
         XCTAssertEqual(calls, 1)
         if changeAccount { account = "other" } else { scanner.cancel() }
-        continuation?.resume(returning: ImageContentScores(nudity: 0.9, semen: 0.2, feet: 0.7))
+        continuation?.resume(returning: 0.9)
         await running?.value
-        XCTAssertNil(store.scores(driveId: 1, file: image))
+        XCTAssertNil(store.score(driveId: 1, file: image))
         XCTAssertEqual(scanner.progress?.phase, .cancelled)
     }
 }

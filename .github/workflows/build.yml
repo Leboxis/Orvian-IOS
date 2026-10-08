@@ -20,17 +20,13 @@ jobs:
         with:
           python-version: '3.12'
       - name: Install model verification tools
-        run: python -m pip install -r scripts/content_models/requirements.txt
-      - uses: actions/cache@v4
-        with:
-          path: model-cache
-          key: content-model-sources-${{ hashFiles('scripts/content_models/assets.json') }}
-      - name: Export and verify both fp16 content models
+        run: python -m pip install -r scripts/nsfw/requirements.txt
+      - name: Verify model transformation and embedded weights
         run: |
           python -m unittest discover -s Tests -p 'test_nsfw_model.py'
-          python -m unittest discover -s Tests -p 'test_content_models.py'
-          python scripts/content_models/convert_models.py
-          python scripts/content_models/verify_models.py
+          python scripts/nsfw/verify_model.py
+          python scripts/nsfw/convert_model.py --fetch-only --upstream "$RUNNER_TEMP/nsfw-reference.mlpackage"
+          python scripts/nsfw/verify_model.py --reference "$RUNNER_TEMP/nsfw-reference.mlpackage"
       - name: Verify classification policy
         run: python .github/scripts/check_image_classification.py
       - name: Install XcodeGen
@@ -47,17 +43,7 @@ jobs:
             -only-testing:OrvianTests/NSFWClassifierTests \
             -only-testing:OrvianTests/ImageClassificationStoreTests \
             -only-testing:OrvianTests/FolderImageScannerTests \
-            -only-testing:OrvianTests/ContentClassificationTests \
             CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO test
-      - name: Share verified model packages with IPA build
-        uses: actions/upload-artifact@v4
-        with:
-          name: content-models-fp16
-          if-no-files-found: error
-          path: |
-            Orvian/Resources/NudeNet320n.mlpackage
-            Orvian/Resources/JoyTag.mlpackage
-            Orvian/Resources/content-model-manifest.json
 
   build:
     needs: classification-tests
@@ -178,17 +164,8 @@ jobs:
       - name: Install XcodeGen
         run: brew install xcodegen
 
-      - name: Download verified model packages
-        uses: actions/download-artifact@v4
-        with:
-          name: content-models-fp16
-          path: Orvian/Resources
-
-      - name: Generate project with both verified model packages
-        run: |
-          test -d Orvian/Resources/NudeNet320n.mlpackage
-          test -d Orvian/Resources/JoyTag.mlpackage
-          xcodegen generate
+      - name: Generate Xcode project
+        run: xcodegen generate
 
       - name: Build (unsigned, generic iOS device)
         run: |
@@ -207,8 +184,7 @@ jobs:
       - name: Package IPA
         run: |
           APP="build/Build/Products/Release-iphoneos/Orvian.app"
-          test -d "$APP/NudeNet320n.mlmodelc"
-          test -d "$APP/JoyTag.mlmodelc"
+          test -d "$APP/NSFWClassifier.mlmodelc"
           VERSION=$(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" "$APP/Info.plist")
           mkdir -p Payload
           cp -R "$APP" Payload/
