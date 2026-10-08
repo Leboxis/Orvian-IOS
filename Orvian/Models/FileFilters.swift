@@ -141,15 +141,14 @@ struct FileFilters: Equatable, Hashable {
     }
 
     enum ClassificationFilter: String, CaseIterable, Identifiable {
-        case all, sfw, nsfw, feet, unscanned
+        case all, sfw, nsfw, unscanned
 
         var id: String { rawValue }
         var title: String {
             switch self {
             case .all: return "Tous"
-            case .sfw: return "Aucun"
-            case .nsfw: return "Nudité / sperme"
-            case .feet: return "Pieds"
+            case .sfw: return "SFW"
+            case .nsfw: return "NSFW"
             case .unscanned: return "Non analysés"
             }
         }
@@ -159,7 +158,6 @@ struct FileFilters: Equatable, Hashable {
             case .all: return nil
             case .sfw: return .sfw
             case .nsfw: return .nsfw
-            case .feet: return .feet
             case .unscanned: return .unscanned
             }
         }
@@ -225,7 +223,7 @@ struct FileFilters: Equatable, Hashable {
         metadata: VideoMetadataSnapshot,
         source: FileSource?,
         classification: ImageClassificationSnapshot = .init(),
-        nsfwThreshold: Float = 0.50
+        nsfwThreshold: Float = 0.80
     ) -> [DriveFile] {
         var result = items
 

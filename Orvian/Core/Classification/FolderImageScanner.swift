@@ -20,7 +20,7 @@ struct FolderScanProgress {
 final class FolderImageScanner {
     static let shared = FolderImageScanner()
     private(set) var progress: FolderScanProgress?
-    private(set) var resultScores: [ImageContentScores] = []
+    private(set) var resultScores: [Float] = []
     @ObservationIgnored private(set) var task: Task<Void, Never>?
     @ObservationIgnored private var generation = 0
     private let store: ImageClassificationStore
@@ -28,19 +28,14 @@ final class FolderImageScanner {
     private let page: (Int, Int, String?) async throws -> CursorPage<DriveFile>
     private let imageData: (Int, Int) async throws -> Data
     private let prepare: () async throws -> Void
-    private let classify: (Data) async throws -> ImageContentScores
+    private let classify: (Data) async throws -> Float
 
     var isRunning: Bool {
         progress?.phase == .enumerating || progress?.phase == .analyzing
     }
 
-    var sfwCount: Int { count(.sfw) }
-    var nsfwCount: Int { count(.nsfw) }
-    var feetCount: Int { count(.feet) }
-
-    private func count(_ category: ImageSafety) -> Int {
-        resultScores.reduce(0) { $0 + ($1.classification(threshold: store.threshold) == category ? 1 : 0) }
-    }
+    var sfwCount: Int { resultScores.reduce(0) { $0 + ($1 < store.threshold ? 1 : 0) } }
+    var nsfwCount: Int { resultScores.count - sfwCount }
 
     init(store: ImageClassificationStore? = nil,
          credential: @escaping () -> String? = { TokenStore.credentialFingerprint() },
@@ -51,7 +46,7 @@ final class FolderImageScanner {
              try await ThumbnailProvider.shared.classificationImageData(driveId: drive, fileId: file)
          },
          prepare: @escaping () async throws -> Void = { try await NSFWImageClassifier.shared.prepare() },
-         classify: @escaping (Data) async throws -> ImageContentScores = { try await NSFWImageClassifier.shared.classify(imageData: $0) }) {
+         classify: @escaping (Data) async throws -> Float = { try await NSFWImageClassifier.shared.classify(imageData: $0) }) {
         self.store = store ?? .shared
         self.credential = credential
         self.page = page
@@ -129,7 +124,7 @@ final class FolderImageScanner {
             for file in images {
                 try check(credential: captured, generation: capturedGeneration)
                 if ImageContentRevision(file: file) != nil,
-                   let score = store.scores(driveId: driveId, file: file) {
+                   let score = store.score(driveId: driveId, file: file) {
                     resultScores.append(score)
                     progress?.reused += 1
                 } else {
@@ -138,7 +133,7 @@ final class FolderImageScanner {
                         try check(credential: captured, generation: capturedGeneration)
                         let score = try await classify(data)
                         try check(credential: captured, generation: capturedGeneration)
-                        try await store.record(scores: score, file: file, driveId: driveId,
+                        try await store.record(score: score, file: file, driveId: driveId,
                                                credentialFingerprint: captured, modelVersion: NSFWImageClassifier.modelVersion)
                         try check(credential: captured, generation: capturedGeneration)
                         resultScores.append(score)

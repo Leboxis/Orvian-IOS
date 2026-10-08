@@ -33,7 +33,7 @@ class FilterMenuChecks(unittest.TestCase):
         self.assertIn("filters.filesOnly = false", self.menu)
 
     def test_all_and_full_reset_remain_available(self):
-        self.assertIn("case all, sfw, nsfw, feet, unscanned", self.model)
+        self.assertIn("case all, sfw, nsfw, unscanned", self.model)
         self.assertIn('case .all: return "Tous"', self.model)
         self.assertIn("if filters.isActive", self.menu)
         self.assertIn("filters = FileFilters()", self.menu)

@@ -28,9 +28,8 @@ struct FolderScanSheet: View {
                                 LabeledContent("Images traitées", value: "\(progress.processed) / \(total)")
                             }
                         }
-                        LabeledContent("Aucun", value: "\(scanner.sfwCount)")
-                        LabeledContent("Nudité / sperme", value: "\(scanner.nsfwCount)")
-                        LabeledContent("Pieds", value: "\(scanner.feetCount)")
+                        LabeledContent("SFW", value: "\(scanner.sfwCount)")
+                        LabeledContent("NSFW", value: "\(scanner.nsfwCount)")
                         if progress.reused > 0 {
                             LabeledContent("Résultats réutilisés", value: "\(progress.reused)")
                         }
@@ -51,14 +50,14 @@ struct FolderScanSheet: View {
                     }
 
                     Section {
-                        LabeledContent("Seuil de détection", value: "\(Int((store.threshold * 100).rounded())) %")
+                        LabeledContent("Seuil NSFW", value: "\(Int((store.threshold * 100).rounded())) %")
                         Slider(value: Binding(
                             get: { Double(store.threshold) },
                             set: { store.threshold = Float($0) }
-                        ), in: 0.30...0.99, step: 0.01)
-                        .accessibilityLabel("Seuil de classification des images")
+                        ), in: 0.50...0.99, step: 0.01)
+                        .accessibilityLabel("Seuil de classification NSFW")
                     } footer: {
-                        Text("Un seuil plus bas retient davantage de détections. Nudité / sperme est prioritaire sur Pieds. Aucun signifie qu’aucun score n’atteint le seuil. Les filtres changent sans relancer l’analyse.")
+                        Text("Un seuil plus bas classe davantage d’images NSFW. Les filtres utilisent ce seuil sans relancer l’analyse.")
                     }
 
                     if scanner.isRunning {

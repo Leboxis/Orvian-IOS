@@ -27,8 +27,6 @@ targets:
     platform: iOS
     sources:
       - path: Orvian
-        excludes:
-          - Resources/NSFWClassifier.mlpackage
     info:
       path: Orvian/Info.plist
       properties:
