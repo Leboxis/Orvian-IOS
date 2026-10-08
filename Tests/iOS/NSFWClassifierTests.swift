@@ -14,14 +14,14 @@ final class NSFWClassifierTests: XCTestCase {
             let desc = model.modelDescription
             let meta = desc.metadata[.creatorDefinedKey] as? [String: String]
             print("DIAG \(name) pipeline=\(meta?["orvian.pipelineVersion"] ?? "nil") tag=\(meta?["orvian.tag"] ?? "nil")")
-            for input in desc.inputDescriptions {
+            for input in desc.inputDescriptionsByName.values {
                 if let c = input.imageConstraint {
                     print("DIAG \(name) input \(input.name) \(c.pixelsWide)x\(c.pixelsHigh)")
                 } else {
                     print("DIAG \(name) input \(input.name) non-image")
                 }
             }
-            for output in desc.outputDescriptions {
+            for output in desc.outputDescriptionsByName.values {
                 if let m = output.multiArrayConstraint {
                     print("DIAG \(name) output \(output.name) shape=\(m.shape) dtype=\(m.dataType.rawValue)")
                 } else {
