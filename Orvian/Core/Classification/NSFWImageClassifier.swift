@@ -57,18 +57,21 @@ actor NSFWImageClassifier {
         guard detections.shape.map({ $0.intValue }) == [1, 22, 2100], detections.dataType == .float32 else {
             throw ClassificationError.invalidModelContract
         }
-        let channelStride = detections.strides[1].intValue
-        let candidateStride = detections.strides[2].intValue
-        guard channelStride > 0, candidateStride > 0,
-              21 * channelStride + 2099 * candidateStride < detections.count else {
-            throw ClassificationError.invalidModelContract
-        }
-        let values = detections.dataPointer.assumingMemoryBound(to: Float.self)
         let scale = Float(320) / Float(max(image.width, image.height))
-        let detected = try NudeNetPostprocessor.scores(candidateCount: 2100,
-            contentWidth: min(320, Float(image.width) * scale), contentHeight: min(320, Float(image.height) * scale)) {
-                values[$0 * channelStride + $1 * candidateStride]
+        let detected = try detections.withUnsafeMutableBufferPointer(ofType: Float.self) { values, strides in
+            let channelStride = strides[1]
+            let candidateStride = strides[2]
+            // Core ML may pad channels (for example, 2112 slots for 2100 values).
+            // Validate against the storage size, not the logical element count.
+            guard channelStride > 0, candidateStride > 0,
+                  21 * channelStride + 2099 * candidateStride < values.count else {
+                throw ClassificationError.invalidModelContract
             }
+            return try NudeNetPostprocessor.scores(candidateCount: 2100,
+                contentWidth: min(320, Float(image.width) * scale), contentHeight: min(320, Float(image.height) * scale)) {
+                    values[$0 * channelStride + $1 * candidateStride]
+                }
+        }
         try Task.checkCancellation()
         let semen = try infer(model: joyModel, image: Self.paddedImage(image, size: 448, centered: true), output: "semenScore")
         guard semen.shape.map({ $0.intValue }) == [1, 1], semen.dataType == .float32 else {
