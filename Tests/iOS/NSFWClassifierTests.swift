@@ -14,18 +14,38 @@ final class NSFWClassifierTests: XCTestCase {
             let desc = model.modelDescription
             let meta = desc.metadata[.creatorDefinedKey] as? [String: String]
             print("DIAG \(name) pipeline=\(meta?["orvian.pipelineVersion"] ?? "nil") tag=\(meta?["orvian.tag"] ?? "nil")")
-            for input in desc.inputDescriptions {
+            for input in desc.inputDescriptionsByName.values {
                 if let c = input.imageConstraint {
                     print("DIAG \(name) input \(input.name) \(c.pixelsWide)x\(c.pixelsHigh)")
                 } else {
                     print("DIAG \(name) input \(input.name) non-image")
                 }
             }
-            for output in desc.outputDescriptions {
+            for output in desc.outputDescriptionsByName.values {
                 if let m = output.multiArrayConstraint {
                     print("DIAG \(name) output \(output.name) shape=\(m.shape) dtype=\(m.dataType.rawValue)")
                 } else {
                     print("DIAG \(name) output \(output.name) non-multiarray")
+                }
+            }
+        }
+        let diagnosticImage = UIGraphicsImageRenderer(size: CGSize(width: 600, height: 300)).image { context in
+            UIColor.white.setFill()
+            context.fill(CGRect(x: 0, y: 0, width: 600, height: 300))
+        }
+        let cgImage = try XCTUnwrap(diagnosticImage.cgImage)
+        for (name, size, centered) in [("NudeNet320n", 320, false), ("JoyTag", 448, true)] {
+            let url = try XCTUnwrap(Bundle.main.url(forResource: name, withExtension: "mlmodelc"))
+            let model = try VNCoreMLModel(for: MLModel(contentsOf: url))
+            let request = VNCoreMLRequest(model: model)
+            request.imageCropAndScaleOption = .scaleFill
+            let padded = try NSFWImageClassifier.paddedImage(cgImage, size: size, centered: centered)
+            try VNImageRequestHandler(cgImage: padded, orientation: .up).perform([request])
+            for result in request.results ?? [] {
+                print("DIAG \(name) observation=\(type(of: result))")
+                if let feature = result as? VNCoreMLFeatureValueObservation,
+                   let tensor = feature.featureValue.multiArrayValue {
+                    print("DIAG \(name) feature=\(feature.featureName) shape=\(tensor.shape) dtype=\(tensor.dataType.rawValue) strides=\(tensor.strides) count=\(tensor.count)")
                 }
             }
         }
