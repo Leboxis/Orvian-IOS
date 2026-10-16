@@ -91,12 +91,14 @@ struct MainTabView: View {
             GeometryReader { geometry in
                 tabs
                     .environment(\.driveLayout, DriveLayout(isPad: true, width: geometry.size.width))
-                    .safeAreaInset(edge: .bottom, spacing: 0) {
+                    .overlay(alignment: .bottom) {
                         TransferOverlayChrome(
                             uploadManager: uploadManager,
                             onShowUploads: { showUploadSheet = true }
                         )
                         .frame(maxWidth: DS.maxTabBarWidth)
+                        // Réserve le coin inférieur droit au bouton d’import, sans déplacer la grille.
+                        .padding(.trailing, 84)
                         .padding(.bottom, 12)
                     }
             }
@@ -131,9 +133,9 @@ struct MainTabView: View {
         }
     }
 
-    private func prepareTab(_ tab: AppTab) {
-        shell.markVisited(tab)
-        guard tab == .profile else { return }
+    private func prepareTab(_ targetTab: AppTab) {
+        shell.markVisited(targetTab)
+        guard targetTab == .profile else { return }
         Task {
             await RecentUploadsLoader.shared.prefetch(driveId: drive.id)
         }

@@ -30,7 +30,7 @@ final class IPadLayoutTests: XCTestCase {
         XCTAssertGreaterThan(hidden.fileColumns(preferred: 3), visible.fileColumns(preferred: 3))
         XCTAssertEqual(hidden.maxGridWidth, .infinity)
         XCTAssertLessThan(hidden.actionInset, hidden.pillInset)
-        XCTAssertLessThan(hidden.bottomInset, DS.floatingBarInset)
+        XCTAssertEqual(hidden.bottomInset, DS.floatingBarInset)
         XCTAssertFalse(DriveLayout(isPad: true, width: 500).usesTwoColumns)
     }
 }
