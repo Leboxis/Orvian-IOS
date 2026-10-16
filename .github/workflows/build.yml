@@ -43,6 +43,7 @@ jobs:
             -only-testing:OrvianTests/NSFWClassifierTests \
             -only-testing:OrvianTests/ImageClassificationStoreTests \
             -only-testing:OrvianTests/FolderImageScannerTests \
+            -only-testing:OrvianTests/IPadLayoutTests \
             CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO test
 
   build:

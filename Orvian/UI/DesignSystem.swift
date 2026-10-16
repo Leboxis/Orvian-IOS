@@ -1,5 +1,17 @@
 import SwiftUI
 
+extension EnvironmentValues {
+    @Entry var driveLayout = DriveLayout()
+}
+
+extension DriveLayout {
+    var maxGridWidth: CGFloat { isPad ? .infinity : DS.maxContentWidth }
+    var bottomInset: CGFloat { isPad ? 84 : DS.floatingBarInset }
+    var listBottomInset: CGFloat { isPad ? 16 : 90 }
+    var actionInset: CGFloat { isPad ? 20 : DS.floatingActionInset }
+    var pillInset: CGFloat { isPad ? 84 : DS.floatingPillInset }
+}
+
 /// Constantes de design partagées.
 ///
 /// Le chrome flottant (barre d'onglets, pastilles de transfert, bouton

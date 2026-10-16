@@ -1,6 +1,7 @@
 import SwiftUI
 
 struct FavoritesView: View {
+    @Environment(\.driveLayout) private var driveLayout
     @State private var mutationCredentialFingerprint = TokenStore.credentialFingerprint()
     @State private var viewModel: FileGridViewModel
     @State private var filters = FileFilters()
@@ -424,7 +425,7 @@ struct FavoritesView: View {
         .padding(.horizontal, 16)
         .padding(.vertical, 10)
         .background(.black.opacity(0.75), in: Capsule())
-        .padding(.bottom, DS.floatingPillInset)
+        .padding(.bottom, driveLayout.pillInset)
         .transition(.opacity)
     }
 
@@ -547,4 +548,3 @@ struct FavoritesView: View {
         }
     }
 }
-

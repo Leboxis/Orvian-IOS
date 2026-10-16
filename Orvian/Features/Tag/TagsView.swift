@@ -25,6 +25,7 @@ struct TagsView: View {
     @AppStorage("tagsLayout") private var layout = CategoryLayout.grid
     /// Nombre de colonnes de la grille, partagé avec l'éditeur de tags.
     @AppStorage("tagGridColumns") private var tagGridColumns = 2
+    @Environment(\.driveLayout) private var driveLayout
     @State private var showCreateSheet = false
 
     @State private var tagToRename: Category?
@@ -196,10 +197,8 @@ struct TagsView: View {
             }
             .padding(.horizontal, DS.gridMargin)
             .padding(.top, 6)
-            .padding(.bottom, DS.floatingBarInset)
-            // Bloc centré et borné en largeur : sur iPad, deux colonnes
-            // étirées sur 1 000 pt rendaient les cartes illisibles.
-            .frame(maxWidth: DS.maxContentWidth)
+            .padding(.bottom, driveLayout.bottomInset)
+            .frame(maxWidth: driveLayout.maxGridWidth)
             .frame(maxWidth: .infinity)
         }
         .background(Color(uiColor: .systemGroupedBackground))
@@ -208,7 +207,7 @@ struct TagsView: View {
         }
     }
     private var gridColumns: [GridItem] {
-        Array(repeating: GridItem(.flexible(), spacing: DS.gridSpacing), count: max(2, tagGridColumns))
+        Array(repeating: GridItem(.flexible(), spacing: DS.gridSpacing), count: driveLayout.tagColumns(preferred: tagGridColumns))
     }
 
     private var list: some View {
@@ -249,7 +248,7 @@ struct TagsView: View {
             }
             .padding(.horizontal, DS.gridMargin)
             .padding(.top, 6)
-            .padding(.bottom, DS.floatingBarInset)
+            .padding(.bottom, driveLayout.bottomInset)
             .frame(maxWidth: DS.maxContentWidth)
             .frame(maxWidth: .infinity)
         }

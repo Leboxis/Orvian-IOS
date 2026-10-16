@@ -16,6 +16,14 @@ def run_check(output, sources):
 
 with tempfile.TemporaryDirectory() as temporary:
     temp = Path(temporary)
+    run_check(temp / "drive-layout", [ROOT / path for path in [
+        "Orvian/UI/DriveLayout.swift", "Tests/DriveLayoutChecks.swift",
+    ]])
+    navigation = (ROOT / "Orvian/App/TabNavigationState.swift").read_text(encoding="utf-8")
+    navigation = navigation[:navigation.index("/// État d'interface")]
+    navigation_source = temp / "TabNavigationState.swift"
+    navigation_source.write_text(navigation.replace("import SwiftUI", "import Foundation"), encoding="utf-8")
+    run_check(temp / "settings-navigation", [navigation_source, ROOT / "Tests/SettingsNavigationChecks.swift"])
     # Compile real production code, not a Python model of its concurrency.
     # Same-file extensions can pause at private snapshot/publication boundaries.
     perf_checks = temp / "PerfChecks.swift"
@@ -167,4 +175,3 @@ enum TokenStore {
         "Orvian/Core/Utils/FileKind.swift",
         "Tests/FileFiltersChecks.swift",
     ]]])
-

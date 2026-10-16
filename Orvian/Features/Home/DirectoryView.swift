@@ -11,6 +11,7 @@ struct DirectoryView: View {
     /// Retire le focus du champ quand son onglet n'est plus affiché.
     let isActive: Bool
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.driveLayout) private var driveLayout
 
     @State private var mutationCredentialFingerprint = TokenStore.credentialFingerprint()
     @State private var viewModel: FileGridViewModel
@@ -694,7 +695,7 @@ struct DirectoryView: View {
         .padding(.horizontal, 16)
         .padding(.vertical, 10)
         .background(.black.opacity(0.75), in: Capsule())
-        .padding(.bottom, DS.floatingPillInset)
+        .padding(.bottom, driveLayout.pillInset)
         .transition(.opacity)
     }
 
@@ -718,7 +719,7 @@ struct DirectoryView: View {
         .frame(width: 52, height: 52)
         .floatingChrome(Circle())
         .padding(.trailing, DS.gridMargin + 4)
-        .padding(.bottom, DS.floatingActionInset)
+        .padding(.bottom, driveLayout.actionInset)
         .accessibilityLabel("Ajouter ou importer")
     }
 
@@ -835,4 +836,3 @@ struct DirectoryView: View {
             && (usesVisibleItemCount || activeViewModel.totalItemCount == nil)
     }
 }
-

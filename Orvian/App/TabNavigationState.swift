@@ -1,6 +1,10 @@
 import SwiftUI
 import Observation
 
+enum SettingsRoute: Hashable {
+    case appearance, media, storage, security, account
+}
+
 /// État de navigation centralisé permettant le contrôle et la réinitialisation
 /// à la racine lors d'un second appui sur le bouton de l'onglet actif.
 @MainActor
@@ -21,7 +25,7 @@ final class TabNavigationState {
     /// Incrémente à chaque second appui sur l'onglet Profil afin de demander
     /// un retour à la racine ET un rafraîchissement des sections.
     var profileRefreshRequest = 0
-    var settingsPath = NavigationPath()
+    var settingsPath: [SettingsRoute] = []
 
     func reset(tab: AppTab, scrollFavoritesToTop: Bool = true) {
         switch tab {
@@ -39,7 +43,7 @@ final class TabNavigationState {
             profilePath = NavigationPath()
             profileRefreshRequest += 1
         case .settings:
-            settingsPath = NavigationPath()
+            settingsPath = []
         }
     }
 }

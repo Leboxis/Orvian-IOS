@@ -9,7 +9,8 @@ import SwiftUI
 /// disponible : elle affiche directement le réglage cherché sans naviguer.
 struct SettingsView: View {
     let session: SessionStore
-    @Binding var path: NavigationPath
+    @Binding var path: [SettingsRoute]
+    @Environment(\.driveLayout) private var driveLayout
 
     @State private var searchText = ""
     @State private var cacheSize: Int = 0
@@ -43,17 +44,20 @@ struct SettingsView: View {
     }
 
     var body: some View {
-        NavigationStack(path: $path) {
-            List {
-                if isSearching {
-                    searchResultsSection
+        NavigationStack(path: stackPath) {
+            Group {
+                if driveLayout.usesTwoColumns && !isSearching {
+                    HStack(spacing: 0) {
+                        hub
+                            .frame(width: 300)
+                        Divider()
+                        destinationView(for: selectedSpace)
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    }
                 } else {
-                    accountHeaderSection
-                    destinationsSection
-                    aboutSection
+                    hub
                 }
             }
-            .listStyle(.insetGrouped)
             .searchable(text: $searchText, prompt: "Rechercher un réglage")
             .navigationTitle("Réglages")
             .navigationBarTitleDisplayMode(.large)
@@ -61,7 +65,7 @@ struct SettingsView: View {
                 destinationView(for: route)
             }
             .safeAreaInset(edge: .bottom) {
-                Color.clear.frame(height: 90)
+                Color.clear.frame(height: driveLayout.listBottomInset)
             }
         }
         .sheet(isPresented: $showDrivePicker) {
@@ -116,10 +120,41 @@ struct SettingsView: View {
 
     // MARK: - Hub : carte de compte
 
+    private var selectedSpace: SettingsRoute { path.last ?? .appearance }
+
+    private var stackPath: Binding<[SettingsRoute]> {
+        Binding(
+            get: { driveLayout.usesTwoColumns ? [] : path },
+            set: { if !driveLayout.usesTwoColumns { path = $0 } }
+        )
+    }
+
+    private var hub: some View {
+        List {
+            if isSearching {
+                searchResultsSection
+            } else {
+                accountHeaderSection
+                destinationsSection
+                aboutSection
+            }
+        }
+        .listStyle(.insetGrouped)
+    }
+
+    private func open(_ route: SettingsRoute) {
+        if driveLayout.usesTwoColumns {
+            path = [route]
+            searchText = ""
+        } else {
+            path.append(route)
+        }
+    }
+
     private var accountHeaderSection: some View {
         Section {
             Button {
-                path.append(SettingsRoute.account)
+                open(.account)
             } label: {
                 VStack(alignment: .leading, spacing: 12) {
                     HStack(spacing: 14) {
@@ -198,21 +233,27 @@ struct SettingsView: View {
                 title: "Apparence et navigation",
                 summary: appearanceSummary,
                 tint: .indigo,
-                route: .appearance
+                route: .appearance,
+                onSelect: driveLayout.usesTwoColumns ? open : nil,
+                isSelected: driveLayout.usesTwoColumns && selectedSpace == .appearance
             )
             SettingsLinkRow(
                 icon: "photo.stack",
                 title: "Médias et réseau",
                 summary: mediaSummary,
                 tint: .blue,
-                route: .media
+                route: .media,
+                onSelect: driveLayout.usesTwoColumns ? open : nil,
+                isSelected: driveLayout.usesTwoColumns && selectedSpace == .media
             )
             SettingsLinkRow(
                 icon: "internaldrive.fill",
                 title: "Stockage",
                 summary: storageSummary,
                 tint: .green,
-                route: .storage
+                route: .storage,
+                onSelect: driveLayout.usesTwoColumns ? open : nil,
+                isSelected: driveLayout.usesTwoColumns && selectedSpace == .storage
             )
             SettingsLinkRow(
                 icon: "lock.shield.fill",
@@ -220,6 +261,8 @@ struct SettingsView: View {
                 summary: securitySummary,
                 tint: .orange,
                 route: .security,
+                onSelect: driveLayout.usesTwoColumns ? open : nil,
+                isSelected: driveLayout.usesTwoColumns && selectedSpace == .security,
                 showsDot: !isLockCodeEnabled
             )
             SettingsLinkRow(
@@ -227,7 +270,9 @@ struct SettingsView: View {
                 title: "Compte et drive",
                 summary: session.selectedDrive?.name ?? "—",
                 tint: .teal,
-                route: .account
+                route: .account,
+                onSelect: driveLayout.usesTwoColumns ? open : nil,
+                isSelected: driveLayout.usesTwoColumns && selectedSpace == .account
             )
         } header: {
             Text("Réglages")
@@ -346,12 +391,12 @@ struct SettingsView: View {
             }
             if matches("code verrouillage sécurité lock face id") {
                 Button(isLockCodeEnabled ? "Gérer le code…" : "Activer le code…") {
-                    path.append(SettingsRoute.security)
+                    open(.security)
                 }
             }
             if matches("compte token déconnecter drive changer") {
                 Button("Ouvrir Compte et drive…") {
-                    path.append(SettingsRoute.account)
+                    open(.account)
                 }
             }
         } header: {
@@ -429,12 +474,6 @@ struct SettingsView: View {
     }
 }
 
-// MARK: - Routage
-
-private enum SettingsRoute: Hashable {
-    case appearance, media, storage, security, account
-}
-
 // MARK: - Briques du hub
 
 /// Ligne de destination : icône teintée, titre, résumé d'état live.
@@ -444,28 +483,41 @@ private struct SettingsLinkRow: View {
     let summary: String
     let tint: Color
     let route: SettingsRoute
+    var onSelect: ((SettingsRoute) -> Void)? = nil
+    var isSelected = false
     var showsDot = false
 
     var body: some View {
-        NavigationLink(value: route) {
-            HStack(spacing: 12) {
-                HubIcon(icon, tint: tint)
-                VStack(alignment: .leading, spacing: 1) {
-                    HStack(spacing: 6) {
-                        Text(title)
-                        if showsDot {
-                            Circle().fill(.orange).frame(width: 8, height: 8)
-                                .accessibilityLabel("Action recommandée")
-                        }
-                    }
-                    Text(summary)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                }
+        Group {
+            if let onSelect {
+                Button { onSelect(route) } label: { row }
+                    .buttonStyle(.plain)
+                    .listRowBackground(isSelected ? Color.accentColor.opacity(0.10) : Color(uiColor: .secondarySystemGroupedBackground))
+                    .accessibilityAddTraits(isSelected ? .isSelected : [])
+            } else {
+                NavigationLink(value: route) { row }
             }
-            .padding(.vertical, 2)
         }
+    }
+
+    private var row: some View {
+        HStack(spacing: 12) {
+            HubIcon(icon, tint: tint)
+            VStack(alignment: .leading, spacing: 1) {
+                HStack(spacing: 6) {
+                    Text(title)
+                    if showsDot {
+                        Circle().fill(.orange).frame(width: 8, height: 8)
+                            .accessibilityLabel("Action recommandée")
+                    }
+                }
+                Text(summary)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+        }
+        .padding(.vertical, 2)
     }
 }
 
@@ -493,6 +545,7 @@ private struct HubIcon: View {
 // MARK: - Espace 1 : Apparence et navigation
 
 private struct AppearanceSpace: View {
+    @Environment(\.driveLayout) private var driveLayout
     @Binding var showFileSizes: Bool
     @Binding var showFavoriteStars: Bool
     @Binding var fileGridColumns: Int
@@ -576,7 +629,7 @@ private struct AppearanceSpace: View {
             }
         }
         .safeAreaInset(edge: .bottom) {
-            Color.clear.frame(height: 90)
+            Color.clear.frame(height: driveLayout.listBottomInset)
         }
         .navigationTitle("Apparence")
         .navigationBarTitleDisplayMode(.inline)
@@ -586,6 +639,7 @@ private struct AppearanceSpace: View {
 // MARK: - Espace 2 : Médias et réseau
 
 private struct MediaSpace: View {
+    @Environment(\.driveLayout) private var driveLayout
     @Binding var prefetchThumbnails: Bool
     @Binding var prefetchVideoURLs: Bool
     @Binding var prefetchOnWiFiOnly: Bool
@@ -636,7 +690,7 @@ private struct MediaSpace: View {
             }
         }
         .safeAreaInset(edge: .bottom) {
-            Color.clear.frame(height: 90)
+            Color.clear.frame(height: driveLayout.listBottomInset)
         }
         .navigationTitle("Médias et réseau")
         .navigationBarTitleDisplayMode(.inline)
@@ -646,6 +700,7 @@ private struct MediaSpace: View {
 // MARK: - Espace 3 : Stockage
 
 private struct StorageSpace: View {
+    @Environment(\.driveLayout) private var driveLayout
     let cacheSize: Int
     @Binding var limitMB: Int
     let onPurge: () -> Void
@@ -685,7 +740,7 @@ private struct StorageSpace: View {
             }
         }
         .safeAreaInset(edge: .bottom) {
-            Color.clear.frame(height: 90)
+            Color.clear.frame(height: driveLayout.listBottomInset)
         }
         .navigationTitle("Stockage")
         .navigationBarTitleDisplayMode(.inline)
@@ -714,6 +769,7 @@ private struct StorageSpace: View {
 // MARK: - Espace 4 : Sécurité
 
 private struct SecuritySpace: View {
+    @Environment(\.driveLayout) private var driveLayout
     let isEnabled: Bool
     let onActivate: () -> Void
     let onChange: () -> Void
@@ -758,7 +814,7 @@ private struct SecuritySpace: View {
             }
         }
         .safeAreaInset(edge: .bottom) {
-            Color.clear.frame(height: 90)
+            Color.clear.frame(height: driveLayout.listBottomInset)
         }
         .navigationTitle("Sécurité")
         .navigationBarTitleDisplayMode(.inline)
@@ -768,6 +824,7 @@ private struct SecuritySpace: View {
 // MARK: - Espace 5 : Compte et drive
 
 private struct AccountSpace: View {
+    @Environment(\.driveLayout) private var driveLayout
     let session: SessionStore
     let onChangeDrive: () -> Void
     let onSignOut: () -> Void
@@ -808,7 +865,7 @@ private struct AccountSpace: View {
             }
         }
         .safeAreaInset(edge: .bottom) {
-            Color.clear.frame(height: 90)
+            Color.clear.frame(height: driveLayout.listBottomInset)
         }
         .navigationTitle("Compte")
         .navigationBarTitleDisplayMode(.inline)

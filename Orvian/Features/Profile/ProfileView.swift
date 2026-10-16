@@ -9,6 +9,7 @@ struct ProfileView: View {
     /// Incrémenté à chaque second appui sur l'onglet Profil (retour à la
     /// racine + rafraîchissement des sections).
     var refreshRequest: Int = 0
+    @Environment(\.driveLayout) private var driveLayout
 
     @State private var recentUploads: [DriveFile] = []
     @State private var isLoadingRecents = true
@@ -20,13 +21,28 @@ struct ProfileView: View {
 
     var body: some View {
         NavigationStack(path: $path) {
-            List {
-                recentUploadsSection
-                trashSection
-                aboutSection
+            Group {
+                if driveLayout.usesTwoColumns {
+                    HStack(spacing: 0) {
+                        List {
+                            recentUploadsSection
+                        }
+                        List {
+                            trashSection
+                            aboutSection
+                        }
+                        .frame(width: 300)
+                    }
+                } else {
+                    List {
+                        recentUploadsSection
+                        trashSection
+                        aboutSection
+                    }
+                }
             }
             .safeAreaInset(edge: .bottom) {
-                Color.clear.frame(height: 90)
+                Color.clear.frame(height: driveLayout.listBottomInset)
             }
             .navigationTitle("Profil")
             .navigationBarTitleDisplayMode(.large)

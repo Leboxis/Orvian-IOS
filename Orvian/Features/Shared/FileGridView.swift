@@ -56,6 +56,7 @@ struct FileGridView: View {
     @AppStorage("prefetchVideoURLs") private var prefetchVideoURLs = true
     @AppStorage("prefetchOnWiFiOnly") private var prefetchOnWiFiOnly = true
     @AppStorage("fileGridColumns") private var fileGridColumns = 3
+    @Environment(\.driveLayout) private var driveLayout
     @AppStorage("foldersFirstInTags") private var foldersFirstInTags = true
     /// Préférence globale : affiche l'étoile des favoris sur les cartes,
     /// y compris dans l'onglet Favoris où elle était autrefois masquée d'office.
@@ -371,10 +372,8 @@ struct FileGridView: View {
                 }
                 .padding(.horizontal, DS.gridMargin)
                 .padding(.top, 6 + contentTopInset)
-                .padding(.bottom, DS.floatingBarInset) // barre flottante
-                // Bloc centré et borné en largeur : sur iPad, les colonnes
-                // s'étiraient sur toute la largeur de l'écran.
-                .frame(maxWidth: DS.maxContentWidth)
+                .padding(.bottom, driveLayout.bottomInset)
+                .frame(maxWidth: driveLayout.maxGridWidth)
                 .frame(maxWidth: .infinity)
             }
             // Le rebond permanent permet le pull-to-refresh même quand le
@@ -608,7 +607,7 @@ struct FileGridView: View {
     private var columns: [GridItem] {
         Array(
             repeating: GridItem(.flexible(), spacing: DS.gridSpacing),
-            count: min(max(fileGridColumns, 2), 7)
+            count: driveLayout.fileColumns(preferred: fileGridColumns)
         )
     }
 

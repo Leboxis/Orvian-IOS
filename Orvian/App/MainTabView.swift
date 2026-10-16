@@ -17,6 +17,8 @@ struct MainTabView: View {
     /// Navigation possédée par la session, remplacée au changement de drive.
     let shell: MainTabShellState
     @State private var showUploadSheet = false
+    @State private var columnVisibility: NavigationSplitViewVisibility = .all
+    @State private var preferredCompactColumn: NavigationSplitViewColumn = .detail
     @AppStorage("favoritesReselectScrollToTop") private var favoritesReselectScrollToTop = true
 
     private let uploadManager = UploadManager.shared
@@ -31,7 +33,80 @@ struct MainTabView: View {
         // Pattern @Observable : donne accès aux bindings `$shell.tab`,
         // `$shell.router.mediaContext`, `$shell.navState.homePath`…
         @Bindable var shell = shell
-        ZStack(alignment: .bottom) {
+        Group {
+            if UIDevice.current.userInterfaceIdiom == .pad {
+                padNavigation
+            } else {
+                phoneNavigation
+            }
+        }
+        .ignoresSafeArea(.keyboard, edges: .bottom)
+        .tint(.accentColor)
+        .sheet(isPresented: $showUploadSheet) {
+            UploadProgressSheet(manager: uploadManager)
+        }
+        .fullScreenCover(item: $shell.router.mediaContext) { context in
+            MediaPagerView(context: context)
+        }
+        .fullScreenCover(item: $shell.router.textFile) { file in
+            TextFileViewer(file: file, driveId: drive.id)
+        }
+    }
+
+    private var padNavigation: some View {
+        NavigationSplitView(
+            columnVisibility: $columnVisibility,
+            preferredCompactColumn: $preferredCompactColumn
+        ) {
+            List {
+                ForEach(AppTab.allCases) { tab in
+                    Button {
+                        if shell.tab == tab {
+                            reselectTab(tab)
+                        } else {
+                            prepareTab(tab)
+                            shell.tab = tab
+                        }
+                        preferredCompactColumn = .detail
+                    } label: {
+                        Label(tab.title, systemImage: shell.tab == tab ? tab.symbolFilled : tab.symbol)
+                            .foregroundStyle(shell.tab == tab ? Color.accentColor : Color.primary)
+                            .padding(.vertical, 6)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .listRowBackground(
+                        RoundedRectangle(cornerRadius: DS.compactRadius)
+                            .fill(shell.tab == tab ? Color.primary.opacity(0.10) : Color.clear)
+                    )
+                    .accessibilityAddTraits(shell.tab == tab ? .isSelected : [])
+                }
+            }
+            .listStyle(.sidebar)
+            .navigationTitle("Orvian")
+            .navigationSplitViewColumnWidth(min: 200, ideal: 240, max: 280)
+        } detail: {
+            // Une seule identité de vue : masquer la barre redimensionne les onglets sans les remonter.
+            GeometryReader { geometry in
+                tabs
+                    .environment(\.driveLayout, DriveLayout(isPad: true, width: geometry.size.width))
+                    .safeAreaInset(edge: .bottom, spacing: 0) {
+                        TransferOverlayChrome(
+                            uploadManager: uploadManager,
+                            onShowUploads: { showUploadSheet = true }
+                        )
+                        .frame(maxWidth: DS.maxTabBarWidth)
+                        .padding(.bottom, 12)
+                    }
+            }
+        }
+        .navigationSplitViewStyle(.balanced)
+    }
+
+    private var phoneNavigation: some View {
+        @Bindable var shell = shell
+        return ZStack(alignment: .bottom) {
             tabs
 
             // Barre et pastilles partagent un seul bloc ancré en bas : la
@@ -48,38 +123,24 @@ struct MainTabView: View {
 
                 FloatingTabBar(
                     selection: $shell.tab,
-                    onSelect: { targetTab in
-                        // Avant la sélection : l'onglet doit pouvoir se monter
-                        // dans le même tour pour ne pas afficher un cadre vide.
-                        shell.markVisited(targetTab)
-                        guard targetTab == .profile else { return }
-                        // Démarre au clic, avant que ProfileView soit montée.
-                        // Sa propre tâche rejoint ensuite la même requête.
-                        Task {
-                            await RecentUploadsLoader.shared.prefetch(driveId: drive.id)
-                        }
-                    },
-                    onReselect: { targetTab in
-                        shell.navState.reset(
-                            tab: targetTab,
-                            scrollFavoritesToTop: favoritesReselectScrollToTop
-                        )
-                    }
+                    onSelect: prepareTab,
+                    onReselect: reselectTab
                 )
             }
             .padding(.bottom, 4)
         }
-        .ignoresSafeArea(.keyboard, edges: .bottom)
-        .tint(.accentColor)
-        .sheet(isPresented: $showUploadSheet) {
-            UploadProgressSheet(manager: uploadManager)
+    }
+
+    private func prepareTab(_ tab: AppTab) {
+        shell.markVisited(tab)
+        guard tab == .profile else { return }
+        Task {
+            await RecentUploadsLoader.shared.prefetch(driveId: drive.id)
         }
-        .fullScreenCover(item: $shell.router.mediaContext) { context in
-            MediaPagerView(context: context)
-        }
-        .fullScreenCover(item: $shell.router.textFile) { file in
-            TextFileViewer(file: file, driveId: drive.id)
-        }
+    }
+
+    private func reselectTab(_ tab: AppTab) {
+        shell.navState.reset(tab: tab, scrollFavoritesToTop: favoritesReselectScrollToTop)
     }
 
     @ViewBuilder

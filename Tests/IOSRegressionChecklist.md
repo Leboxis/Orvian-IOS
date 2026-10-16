@@ -105,6 +105,33 @@ Les scénarios suivants nécessitent aussi un iPhone ou un simulateur :
 Les changements ont été préparés sous Windows : la vérification syntaxique
 ne remplace pas la compilation Xcode, les tests Swift et les essais ci-dessus.
 
+## Disposition iPad Pro 13 pouces
+
+- Paysage : les cinq onglets apparaissent dans la barre latérale native ; le
+  petit bouton système de la barre de navigation permet de la masquer et de
+  la réafficher depuis chaque onglet, y compris un sous-dossier.
+- Faire défiler un dossier, le filtrer, ouvrir un sous-dossier, puis masquer
+  et réafficher la barre : largeur et colonnes changent sans revenir à la
+  racine, recharger la liste ni perdre la sélection. Répéter dans Favoris et Tag.
+- Retoucher un onglet : mêmes retours à la racine et rafraîchissements que
+  sur iPhone ; Profil précharge toujours ses uploads récents.
+- Tourner en portrait et réduire la fenêtre (Split View / Stage Manager) :
+  les colonnes se simplifient et les cinq onglets restent accessibles via
+  le bouton système. Revenir au paysage sans perdre les piles de navigation.
+- Réglages larges : choisir chaque espace à gauche, vérifier ses contrôles
+  à droite, la recherche, le changement de drive et la gestion du code.
+  Réduire la fenêtre pendant la consultation d’un espace ou une recherche.
+- Profil large : uploads à gauche, stockage et informations à droite ;
+  accès aux récents, à la corbeille et aux mesures réseau inchangé.
+- Envoi et téléchargement simultanés : progressions et Annuler restent
+  visibles, sans recouvrir le bouton d’import ni les dernières cartes.
+- Ouvrir un média, un texte, une feuille puis verrouiller l’app : aucune
+  présentation ne passe au-dessus du verrou ; état restauré après déverrouillage.
+- Comparer clair/sombre, Réduire la transparence, Dynamic Type maximal et
+  VoiceOver ; pas de nouvelle couleur, police ou carte propre à l’iPad.
+- iPhone portrait/paysage : barre flottante inchangée, mêmes marges, mêmes
+  colonnes (2 à 7) et réglages de tags, aucune barre latérale.
+
 ## Navigation, recherche et publications réseau
 
 Les contrôles ajoutés à `check_ios_regressions.py` compilent le code Swift de
