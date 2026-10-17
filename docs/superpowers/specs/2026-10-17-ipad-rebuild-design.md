@@ -1,6 +1,6 @@
 # Refonte iPad 13 pouces depuis la base antérieure
 
-Statut : direction et implémentation approuvées par l'utilisateur le 17 octobre 2026. La nouvelle interface est codée depuis la base restaurée. Les vérifications locales passent ; compilation et tests iPad doivent être confirmés par la CI avant le push final sur main. Les essais avec un compte réel restent à réaliser. La conception détaillée est consignée dans `tasks/plan.md` ; les tâches sont suivies dans `tasks/todo.md`.
+Statut : direction et implémentation approuvées par l'utilisateur le 17 octobre 2026. La nouvelle interface est codée depuis la base restaurée. Le contrôle préalable GitHub Actions 39013332197 confirme la compilation, les tests iPhone et les dix tests iPad sur iPad Pro 13 pouces (M5), iPadOS 26.4.1. Les essais avec un compte réel restent à réaliser. La conception détaillée est consignée dans `tasks/plan.md` ; les tâches sont suivies dans `tasks/todo.md`.
 
 ## Objectif
 

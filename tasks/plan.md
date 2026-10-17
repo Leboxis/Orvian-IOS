@@ -4,7 +4,7 @@
 
 La direction de `docs/superpowers/specs/2026-10-17-ipad-rebuild-design.md` et l'implémentation sont approuvées. Ce document précise les choix d'interface et l'ordre de réalisation. L'utilisateur demande désormais un push sur main après réalisation et la surveillance de GitHub Actions.
 
-La base restaurée reste `3387c1e`. Les modifications de retrait sont conservées sur `feat/ipad-rebuild`, sans commit ni publication. Les tâches détaillées sont suivies uniquement dans `tasks/todo.md`.
+La base restaurée reste `3387c1e`. Le retrait et la reconstruction sont regroupés dans le commit `e1be8ce`, vérifié par un workflow de contrôle sur `feat/ipad-rebuild` avant passage sur main. Les tâches et preuves détaillées sont suivies uniquement dans `tasks/todo.md`.
 
 ## Règles communes
 

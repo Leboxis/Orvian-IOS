@@ -1,6 +1,6 @@
 # Tâches : refonte iPad depuis la base restaurée
 
-Plan : `tasks/plan.md`. Statut : code des tâches 1 à 8 implémenté ; vérifications locales réussies, validation Xcode et iPad en attente du contrôle CI. Les coches d'implémentation ne signifient pas que les essais manuels ont été réalisés. Les points de contrôle de validation restent distincts.
+Plan : `tasks/plan.md`. Statut : code des tâches 1 à 8 implémenté ; vérifications locales, compilation iOS et dix tests iPad réussis sur le workflow de contrôle. Les coches d'implémentation ne signifient pas que les essais manuels avec un compte réel ont été réalisés. Les points de contrôle de validation restent distincts.
 
 ## 1. Navigation native isolée
 
@@ -88,7 +88,7 @@ Plan : `tasks/plan.md`. Statut : code des tâches 1 à 8 implémenté ; vérific
 
 ## 9. Preuves finales et décision de livraison
 
-- [ ] Exécuter et consigner les vérifications du plan ; ne pas confondre tests hébergés, compilation et validation des gestes.
+- [x] Exécuter et consigner les vérifications automatisées du plan ; distinguer les essais sur appareil et avec compte réel encore manquants.
 - Acceptation : aucune régression connue laissée silencieusement ouverte ; chaque vérification manquante est indiquée ; aucun push ou release sans demande.
 - Vérification : commandes de `tasks/plan.md`, parcours des dix cycles et favoris connus sur iPad réel, puis comparaison iPhone.
 - Dépendances : 1 à 8.
@@ -106,4 +106,6 @@ Plan : `tasks/plan.md`. Statut : code des tâches 1 à 8 implémenté ; vérific
 - Dix tests iOS couvrent la disposition, les sélections de tags et réglages, dix cycles du conteneur natif et le rendu des véritables écrans et destinations de dossiers dans les deux thèmes sans credentials. Les captures sont jointes au résultat XCTest ; ces essais sans compte ne prouvent pas le chargement des favoris d'un compte réel.
 - Les couleurs et constantes existantes restent inchangées ; les nouveaux fonds utilisent uniquement les couleurs système déjà présentes dans l'application.
 - Aucun changement d'API, d'authentification, de cache ou de modèle NSFW. Aucun test existant désactivé pour masquer un défaut.
-- Sous Windows, aucun build SwiftUI ni test XCTest n'a pu être lancé localement. Le push sur main attend le résultat du workflow de contrôle ; les essais avec un compte et sur appareil réel restent ouverts.
+- Sous Windows, aucun build SwiftUI ni test XCTest n'a pu être lancé localement. Le contrôle préalable sur macOS est réussi : https://github.com/Leboxis/Orvian-IOS/actions/runs/39013332197.
+- Le commit de code `e1be8ce` a passé 17 tests iPhone, 10 tests sur iPad Pro 13 pouces (M5), iPadOS 26.4.1, les contrôles Swift/Python existants et la compilation Release. Le résultat XCTest et ses captures sont joints en artefact `Orvian-iPad-tests`.
+- La publication sur main est autorisée après ce contrôle. Les essais avec un compte et sur appareil réel restent ouverts ; aucun statut « sans bug » n'est revendiqué.
