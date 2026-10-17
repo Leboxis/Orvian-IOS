@@ -7,7 +7,6 @@ struct TagIntersectionView: View {
     let categories: [Category]
     let hasLoadedCategories: Bool
     let onOpenFolder: (DriveFile) -> Void
-    @State private var path: [DriveFile] = []
 
     var body: some View {
         Group {
@@ -18,12 +17,41 @@ struct TagIntersectionView: View {
                 ContentUnavailableView("Un tag n’est plus disponible", systemImage: "tag.slash",
                                        description: Text("Modifiez ou effacez le croisement pour poursuivre. Le filtre n’a pas été élargi."))
             } else {
-                FavoritesView(driveId: driveId, router: router, path: $path,
-                              source: .intersection(selection), title: "Croisement de tags",
-                              ownsNavigation: false, onOpenFolder: onOpenFolder)
+                DebouncedTagResults(driveId: driveId, router: router, selection: selection,
+                                    onOpenFolder: onOpenFolder)
                     .id(selection)
             }
         }
         .environment(\.fileBrowserScope, .tag)
+    }
+}
+
+/// Each query owns its delay and browser. Replacing it immediately removes stale
+/// actions; rapid checkmarks don't create a new network request for every tap.
+private struct DebouncedTagResults: View {
+    let driveId: Int
+    let router: ViewerRouter
+    let selection: TagIntersection
+    let onOpenFolder: (DriveFile) -> Void
+    @State private var ready = false
+    @State private var path: [DriveFile] = []
+
+    var body: some View {
+        Group {
+            if ready {
+                FavoritesView(driveId: driveId, router: router, path: $path,
+                              source: .intersection(selection), title: "Croisement de tags",
+                              ownsNavigation: false, onOpenFolder: onOpenFolder)
+            } else {
+                ProgressView("Recherche des éléments communs…")
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+        }
+        .task {
+            do { try await Task.sleep(for: .milliseconds(180)) }
+            catch { return }
+            guard !Task.isCancelled else { return }
+            ready = true
+        }
     }
 }

@@ -28,7 +28,14 @@ struct TagsView: View {
     @State private var errorMessage: String?
     @State private var operationErrorMessage: String?
     /// Affichage des catégories : grille (défaut) ou liste.
-    @AppStorage("tagsLayout") private var layout = CategoryLayout.grid
+    @AppStorage("tagsLayout") private var phoneLayout = CategoryLayout.grid
+    @AppStorage("padTagsLayout") private var padLayout = CategoryLayout.list
+    private var layout: CategoryLayout {
+        get { iPadLayout.isPad ? padLayout : phoneLayout }
+        nonmutating set { if iPadLayout.isPad { padLayout = newValue } else { phoneLayout = newValue } }
+    }
+    private var usesTagColumns: Bool { iPadLayout.isPad && iPadLayout.width >= 700 && !dynamicTypeSize.isAccessibilitySize }
+    private enum CrossRoute: Hashable { case results }
     /// Nombre de colonnes de la grille, partagé avec l'éditeur de tags.
     @AppStorage("tagGridColumns") private var tagGridColumns = 2
     @State private var showCreateSheet = false
@@ -52,7 +59,7 @@ struct TagsView: View {
 
     var body: some View {
         Group {
-            if iPadLayout.isPad {
+            if usesTagColumns {
                 padNavigationView
             } else {
                 phoneNavigation
@@ -114,6 +121,7 @@ struct TagsView: View {
         NavigationStack(path: $path) {
             root
                 .toolbar { categoryToolbar }
+                .navigationDestination(for: CrossRoute.self) { _ in intersectionResults }
                 .navigationDestination(for: Category.self) { category in
                     CategoryFilesView(
                         category: category,
@@ -155,6 +163,7 @@ struct TagsView: View {
             }
             .accessibilityLabel(layout == .grid ? "Afficher en liste" : "Afficher en grille")
             Button {
+                crossState.isEditing = false
                 isReordering.toggle()
             } label: {
                 Image(systemName: "pencil")
@@ -213,7 +222,7 @@ struct TagsView: View {
             crossState.isEditing.toggle()
         } label: {
             Image(systemName: crossState.isEditing ? "checkmark.circle" : "line.3.horizontal.decrease.circle")
-                .frame(width: 44, height: 44)
+                .frame(minWidth: 44, minHeight: 44)
         }
         .accessibilityLabel(crossState.isEditing ? "Terminer la sélection des tags" : "Croiser plusieurs tags")
         .tint(crossState.isActive ? .accentColor : .primary)
@@ -223,7 +232,7 @@ struct TagsView: View {
         if crossState.isActive {
             VStack {
                 crossControls
-                if !iPadLayout.isPad { NavigationLink("Résultats") { intersectionResults } }
+                if !usesTagColumns { NavigationLink("Résultats", value: CrossRoute.results) }
             }
         }
     }
@@ -236,8 +245,20 @@ struct TagsView: View {
                 let names = orderedCategories.filter { crossState.selectedIDs.contains($0.id) }.map(\.name)
                 if !names.isEmpty { Text(names.joined(separator: " + ")).font(.caption).foregroundStyle(.secondary) }
                 HStack {
-                    Button(crossState.isEditing ? "Terminer" : "Modifier") { crossState.isEditing.toggle() }
-                    Button("Effacer") { crossState.clear() }
+                    Button(crossState.isEditing ? "Terminer" : "Modifier") {
+                        let wasEditing = crossState.isEditing
+                        crossState.isEditing.toggle()
+                        if !usesTagColumns {
+                            path = NavigationPath(); trail = []
+                            if wasEditing && !crossState.selectedIDs.isEmpty {
+                                path.append(CrossRoute.results); trail = ["Croisement de tags"]
+                            }
+                        }
+                    }
+                    Button("Effacer") {
+                        crossState.clear()
+                        if !usesTagColumns { path = NavigationPath(); trail = [] }
+                    }
                 }
                 .buttonStyle(.bordered)
             }
@@ -250,29 +271,20 @@ struct TagsView: View {
         TagIntersectionView(driveId: driveId, router: router, selection: TagIntersection(crossState.selectedIDs),
                             categories: categories, hasLoadedCategories: hasLoadedCategories,
                             onOpenFolder: { folder in
-            if iPadLayout.isPad { padNavigation.folders.append(folder) } else { push(folder) }
+            if usesTagColumns { padNavigation.folders.append(folder) } else { push(folder) }
         })
         .safeAreaInset(edge: .top) {
-            if !iPadLayout.isPad {
+            if !usesTagColumns {
                 crossControls
-                if crossState.isEditing {
-                    ScrollView(.horizontal) {
-                        HStack {
-                            ForEach(orderedCategories) { category in
-                                Button { crossState.toggle(category.id) } label: {
-                                    Label(category.name, systemImage: crossState.selectedIDs.contains(category.id) ? "checkmark.circle.fill" : "circle")
-                                }
-                                .buttonStyle(.bordered)
-                            }
-                        }.padding(.horizontal)
-                    }
-                }
             }
         }
     }
 
     private var categorySelection: Binding<Int?> {
-        Binding(get: { padNavigation.categoryID }, set: { crossState.clear(); padNavigation.select($0) })
+        Binding(get: { crossState.isEditing ? nil : padNavigation.categoryID }, set: {
+            guard !crossState.isEditing else { return }
+            crossState.clear(); padNavigation.select($0)
+        })
     }
 
     @ViewBuilder
@@ -289,6 +301,7 @@ struct TagsView: View {
                 crossButton
                 Menu {
                     Button {
+                        crossState.isEditing = false
                         isReordering.toggle()
                     } label: {
                         Label(isReordering ? "Terminer le réarrangement" : "Réarranger les tags",
@@ -350,7 +363,7 @@ struct TagsView: View {
 
     private var root: some View {
         VStack(spacing: 8) {
-            if !iPadLayout.isPad { crossSummary }
+            if !usesTagColumns { crossSummary }
             catalogueContent
         }
     }
@@ -589,7 +602,7 @@ struct TagsView: View {
     private func open(_ category: Category) {
         if crossState.isEditing { crossState.toggle(category.id); return }
         crossState.clear()
-        if iPadLayout.isPad { padNavigation.select(category.id); return }
+        if usesTagColumns { padNavigation.select(category.id); return }
         path.append(category)
         trail.append(category.name)
     }

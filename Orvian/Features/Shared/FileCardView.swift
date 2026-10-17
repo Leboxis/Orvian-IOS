@@ -154,19 +154,22 @@ struct FileCardView: View {
     @ViewBuilder private var cardContent: some View {
         if presentation == .list {
             HStack(spacing: 12) {
-                thumbnailArea.frame(width: 52, height: 52)
+                thumbnailArea.overlay { playBadge }.frame(width: 52, height: 52)
                 VStack(alignment: .leading, spacing: 4) {
-                    Text(file.name).font(.body).lineLimit(2)
-                    Text(kind.label).font(.caption).foregroundStyle(.secondary)
+                    Text(file.name).font(.body)
+                        .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 2)
+                    Text(!showsListMetadata && showFileSizes && !file.isDirectory ? "\(kind.label) · \(subtitle)" : kind.label)
+                        .font(.caption).foregroundStyle(.secondary)
                     let names = (file.categories ?? []).compactMap { categoriesById[$0.categoryId]?.name }
                     if !names.isEmpty {
-                        Text(names.joined(separator: ", ")).font(.caption).foregroundStyle(.secondary).lineLimit(2)
+                        Text(names.joined(separator: ", ")).font(.caption).foregroundStyle(.secondary)
+                            .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 2)
                     }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 if showsListMetadata {
                     VStack(alignment: .trailing, spacing: 4) {
-                        if !file.isDirectory { Text(subtitle) }
+                        if showFileSizes && !file.isDirectory { Text(subtitle) }
                         if let date = file.updatedAt ?? file.lastModifiedAt {
                             Text(Date(timeIntervalSince1970: date), format: .dateTime.day().month().year())
                         }
@@ -303,9 +306,13 @@ struct FileCardView: View {
 
     private var accessibilityValue: String {
         let names = (file.categories ?? []).compactMap { categoriesById[$0.categoryId]?.name }
-        return ([subtitle, file.isFavorite == true ? "Favori" : "",
+        var values = [subtitle, file.isFavorite == true ? "Favori" : "",
                  selectionMode ? (isSelected ? "Sélectionné" : "Non sélectionné") : ""]
-            + names).filter { !$0.isEmpty }.joined(separator: ", ")
+            + names
+        if presentation == .list, let date = file.updatedAt ?? file.lastModifiedAt {
+            values.append("Modifié le " + Date(timeIntervalSince1970: date).formatted(date: .abbreviated, time: .omitted))
+        }
+        return values.filter { !$0.isEmpty }.joined(separator: ", ")
     }
 
     /// Indicateur de lecture sur les vidéos.

@@ -5,7 +5,7 @@ import Foundation
 /// Unifie les schémas `FileV3` / `DirectoryV3` de l'API v3 : les dossiers
 /// reviennent avec des champs plus pauvres que les fichiers, tout est donc
 /// optionnel sauf l'essentiel.
-struct DriveFile: Codable, Identifiable, Hashable {
+struct DriveFile: Codable, Identifiable, Hashable, Sendable {
     let id: Int
     var name: String
     /// "dir" ou "file"

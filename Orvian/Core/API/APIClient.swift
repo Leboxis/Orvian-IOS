@@ -115,9 +115,13 @@ actor APIClient {
     func data(
         _ endpoint: Endpoint,
         method: String = "GET",
-        cachePolicy: URLRequest.CachePolicy = .useProtocolCachePolicy
+        cachePolicy: URLRequest.CachePolicy = .useProtocolCachePolicy,
+        originatingCredential: String? = nil
     ) async throws -> Data {
         let request = try request(for: endpoint, method: method, cachePolicy: cachePolicy)
+        if let originatingCredential {
+            guard Self.credentialFingerprint(for: request) == originatingCredential else { throw CancellationError() }
+        }
         if method == "GET" {
             return try await coalescedData(for: request, measuredPath: endpoint.path)
         }
@@ -149,9 +153,10 @@ actor APIClient {
     func get<T: Decodable>(
         _ type: T.Type = T.self,
         _ endpoint: Endpoint,
-        cachePolicy: URLRequest.CachePolicy = .useProtocolCachePolicy
+        cachePolicy: URLRequest.CachePolicy = .useProtocolCachePolicy,
+        originatingCredential: String? = nil
     ) async throws -> T {
-        let data = try await self.data(endpoint, cachePolicy: cachePolicy)
+        let data = try await self.data(endpoint, cachePolicy: cachePolicy, originatingCredential: originatingCredential)
         do {
             return try await ResponseDecoder.decode(T.self, from: data)
         } catch {
