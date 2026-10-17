@@ -114,6 +114,16 @@ final class FileGridViewModel {
     /// aussi le calcul dérivé, et rien n'est écrit pendant le rendu.
     @ObservationIgnored private var visibleItemsCache = VisibleItemsCache()
 
+    func visibleSnapshot(filters: FileFilters, searchText: String, foldersFirst: Bool) -> VisibleFileSnapshot {
+        let metadata = MediaMetadataStore.shared
+        let needsMetadata = filters.sort == .duration || filters.orientation != nil || filters.highResolutionVideosOnly
+        let key = VisibleItemsKey(source: source, driveId: driveId, itemsRevision: itemsRevision,
+                                  filters: filters, searchText: source.isServerFiltered ? "" : searchText,
+                                  metadataRevision: needsMetadata ? metadata.revision : 0,
+                                  foldersFirst: foldersFirst)
+        return VisibleFileSnapshot(key: key, items: visibleItems(key: key, mediaMetadata: metadata))
+    }
+
     /// Éléments après filtres, recherche et tri, mémoïsés par `key`. La clé
     /// est purement incrémentale : sa comparaison est O(1) au lieu de relire
     /// tout le tableau à chaque rendu.
@@ -853,6 +863,21 @@ final class FileGridViewModel {
     /// Renvoie vrai si une source de tag doit récupérer un fichier qui vient
     /// d'entrer dans la catégorie mais n'est pas présent dans sa page locale.
     private func applyCategoryChange(fileId: Int, category: Category, applied: Bool) -> Bool {
+        if case let .intersection(selection) = source {
+            if selection.ids.contains(category.id) && !applied {
+                items.removeAll { $0.id == fileId }
+                return true
+            }
+            if let index = items.firstIndex(where: { $0.id == fileId }) {
+                guard items[index].categories != nil else { return true }
+                var categories = items[index].categories ?? []
+                categories.removeAll { $0.categoryId == category.id }
+                if applied { categories.append(FileCategory(categoryId: category.id)) }
+                items[index].categories = categories
+                if !selection.matches(Set(categories.map(\.categoryId))) { items.remove(at: index) }
+            }
+            return selection.ids.contains(category.id)
+        }
         guard let index = items.firstIndex(where: { $0.id == fileId }) else {
             if case let .category(categoryId) = source {
                 return categoryId == category.id && applied
@@ -1189,4 +1214,3 @@ final class FileGridViewModel {
         return buckets.map { Group(title: title($0.0), files: $0.1) }
     }
 }
-

@@ -24,6 +24,11 @@ extension KDriveService {
             : .useProtocolCachePolicy
         let endpoint: Endpoint
         switch source {
+        case let .intersection(selection):
+            guard !selection.ids.isEmpty else { throw APIError.invalidResponse }
+            endpoint = safeOrdering(.intersectionFiles(driveId: driveId, selection: selection, cursor: cursor),
+                                    requested: orderBy, order: order, allowed: ["last_modified_at"],
+                                    aliases: ["updated_at": "last_modified_at"])
         case let .directory(directoryId):
             endpoint = safeOrdering(
                 .directoryContent(driveId: driveId, directoryId: directoryId, cursor: cursor),

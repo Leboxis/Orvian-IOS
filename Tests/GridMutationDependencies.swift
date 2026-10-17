@@ -18,6 +18,7 @@ struct Category { let id: Int }
 struct FileCategory: Equatable { let categoryId: Int }
 enum FileSource: Equatable {
     case directory(Int), recents, favorites, trash, category(Int)
+    case intersection(TagIntersection)
     case search(String, Int?)
 }
 struct FileFilters {

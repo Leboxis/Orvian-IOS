@@ -40,6 +40,8 @@ struct FileCardView: View {
     var showFileSizes = true
     /// Couleur de repli des dossiers sans couleur API, lue par la grille.
     var defaultFolderColor = "#4285F5"
+    var presentation = FilePresentation.grid
+    var showsListMetadata = true
     var onToggleSelection: (() -> Void)?
     var onToggleFavorite: (() -> Void)?
     var onMove: (() -> Void)?
@@ -106,28 +108,7 @@ struct FileCardView: View {
     }
 
     var body: some View {
-        VStack(spacing: 5) {
-            thumbnailArea
-                .overlay(alignment: .center) { playBadge }
-                .accessibilityHidden(true)
-
-            Text(file.name)
-                .font(.footnote)
-                .lineLimit(dynamicTypeSize.isAccessibilitySize ? 4 : 2, reservesSpace: true)
-                .truncationMode(.middle)
-                .foregroundStyle(.primary)
-                .frame(maxWidth: .infinity)
-                .accessibilityHidden(enabled)
-
-            HStack(spacing: 4) {
-                Text(subtitle)
-                categoryDots
-            }
-            .font(.caption2)
-            .foregroundStyle(.secondary)
-            .frame(maxWidth: .infinity)
-            .accessibilityHidden(enabled)
-        }
+        cardContent
         .opacity(enabled ? 1 : 0.55)
         .contentShape(Rectangle())
         // Interaction (tap + long-press) portée par UIKit : `contextMenu`
@@ -169,6 +150,47 @@ struct FileCardView: View {
     }
 
     // MARK: - Zones
+
+    @ViewBuilder private var cardContent: some View {
+        if presentation == .list {
+            HStack(spacing: 12) {
+                thumbnailArea.frame(width: 52, height: 52)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(file.name).font(.body).lineLimit(2)
+                    Text(kind.label).font(.caption).foregroundStyle(.secondary)
+                    let names = (file.categories ?? []).compactMap { categoriesById[$0.categoryId]?.name }
+                    if !names.isEmpty {
+                        Text(names.joined(separator: ", ")).font(.caption).foregroundStyle(.secondary).lineLimit(2)
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                if showsListMetadata {
+                    VStack(alignment: .trailing, spacing: 4) {
+                        if !file.isDirectory { Text(subtitle) }
+                        if let date = file.updatedAt ?? file.lastModifiedAt {
+                            Text(Date(timeIntervalSince1970: date), format: .dateTime.day().month().year())
+                        }
+                    }
+                    .font(.caption).foregroundStyle(.secondary)
+                }
+            }
+            .padding(12).padding(.trailing, 32)
+            .background(Color(uiColor: .secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: DS.compactRadius))
+            .accessibilityHidden(enabled)
+        } else {
+            VStack(spacing: 5) {
+                thumbnailArea.overlay { playBadge }.accessibilityHidden(true)
+                Text(file.name)
+                    .font(.footnote)
+                    .lineLimit(dynamicTypeSize.isAccessibilitySize ? 4 : 2, reservesSpace: true)
+                    .truncationMode(.middle).foregroundStyle(.primary)
+                    .frame(maxWidth: .infinity).accessibilityHidden(enabled)
+                HStack(spacing: 4) { Text(subtitle); categoryDots }
+                    .font(.caption2).foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity).accessibilityHidden(enabled)
+            }
+        }
+    }
 
     /// Conteneur carré strict : `Color.clear` fixe les limites, le contenu
     /// est plaqué dessus en remplissage puis recadré — toutes les cartes

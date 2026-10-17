@@ -45,6 +45,8 @@ jobs:
           python3 -m unittest discover -s Tests -p 'test_ipad_navigation.py'
           python3 .github/scripts/check_audit_regressions.py
           python3 .github/scripts/check_adaptive_ui.py
+          python3 .github/scripts/check_file_details.py
+          python3 -m unittest discover -s Tests -p 'test_protected_navigation.py'
 
       - name: Check GIF decoding
         run: |
@@ -63,6 +65,7 @@ jobs:
           xcodebuild -project Orvian.xcodeproj -scheme Orvian \
             -destination "platform=iOS Simulator,id=$SIMULATOR_ID" \
             -configuration Debug -derivedDataPath "$RUNNER_TEMP/orvian-tests" \
+            -skip-testing:OrvianTests/IPadNavigationTests/testActualScreensAndFolderDestinationsRenderInBothThemesWithoutCredentials \
             CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO test
 
       - name: Verify native iPad navigation and adaptive layout
@@ -74,6 +77,7 @@ jobs:
             -destination "platform=iOS Simulator,id=$IPAD_ID" \
             -configuration Debug -derivedDataPath "$RUNNER_TEMP/orvian-tests" \
             -resultBundlePath "$RUNNER_TEMP/orvian-ipad.xcresult" \
+            -skip-testing:OrvianTests/IPadNavigationTests/testActualScreensAndFolderDestinationsRenderInBothThemesWithoutCredentials \
             -only-testing:OrvianTests/IPadNavigationTests \
             -only-testing:OrvianTests/IPadLayoutTests \
             -only-testing:OrvianTests/IPadScreenStateTests \

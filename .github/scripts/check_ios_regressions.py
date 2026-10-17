@@ -134,6 +134,7 @@ enum TokenStore {
     )
     run_check(temp / "mutation-safety", [mutation_dependencies, *[ROOT / path for path in [
         "Orvian/Models/DriveFile.swift", "Orvian/Models/Category.swift",
+        "Orvian/Models/TagIntersection.swift",
         "Orvian/Core/Utils/FileKind.swift",
         "Orvian/Features/Shared/FileGridMutationCenter.swift",
         "Tests/MutationSafetyChecks.swift",
@@ -160,6 +161,7 @@ enum TokenStore {
     )
     run_check(temp / "file-filters", [filters_dependencies, *[ROOT / path for path in [
         "Orvian/Core/API/FileSource+Ordering.swift",
+        "Orvian/Models/TagIntersection.swift",
         "Orvian/Models/FileFilters.swift",
         "Orvian/Models/DriveFile.swift",
         "Orvian/Models/Category.swift",

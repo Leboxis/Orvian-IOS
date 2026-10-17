@@ -119,6 +119,14 @@ extension Endpoint {
         )
     }
 
+    static func intersectionFiles(driveId: Int, selection: TagIntersection, cursor: String?) -> Endpoint {
+        var endpoint = categoryFiles(driveId: driveId, categoryId: selection.ids.first ?? 0, cursor: cursor)
+        endpoint.query = endpoint.query.map { item in
+            item.name == "category" ? URLQueryItem(name: "category", value: selection.query) : item
+        }
+        return endpoint
+    }
+
     /// Recherche récursive de fichiers dans un dossier (ou tout le drive) et ses sous-dossiers.
     static func search(driveId: Int, query: String, directoryId: Int?, cursor: String?, limit: Int = 60) -> Endpoint {
         var queryItems: [URLQueryItem] = [

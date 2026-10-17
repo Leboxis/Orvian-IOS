@@ -38,6 +38,7 @@ final class TabNavigationState {
     var settingsPath = NavigationPath()
     var settingsSelection: SettingsRoute? = .appearance
     var iPadTags = IPadTagNavigation()
+    var tagIntersection = TagIntersectionState()
     /// Visibilité de la colonne de gauche des onglets « Tag » et « Réglages ».
     /// Partagée par les deux onglets et possédée par la session : les deux
     /// barres latérales restent dans le même état et la valeur survit au

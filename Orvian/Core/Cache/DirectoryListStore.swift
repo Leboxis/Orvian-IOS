@@ -56,6 +56,8 @@ final class DirectoryListStore {
             return "\(credential)|\(driveId)|rec|\(limit)|\(ordering)"
         case let .category(categoryId):
             return "\(credential)|\(driveId)|cat|\(categoryId)|\(ordering)"
+        case let .intersection(selection):
+            return "\(credential)|\(driveId)|and|\(selection.ids.map(String.init).joined(separator: ","))|\(ordering)"
         case .trash:
             return "\(credential)|\(driveId)|trash|\(ordering)"
         case .search:
@@ -171,4 +173,3 @@ private extension FileSource {
         }
     }
 }
-

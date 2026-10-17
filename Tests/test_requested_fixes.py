@@ -11,7 +11,7 @@ def source(path):
 
 
 class RequestedFixChecks(unittest.TestCase):
-    def test_random_uses_only_current_visible_report(self):
+    def test_random_uses_current_synchronous_visible_snapshot(self):
         for path in ["Orvian/Features/Favorites/FavoritesView.swift",
                      "Orvian/Features/Home/DirectoryView.swift"]:
             text = source(path)
@@ -20,8 +20,9 @@ class RequestedFixChecks(unittest.TestCase):
             self.assertIn("visibleSelectionItems.filter", population)
             self.assertNotIn("viewModel.items", population)
             self.assertNotIn("activeViewModel.items", population)
-            self.assertIn("guard visibleItemsReport?.context == currentVisibleItemsContext", text)
-            self.assertIn(".disabled(playableFiles.isEmpty)", text)
+            self.assertIn("visibleSnapshot(", text)
+            self.assertNotIn("visibleItemsReport", text)
+            self.assertIn("BrowserToolbar(canOpenRandom: !playableFiles.isEmpty", text)
 
     def test_network_zero_is_honestly_labelled(self):
         settings = source("Orvian/Features/Settings/SettingsView.swift")

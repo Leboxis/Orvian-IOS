@@ -28,7 +28,7 @@ class IPadNavigationWiringChecks(unittest.TestCase):
         self.assertIn(".tabViewStyle(.tabBarOnly)", native)
         self.assertEqual(
             re.findall(r"value: AppTab\.(\w+)", native),
-            ["home", "favorites", "tag", "settings", "profile"],
+            ["settings", "tag", "home", "favorites", "profile"],
         )
         for forbidden in ["NavigationSplitView", "NavigationStack", "ZStack", ".opacity(", "tabPane("]:
             self.assertNotIn(forbidden, native)
@@ -110,8 +110,8 @@ class IPadNavigationWiringChecks(unittest.TestCase):
     def test_bar_order_matches_native_tabs_and_retains_accessible_text(self):
         bar = self.source("Orvian/UI/FloatingTabBar.swift")
         self.assertIn("@Environment(\\.iPadLayout)", bar)
-        self.assertIn("iPadLayout.isPad ? [.home, .favorites, .tag, .settings, .profile]", bar)
-        self.assertIn(": [.home, .favorites, .tag, .settings]", bar)
+        self.assertIn("iPadLayout.isPad ? [.settings, .tag, .home, .favorites, .profile]", bar)
+        self.assertIn(": [.settings, .tag, .home, .favorites]", bar)
         self.assertIn("ForEach(AppTab.presentationOrder)", bar)
         self.assertNotIn("dynamicTypeSize < .accessibility1", bar)
         self.assertIn("if !iPadLayout.isPad {", bar)

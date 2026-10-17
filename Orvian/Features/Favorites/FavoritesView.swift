@@ -1,6 +1,7 @@
 import SwiftUI
 
 struct FavoritesView: View {
+    @Environment(\.iPadLayout) private var iPadLayout
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @State private var mutationCredentialFingerprint = TokenStore.credentialFingerprint()
     @State private var viewModel: FileGridViewModel
@@ -8,6 +9,10 @@ struct FavoritesView: View {
     private let router: ViewerRouter
     @Binding var path: [DriveFile]
     let scrollToTopRequest: Int
+    private let title: String
+    private let ownsNavigation: Bool
+    private let onOpenFolder: ((DriveFile) -> Void)?
+    @AppStorage("foldersFirstInTags") private var foldersFirstInTags = true
 
     @State private var searchText = ""
     @State private var searchRevealed = false
@@ -16,7 +21,6 @@ struct FavoritesView: View {
 
     @State private var selectionMode = false
     @State private var selectedIDs: Set<Int> = []
-    @State private var visibleItemsReport: VisibleItemsReport?
     @State private var pendingMove: MoveRequest?
     @State private var pendingTags: TagRequest?
     @State private var moveBusy = false
@@ -27,12 +31,19 @@ struct FavoritesView: View {
         driveId: Int,
         router: ViewerRouter,
         path: Binding<[DriveFile]>,
-        scrollToTopRequest: Int = 0
+        scrollToTopRequest: Int = 0,
+        source: FileSource = .favorites,
+        title: String = "Favoris",
+        ownsNavigation: Bool = true,
+        onOpenFolder: ((DriveFile) -> Void)? = nil
     ) {
         self.router = router
         self._path = path
         self.scrollToTopRequest = scrollToTopRequest
-        _viewModel = State(initialValue: FileGridViewModel(source: .favorites, driveId: driveId))
+        self.title = title
+        self.ownsNavigation = ownsNavigation
+        self.onOpenFolder = onOpenFolder
+        _viewModel = State(initialValue: FileGridViewModel(source: source, driveId: driveId))
     }
 
     private struct MoveRequest: Identifiable {
@@ -45,19 +56,6 @@ struct FavoritesView: View {
         let files: [DriveFile]
     }
 
-    private struct VisibleItemsContext: Equatable {
-        let viewModelID: ObjectIdentifier
-        let source: FileSource
-        let itemsRevision: Int
-        let filters: FileFilters
-        let searchText: String
-    }
-
-    private struct VisibleItemsReport {
-        let context: VisibleItemsContext
-        let items: [DriveFile]
-    }
-
     private var isSearching: Bool {
         !searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
@@ -66,19 +64,10 @@ struct FavoritesView: View {
         alwaysShowSearch || searchFocused || isSearching || searchRevealed
     }
 
-    private var currentVisibleItemsContext: VisibleItemsContext {
-        VisibleItemsContext(
-            viewModelID: ObjectIdentifier(viewModel),
-            source: viewModel.source,
-            itemsRevision: viewModel.itemsRevision,
-            filters: filters,
-            searchText: searchText
-        )
-    }
-
     private var visibleSelectionItems: [DriveFile] {
-        guard visibleItemsReport?.context == currentVisibleItemsContext else { return [] }
-        return visibleItemsReport?.items ?? []
+        let isTag: Bool
+        switch viewModel.source { case .category, .intersection: isTag = true; default: isTag = false }
+        return viewModel.visibleSnapshot(filters: filters, searchText: searchText, foldersFirst: isTag && foldersFirstInTags).items
     }
 
     private var visibleSelectionIDs: Set<Int> {
@@ -100,8 +89,7 @@ struct FavoritesView: View {
     }
 
     private var reportedVisibleItemCount: Int? {
-        guard visibleItemsReport?.context == currentVisibleItemsContext else { return nil }
-        return visibleItemsReport?.items.count
+        visibleSelectionItems.count
     }
 
     private var displayedItemCount: Int? {
@@ -117,6 +105,9 @@ struct FavoritesView: View {
             return hasCountFiltering || isSearching ? "Filtrage…" : "Chargement…"
         }
         let plural = count > 1
+        if viewModel.hasMore && viewModel.totalItemCount == nil {
+            return "\(count) éléments chargés"
+        }
         if isSearching {
             return "\(count) résultat\(plural ? "s" : "")"
         }
@@ -145,13 +136,21 @@ struct FavoritesView: View {
 
 
     var body: some View {
-        let visibleItemsContext = currentVisibleItemsContext
-        NavigationStack(path: $path) {
+        Group {
+            if ownsNavigation {
+                NavigationStack(path: $path) {
+                    browser.navigationDestination(for: DriveFile.self) { folderDestination($0) }
+                }
+            } else { browser }
+        }
+    }
+
+    private var browser: some View {
             FileGridView(
                 viewModel: viewModel,
                 onOpenDirectory: { folder in
                     searchFocused = false
-                    path.append(folder)
+                    if let onOpenFolder { onOpenFolder(folder) } else { path.append(folder) }
                 },
                 onOpenFile: { file, siblings in
                     searchFocused = false
@@ -162,9 +161,6 @@ struct FavoritesView: View {
                         searchText: searchText,
                         viewModel: viewModel
                     )
-                },
-                onVisibleItemsChanged: { items in
-                    updateVisibleSelectionItems(items, context: visibleItemsContext)
                 },
                 onResetFilters: { searchText = ""; filters = FileFilters() },
                 searchText: searchText,
@@ -256,30 +252,20 @@ struct FavoritesView: View {
                     ToolbarItemGroup(placement: .topBarLeading) {
                         FilterMenu(filters: $filters)
                             .accessibilityIdentifier("browser.filter")
+                        if iPadLayout.isPad { FilePresentationToggle() }
                         searchToggleButton
                             .accessibilityIdentifier("browser.search")
                     }
 
                     ToolbarItem(placement: .principal) {
-                        Text("Favoris")
+                        Text(title)
                             .font(.headline)
                             .lineLimit(1)
                     }
 
-                    ToolbarItemGroup(placement: .topBarTrailing) {
-                        Menu {
-                        Button {
-                            startSelection()
-                        } label: {
-                            Label("Sélectionner", systemImage: "checkmark.circle")
-                        }
-                        .disabled(visibleSelectionItems.isEmpty || moveBusy)
-                        .accessibilityIdentifier("browser.select")
-                        randomFileButton
-                        } label: {
-                            Label("Actions", systemImage: "ellipsis.circle")
-                        }
-                    }
+                    BrowserToolbar(canOpenRandom: !playableFiles.isEmpty,
+                                   canSelect: !visibleSelectionItems.isEmpty && !moveBusy,
+                                   onRandom: openRandomFile, onSelect: startSelection)
                 }
             }
             .safeAreaInset(edge: .bottom, spacing: 0) {
@@ -330,11 +316,15 @@ struct FavoritesView: View {
             .onChange(of: searchText) { _, _ in
                 if selectionMode { endSelection() }
             }
+            .onChange(of: filters) { _, _ in if selectionMode { endSelection() } }
+            .onChange(of: viewModel.itemsRevision) { _, _ in selectedIDs.formIntersection(visibleSelectionIDs) }
             .onDisappear { searchFocused = false }
-            .navigationDestination(for: DriveFile.self) { directory in
+    }
+
+    private func folderDestination(_ directory: DriveFile) -> some View {
                 let index = path.firstIndex(where: { $0.id == directory.id })
                 let crumbs = ["Favoris"] + (index.map { Array(path[...$0].map(\.name)) } ?? [])
-                DirectoryView(
+                 return DirectoryView(
                     directory: directory,
                     driveId: viewModel.driveId,
                     crumbs: crumbs,
@@ -345,22 +335,19 @@ struct FavoritesView: View {
                     }
                 )
             }
-        }
-    }
-
     private var searchBar: some View {
         HStack(spacing: 6) {
             Image(systemName: "magnifyingglass")
                 .font(.system(size: 13, weight: .medium))
                 .foregroundStyle(.secondary)
             TextField(
-                "Rechercher dans les favoris…",
+                "Rechercher dans \(title)…",
                 text: $searchText
             )
             .focused($searchFocused)
             .autocorrectionDisabled()
             .submitLabel(.search)
-            .accessibilityLabel("Rechercher dans les favoris")
+            .accessibilityLabel("Rechercher dans \(title)")
             .frame(minHeight: 44)
             if !searchText.isEmpty {
                 Button {
@@ -401,16 +388,6 @@ struct FavoritesView: View {
         .accessibilityHint("Affiche ou masque la barre de recherche")
     }
 
-    private var randomFileButton: some View {
-        Button {
-            openRandomFile()
-        } label: {
-            Label("Ouvrir un fichier au hasard", systemImage: "dice")
-        }
-        .disabled(playableFiles.isEmpty)
-        .accessibilityLabel("Ouvrir un fichier au hasard")
-    }
-
     private func openRandomFile() {
         guard let random = playableFiles.randomElement() else { return }
         searchFocused = false
@@ -430,7 +407,7 @@ struct FavoritesView: View {
             .padding(.horizontal, 10)
             .padding(.vertical, 3.5)
             .inlineChrome(Capsule())
-            .accessibilityLabel("\(itemCountText) dans les favoris")
+            .accessibilityLabel("\(itemCountText) dans \(title)")
     }
 
     private var busyIndicator: some View {
@@ -497,14 +474,6 @@ struct FavoritesView: View {
         let files = visibleSelectionItems.filter { selectedIDs.contains($0.id) }
         guard !files.isEmpty else { return }
         pendingTags = TagRequest(files: files)
-    }
-
-    private func updateVisibleSelectionItems(_ items: [DriveFile], context: VisibleItemsContext) {
-        guard context == currentVisibleItemsContext else { return }
-        visibleItemsReport = VisibleItemsReport(context: context, items: items)
-        if selectionMode {
-            selectedIDs.formIntersection(Set(items.map(\.id)))
-        }
     }
 
     private func unavailableDestinationIDs(for files: [DriveFile]) -> Set<Int> {

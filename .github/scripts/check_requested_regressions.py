@@ -24,15 +24,32 @@ def block(source, marker):
 def fixtures():
     common = '''import Foundation
 struct DriveFile: Equatable { let id: Int; var isDirectory = false }
-struct FileFilters: Equatable { var revision = 0 }
-enum FileSource: Equatable {
-    case directory, search
+struct FileFilters: Hashable {
+    enum Sort: Hashable { case name, duration }
+    var sort = Sort.name
+    var orientation: Int? = nil
+    var highResolutionVideosOnly = false
+    var excludedIDs: Set<Int> = []
+}
+enum FileSource: Hashable {
+    case directory, search, category, intersection
     var isServerFiltered: Bool { self == .search }
 }
+struct VisibleItemsKey: Hashable {
+    let source: FileSource; let driveId: Int; let itemsRevision: Int
+    let filters: FileFilters; let searchText: String; let metadataRevision: Int; let foldersFirst: Bool
+}
+struct VisibleFileSnapshot { let key: VisibleItemsKey; let items: [DriveFile] }
+final class MediaMetadataStore { static let shared = MediaMetadataStore(); var revision = 0 }
 final class FileGridViewModel {
+    var driveId = 42
     var source = FileSource.directory
     var itemsRevision = 0
     var items: [DriveFile] = []
+    func visibleItems(key: VisibleItemsKey, mediaMetadata: MediaMetadataStore) -> [DriveFile] {
+        key.searchText.isEmpty ? items.filter { !key.filters.excludedIDs.contains($0.id) } : []
+    }
+''' + block((ROOT / 'Orvian/Features/Shared/FileGridViewModel.swift').read_text(encoding='utf-8'), '    func visibleSnapshot(') + '''
 }
 final class ViewerRouter {
     var opened: DriveFile?
@@ -49,12 +66,11 @@ final class ViewerRouter {
         ('DirectoryFixture', 'Orvian/Features/Home/DirectoryView.swift'),
     ]:
         source = (ROOT / path).read_text(encoding='utf-8')
-        assert '.disabled(playableFiles.isEmpty)' in source
+        assert 'BrowserToolbar(canOpenRandom: !playableFiles.isEmpty' in source
         population = block(source, '    private var playableFiles:')
         assert 'visibleSelectionItems.filter' in population
         members = [block(source, marker) for marker in [
-            '    private struct VisibleItemsContext:', '    private struct VisibleItemsReport',
-            '    private var currentVisibleItemsContext:', '    private var visibleSelectionItems:',
+            '    private var visibleSelectionItems:',
             '    private var playableFiles:', '    private func openRandomFile()',
         ]]
         classes.append('final class ' + name + ''' {
@@ -64,29 +80,30 @@ final class ViewerRouter {
     var searchText = ""
     var searchFocused = true
     let router = ViewerRouter()
-    private var visibleItemsReport: VisibleItemsReport?
+    var foldersFirstInTags = true
 ''' + '\n'.join(members) + '''
     func check() {
         let image = DriveFile(id: 1)
         let hiddenText = DriveFile(id: 2)
         let folder = DriveFile(id: 3, isDirectory: true)
         viewModel.items = [image, hiddenText, folder]
-        visibleItemsReport = VisibleItemsReport(context: currentVisibleItemsContext, items: [image, folder])
+        filters.excludedIDs = [2]
         for _ in 0..<50 {
             openRandomFile()
             precondition(router.opened == image)
             precondition(router.siblings == [image])
         }
-        // A changed filter/search/list invalidates the old visible report.
-        filters.revision += 1
+        // A new revision must not leave loaded favorites permanently disabled.
+        viewModel.itemsRevision += 1
+        openRandomFile()
+        precondition(router.opened == image)
+        filters.excludedIDs = [1, 2]
         router.opened = nil
         openRandomFile()
         precondition(router.opened == nil)
-        visibleItemsReport = VisibleItemsReport(context: currentVisibleItemsContext, items: [folder])
         openRandomFile()
         precondition(router.opened == nil)
         searchText = "missing"
-        visibleItemsReport = VisibleItemsReport(context: currentVisibleItemsContext, items: [])
         openRandomFile()
         precondition(router.opened == nil)
         searchText = "changed"

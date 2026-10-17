@@ -37,7 +37,7 @@ struct ProfileView: View {
             .safeAreaInset(edge: .bottom) {
                 Color.clear.frame(height: DS.contentBottomInset)
             }
-            .navigationTitle("Activité")
+            .navigationTitle("Profil")
             // Le mode inline masque la barre sur un contenu qui défile : le
             // grand titre reste, et le bloc ci-dessous prend l'axe du titre.
             .navigationBarTitleDisplayMode(.large)

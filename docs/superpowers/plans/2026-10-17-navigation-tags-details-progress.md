@@ -1,0 +1,28 @@
+# SDD ledger — plan: docs/superpowers/plans/2026-10-17-navigation-tags-details.md
+
+- Baseline: 38 Python tests pass; main at a26090ed. Only approved design/plan documents are untracked.
+- Ruling: Work in place on main for the explicitly requested direct execution and final push; do not create an unsolicited worktree. No history rewriting.
+- Ruling: Track briefs and progress in this portable ledger rather than Bash-only workspace scripts on Windows. No product behavior changes from this adaptation.
+- Pre-flight: Task 1 visible snapshot feeds Task 3 list and Task 5 intersection; both must use the same filtered population.
+- Pre-flight: Task 2 presentation preferences feed Task 3; catalogue tags remains a separate preference.
+- Pre-flight: Task 4 source identity feeds Task 5 and mutation/cache invalidation; normalized tag IDs required.
+- Pre-flight: Task 6 changes the detail initializer; update every caller and source contract together.
+- Design direction: native semantic backgrounds and SF typography, compact left-aligned identity, restrained separators; no decorative gradients, large hero or actions in Détails.
+- Task 1: in progress. Root cause candidate: child publishes a new visible list through a callback capturing an older parent revision; the report is rejected and not re-emitted once the key settles. Replace asynchronous report ownership with shared synchronous derivation.
+- Task 1: implemented. Shared synchronous snapshot replaces rejected child reports. Generated Swift harness exercises actual snapshot and view random methods through cache/filter/revision changes; passing. Category browsers reuse the same selection/operation UI rather than duplicate it.
+- Task 2: implemented. Protected navigation contracts initially failed, now pass. Platform preference migration and phone max-three tests pass; AGENTS.md protects the user's decisions.
+- Task 3: implemented. Ruling: reuse FileCardView's existing interaction/menu with an alternate row layout instead of a second FileListRow implementation — avoids diverging accessibility and mutations; cost: the card owns both simple layouts.
+- Task 4: implemented. Ruling: official OpenAPI `/3/drive/{drive_id}/files/search`, parameter `category`, explicitly documents '&' as AND and '|' as OR. Use the native server intersection, not a client scan or extra file-info requests. Normalized query/cursor/URL tests pass; existing pagination and session guards retained.
+- Task 5: implemented. Cross-selection state survives tab changes in the shell; separate normalized source caches; results remain on Finish. Shared generic browser supplies file selection and operations in normal/crossed tag results.
+- Task 6: implemented. Native adaptive inspector, read-only compact layout and generation-safe model. Real model tests cover known data, obsolete file responses, credentials, partial failures and trash without active endpoints; passing. Original image dimensions recorded from already downloaded originals (no extra image fetch), credential-scoped and bounded; native ImageIO test added but cannot run under Windows.
+- User override: no visual verification or screenshots via GitHub Actions. Historical screenshot method excluded from both native CI commands; no workflow dispatch requested. Only nonvisual tests permitted.
+- Task 7: verification/review in progress. 42 Python tests pass; adaptive/prefs/intersection/details and audit Swift checks pass. Existing two Swift warnings remain outside the task. No SDK typecheck or device visual claim.
+- Final review: independent read-only reviewer found four Important issues and no Critical issues. Added failing regressions for all four before the fix pass.
+- Final: fixed iPad catalogue navigation — protected routing test RED→GREEN; normal taps now target padNavigation, not the hidden phone stack.
+- Final: fixed cold video metadata publication — source regression RED→GREEN; task publishes resolved metadata into view state after cancellation checks.
+- Final: fixed required-tag removal with omitted memberships — production mutation harness precondition RED→GREEN; confirmed removal excludes the item immediately even if reload later fails.
+- Final: fixed remaining privacy screenshot attachments — source regression RED→GREEN; image attachment generation removed while all security assertions remain. No reliance on host environment variables propagating into a test app.
+- Final: Ruling: treat misleading generic-browser accessibility scope and unlabelled partial counts as correctness fixes, not optional visual polish — both contradict the approved scope/count semantics; cost if wrong: wording only. Both corrected with regression contracts.
+- Final: all seven tasks implemented. Native SDK/hosted tests and device appearance remain unverified on Windows; visual checks through GitHub Actions deliberately disabled as requested. No deferred reviewer findings remain.
+- Final integration: fetched and fast-forwarded the existing automated 0.17.7 release (752b47e5); it changes only project.yml and repo.json, not the reviewed application files. Push authorized by the user; never force-push.
+- Final verification after fixes: 46/46 Python tests; adaptive layout, preference migration, AND queries, original drop checks, details model, production mutation/race/tag/upload/recent checks, motion/isolation and performance checks all pass. Swift parser and diff whitespace checks pass. Two pre-existing Swift warnings remain. Native SDK compilation, hosted tests and manual device validation are not claimed.

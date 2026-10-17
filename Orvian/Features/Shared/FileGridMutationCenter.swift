@@ -142,6 +142,9 @@ final class FileGridMutationCenter {
             return file.isFavorite == isFavorite
 
         case let .category(_, fileId, category, applied):
+            if case let .intersection(selection) = source, selection.ids.contains(category.id) {
+                return false // A newly matching item may not be in the cached page yet.
+            }
             let file = items.first { $0.id == fileId }
             if case let .category(sourceCategoryId) = source,
                sourceCategoryId == category.id {
@@ -190,4 +193,3 @@ final class FileGridMutationCenter {
         }
     }
 }
-

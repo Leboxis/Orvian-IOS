@@ -14,7 +14,7 @@ struct IPadLayout {
     }
 
     func fileColumns(preferred: Int, margin: CGFloat, spacing: CGFloat) -> Int {
-        let preferred = min(max(preferred, 2), 7)
+        let preferred = min(max(preferred, 2), isPad ? 7 : 3)
         guard width.isFinite, width > 0 else { return largeText ? 1 : min(preferred, 3) }
         // Each density has its own thumbnail size; stored phone preferences stay intact.
         let minimum = largeText ? CGFloat(220) : (isPad ? Self.thumbnailSizes[preferred - 2] : 100)

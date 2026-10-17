@@ -6,6 +6,7 @@ enum FileSource: Hashable {
     case favorites(limit: Int = 60)
     case recents(limit: Int = 12)
     case category(Int)
+    case intersection(TagIntersection)
     case trash
     case search(query: String, directoryId: Int?)
 

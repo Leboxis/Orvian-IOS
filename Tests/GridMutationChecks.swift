@@ -50,6 +50,16 @@ import Foundation
         assertUnlocked(vm)
     }
     @MainActor static func main() async {
+        let intersection = seeded(.intersection(TagIntersection([8, 9])))
+        intersection.items = [DriveFile(id: 1, categories: [FileCategory(categoryId: 8), FileCategory(categoryId: 9)])]
+        precondition(intersection.apply(.category(driveId: 7, fileId: 1, category: Category(id: 8), applied: false)))
+        precondition(intersection.items.isEmpty, "Removing a required tag removes the file from the intersection")
+        intersection.items = [DriveFile(id: 2, categories: nil)]
+        precondition(intersection.apply(.category(driveId: 7, fileId: 2, category: Category(id: 8), applied: false)))
+        precondition(intersection.items.isEmpty,
+                     "Confirmed required-tag removal must remove an item even when membership was omitted")
+        precondition(intersection.apply(.category(driveId: 7, fileId: 4, category: Category(id: 9), applied: true)),
+                     "A new matching file absent from the page requires revalidation")
         let variants: [(FileGridMutation, FileSource)] = [
             (.favorite(driveId: 7, fileId: 1, isFavorite: true), .directory(1)),
             (.favorite(driveId: 7, fileId: 1, isFavorite: false), .favorites),

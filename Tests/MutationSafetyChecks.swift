@@ -11,7 +11,7 @@ struct MutationSafetyChecks {
         file.categories = [FileCategory(categoryId: 42)]
         let move = FileGridMutation.moved(driveId: 7, fileIds: [file.id], destinationDirectoryId: 20)
 
-        let retainedSources: [FileSource] = [.favorites, .category(42), .recents(), .search(query: "Fichier", directoryId: nil)]
+        let retainedSources: [FileSource] = [.favorites, .category(42), .intersection(TagIntersection([42, 43])), .recents(), .search(query: "Fichier", directoryId: nil)]
         for source in retainedSources {
             var items = [file]
             precondition(!move.applyMove(to: &items, source: source))
@@ -73,4 +73,3 @@ struct MutationSafetyChecks {
         print("Move, restoration, session isolation and cache consistency checks passed")
     }
 }
-

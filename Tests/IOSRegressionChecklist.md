@@ -12,6 +12,26 @@ utilisent des secrets factices et des transferts simulés, sans compte kDrive.
 
 ## Refonte iPad du 17 octobre 2026
 
+### Navigation et Détails — choix validés
+
+- Pas de validation visuelle ni de captures via GitHub Actions : le test de
+  captures historique est explicitement exclu des commandes CI iPhone/iPad.
+  Les contrôles natifs non visuels restent actifs.
+- Vérifier manuellement : Réglages — Tags — Accueil — Favoris — Profil ;
+  Hasard puis Sélectionner séparés en haut à droite, y compris dans un tag ouvert.
+- Favoris déjà en cache, chargement tardif, changement de filtre et pagination :
+  les boutons suivent immédiatement les éléments réellement visibles.
+- iPhone : deux ou trois colonnes, anciennes préférences 4–7 plafonnées sans
+  modifier la densité iPad. Liste/grille iPad mémorisée par onglet et non par dossier.
+- Croisement : cocher deux tags, vérifier AND (fichiers et dossiers), puis
+  Terminer, Modifier, Effacer. Supprimer un tag actif ne doit pas élargir le filtre.
+- Détails : inspecteur à droite en iPad régulier, feuille en compact/iPhone,
+  aucune opération d'édition, chargements partiels et reprises distincts ;
+  fermeture, remplacement du fichier, verrouillage et compte différent.
+- Dimensions photo : uniquement celles lues dans le fichier original lors de
+  sa consultation, jamais déduites de la miniature et aucun téléchargement de
+  photo supplémentaire pour remplir une ligne de Détails.
+
 ### Corrections de l'audit iPhone / iPad
 
 - iPhone 320/375/430 pt et iPad 1024×1366 / 1366×1024 : vérifier les six niveaux
@@ -41,10 +61,9 @@ utilisent des secrets factices et des transferts simulés, sans compte kDrive.
 - Aide de connexion : défilement avec texte maximal et clavier, fermeture et
   passage de la feuille moyenne à grande. Réduire la transparence sur les cartes.
 
-La CI exécute `IPadNavigationTests`, `IPadLayoutTests` et `IPadScreenStateTests`
-sur un simulateur iPad, en plus des vérifications iPhone existantes. Le résultat
-`Orvian-iPad-tests` contient les captures des véritables écrans clair/sombre sans
-compte. Ces tests ne remplacent pas les essais avec des favoris réels.
+La CI exécute les tests de navigation, de disposition et d'état non visuels sur
+un simulateur iPad, en plus des contrôles iPhone. Aucun résultat visuel n'est
+attendu de ces jobs ; ils ne remplacent pas les essais manuels sur appareil.
 
 À vérifier avec un compte de test et sur appareil :
 

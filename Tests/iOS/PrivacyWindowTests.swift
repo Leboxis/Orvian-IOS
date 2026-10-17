@@ -209,13 +209,6 @@ final class PrivacyWindowTests: XCTestCase {
         XCTAssertTrue(shield !== owner)
         XCTAssertTrue(owner.accessibilityElementsHidden)
         XCTAssertTrue(host.presentedViewController === photo)
-        let protectedImage = UIGraphicsImageRenderer(bounds: shield.bounds).image { _ in
-            shield.drawHierarchy(in: shield.bounds, afterScreenUpdates: true)
-        }
-        let protectedAttachment = XCTAttachment(image: protectedImage)
-        protectedAttachment.name = "Verrouillage-au-dessus-photo"
-        protectedAttachment.lifetime = .keepAlways
-        add(protectedAttachment)
         let mounts = state.mounts
 
         NotificationCenter.default.post(name: UIScene.didActivateNotification, object: scene)
@@ -255,13 +248,6 @@ final class PrivacyWindowTests: XCTestCase {
                     previous?.makeKey()
                 }
                 try await settle()
-                let image = UIGraphicsImageRenderer(size: size).image { _ in
-                    host.view.drawHierarchy(in: host.view.bounds, afterScreenUpdates: true)
-                }
-                let attachment = XCTAttachment(image: image)
-                attachment.name = "Pavé-\(dark ? "sombre" : "clair")-\(Int(size.width))x\(Int(size.height))"
-                attachment.lifetime = .keepAlways
-                add(attachment)
                 func scrollViews(_ view: UIView) -> [UIScrollView] {
                     (view as? UIScrollView).map { [$0] } ?? view.subviews.flatMap(scrollViews)
                 }

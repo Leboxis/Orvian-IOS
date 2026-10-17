@@ -2,6 +2,7 @@ import SwiftUI
 
 extension EnvironmentValues {
     @Entry var iPadLayout = IPadLayout()
+    @Entry var fileBrowserScope = FileBrowserScope.home
 }
 
 /// Constantes de design partagées.

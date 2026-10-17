@@ -9,6 +9,8 @@ with tempfile.TemporaryDirectory() as temporary:
     for name, sources in [
         ("layout", ["Orvian/UI/IPadLayout.swift", "Tests/AdaptiveLayoutChecks.swift"]),
         ("drop", ["Orvian/Core/Utils/DroppedFileStaging.swift", "Tests/DroppedFileChecks.swift"]),
+        ("preferences", ["Orvian/Models/FilePresentation.swift", "Tests/BrowserPreferencesChecks.swift"]),
+        ("intersection", ["Orvian/Models/TagIntersection.swift", "Orvian/Core/API/Endpoints.swift", "Tests/TagIntersectionChecks.swift"]),
     ]:
         output = Path(temporary) / (name + ".exe")
         subprocess.run(["swiftc", "-swift-version", "5", *[str(ROOT / p) for p in sources],

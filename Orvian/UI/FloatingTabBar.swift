@@ -17,8 +17,8 @@ struct FloatingTabBar: View {
     private let spacing: CGFloat = 8
     private let inset: CGFloat = 4
     private var groupedTabs: [AppTab] {
-        iPadLayout.isPad ? [.home, .favorites, .tag, .settings, .profile]
-            : [.home, .favorites, .tag, .settings]
+        iPadLayout.isPad ? [.settings, .tag, .home, .favorites, .profile]
+            : [.settings, .tag, .home, .favorites]
     }
 
     var body: some View {
@@ -166,7 +166,7 @@ private struct TabButton: View {
 
 /// Onglets de l'application, de gauche à droite dans la barre.
 enum AppTab: String, CaseIterable, Identifiable {
-    static let presentationOrder: [AppTab] = [.home, .favorites, .tag, .settings, .profile]
+    static let presentationOrder: [AppTab] = [.settings, .tag, .home, .favorites, .profile]
     case settings
     case tag
     case home
@@ -181,7 +181,7 @@ enum AppTab: String, CaseIterable, Identifiable {
         case .tag: return "Tags"
         case .home: return "Accueil"
         case .favorites: return "Favoris"
-        case .profile: return "Activité"
+        case .profile: return "Profil"
         }
     }
 

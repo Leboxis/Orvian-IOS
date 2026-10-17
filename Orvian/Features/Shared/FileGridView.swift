@@ -57,7 +57,21 @@ struct FileGridView: View {
     @AppStorage("prefetchThumbnails") private var prefetchThumbnails = true
     @AppStorage("prefetchVideoURLs") private var prefetchVideoURLs = true
     @AppStorage("prefetchOnWiFiOnly") private var prefetchOnWiFiOnly = true
-    @AppStorage("fileGridColumns") private var fileGridColumns = 3
+    @AppStorage("phoneFileGridColumns") private var phoneColumns = 3
+    @AppStorage("padFileGridDensity") private var padDensity = 3
+    @AppStorage("homeFilePresentation") private var homePresentation = FilePresentation.grid
+    @AppStorage("favoritesFilePresentation") private var favoritesPresentation = FilePresentation.grid
+    @AppStorage("tagFilePresentation") private var tagPresentation = FilePresentation.grid
+    @Environment(\.fileBrowserScope) private var browserScope
+    private var fileGridColumns: Int { iPadLayout.isPad ? padDensity : min(3, phoneColumns) }
+    private var presentation: FilePresentation {
+        guard iPadLayout.isPad else { return .grid }
+        switch browserScope {
+        case .home: return homePresentation
+        case .favorites: return favoritesPresentation
+        case .tag: return tagPresentation
+        }
+    }
     @Environment(\.iPadLayout) private var iPadLayout
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @State private var containerWidth: CGFloat = 0
@@ -80,15 +94,15 @@ struct FileGridView: View {
     @State private var mutationReloadTask: Task<Void, Never>?
     @State private var videoMetadataResolutionCount = 0
     /// Fiche détails demandée par une carte (une seule feuille pour toute la grille).
-    @State private var detailRequest: FilePresentation?
+    @State private var detailRequest: FileRequest?
     /// Éditeur de tags demandé par une carte.
-    @State private var tagsRequest: FilePresentation?
+    @State private var tagsRequest: FileRequest?
     /// Sélecteur de couleur demandé par une carte (dossiers).
-    @State private var colorRequest: FilePresentation?
+    @State private var colorRequest: FileRequest?
     /// Confirmation de suppression demandée par une carte.
-    @State private var deleteRequest: FilePresentation?
+    @State private var deleteRequest: FileRequest?
     /// Alerte de renommage demandée par une carte.
-    @State private var renameRequest: FilePresentation?
+    @State private var renameRequest: FileRequest?
     /// Texte de l'alerte de renommage, conservé entre l'ouverture et la validation.
     @State private var renameText = ""
 
@@ -173,19 +187,14 @@ struct FileGridView: View {
             } message: {
                 Text(viewModel.mutationErrorMessage ?? "")
             }
-            .sheet(item: $detailRequest) { request in
+            .inspector(isPresented: Binding(get: { detailRequest != nil }, set: { if !$0 { detailRequest = nil } })) {
+                if let request = detailRequest {
                 FileDetailSheet(
                     file: currentFile(matching: request),
                     driveId: viewModel.driveId,
-                    isTrashed: viewModel.source == .trash,
-                    onOpen: { open(request: request) },
-                    onToggleFavorite: { await viewModel.toggleFavorite(request.file) },
-                    onDelete: { Task { await viewModel.trash(request.file) } },
-                    onRename: { newName in
-                        Task { await viewModel.rename(request.file, name: newName) }
-                    },
-                    onMove: onMove == nil ? nil : { onMove?(request.file) }
+                    isTrashed: viewModel.source == .trash
                 )
+                }
             }
             .sheet(item: $tagsRequest) { request in
                 TagsEditorSheet(
@@ -250,7 +259,7 @@ struct FileGridView: View {
 
     /// Fichier ciblé par une présentation de la grille, avec les voisins du
     /// pager pour l'ouverture depuis la fiche détails.
-    private struct FilePresentation: Identifiable {
+    private struct FileRequest: Identifiable {
         let file: DriveFile
         var siblings: [DriveFile] = []
         var id: Int { file.id }
@@ -273,11 +282,11 @@ struct FileGridView: View {
     /// Version la plus récente du fichier présenté : une mutation confirmée
     /// pendant l'ouverture (renommage depuis la fiche…) doit se refléter dans
     /// la feuille, comme lorsque celle-ci vivait sur la carte re-rendue.
-    private func currentFile(matching request: FilePresentation) -> DriveFile {
+    private func currentFile(matching request: FileRequest) -> DriveFile {
         viewModel.items.first { $0.id == request.file.id } ?? request.file
     }
 
-    private func isMissing(_ request: FilePresentation?) -> Bool {
+    private func isMissing(_ request: FileRequest?) -> Bool {
         guard let request else { return false }
         return !viewModel.items.contains { $0.id == request.file.id }
     }
@@ -288,23 +297,23 @@ struct FileGridView: View {
     private func present(_ intent: FileCardView.Intent, for file: DriveFile, siblings: [DriveFile]) {
         switch intent {
         case .details:
-            detailRequest = FilePresentation(file: file, siblings: siblings)
+            detailRequest = FileRequest(file: file, siblings: siblings)
         case .colorPicker:
-            colorRequest = FilePresentation(file: file)
+            colorRequest = FileRequest(file: file)
         case .tags:
-            tagsRequest = FilePresentation(file: file)
+            tagsRequest = FileRequest(file: file)
         case .rename:
             renameText = file.name
-            renameRequest = FilePresentation(file: file)
+            renameRequest = FileRequest(file: file)
         case .deleteConfirm:
-            deleteRequest = FilePresentation(file: file)
+            deleteRequest = FileRequest(file: file)
         }
     }
 
     /// Ouverture depuis la fiche détails : même routage que le tap sur la
     /// carte, avec les voisins capturés au moment de la demande (le pager
     /// navigue dans l'ordre du tri et des filtres affichés).
-    private func open(request: FilePresentation) {
+    private func open(request: FileRequest) {
         let file = request.file
         if file.isDirectory {
             onOpenDirectory?(file)
@@ -420,7 +429,8 @@ struct FileGridView: View {
     /// O(1) au lieu de relire tout le tableau à chaque rendu. Le cache lui-même
     /// appartient au vue-modèle, jamais à un `@State` de la vue.
     private var visibleItems: [DriveFile] {
-        viewModel.visibleItems(key: visibleItemsKey, mediaMetadata: mediaMetadata)
+        viewModel.visibleSnapshot(filters: filters, searchText: effectiveSearchText,
+                                  foldersFirst: foldersFirstInTags && sourceIsCategory).items
     }
 
     private var visibleItemsKey: VisibleItemsKey {
@@ -438,6 +448,7 @@ struct FileGridView: View {
     /// Vrai quand la grille affiche le contenu d'un tag (source `.category`).
     private var sourceIsCategory: Bool {
         if case .category = viewModel.source { return true }
+        if case .intersection = viewModel.source { return true }
         return false
     }
 
@@ -455,6 +466,8 @@ struct FileGridView: View {
             skeleton
         } else if let message = viewModel.errorMessage, viewModel.items.isEmpty {
             errorState(message)
+        } else if viewModel.items.isEmpty && (viewModel.hasMore || viewModel.isLoadingMore) {
+            filteredEmptyState
         } else if viewModel.items.isEmpty {
             emptyState
         } else if visibleItems.isEmpty {
@@ -503,6 +516,9 @@ struct FileGridView: View {
                 .buttonStyle(.borderedProminent)
             }
             .padding(.top, 60)
+        } else if viewModel.hasMore {
+            ProgressView("Recherche dans les pages suivantes…")
+                .frame(maxWidth: .infinity).padding(.top, 40)
         } else {
             ContentUnavailableView {
                 Label("Aucun résultat", systemImage: "line.3.horizontal.decrease.circle")
@@ -523,7 +539,6 @@ struct FileGridView: View {
     /// une API qui renverrait la même page.
     private func loadUntilFilteredResultIfNeeded() async {
         guard !viewModel.isInitialLoading,
-              !viewModel.items.isEmpty,
               visibleItems.isEmpty
         else { return }
 
@@ -536,14 +551,17 @@ struct FileGridView: View {
         else { return }
 
         var previousItemCount = viewModel.items.count
+        var previousRevision = viewModel.itemsRevision
         while !Task.isCancelled,
+              !viewModel.isReloading, !viewModel.isLoadingMore,
               visibleItems.isEmpty,
               viewModel.hasMore,
               viewModel.errorMessage == nil {
             await loadMoreAfterMetadataResolution()
             guard !Task.isCancelled, viewModel.errorMessage == nil else { return }
             let newItemCount = viewModel.items.count
-            guard newItemCount > previousItemCount else { return }
+            guard newItemCount > previousItemCount || (viewModel.hasMore && viewModel.itemsRevision != previousRevision) else { return }
+            previousRevision = viewModel.itemsRevision
             if needsVideoMetadata {
                 await resolveVideoMetadata(for: Array(viewModel.items.dropFirst(previousItemCount)))
                 guard !Task.isCancelled else { return }
@@ -603,7 +621,7 @@ struct FileGridView: View {
     }
 
     private func grid(for files: [DriveFile]) -> some View {
-        LazyVGrid(columns: columns, spacing: DS.gridSpacing) {
+        LazyVGrid(columns: presentation == .list ? [GridItem(.flexible())] : columns, spacing: DS.gridSpacing) {
             ForEach(Array(files.enumerated()), id: \.element.id) { index, file in
                 cell(file, index: index, siblings: files)
             }
@@ -664,6 +682,8 @@ struct FileGridView: View {
             showsFavoriteBadge: showFavoriteStars,
             showFileSizes: showFileSizes,
             defaultFolderColor: defaultFolderColor,
+            presentation: presentation,
+            showsListMetadata: containerWidth >= 700 && !dynamicTypeSize.isAccessibilitySize,
             onToggleSelection: onToggleSelection == nil ? nil : { onToggleSelection?(file) },
             onToggleFavorite: {
                 Task { await viewModel.toggleFavorite(file) }
@@ -797,7 +817,7 @@ struct FileGridView: View {
         switch viewModel.source {
         case .directory: return "Importez des fichiers ou créez un dossier avec le bouton Ajouter."
         case .favorites: return "Ajoutez un fichier aux favoris depuis son menu ou sa fiche de détails."
-        case .category: return "Appliquez ce tag à un fichier depuis son menu ou sa fiche de détails."
+        case .category, .intersection: return "Les éléments doivent porter tous les tags choisis."
         case .search: return "Essayez un autre nom ou élargissez la portée de la recherche."
         case .recents: return "Vos prochains imports apparaîtront ici."
         case .trash: return "Les fichiers supprimés apparaîtront ici."
@@ -822,7 +842,7 @@ struct FileGridView: View {
         case .directory: return "folder"
         case .favorites: return "star"
         case .recents: return "clock"
-        case .category: return "tag"
+        case .category, .intersection: return "tag"
         case .trash: return "trash"
         case .search: return "magnifyingglass"
         }
@@ -833,7 +853,7 @@ struct FileGridView: View {
         case .directory: return "Dossier vide"
         case .favorites: return "Aucun favori"
         case .recents: return "Aucun import récent"
-        case .category: return "Aucun fichier avec ce tag"
+        case .category, .intersection: return "Aucun élément avec ces tags"
         case .trash: return "Corbeille vide"
         case .search: return "Aucun résultat"
         }
@@ -879,6 +899,11 @@ struct VisibleItemsKey: Hashable {
     let searchText: String
     let metadataRevision: Int
     let foldersFirst: Bool
+}
+
+struct VisibleFileSnapshot {
+    let key: VisibleItemsKey
+    let items: [DriveFile]
 }
 
 /// Mémoïse le résultat des filtres/tri de la grille.

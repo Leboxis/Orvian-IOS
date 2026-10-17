@@ -67,7 +67,7 @@ final class FileCardAccessibilityTests: XCTestCase {
     }
 
     func testPresentationOrderAndFavoriteSymbolsAreConsistent() {
-        XCTAssertEqual(AppTab.presentationOrder, [.home, .favorites, .tag, .settings, .profile])
+        XCTAssertEqual(AppTab.presentationOrder, [.settings, .tag, .home, .favorites, .profile])
         XCTAssertEqual(AppTab.favorites.symbol, "star")
         XCTAssertEqual(AppTab.favorites.symbolFilled, "star.fill")
     }

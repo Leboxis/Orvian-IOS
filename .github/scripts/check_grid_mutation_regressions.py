@@ -61,7 +61,8 @@ def main():
         grid.write_text(grid_source(), encoding="utf-8")
         output = temp / "grid-mutation-checks"
         subprocess.run(["swiftc", "-parse-as-library", "-swift-version", "5",
-                        str(grid), str(ROOT / "Orvian/Core/API/APIError.swift"),
+                         str(grid), str(ROOT / "Orvian/Core/API/APIError.swift"),
+                         str(ROOT / "Orvian/Models/TagIntersection.swift"),
                         str(ROOT / "Tests/GridMutationChecks.swift"), "-o", str(output)], check=True)
         subprocess.run([str(output)], check=True, timeout=60)
 

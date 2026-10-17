@@ -22,7 +22,12 @@ struct SettingsView: View {
 
     @AppStorage("showFileSizes") private var showFileSizes = true
     @AppStorage("showFavoriteStars") private var showFavoriteStars = true
-    @AppStorage("fileGridColumns") private var fileGridColumns = 3
+    @AppStorage("phoneFileGridColumns") private var phoneColumns = 3
+    @AppStorage("padFileGridDensity") private var padDensity = 3
+    private var fileGridColumns: Int { iPadLayout.isPad ? padDensity : min(3, phoneColumns) }
+    private var gridColumnsBinding: Binding<Int> {
+        Binding(get: { fileGridColumns }, set: { if iPadLayout.isPad { padDensity = $0 } else { phoneColumns = $0 } })
+    }
     @AppStorage("tagGridColumns") private var tagGridColumns = 2
     @AppStorage("alwaysShowSearch") private var alwaysShowSearch = false
     @AppStorage("showBreadcrumb") private var showBreadcrumb = true
@@ -375,8 +380,8 @@ struct SettingsView: View {
                 Toggle("Étoiles des favoris", isOn: $showFavoriteStars)
             }
             if matches("cartes ligne grille colonnes densité") {
-                Picker(iPadLayout.isPad ? "Densité des miniatures" : "Cartes par ligne", selection: $fileGridColumns) {
-                    ForEach([2, 3, 4, 5, 6, 7], id: \.self) { Text("\($0)").tag($0) }
+                Picker(iPadLayout.isPad ? "Densité des miniatures" : "Cartes par ligne", selection: gridColumnsBinding) {
+                    ForEach(2...(iPadLayout.isPad ? 7 : 3), id: \.self) { Text("\($0)").tag($0) }
                 }
             }
             if matches("tags colonnes") {
@@ -456,7 +461,7 @@ struct SettingsView: View {
             AppearanceSpace(
                 showFileSizes: $showFileSizes,
                 showFavoriteStars: $showFavoriteStars,
-                fileGridColumns: $fileGridColumns,
+                fileGridColumns: gridColumnsBinding,
                 tagGridColumns: $tagGridColumns,
                 foldersFirstInTags: $foldersFirstInTags,
                 alwaysShowSearch: $alwaysShowSearch,
@@ -605,11 +610,11 @@ private struct AppearanceSpace: View {
             }
             Section {
                 VStack(alignment: .leading, spacing: 10) {
-                    Stepper(value: $fileGridColumns, in: 2...7) {
+                    Stepper(value: $fileGridColumns, in: 2...(iPadLayout.isPad ? 7 : 3)) {
                         HStack {
                             Text("Densité des miniatures")
                             Spacer()
-                            Text("\(fileGridColumns - 1) / 6")
+                            Text(iPadLayout.isPad ? "\(fileGridColumns - 1) / 6" : "\(fileGridColumns) colonnes")
                                 .foregroundStyle(.secondary)
                                 .monospacedDigit()
                         }
@@ -722,7 +727,7 @@ private struct MediaSpace: View {
             } header: {
                 Text("Diagnostic")
             } footer: {
-                Text("Journal des durées et codes HTTP, consultable dans Activité → Mesures réseau. Désactivé, rien n'est collecté.")
+                Text("Journal des durées et codes HTTP, consultable dans Profil → Mesures réseau. Désactivé, rien n'est collecté.")
             }
         }
         .safeAreaInset(edge: .bottom) {

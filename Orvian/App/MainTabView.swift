@@ -148,8 +148,10 @@ struct MainTabView: View {
                 path: $shell.navState.tagsPath,
                 trail: $shell.navState.tagsTrail,
                 padNavigation: $shell.navState.iPadTags,
-                columnVisibility: $shell.navState.splitVisibility
+                columnVisibility: $shell.navState.splitVisibility,
+                crossState: $shell.navState.tagIntersection
             )
+            .environment(\.fileBrowserScope, .tag)
         case .home:
             HomeTab(
                 driveId: drive.id,
@@ -164,6 +166,7 @@ struct MainTabView: View {
                 path: $shell.navState.favoritesPath,
                 scrollToTopRequest: shell.navState.favoritesScrollToTopRequest
             )
+            .environment(\.fileBrowserScope, .favorites)
         case .profile:
             ProfileView(
                 session: session,

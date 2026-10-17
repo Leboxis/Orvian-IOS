@@ -29,7 +29,7 @@ extension FileSource {
         switch self {
         case .directory, .favorites, .trash:
             return Self.browsableOrderingFields
-        case .recents, .category, .search:
+        case .recents, .category, .search, .intersection:
             // Cascade `recents` (last_modified → recents → activities →
             // search) : seule la date de modification est traduite par les
             // alias de chaque étage. `category` et `search` n'acceptent que

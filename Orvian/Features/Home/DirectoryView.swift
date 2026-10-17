@@ -41,7 +41,7 @@ struct DirectoryView: View {
 
     @State private var selectionMode = false
     @State private var selectedIDs: Set<Int> = []
-    @State private var visibleItemsReport: VisibleItemsReport?
+    @AppStorage("foldersFirstInTags") private var foldersFirstInTags = true
     @State private var pendingMove: MoveRequest?
     @State private var pendingTags: TagRequest?
     @State private var moveBusy = false
@@ -76,19 +76,6 @@ struct DirectoryView: View {
     /// Associe le callback de la grille aux données qui l'ont produit. Un
     /// callback tardif d'une recherche ou d'un filtre précédent ne peut ainsi
     /// ni fausser le compteur ni modifier la sélection courante.
-    private struct VisibleItemsContext: Equatable {
-        let viewModelID: ObjectIdentifier
-        let source: FileSource
-        let itemsRevision: Int
-        let filters: FileFilters
-        let searchText: String
-    }
-
-    private struct VisibleItemsReport {
-        let context: VisibleItemsContext
-        let items: [DriveFile]
-    }
-
     init(
         directory: DriveFile,
         driveId: Int,
@@ -122,26 +109,11 @@ struct DirectoryView: View {
         return viewModel
     }
 
-    private var currentVisibleItemsContext: VisibleItemsContext {
-        // Même règle que `FileGridView.effectiveSearchText` : la source
-        // `.search` est déjà filtrée par le serveur.
-        let effectiveSearchText = activeViewModel.source.isServerFiltered ? "" : searchText
-        return VisibleItemsContext(
-            viewModelID: ObjectIdentifier(activeViewModel),
-            source: activeViewModel.source,
-            itemsRevision: activeViewModel.itemsRevision,
-            filters: filters,
-            searchText: effectiveSearchText
-        )
-    }
-
     private var visibleSelectionItems: [DriveFile] {
-        guard visibleItemsReport?.context == currentVisibleItemsContext else { return [] }
-        return visibleItemsReport?.items ?? []
+        activeViewModel.visibleSnapshot(filters: filters, searchText: searchText, foldersFirst: false).items
     }
 
     var body: some View {
-        let visibleItemsContext = currentVisibleItemsContext
         FileGridView(
             viewModel: activeViewModel,
             onOpenDirectory: { folder in
@@ -159,9 +131,6 @@ struct DirectoryView: View {
                     searchText: searchText,
                     viewModel: activeViewModel
                 )
-            },
-            onVisibleItemsChanged: { items in
-                updateVisibleSelectionItems(items, context: visibleItemsContext)
             },
             onResetFilters: { searchText = ""; filters = FileFilters() },
             onEmptyAction: { showImportPicker = true },
@@ -274,29 +243,20 @@ struct DirectoryView: View {
                 ToolbarItemGroup(placement: .topBarLeading) {
                     FilterMenu(filters: $filters)
                         .accessibilityIdentifier("browser.filter")
+                    if iPadLayout.isPad { FilePresentationToggle() }
                     if showsSearchBar {
                         searchToggleButton
                             .accessibilityIdentifier("browser.search")
                     }
                 }
 
-                ToolbarItemGroup(placement: .topBarTrailing) {
-                    Menu {
-                    Button {
-                        startSelection()
-                    } label: {
-                        Label("Sélectionner", systemImage: "checkmark.circle")
-                    }
-                    .disabled(visibleSelectionItems.isEmpty || moveBusy || addBusy)
-                    .accessibilityIdentifier("browser.select")
-
-                        randomFileButton
-                    } label: {
-                        Label("Actions", systemImage: "ellipsis.circle")
-                    }
+                ToolbarItem(placement: .topBarLeading) {
                     addMenu
                         .accessibilityLabel("Ajouter ou importer")
                 }
+                BrowserToolbar(canOpenRandom: !playableFiles.isEmpty,
+                               canSelect: !visibleSelectionItems.isEmpty && !moveBusy && !addBusy,
+                               onRandom: openRandomFile, onSelect: startSelection)
             }
         }
         .safeAreaInset(edge: .bottom, spacing: 0) {
@@ -360,6 +320,8 @@ struct DirectoryView: View {
         .onChange(of: searchText) { _, _ in
             if selectionMode { endSelection() }
         }
+        .onChange(of: filters) { _, _ in if selectionMode { endSelection() } }
+        .onChange(of: activeViewModel.itemsRevision) { _, _ in selectedIDs.formIntersection(Set(visibleSelectionItems.map(\.id))) }
         .onChange(of: isActive) { _, active in
             if !active {
                 searchFocused = false
@@ -524,16 +486,6 @@ struct DirectoryView: View {
     }
 
     /// Bouton dé : ouvre au hasard un fichier parmi les cartes visibles.
-    private var randomFileButton: some View {
-        Button {
-            openRandomFile()
-        } label: {
-            Label("Ouvrir un fichier au hasard", systemImage: "dice")
-        }
-        .disabled(playableFiles.isEmpty)
-        .accessibilityLabel("Ouvrir un fichier au hasard")
-    }
-
     private var playableFiles: [DriveFile] {
         // Même population que les cartes visibles, jamais la liste brute.
         visibleSelectionItems.filter { !$0.isDirectory }
@@ -641,14 +593,6 @@ struct DirectoryView: View {
         // (mutationErrorMessage du même view model que la grille affiche).
         if selectedIDs.isEmpty {
             selectionMode = false
-        }
-    }
-
-    private func updateVisibleSelectionItems(_ items: [DriveFile], context: VisibleItemsContext) {
-        guard context == currentVisibleItemsContext else { return }
-        visibleItemsReport = VisibleItemsReport(context: context, items: items)
-        if selectionMode {
-            selectedIDs.formIntersection(Set(items.map(\.id)))
         }
     }
 
@@ -845,8 +789,7 @@ struct DirectoryView: View {
     }
 
     private var reportedVisibleItemCount: Int? {
-        guard visibleItemsReport?.context == currentVisibleItemsContext else { return nil }
-        return visibleItemsReport?.items.count
+        visibleSelectionItems.count
     }
 
     private var displayedItemCount: Int? {

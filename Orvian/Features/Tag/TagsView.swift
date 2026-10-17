@@ -16,6 +16,7 @@ struct TagsView: View {
     @Binding var padNavigation: IPadTagNavigation
     /// Visibilité de la colonne de gauche (bouton de masquage de l'en-tête).
     @Binding var columnVisibility: NavigationSplitViewVisibility
+    @Binding var crossState: TagIntersectionState
     @Environment(\.iPadLayout) private var iPadLayout
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
@@ -57,7 +58,7 @@ struct TagsView: View {
                 phoneNavigation
             }
         }
-        .onChange(of: categories, initial: true) { _, _ in
+            .onChange(of: categories, initial: true) { _, _ in
             updateOrder()
             if hasLoadedCategories, let id = padNavigation.categoryID,
                !categories.contains(where: { $0.id == id }) {
@@ -65,6 +66,7 @@ struct TagsView: View {
             }
         }
         .onChange(of: customOrder) { _, _ in updateOrder() }
+        .onChange(of: crossState.selectedIDs) { _, _ in padNavigation.folders = [] }
         .onChange(of: path.count) { _, newCount in
             if trail.count > newCount {
                 trail.removeLast(trail.count - newCount)
@@ -143,6 +145,7 @@ struct TagsView: View {
     @ToolbarContentBuilder
     private var categoryToolbar: some ToolbarContent {
         ToolbarItemGroup(placement: .topBarTrailing) {
+            crossButton
             Button {
                 withAnimation(Motion.animation(.snappy(duration: 0.25))) {
                     layout = layout == .grid ? .list : .grid
@@ -173,7 +176,9 @@ struct TagsView: View {
         } detail: {
             NavigationStack(path: $padNavigation.folders) {
                 Group {
-                    if let category = selectedCategory {
+                    if crossState.isActive {
+                        intersectionResults
+                    } else if let category = selectedCategory {
                         CategoryFilesView(category: category, driveId: driveId, router: router,
                                           onOpenFolder: { padNavigation.folders.append($0) })
                             .id(category.id)
@@ -186,7 +191,7 @@ struct TagsView: View {
                     let index = padNavigation.folders.firstIndex { $0.id == directory.id }
                     let names = index.map { Array(padNavigation.folders[...$0].map(\.name)) } ?? [directory.name]
                     DirectoryView(directory: directory, driveId: driveId,
-                                   crumbs: [selectedCategory?.name ?? "Tag"] + names, router: router,
+                                   crumbs: [crossState.isActive ? "Croisement de tags" : (selectedCategory?.name ?? "Tags")] + names, router: router,
                                    onNavigateAncestor: { depth in
                                        padNavigation.folders = Array(padNavigation.folders.prefix(depth))
                                    },
@@ -201,8 +206,73 @@ struct TagsView: View {
         categories.first { $0.id == padNavigation.categoryID }
     }
 
+    private var crossButton: some View {
+        Button {
+            isReordering = false
+            padNavigation.folders = []
+            crossState.isEditing.toggle()
+        } label: {
+            Image(systemName: crossState.isEditing ? "checkmark.circle" : "line.3.horizontal.decrease.circle")
+                .frame(width: 44, height: 44)
+        }
+        .accessibilityLabel(crossState.isEditing ? "Terminer la sélection des tags" : "Croiser plusieurs tags")
+        .tint(crossState.isActive ? .accentColor : .primary)
+    }
+
+    @ViewBuilder private var crossSummary: some View {
+        if crossState.isActive {
+            VStack {
+                crossControls
+                if !iPadLayout.isPad { NavigationLink("Résultats") { intersectionResults } }
+            }
+        }
+    }
+
+    @ViewBuilder private var crossControls: some View {
+        if crossState.isActive {
+            VStack(alignment: .leading, spacing: 8) {
+                Text(crossState.selectedIDs.isEmpty ? "Choisissez les tags à croiser" : "Tous les tags sélectionnés")
+                    .font(.subheadline.weight(.semibold))
+                let names = orderedCategories.filter { crossState.selectedIDs.contains($0.id) }.map(\.name)
+                if !names.isEmpty { Text(names.joined(separator: " + ")).font(.caption).foregroundStyle(.secondary) }
+                HStack {
+                    Button(crossState.isEditing ? "Terminer" : "Modifier") { crossState.isEditing.toggle() }
+                    Button("Effacer") { crossState.clear() }
+                }
+                .buttonStyle(.bordered)
+            }
+            .padding(12)
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    private var intersectionResults: some View {
+        TagIntersectionView(driveId: driveId, router: router, selection: TagIntersection(crossState.selectedIDs),
+                            categories: categories, hasLoadedCategories: hasLoadedCategories,
+                            onOpenFolder: { folder in
+            if iPadLayout.isPad { padNavigation.folders.append(folder) } else { push(folder) }
+        })
+        .safeAreaInset(edge: .top) {
+            if !iPadLayout.isPad {
+                crossControls
+                if crossState.isEditing {
+                    ScrollView(.horizontal) {
+                        HStack {
+                            ForEach(orderedCategories) { category in
+                                Button { crossState.toggle(category.id) } label: {
+                                    Label(category.name, systemImage: crossState.selectedIDs.contains(category.id) ? "checkmark.circle.fill" : "circle")
+                                }
+                                .buttonStyle(.bordered)
+                            }
+                        }.padding(.horizontal)
+                    }
+                }
+            }
+        }
+    }
+
     private var categorySelection: Binding<Int?> {
-        Binding(get: { padNavigation.categoryID }, set: { padNavigation.select($0) })
+        Binding(get: { padNavigation.categoryID }, set: { crossState.clear(); padNavigation.select($0) })
     }
 
     @ViewBuilder
@@ -211,6 +281,12 @@ struct TagsView: View {
             // Un seul en-tête, sans seconde barre de navigation au-dessus.
             PadSidebarHeader(title: Text(hasLoadedCategories ? "Tags (\(categories.count))" : "Tags"),
                              columnVisibility: $columnVisibility) {
+                Button { layout = layout == .grid ? .list : .grid } label: {
+                    Image(systemName: layout == .grid ? "list.bullet" : "square.grid.2x2")
+                        .frame(width: 44, height: 44)
+                }
+                .accessibilityLabel(layout == .grid ? "Afficher les tags en liste" : "Afficher les tags en grille")
+                crossButton
                 Menu {
                     Button {
                         isReordering.toggle()
@@ -232,12 +308,21 @@ struct TagsView: View {
                 .accessibilityLabel(isReordering ? "Terminer le réarrangement" : "Actions des tags")
             }
 
-            if categories.isEmpty {
+            crossSummary
+            if categories.isEmpty || layout == .grid {
                 root
             } else {
                 List(selection: categorySelection) {
                     ForEach(orderedCategories) { category in
-                        if isReordering {
+                        if crossState.isEditing {
+                            Button { crossState.toggle(category.id) } label: {
+                                HStack {
+                                    CategoryRow(category: category, inSidebar: true)
+                                    Image(systemName: crossState.selectedIDs.contains(category.id) ? "checkmark.circle.fill" : "circle")
+                                }
+                            }
+                            .accessibilityAddTraits(crossState.selectedIDs.contains(category.id) ? .isSelected : [])
+                        } else if isReordering {
                             reorderCell(for: category, inSidebar: true)
                         } else {
                             NavigationLink(value: category.id) {
@@ -264,6 +349,13 @@ struct TagsView: View {
     }
 
     private var root: some View {
+        VStack(spacing: 8) {
+            if !iPadLayout.isPad { crossSummary }
+            catalogueContent
+        }
+    }
+
+    private var catalogueContent: some View {
         Group {
             if isLoading && categories.isEmpty {
                 ProgressView("Chargement des tags…")
@@ -309,6 +401,12 @@ struct TagsView: View {
                             open(category)
                         } label: {
                             TagGridCard(category: category)
+                                .overlay(alignment: .topTrailing) {
+                                    if crossState.isEditing {
+                                        Image(systemName: crossState.selectedIDs.contains(category.id) ? "checkmark.circle.fill" : "circle")
+                                            .padding(6).foregroundStyle(Color.accentColor)
+                                    }
+                                }
                         }
                         .buttonStyle(.plain)
                         .contextMenu {
@@ -345,6 +443,12 @@ struct TagsView: View {
                             open(category)
                         } label: {
                             CategoryRow(category: category)
+                                .overlay(alignment: .trailing) {
+                                    if crossState.isEditing {
+                                        Image(systemName: crossState.selectedIDs.contains(category.id) ? "checkmark.circle.fill" : "circle")
+                                            .foregroundStyle(Color.accentColor)
+                                    }
+                                }
                         }
                         .buttonStyle(.plain)
                         .contextMenu {
@@ -483,6 +587,9 @@ struct TagsView: View {
     }
 
     private func open(_ category: Category) {
+        if crossState.isEditing { crossState.toggle(category.id); return }
+        crossState.clear()
+        if iPadLayout.isPad { padNavigation.select(category.id); return }
         path.append(category)
         trail.append(category.name)
     }
@@ -704,8 +811,7 @@ struct CategoryFilesView: View {
     let router: ViewerRouter
     let onOpenFolder: (DriveFile) -> Void
 
-    @State private var viewModel: FileGridViewModel
-    @State private var filters = FileFilters()
+    @State private var browserPath: [DriveFile] = []
 
     init(
         category: Category,
@@ -717,36 +823,17 @@ struct CategoryFilesView: View {
         self.driveId = driveId
         self.router = router
         self.onOpenFolder = onOpenFolder
-        _viewModel = State(initialValue: FileGridViewModel(source: .category(category.id), driveId: driveId))
     }
 
     var body: some View {
-        FileGridView(
-            viewModel: viewModel,
-            onOpenDirectory: onOpenFolder,
-            onOpenFile: { file, siblings in
-                router.open(
-                    file,
-                    siblings: siblings,
-                    filters: filters,
-                    searchText: "",
-                    viewModel: viewModel
-                )
-            },
-            onResetFilters: { filters = FileFilters() },
-            filters: filters
-        )
-        .navigationTitle(category.name)
-        .navigationBarTitleDisplayMode(.inline)
-        .toolbar {
-            ToolbarItemGroup(placement: .topBarTrailing) {
-                FilterMenu(filters: $filters)
-            }
-        }
+        FavoritesView(driveId: driveId, router: router, path: $browserPath,
+                      source: .category(category.id), title: category.name,
+                      ownsNavigation: false, onOpenFolder: onOpenFolder)
+            .environment(\.fileBrowserScope, .tag)
     }
 }
 
-// MARK: - Création de tag
+    // MARK: - Création de tag
 
 /// Couleurs proposées à la création d'un tag (format `#rrggbb` kDrive).
 enum TagPalette {
