@@ -10,6 +10,31 @@ python3 .github/scripts/check_favorites_cache.py
 Le build Xcode complet suit ces contrôles dans le workflow existant. Ces tests
 utilisent des secrets factices et des transferts simulés, sans compte kDrive.
 
+## Refonte iPad du 17 octobre 2026
+
+La CI exécute `IPadNavigationTests`, `IPadLayoutTests` et `IPadScreenStateTests`
+sur un simulateur iPad, en plus des vérifications iPhone existantes. Le résultat
+`Orvian-iPad-tests` contient les captures des véritables écrans clair/sombre sans
+compte. Ces tests ne remplacent pas les essais avec des favoris réels.
+
+À vérifier avec un compte de test et sur appareil :
+
+- Ouvrir trois niveaux de dossiers dans Accueil et Favoris, changer d'onglet
+  dix fois et revenir : aucun plantage, chemin perdu ou contrôle dupliqué.
+- Contrôler des favoris connus, leur pagination, un retrait des favoris et les
+  états distincts d'erreur, de collection vide et de recherche sans résultat.
+- Dans Tag, changer de catégorie depuis un sous-dossier : aucun ancien fichier
+  conservé dans le nouveau détail. Supprimer le tag actif puis recréer un tag.
+- Redimensionner pendant la consultation de Sécurité ou d'un dossier de tag ;
+  vérifier le retour natif aux catégories en fenêtre compacte.
+- Vérifier le Profil avec 0, 1, 3 et 6 uploads ; l'iPhone conserve trois cartes.
+- Envoyer et télécharger simultanément, vérifier les actions et la dernière
+  rangée ; les progressions ne doivent pas déplacer la grille.
+- Contrôler les cinq onglets en clair/sombre, portrait/paysage, grand texte,
+  VoiceOver, réduction des animations et de la transparence.
+- Ouvrir une visionneuse puis verrouiller l'app : aucune présentation au-dessus
+  du verrou. Comparer l'iPhone à la disposition de référence.
+
 ## Parcours à vérifier sur iPhone / simulateur
 
 - Téléchargement lent avec PIN : passer en arrière-plan puis revenir sans
@@ -104,33 +129,6 @@ Les scénarios suivants nécessitent aussi un iPhone ou un simulateur :
 
 Les changements ont été préparés sous Windows : la vérification syntaxique
 ne remplace pas la compilation Xcode, les tests Swift et les essais ci-dessus.
-
-## Disposition iPad Pro 13 pouces
-
-- Paysage : les cinq onglets apparaissent dans la barre latérale native ; le
-  petit bouton système de la barre de navigation permet de la masquer et de
-  la réafficher depuis chaque onglet, y compris un sous-dossier.
-- Faire défiler un dossier, le filtrer, ouvrir un sous-dossier, puis masquer
-  et réafficher la barre : largeur et colonnes changent sans revenir à la
-  racine, recharger la liste ni perdre la sélection. Répéter dans Favoris et Tag.
-- Retoucher un onglet : mêmes retours à la racine et rafraîchissements que
-  sur iPhone ; Profil précharge toujours ses uploads récents.
-- Tourner en portrait et réduire la fenêtre (Split View / Stage Manager) :
-  les colonnes se simplifient et les cinq onglets restent accessibles via
-  le bouton système. Revenir au paysage sans perdre les piles de navigation.
-- Réglages larges : choisir chaque espace à gauche, vérifier ses contrôles
-  à droite, la recherche, le changement de drive et la gestion du code.
-  Réduire la fenêtre pendant la consultation d’un espace ou une recherche.
-- Profil large : uploads à gauche, stockage et informations à droite ;
-  accès aux récents, à la corbeille et aux mesures réseau inchangé.
-- Envoi et téléchargement simultanés : progressions et Annuler restent
-  visibles, sans recouvrir le bouton d’import ni les dernières cartes.
-- Ouvrir un média, un texte, une feuille puis verrouiller l’app : aucune
-  présentation ne passe au-dessus du verrou ; état restauré après déverrouillage.
-- Comparer clair/sombre, Réduire la transparence, Dynamic Type maximal et
-  VoiceOver ; pas de nouvelle couleur, police ou carte propre à l’iPad.
-- iPhone portrait/paysage : barre flottante inchangée, mêmes marges, mêmes
-  colonnes (2 à 7) et réglages de tags, aucune barre latérale.
 
 ## Navigation, recherche et publications réseau
 

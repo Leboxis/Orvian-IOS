@@ -13,6 +13,8 @@ struct TagsView: View {
     /// Noms des éléments de `path` pour le fil d'Ariane ; persiste dans
     /// `TabNavigationState` pour survivre au démontage de l'onglet.
     @Binding var trail: [String]
+    @Binding var padNavigation: IPadTagNavigation
+    @Environment(\.iPadLayout) private var iPadLayout
 
     @State private var categories: [Category] = []
     @State private var orderedCategories: [Category] = []
@@ -25,7 +27,6 @@ struct TagsView: View {
     @AppStorage("tagsLayout") private var layout = CategoryLayout.grid
     /// Nombre de colonnes de la grille, partagé avec l'éditeur de tags.
     @AppStorage("tagGridColumns") private var tagGridColumns = 2
-    @Environment(\.driveLayout) private var driveLayout
     @State private var showCreateSheet = false
 
     @State private var tagToRename: Category?
@@ -46,57 +47,20 @@ struct TagsView: View {
     private let service = KDriveService()
 
     var body: some View {
-        NavigationStack(path: $path) {
-            root
-                .toolbar {
-                    ToolbarItemGroup(placement: .topBarTrailing) {
-                        Button {
-                            withAnimation(Motion.animation(.snappy(duration: 0.25))) {
-                                layout = layout == .grid ? .list : .grid
-                            }
-                        } label: {
-                            Image(systemName: layout == .grid ? "list.bullet" : "square.grid.2x2")
-                        }
-                        .accessibilityLabel(layout == .grid ? "Afficher en liste" : "Afficher en grille")
-
-                        Button {
-                            isReordering.toggle()
-                        } label: {
-                            Image(systemName: "pencil")
-                        }
-                        .accessibilityLabel(isReordering ? "Terminer le réarrangement" : "Réarranger les tags")
-
-                        Button {
-                            showCreateSheet = true
-                        } label: {
-                            Image(systemName: "plus")
-                        }
-                        .accessibilityLabel("Nouveau tag")
-                    }
-                }
-                .navigationDestination(for: Category.self) { category in
-                    CategoryFilesView(
-                        category: category,
-                        driveId: driveId,
-                        router: router,
-                        onOpenFolder: { folder in
-                            push(folder)
-                        }
-                    )
-                }
-                .navigationDestination(for: DriveFile.self) { directory in
-                    DirectoryView(
-                        directory: directory,
-                        driveId: driveId,
-                        crumbs: trail,
-                        router: router,
-                        onOpenFolder: { folder in
-                            push(folder)
-                        }
-                    )
-                }
+        Group {
+            if iPadLayout.isPad {
+                padNavigationView
+            } else {
+                phoneNavigation
+            }
         }
-        .onChange(of: categories, initial: true) { _, _ in updateOrder() }
+        .onChange(of: categories, initial: true) { _, _ in
+            updateOrder()
+            if hasLoadedCategories, let id = padNavigation.categoryID,
+               !categories.contains(where: { $0.id == id }) {
+                padNavigation.select(nil)
+            }
+        }
         .onChange(of: customOrder) { _, _ in updateOrder() }
         .onChange(of: path.count) { _, newCount in
             if trail.count > newCount {
@@ -138,6 +102,123 @@ struct TagsView: View {
             Button("OK", role: .cancel) {}
         } message: {
             Text(operationErrorMessage ?? "")
+        }
+    }
+
+    private var phoneNavigation: some View {
+        NavigationStack(path: $path) {
+            root
+                .toolbar { categoryToolbar }
+                .navigationDestination(for: Category.self) { category in
+                    CategoryFilesView(
+                        category: category,
+                        driveId: driveId,
+                        router: router,
+                        onOpenFolder: { folder in
+                            push(folder)
+                        }
+                    )
+                }
+                .navigationDestination(for: DriveFile.self) { directory in
+                    DirectoryView(
+                        directory: directory,
+                        driveId: driveId,
+                        crumbs: trail,
+                        router: router,
+                        onOpenFolder: { folder in
+                            push(folder)
+                        }
+                    )
+                }
+        }
+    }
+
+    @ToolbarContentBuilder
+    private var categoryToolbar: some ToolbarContent {
+        ToolbarItemGroup(placement: .topBarTrailing) {
+            if !iPadLayout.isPad {
+                Button {
+                    withAnimation(Motion.animation(.snappy(duration: 0.25))) {
+                        layout = layout == .grid ? .list : .grid
+                    }
+                } label: {
+                    Image(systemName: layout == .grid ? "list.bullet" : "square.grid.2x2")
+                }
+                .accessibilityLabel(layout == .grid ? "Afficher en liste" : "Afficher en grille")
+            }
+            Button {
+                isReordering.toggle()
+            } label: {
+                Image(systemName: "pencil")
+            }
+            .accessibilityLabel(isReordering ? "Terminer le réarrangement" : "Réarranger les tags")
+            Button {
+                showCreateSheet = true
+            } label: {
+                Image(systemName: "plus")
+            }
+            .accessibilityLabel("Nouveau tag")
+        }
+    }
+
+    private var padNavigationView: some View {
+        NavigationSplitView {
+            padCategoryList
+                .toolbar { categoryToolbar }
+                .navigationSplitViewColumnWidth(min: 260, ideal: 280, max: 320)
+        } detail: {
+            NavigationStack(path: $padNavigation.folders) {
+                Group {
+                    if let category = selectedCategory {
+                        CategoryFilesView(category: category, driveId: driveId, router: router,
+                                          onOpenFolder: { padNavigation.folders.append($0) })
+                            .id(category.id)
+                    } else {
+                        EmptyStateView(symbol: "tag", title: "Vos fichiers par tag",
+                                       message: "Choisissez un tag pour consulter ses fichiers.")
+                    }
+                }
+                .navigationDestination(for: DriveFile.self) { directory in
+                    let index = padNavigation.folders.firstIndex { $0.id == directory.id }
+                    let names = index.map { Array(padNavigation.folders[...$0].map(\.name)) } ?? [directory.name]
+                    DirectoryView(directory: directory, driveId: driveId,
+                                  crumbs: [selectedCategory?.name ?? "Tag"] + names, router: router,
+                                  onOpenFolder: { padNavigation.folders.append($0) })
+                }
+            }
+        }
+        .navigationSplitViewStyle(.balanced)
+    }
+
+    private var selectedCategory: Category? {
+        categories.first { $0.id == padNavigation.categoryID }
+    }
+
+    private var categorySelection: Binding<Int?> {
+        Binding(get: { padNavigation.categoryID }, set: { padNavigation.select($0) })
+    }
+
+    @ViewBuilder
+    private var padCategoryList: some View {
+        if categories.isEmpty {
+            root
+        } else {
+            List(selection: categorySelection) {
+                ForEach(orderedCategories) { category in
+                    if isReordering {
+                        reorderCell(for: category)
+                    } else {
+                        NavigationLink(value: category.id) {
+                            CategoryRow(category: category)
+                        }
+                        .contextMenu { tagContextMenu(for: category) }
+                    }
+                }
+            }
+            .listStyle(.sidebar)
+            .navigationTitle(tagNavigationTitle)
+            .refreshable { await load(force: true) }
+            .safeAreaInset(edge: .bottom) { Color.clear.frame(height: DS.floatingBarInset) }
         }
     }
 
@@ -197,8 +278,10 @@ struct TagsView: View {
             }
             .padding(.horizontal, DS.gridMargin)
             .padding(.top, 6)
-            .padding(.bottom, driveLayout.bottomInset)
-            .frame(maxWidth: driveLayout.maxGridWidth)
+            .padding(.bottom, DS.floatingBarInset)
+            // Bloc centré et borné en largeur : sur iPad, deux colonnes
+            // étirées sur 1 000 pt rendaient les cartes illisibles.
+            .frame(maxWidth: DS.maxContentWidth)
             .frame(maxWidth: .infinity)
         }
         .background(Color(uiColor: .systemGroupedBackground))
@@ -207,7 +290,7 @@ struct TagsView: View {
         }
     }
     private var gridColumns: [GridItem] {
-        Array(repeating: GridItem(.flexible(), spacing: DS.gridSpacing), count: driveLayout.tagColumns(preferred: tagGridColumns))
+        Array(repeating: GridItem(.flexible(), spacing: DS.gridSpacing), count: max(2, tagGridColumns))
     }
 
     private var list: some View {
@@ -248,7 +331,7 @@ struct TagsView: View {
             }
             .padding(.horizontal, DS.gridMargin)
             .padding(.top, 6)
-            .padding(.bottom, driveLayout.bottomInset)
+            .padding(.bottom, DS.floatingBarInset)
             .frame(maxWidth: DS.maxContentWidth)
             .frame(maxWidth: .infinity)
         }

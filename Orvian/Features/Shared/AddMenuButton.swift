@@ -24,6 +24,7 @@ private struct PickedPhotoFile: Transferable {
 /// Bouton « + » d'un dossier : créer un dossier, importer des fichiers
 /// ou importer des photos/vidéos (upload kDrive).
 struct AddMenuButton: View {
+    @Environment(\.iPadLayout) private var iPadLayout
     let directoryId: Int
     let driveId: Int
     @Binding var isBusy: Bool
@@ -62,7 +63,7 @@ struct AddMenuButton: View {
             Image(systemName: "plus")
                 .font(.headline.weight(.semibold))
                 .foregroundStyle(Color.accentColor)
-                .frame(width: 52, height: 52)
+                .frame(width: iPadLayout.isPad ? 44 : 52, height: iPadLayout.isPad ? 44 : 52)
                 .contentShape(Circle())
         }
         .disabled(isBusy)

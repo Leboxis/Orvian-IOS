@@ -5,6 +5,16 @@ enum SettingsRoute: Hashable {
     case appearance, media, storage, security, account
 }
 
+struct IPadTagNavigation {
+    var categoryID: Int?
+    var folders: [DriveFile] = []
+
+    mutating func select(_ categoryID: Int?) {
+        folders.removeAll()
+        self.categoryID = categoryID
+    }
+}
+
 /// État de navigation centralisé permettant le contrôle et la réinitialisation
 /// à la racine lors d'un second appui sur le bouton de l'onglet actif.
 @MainActor
@@ -25,7 +35,9 @@ final class TabNavigationState {
     /// Incrémente à chaque second appui sur l'onglet Profil afin de demander
     /// un retour à la racine ET un rafraîchissement des sections.
     var profileRefreshRequest = 0
-    var settingsPath: [SettingsRoute] = []
+    var settingsPath = NavigationPath()
+    var settingsSelection: SettingsRoute? = .appearance
+    var iPadTags = IPadTagNavigation()
 
     func reset(tab: AppTab, scrollFavoritesToTop: Bool = true) {
         switch tab {
@@ -39,11 +51,13 @@ final class TabNavigationState {
         case .tag:
             tagsPath = NavigationPath()
             tagsTrail = []
+            iPadTags.select(nil)
         case .profile:
             profilePath = NavigationPath()
             profileRefreshRequest += 1
         case .settings:
-            settingsPath = []
+            settingsPath = NavigationPath()
+            settingsSelection = .appearance
         }
     }
 }

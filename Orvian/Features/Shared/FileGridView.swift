@@ -56,7 +56,8 @@ struct FileGridView: View {
     @AppStorage("prefetchVideoURLs") private var prefetchVideoURLs = true
     @AppStorage("prefetchOnWiFiOnly") private var prefetchOnWiFiOnly = true
     @AppStorage("fileGridColumns") private var fileGridColumns = 3
-    @Environment(\.driveLayout) private var driveLayout
+    @Environment(\.iPadLayout) private var iPadLayout
+    @State private var containerWidth: CGFloat = 0
     @AppStorage("foldersFirstInTags") private var foldersFirstInTags = true
     /// Préférence globale : affiche l'étoile des favoris sur les cartes,
     /// y compris dans l'onglet Favoris où elle était autrefois masquée d'office.
@@ -370,16 +371,20 @@ struct FileGridView: View {
                 LazyVStack(alignment: .leading, spacing: 18, pinnedViews: []) {
                     content
                 }
-                .padding(.horizontal, DS.gridMargin)
+                .padding(.horizontal, gridLayout.horizontalInset(base: DS.gridMargin))
                 .padding(.top, 6 + contentTopInset)
-                .padding(.bottom, driveLayout.bottomInset)
-                .frame(maxWidth: driveLayout.maxGridWidth)
+                .padding(.bottom, DS.floatingBarInset) // barre flottante
+                // L'iPhone garde sa borne ; l'iPad adapte les colonnes à la largeur du panneau.
+                .frame(maxWidth: iPadLayout.isPad ? .infinity : DS.maxContentWidth)
                 .frame(maxWidth: .infinity)
             }
             // Le rebond permanent permet le pull-to-refresh même quand le
             // dossier est trop court pour défiler.
             .scrollBounceBehavior(.always, axes: .vertical)
             .scrollIndicators(.hidden)
+            .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { width in
+                if iPadLayout.isPad { containerWidth = width }
+            }
             .onChange(of: scrollToTopRequest) { oldValue, newValue in
                 guard oldValue != newValue else { return }
                 withAnimation(Motion.animation(.snappy(duration: 0.3))) {
@@ -604,10 +609,16 @@ struct FileGridView: View {
         }
     }
 
+    private var gridLayout: IPadLayout {
+        IPadLayout(isPad: iPadLayout.isPad,
+                   width: containerWidth > 0 ? containerWidth : iPadLayout.width,
+                   largeText: iPadLayout.largeText)
+    }
+
     private var columns: [GridItem] {
         Array(
             repeating: GridItem(.flexible(), spacing: DS.gridSpacing),
-            count: driveLayout.fileColumns(preferred: fileGridColumns)
+            count: gridLayout.fileColumns(preferred: fileGridColumns, margin: DS.gridMargin, spacing: DS.gridSpacing)
         )
     }
 

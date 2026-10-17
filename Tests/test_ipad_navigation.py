@@ -1,0 +1,94 @@
+"""Source contracts for the iPad shell; runtime checks live in IPadNavigationTests."""
+from pathlib import Path
+import re
+import unittest
+
+ROOT = Path(__file__).resolve().parents[1]
+
+
+class IPadNavigationWiringChecks(unittest.TestCase):
+    def source(self, name):
+        path = ROOT / name
+        self.assertTrue(path.is_file(), f"Missing implementation: {name}")
+        return path.read_text(encoding="utf-8")
+
+    def test_ipad_uses_native_tabs_instead_of_the_phone_stack_overlay(self):
+        main = self.source("Orvian/App/MainTabView.swift")
+        self.assertIn("private var phoneNavigation:", main)
+        body = main[main.index("    var body:"):main.index("    private var phoneNavigation:")]
+        self.assertIn("UIDevice.current.userInterfaceIdiom == .pad", body)
+        self.assertIn("IPadTabView(selection: iPadSelection)", body)
+        self.assertIn("tabContent(tab)", body)
+        self.assertIn("phoneNavigation", body)
+        self.assertNotIn("tabPane(", body)
+
+    def test_native_container_declares_five_distinct_tabs_without_hidden_stacks(self):
+        native = self.source("Orvian/App/IPadTabView.swift")
+        self.assertIn("TabView(selection: $selection)", native)
+        self.assertIn(".tabViewStyle(.tabBarOnly)", native)
+        self.assertEqual(
+            re.findall(r"value: AppTab\.(\w+)", native),
+            ["home", "favorites", "tag", "profile", "settings"],
+        )
+        for forbidden in ["NavigationSplitView", "NavigationStack", "ZStack", ".opacity(", "tabPane("]:
+            self.assertNotIn(forbidden, native)
+        for tab in ["home", "favorites", "tag", "profile", "settings"]:
+            self.assertEqual(native.count(f"content(.{tab})"), 1)
+        for forbidden in ["Color(", ".tint(", "colorScheme", ".background("]:
+            self.assertNotIn(forbidden, native)
+
+    def test_phone_keeps_its_floating_bar_and_reselection_behavior(self):
+        main = self.source("Orvian/App/MainTabView.swift")
+        self.assertIn("private var phoneNavigation:", main)
+        phone = main[main.index("    private var phoneNavigation:"):main.index("    private var iPadSelection:")]
+        for expected in [
+            "ZStack(alignment: .bottom)", "FloatingTabBar(",
+            "selection: $shell.tab", "onSelect: prepareTab", "onReselect:",
+            "scrollFavoritesToTop: favoritesReselectScrollToTop", "TransferOverlayChrome(",
+        ]:
+            self.assertIn(expected, phone)
+        self.assertNotIn("IPadTabView(", phone)
+        self.assertIn("target == shell.tab || (target.isKeptAlive && shell.visitedTabs.contains(target))", main)
+
+    def test_presentations_and_profile_prefetch_keep_their_shared_owners(self):
+        main = self.source("Orvian/App/MainTabView.swift")
+        self.assertIn("private var phoneNavigation:", main)
+        body = main[main.index("    var body:"):main.index("    private var phoneNavigation:")]
+        self.assertEqual(body.count(".fullScreenCover("), 2)
+        self.assertEqual(body.count(".sheet("), 1)
+        self.assertIn(".tint(.accentColor)", body)
+        self.assertIn("shell.markVisited(targetTab)", main)
+        self.assertIn("await RecentUploadsLoader.shared.prefetch(driveId: drive.id)", main)
+        selection = main[main.index("    private var iPadSelection:"):main.index("    private func prepareTab(")]
+        self.assertIn("guard targetTab != shell.tab else { return }", selection)
+        self.assertLess(selection.index("prepareTab(targetTab)"), selection.index("shell.tab = targetTab"))
+        self.assertNotIn("navState.reset", selection)
+        self.assertNotIn("safeAreaInset(edge: .bottom", main)
+
+    def test_tag_details_and_settings_use_owned_navigation_state(self):
+        tags = self.source("Orvian/Features/Tag/TagsView.swift")
+        self.assertIn("NavigationStack(path: $padNavigation.folders)", tags)
+        self.assertIn(".id(category.id)", tags)
+        self.assertIn("List(selection: categorySelection)", tags)
+        self.assertIn("padNavigation.select($0)", tags)
+        self.assertNotIn("preferredCompactColumn", tags)
+        settings = self.source("Orvian/Features/Settings/SettingsView.swift")
+        self.assertIn("List(selection: $selectedSpace)", settings)
+        self.assertIn("NavigationStack(path: $path)", settings)
+        self.assertNotIn("stackPath", settings)
+        state = self.source("Orvian/App/TabNavigationState.swift")
+        self.assertIn("var settingsSelection: SettingsRoute? = .appearance", state)
+        self.assertIn("var iPadTags = IPadTagNavigation()", state)
+
+    def test_profile_preserves_phone_preview_without_an_extra_pad_fetch(self):
+        profile = self.source("Orvian/Features/Profile/ProfileView.swift")
+        self.assertIn("ForEach(recentUploads.prefix(3))", profile)
+        self.assertIn("recentUploads.prefix(iPadLayout.recentPreviewLimit)", profile)
+        pad = profile[profile.index("    private var padOverview:"):profile.index("    private var recentUploadsSection:")]
+        self.assertNotIn("await ", pad)
+        self.assertNotIn("service.page", pad)
+        self.assertIn("AnyLayout", pad)
+
+
+if __name__ == "__main__":
+    unittest.main()

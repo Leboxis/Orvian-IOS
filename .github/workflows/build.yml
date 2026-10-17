@@ -43,8 +43,28 @@ jobs:
             -only-testing:OrvianTests/NSFWClassifierTests \
             -only-testing:OrvianTests/ImageClassificationStoreTests \
             -only-testing:OrvianTests/FolderImageScannerTests \
-            -only-testing:OrvianTests/IPadLayoutTests \
             CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO test
+
+      - name: Verify native iPad navigation and adaptive layout
+        shell: bash
+        run: |
+          set -o pipefail
+          IPAD_ID=$(xcrun simctl list devices available -j | python -c 'import json,re,sys; d=json.load(sys.stdin); pads=[x for k,v in d["devices"].items() if (m := re.search(r"iOS-(\d+)", k)) and int(m[1]) >= 26 for x in v if "iPad" in x["name"]]; assert pads, "No iPadOS 26 simulator available"; print(next((x["udid"] for x in pads if "13-inch" in x["name"]), pads[0]["udid"]))')
+          xcodebuild -project Orvian.xcodeproj -scheme Orvian \
+            -destination "platform=iOS Simulator,id=$IPAD_ID" \
+            -configuration Debug -derivedDataPath "$RUNNER_TEMP/orvian-tests" \
+            -resultBundlePath "$RUNNER_TEMP/orvian-ipad.xcresult" \
+            -only-testing:OrvianTests/IPadNavigationTests \
+            -only-testing:OrvianTests/IPadLayoutTests \
+            -only-testing:OrvianTests/IPadScreenStateTests \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO test
+
+      - name: Upload iPad test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Orvian-iPad-tests
+          path: ${{ runner.temp }}/orvian-ipad.xcresult
 
   build:
     needs: classification-tests
@@ -155,6 +175,7 @@ jobs:
           python3 -m unittest discover -s Tests -p 'test_filter_menu.py'
           python3 -m unittest discover -s Tests -p 'test_recent_sharing.py'
           python3 -m unittest discover -s Tests -p 'test_ui_cleanup.py'
+          python3 -m unittest discover -s Tests -p 'test_ipad_navigation.py'
           python3 .github/scripts/check_audit_regressions.py
 
       - name: Check GIF decoding

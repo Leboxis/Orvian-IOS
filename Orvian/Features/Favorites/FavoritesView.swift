@@ -1,7 +1,6 @@
 import SwiftUI
 
 struct FavoritesView: View {
-    @Environment(\.driveLayout) private var driveLayout
     @State private var mutationCredentialFingerprint = TokenStore.credentialFingerprint()
     @State private var viewModel: FileGridViewModel
     @State private var filters = FileFilters()
@@ -250,7 +249,9 @@ struct FavoritesView: View {
                 } else {
                     ToolbarItemGroup(placement: .topBarLeading) {
                         FilterMenu(filters: $filters)
+                            .accessibilityIdentifier("browser.filter")
                         searchToggleButton
+                            .accessibilityIdentifier("browser.search")
                     }
 
                     ToolbarItem(placement: .principal) {
@@ -268,6 +269,7 @@ struct FavoritesView: View {
                             Label("Sélectionner", systemImage: "checkmark.circle")
                         }
                         .disabled(visibleSelectionItems.isEmpty || moveBusy)
+                        .accessibilityIdentifier("browser.select")
                     }
                 }
             }
@@ -313,6 +315,7 @@ struct FavoritesView: View {
             .onChange(of: searchText) { _, _ in
                 if selectionMode { endSelection() }
             }
+            .onDisappear { searchFocused = false }
             .navigationDestination(for: DriveFile.self) { directory in
                 let index = path.firstIndex(where: { $0.id == directory.id })
                 let crumbs = ["Favoris"] + (index.map { Array(path[...$0].map(\.name)) } ?? [])
@@ -425,7 +428,7 @@ struct FavoritesView: View {
         .padding(.horizontal, 16)
         .padding(.vertical, 10)
         .background(.black.opacity(0.75), in: Capsule())
-        .padding(.bottom, driveLayout.pillInset)
+        .padding(.bottom, DS.floatingPillInset)
         .transition(.opacity)
     }
 

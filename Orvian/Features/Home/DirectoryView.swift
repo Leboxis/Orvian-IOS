@@ -11,7 +11,7 @@ struct DirectoryView: View {
     /// Retire le focus du champ quand son onglet n'est plus affiché.
     let isActive: Bool
     @Environment(\.scenePhase) private var scenePhase
-    @Environment(\.driveLayout) private var driveLayout
+    @Environment(\.iPadLayout) private var iPadLayout
 
     @State private var mutationCredentialFingerprint = TokenStore.credentialFingerprint()
     @State private var viewModel: FileGridViewModel
@@ -240,23 +240,19 @@ struct DirectoryView: View {
                 }
             } else {
                 ToolbarItemGroup(placement: .topBarLeading) {
-                    FilterMenu(filters: $filters)
-                    if showsSearchBar {
-                        searchToggleButton
+                        FilterMenu(filters: $filters)
+                            .accessibilityIdentifier("browser.filter")
+                        if showsSearchBar {
+                            searchToggleButton
+                                .accessibilityIdentifier("browser.search")
                     }
                 }
 
                 ToolbarItemGroup(placement: .topBarTrailing) {
-                    randomFileButton
-
-                    Button {
-                        folderScanner.start(driveId: driveId, directory: directory)
-                        showsFolderScan = true
-                    } label: {
-                        Image(systemName: folderScanner.isRunning ? "viewfinder.circle.fill" : "viewfinder")
+                    if !iPadLayout.isPad {
+                        randomFileButton
+                        scanFolderButton
                     }
-                    .accessibilityLabel("Scanner ce dossier")
-                    .accessibilityHint("Classer les images de ce dossier en SFW ou NSFW")
 
                     Button {
                         startSelection()
@@ -264,6 +260,19 @@ struct DirectoryView: View {
                         Label("Sélectionner", systemImage: "checkmark.circle")
                     }
                     .disabled(visibleSelectionItems.isEmpty || moveBusy || addBusy)
+                    .accessibilityIdentifier("browser.select")
+
+                    if iPadLayout.isPad {
+                        addMenu
+                            .accessibilityLabel("Ajouter ou importer")
+                        Menu {
+                            randomFileButton
+                            scanFolderButton
+                        } label: {
+                            Image(systemName: "ellipsis.circle")
+                        }
+                        .accessibilityLabel("Autres actions du dossier")
+                    }
                 }
             }
         }
@@ -273,7 +282,7 @@ struct DirectoryView: View {
             }
         }
         .overlay(alignment: .bottomTrailing) {
-            if !selectionMode {
+            if !selectionMode && !iPadLayout.isPad {
                 floatingAddButton
             }
         }
@@ -695,7 +704,7 @@ struct DirectoryView: View {
         .padding(.horizontal, 16)
         .padding(.vertical, 10)
         .background(.black.opacity(0.75), in: Capsule())
-        .padding(.bottom, driveLayout.pillInset)
+        .padding(.bottom, DS.floatingPillInset)
         .transition(.opacity)
     }
 
@@ -703,6 +712,26 @@ struct DirectoryView: View {
     /// du titre du dossier. La marge basse l'aligne au-dessus de la barre
     /// d'onglets flottante sans recouvrir la dernière rangée de cartes.
     private var floatingAddButton: some View {
+        addMenu
+            .frame(width: 52, height: 52)
+            .floatingChrome(Circle())
+            .padding(.trailing, DS.gridMargin + 4)
+            .padding(.bottom, DS.floatingActionInset)
+            .accessibilityLabel("Ajouter ou importer")
+    }
+
+    private var scanFolderButton: some View {
+        Button {
+            folderScanner.start(driveId: driveId, directory: directory)
+            showsFolderScan = true
+        } label: {
+            Image(systemName: folderScanner.isRunning ? "viewfinder.circle.fill" : "viewfinder")
+        }
+        .accessibilityLabel("Scanner ce dossier")
+        .accessibilityHint("Classer les images de ce dossier en SFW ou NSFW")
+    }
+
+    private var addMenu: some View {
         AddMenuButton(
             directoryId: directory.id,
             driveId: driveId,
@@ -716,11 +745,6 @@ struct DirectoryView: View {
                 Task { await refreshAfterImport(uploadedFiles) }
             }
         )
-        .frame(width: 52, height: 52)
-        .floatingChrome(Circle())
-        .padding(.trailing, DS.gridMargin + 4)
-        .padding(.bottom, driveLayout.actionInset)
-        .accessibilityLabel("Ajouter ou importer")
     }
 
     /// Affichage immédiat : les fichiers confirmés par l'API entrent dans la

@@ -66,6 +66,16 @@ hors Mac, la CI valide chaque push.
 
 ## Architecture
 
+### Interface iPad
+
+Sur iPad, les cinq onglets utilisent la barre native du système et des piles
+de navigation indépendantes. Les galeries adaptent leur densité à la largeur
+du panneau. Tag et Réglages disposent de colonnes internes ; le Profil affiche
+jusqu'à six uploads récents depuis les données déjà chargées.
+
+Les couleurs, les matières et les cartes restent celles de l'application.
+L'iPhone conserve sa barre flottante et ses préférences de présentation.
+
 ### Scan SFW / NSFW du dossier ouvert
 
 Dans un dossier, le bouton **Scanner ce dossier** (icône de viseur dans la barre
@@ -97,7 +107,7 @@ View (SwiftUI) → ViewModel (@MainActor @Observable) → Repository
 
 ```
 Orvian/
-├── App/            OrvianApp, RootView, MainTabView (5 onglets vivants en ZStack)
+├── App/            OrvianApp, RootView, MainTabView (onglets natifs iPad, barre flottante iPhone)
 ├── Core/
 │   ├── API/        APIClient (actor), Endpoints, Repository, APIError
 │   ├── Auth/       TokenStore (Keychain + repli), SessionStore (session @Observable)

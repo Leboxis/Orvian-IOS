@@ -10,6 +10,7 @@ import SwiftUI
 ///
 /// Le verrouillage couvre cet arbre sans le démonter. Les présentations,
 /// positions de défilement et piles survivent au passage en arrière-plan.
+/// Sur iPad, les onglets natifs remplacent la rétention manuelle décrite ci-dessus pour l'iPhone.
 struct MainTabView: View {
     let drive: Drive
     let session: SessionStore
@@ -17,8 +18,6 @@ struct MainTabView: View {
     /// Navigation possédée par la session, remplacée au changement de drive.
     let shell: MainTabShellState
     @State private var showUploadSheet = false
-    @State private var columnVisibility: NavigationSplitViewVisibility = .all
-    @State private var preferredCompactColumn: NavigationSplitViewColumn = .detail
     @AppStorage("favoritesReselectScrollToTop") private var favoritesReselectScrollToTop = true
 
     private let uploadManager = UploadManager.shared
@@ -35,7 +34,17 @@ struct MainTabView: View {
         @Bindable var shell = shell
         Group {
             if UIDevice.current.userInterfaceIdiom == .pad {
-                padNavigation
+                IPadTabView(selection: iPadSelection) { tab in
+                    tabContent(tab)
+                }
+                .overlay(alignment: .bottom) {
+                    TransferOverlayChrome(
+                        uploadManager: uploadManager,
+                        onShowUploads: { showUploadSheet = true }
+                    )
+                    .frame(maxWidth: DS.maxTabBarWidth)
+                    .padding(.bottom, 4)
+                }
             } else {
                 phoneNavigation
             }
@@ -51,59 +60,6 @@ struct MainTabView: View {
         .fullScreenCover(item: $shell.router.textFile) { file in
             TextFileViewer(file: file, driveId: drive.id)
         }
-    }
-
-    private var padNavigation: some View {
-        NavigationSplitView(
-            columnVisibility: $columnVisibility,
-            preferredCompactColumn: $preferredCompactColumn
-        ) {
-            List {
-                ForEach(AppTab.allCases) { tab in
-                    Button {
-                        if shell.tab == tab {
-                            reselectTab(tab)
-                        } else {
-                            prepareTab(tab)
-                            shell.tab = tab
-                        }
-                        preferredCompactColumn = .detail
-                    } label: {
-                        Label(tab.title, systemImage: shell.tab == tab ? tab.symbolFilled : tab.symbol)
-                            .foregroundStyle(shell.tab == tab ? Color.accentColor : Color.primary)
-                            .padding(.vertical, 6)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                    .listRowBackground(
-                        RoundedRectangle(cornerRadius: DS.compactRadius)
-                            .fill(shell.tab == tab ? Color.primary.opacity(0.10) : Color.clear)
-                    )
-                    .accessibilityAddTraits(shell.tab == tab ? .isSelected : [])
-                }
-            }
-            .listStyle(.sidebar)
-            .navigationTitle("Orvian")
-            .navigationSplitViewColumnWidth(min: 200, ideal: 240, max: 280)
-        } detail: {
-            // Une seule identité de vue : masquer la barre redimensionne les onglets sans les remonter.
-            GeometryReader { geometry in
-                tabs
-                    .environment(\.driveLayout, DriveLayout(isPad: true, width: geometry.size.width))
-                    .overlay(alignment: .bottom) {
-                        TransferOverlayChrome(
-                            uploadManager: uploadManager,
-                            onShowUploads: { showUploadSheet = true }
-                        )
-                        .frame(maxWidth: DS.maxTabBarWidth)
-                        // Réserve le coin inférieur droit au bouton d’import, sans déplacer la grille.
-                        .padding(.trailing, 84)
-                        .padding(.bottom, 12)
-                    }
-            }
-        }
-        .navigationSplitViewStyle(.balanced)
     }
 
     private var phoneNavigation: some View {
@@ -126,66 +82,89 @@ struct MainTabView: View {
                 FloatingTabBar(
                     selection: $shell.tab,
                     onSelect: prepareTab,
-                    onReselect: reselectTab
+                    onReselect: { targetTab in
+                        shell.navState.reset(
+                            tab: targetTab,
+                            scrollFavoritesToTop: favoritesReselectScrollToTop
+                        )
+                    }
                 )
             }
             .padding(.bottom, 4)
         }
     }
 
+    private var iPadSelection: Binding<AppTab> {
+        Binding(
+            get: { shell.tab },
+            set: { targetTab in
+                guard targetTab != shell.tab else { return }
+                prepareTab(targetTab)
+                shell.tab = targetTab
+            }
+        )
+    }
+
     private func prepareTab(_ targetTab: AppTab) {
+        // Avant la sélection : l'onglet doit pouvoir se monter
+        // dans le même tour pour ne pas afficher un cadre vide.
         shell.markVisited(targetTab)
         guard targetTab == .profile else { return }
+        // Démarre au clic, avant que ProfileView soit montée.
+        // Sa propre tâche rejoint ensuite la même requête.
         Task {
             await RecentUploadsLoader.shared.prefetch(driveId: drive.id)
         }
     }
 
-    private func reselectTab(_ tab: AppTab) {
-        shell.navState.reset(tab: tab, scrollFavoritesToTop: favoritesReselectScrollToTop)
+    private var tabs: some View {
+        ZStack {
+            tabPane(.settings) { tabContent(.settings) }
+            tabPane(.tag) { tabContent(.tag) }
+            tabPane(.home) { tabContent(.home) }
+            tabPane(.favorites) { tabContent(.favorites) }
+            tabPane(.profile) { tabContent(.profile) }
+        }
     }
 
     @ViewBuilder
-    private var tabs: some View {
+    private func tabContent(_ tab: AppTab) -> some View {
         // Même pattern que `body` : bindings vers l'état persistant.
         @Bindable var shell = shell
-        ZStack {
-            tabPane(.settings) {
-                SettingsView(session: session, path: $shell.navState.settingsPath)
-            }
-            tabPane(.tag) {
-                TagsView(
-                    driveId: drive.id,
-                    router: shell.router,
-                    path: $shell.navState.tagsPath,
-                    trail: $shell.navState.tagsTrail
-                )
-            }
-            tabPane(.home) {
-                HomeTab(
-                    driveId: drive.id,
-                    router: shell.router,
-                    isSelected: shell.tab == .home,
-                    path: $shell.navState.homePath
-                )
-            }
-            tabPane(.favorites) {
-                FavoritesView(
-                    driveId: drive.id,
-                    router: shell.router,
-                    path: $shell.navState.favoritesPath,
-                    scrollToTopRequest: shell.navState.favoritesScrollToTopRequest
-                )
-            }
-            tabPane(.profile) {
-                ProfileView(
-                    session: session,
-                    router: shell.router,
-                    path: $shell.navState.profilePath,
-                    isSelected: shell.tab == .profile,
-                    refreshRequest: shell.navState.profileRefreshRequest
-                )
-            }
+        switch tab {
+        case .settings:
+            SettingsView(session: session, path: $shell.navState.settingsPath,
+                         selectedSpace: $shell.navState.settingsSelection)
+        case .tag:
+            TagsView(
+                driveId: drive.id,
+                router: shell.router,
+                path: $shell.navState.tagsPath,
+                trail: $shell.navState.tagsTrail,
+                padNavigation: $shell.navState.iPadTags
+            )
+        case .home:
+            HomeTab(
+                driveId: drive.id,
+                router: shell.router,
+                isSelected: shell.tab == .home,
+                path: $shell.navState.homePath
+            )
+        case .favorites:
+            FavoritesView(
+                driveId: drive.id,
+                router: shell.router,
+                path: $shell.navState.favoritesPath,
+                scrollToTopRequest: shell.navState.favoritesScrollToTopRequest
+            )
+        case .profile:
+            ProfileView(
+                session: session,
+                router: shell.router,
+                path: $shell.navState.profilePath,
+                isSelected: shell.tab == .profile,
+                refreshRequest: shell.navState.profileRefreshRequest
+            )
         }
     }
 

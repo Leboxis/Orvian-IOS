@@ -9,7 +9,7 @@ struct ProfileView: View {
     /// Incrémenté à chaque second appui sur l'onglet Profil (retour à la
     /// racine + rafraîchissement des sections).
     var refreshRequest: Int = 0
-    @Environment(\.driveLayout) private var driveLayout
+    @Environment(\.iPadLayout) private var iPadLayout
 
     @State private var recentUploads: [DriveFile] = []
     @State private var isLoadingRecents = true
@@ -22,17 +22,8 @@ struct ProfileView: View {
     var body: some View {
         NavigationStack(path: $path) {
             Group {
-                if driveLayout.usesTwoColumns {
-                    HStack(spacing: 0) {
-                        List {
-                            recentUploadsSection
-                        }
-                        List {
-                            trashSection
-                            aboutSection
-                        }
-                        .frame(width: 300)
-                    }
+                if iPadLayout.isPad {
+                    padOverview
                 } else {
                     List {
                         recentUploadsSection
@@ -42,7 +33,7 @@ struct ProfileView: View {
                 }
             }
             .safeAreaInset(edge: .bottom) {
-                Color.clear.frame(height: driveLayout.listBottomInset)
+                Color.clear.frame(height: iPadLayout.isPad ? 0 : 90)
             }
             .navigationTitle("Profil")
             .navigationBarTitleDisplayMode(.large)
@@ -72,6 +63,93 @@ struct ProfileView: View {
     }
 
     // MARK: - Uploads récents (3 miniatures + bouton voir plus)
+
+    private var padOverview: some View {
+        let layout = iPadLayout.usesTwoColumns
+            ? AnyLayout(HStackLayout(alignment: .top, spacing: 24))
+            : AnyLayout(VStackLayout(alignment: .leading, spacing: 24))
+        return ScrollView {
+            layout {
+                padRecents
+                    .frame(maxWidth: .infinity, alignment: .topLeading)
+                padInformation
+                    .frame(width: iPadLayout.usesTwoColumns ? 280 : nil)
+            }
+            .padding(.horizontal, iPadLayout.horizontalInset(base: DS.gridMargin))
+            .padding(.top, 16)
+            .padding(.bottom, DS.floatingBarInset)
+        }
+        .background(Color(uiColor: .systemGroupedBackground))
+    }
+
+    private var padRecents: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            HStack {
+                Text("Uploads récents").font(.headline)
+                Spacer()
+                if let drive = session.selectedDrive {
+                    NavigationLink("Voir plus") {
+                        RecentFilesView(driveId: drive.id, title: "Uploads récents",
+                                        source: RecentUploadsLoader.source, router: router)
+                    }
+                }
+            }
+            if !isLoadingRecents && recentUploads.isEmpty {
+                Text("Aucun upload récent")
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, minHeight: 120)
+            } else {
+                LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: DS.gridSpacing),
+                                         count: iPadLayout.largeText ? 2 : 3), spacing: 16) {
+                    if isLoadingRecents {
+                        ForEach(0..<iPadLayout.recentPreviewLimit, id: \.self) { _ in
+                            RoundedRectangle(cornerRadius: DS.cardRadius)
+                                .fill(.quaternary.opacity(0.4))
+                                .aspectRatio(1, contentMode: .fit)
+                                .accessibilityHidden(true)
+                        }
+                    } else if let drive = session.selectedDrive {
+                        ForEach(recentUploads.prefix(iPadLayout.recentPreviewLimit)) { file in
+                            Button {
+                                router.open(file, siblings: recentUploads)
+                            } label: {
+                                ProfileThumbnailCard(file: file, driveId: drive.id)
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                }
+            }
+        }
+        .padding(20)
+        .background(Color(uiColor: .secondarySystemGroupedBackground),
+                    in: RoundedRectangle(cornerRadius: DS.panelRadius))
+    }
+
+    private var padInformation: some View {
+        VStack(alignment: .leading, spacing: 20) {
+            Text("Stockage et informations").font(.headline)
+            if let drive = session.selectedDrive {
+                NavigationLink(destination: TrashView(driveId: drive.id, router: router)) {
+                    Label("Corbeille", systemImage: "trash")
+                }
+            }
+            Divider()
+            HStack {
+                Label("Version", systemImage: "info.circle")
+                Spacer()
+                Text(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "—")
+                    .foregroundStyle(.secondary)
+            }
+            NavigationLink(destination: PerfView()) {
+                Label("Mesures réseau", systemImage: "gauge.with.dots")
+            }
+        }
+        .padding(20)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color(uiColor: .secondarySystemGroupedBackground),
+                    in: RoundedRectangle(cornerRadius: DS.panelRadius))
+    }
 
     private var recentUploadsSection: some View {
         Section {

@@ -9,8 +9,9 @@ import SwiftUI
 /// disponible : elle affiche directement le réglage cherché sans naviguer.
 struct SettingsView: View {
     let session: SessionStore
-    @Binding var path: [SettingsRoute]
-    @Environment(\.driveLayout) private var driveLayout
+    @Binding var path: NavigationPath
+    @Binding var selectedSpace: SettingsRoute?
+    @Environment(\.iPadLayout) private var iPadLayout
 
     @State private var searchText = ""
     @State private var cacheSize: Int = 0
@@ -44,28 +45,11 @@ struct SettingsView: View {
     }
 
     var body: some View {
-        NavigationStack(path: stackPath) {
-            Group {
-                if driveLayout.usesTwoColumns && !isSearching {
-                    HStack(spacing: 0) {
-                        hub
-                            .frame(width: 300)
-                        Divider()
-                        destinationView(for: selectedSpace)
-                            .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    }
-                } else {
-                    hub
-                }
-            }
-            .searchable(text: $searchText, prompt: "Rechercher un réglage")
-            .navigationTitle("Réglages")
-            .navigationBarTitleDisplayMode(.large)
-            .navigationDestination(for: SettingsRoute.self) { route in
-                destinationView(for: route)
-            }
-            .safeAreaInset(edge: .bottom) {
-                Color.clear.frame(height: driveLayout.listBottomInset)
+        Group {
+            if iPadLayout.isPad {
+                padNavigation
+            } else {
+                phoneNavigation
             }
         }
         .sheet(isPresented: $showDrivePicker) {
@@ -120,31 +104,68 @@ struct SettingsView: View {
 
     // MARK: - Hub : carte de compte
 
-    private var selectedSpace: SettingsRoute { path.last ?? .appearance }
-
-    private var stackPath: Binding<[SettingsRoute]> {
-        Binding(
-            get: { driveLayout.usesTwoColumns ? [] : path },
-            set: { if !driveLayout.usesTwoColumns { path = $0 } }
-        )
+    private var phoneNavigation: some View {
+        NavigationStack(path: $path) {
+            List {
+                if isSearching {
+                    searchResultsSection
+                } else {
+                    accountHeaderSection
+                    destinationsSection
+                    aboutSection
+                }
+            }
+            .listStyle(.insetGrouped)
+            .searchable(text: $searchText, prompt: "Rechercher un réglage")
+            .navigationTitle("Réglages")
+            .navigationBarTitleDisplayMode(.large)
+            .navigationDestination(for: SettingsRoute.self) { route in
+                destinationView(for: route)
+            }
+            .safeAreaInset(edge: .bottom) {
+                Color.clear.frame(height: 90)
+            }
+        }
     }
 
-    private var hub: some View {
-        List {
-            if isSearching {
-                searchResultsSection
-            } else {
+    private var padNavigation: some View {
+        NavigationSplitView {
+            List(selection: $selectedSpace) {
                 accountHeaderSection
                 destinationsSection
                 aboutSection
             }
+            .listStyle(.sidebar)
+            .navigationTitle("Réglages")
+            .navigationSplitViewColumnWidth(min: 260, ideal: 280, max: 320)
+            .safeAreaInset(edge: .bottom) { Color.clear.frame(height: DS.floatingBarInset) }
+        } detail: {
+            Group {
+                if isSearching {
+                    List { searchResultsSection }
+                        .listStyle(.insetGrouped)
+                        .safeAreaInset(edge: .bottom) { Color.clear.frame(height: DS.floatingBarInset) }
+                } else if let selectedSpace {
+                    destinationView(for: selectedSpace)
+                } else {
+                    EmptyStateView(symbol: "slider.horizontal.3", title: "Réglages",
+                                   message: "Choisissez un espace dans la liste.")
+                }
+            }
+            .frame(maxWidth: 720)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(Color(uiColor: .systemGroupedBackground))
         }
-        .listStyle(.insetGrouped)
+        .navigationSplitViewStyle(.balanced)
+        .searchable(text: $searchText, prompt: "Rechercher un réglage")
+        .onChange(of: selectedSpace) { _, selection in
+            if selection != nil { searchText = "" }
+        }
     }
 
     private func open(_ route: SettingsRoute) {
-        if driveLayout.usesTwoColumns {
-            path = [route]
+        if iPadLayout.isPad {
+            selectedSpace = route
             searchText = ""
         } else {
             path.append(route)
@@ -233,27 +254,21 @@ struct SettingsView: View {
                 title: "Apparence et navigation",
                 summary: appearanceSummary,
                 tint: .indigo,
-                route: .appearance,
-                onSelect: driveLayout.usesTwoColumns ? open : nil,
-                isSelected: driveLayout.usesTwoColumns && selectedSpace == .appearance
+                route: .appearance
             )
             SettingsLinkRow(
                 icon: "photo.stack",
                 title: "Médias et réseau",
                 summary: mediaSummary,
                 tint: .blue,
-                route: .media,
-                onSelect: driveLayout.usesTwoColumns ? open : nil,
-                isSelected: driveLayout.usesTwoColumns && selectedSpace == .media
+                route: .media
             )
             SettingsLinkRow(
                 icon: "internaldrive.fill",
                 title: "Stockage",
                 summary: storageSummary,
                 tint: .green,
-                route: .storage,
-                onSelect: driveLayout.usesTwoColumns ? open : nil,
-                isSelected: driveLayout.usesTwoColumns && selectedSpace == .storage
+                route: .storage
             )
             SettingsLinkRow(
                 icon: "lock.shield.fill",
@@ -261,8 +276,6 @@ struct SettingsView: View {
                 summary: securitySummary,
                 tint: .orange,
                 route: .security,
-                onSelect: driveLayout.usesTwoColumns ? open : nil,
-                isSelected: driveLayout.usesTwoColumns && selectedSpace == .security,
                 showsDot: !isLockCodeEnabled
             )
             SettingsLinkRow(
@@ -270,9 +283,7 @@ struct SettingsView: View {
                 title: "Compte et drive",
                 summary: session.selectedDrive?.name ?? "—",
                 tint: .teal,
-                route: .account,
-                onSelect: driveLayout.usesTwoColumns ? open : nil,
-                isSelected: driveLayout.usesTwoColumns && selectedSpace == .account
+                route: .account
             )
         } header: {
             Text("Réglages")
@@ -334,12 +345,12 @@ struct SettingsView: View {
                 Toggle("Étoiles des favoris", isOn: $showFavoriteStars)
             }
             if matches("cartes ligne grille colonnes densité") {
-                Picker("Cartes par ligne", selection: $fileGridColumns) {
+                Picker(iPadLayout.isPad ? "Densité des miniatures" : "Cartes par ligne", selection: $fileGridColumns) {
                     ForEach([2, 3, 4, 5, 6, 7], id: \.self) { Text("\($0)").tag($0) }
                 }
             }
             if matches("tags colonnes") {
-                Picker("Colonnes des tags", selection: $tagGridColumns) {
+                Picker(iPadLayout.isPad ? "Colonnes des tags sur iPhone" : "Colonnes des tags", selection: $tagGridColumns) {
                     Text("2").tag(2); Text("3").tag(3)
                 }
             }
@@ -356,7 +367,7 @@ struct SettingsView: View {
                 ColorPicker("Couleur des dossiers", selection: defaultFolderColorBinding, supportsOpacity: false)
             }
             if matches("favoris haut retour scroll") {
-                Toggle("Revenir en haut (favoris)", isOn: $favoritesReselectScrollToTop)
+                Toggle(iPadLayout.isPad ? "Retour en haut des favoris sur iPhone" : "Revenir en haut (favoris)", isOn: $favoritesReselectScrollToTop)
             }
             if matches("miniatures précharger photos") {
                 Toggle("Précharger les miniatures", isOn: $prefetchThumbnails)
@@ -474,6 +485,8 @@ struct SettingsView: View {
     }
 }
 
+// MARK: - Routage
+
 // MARK: - Briques du hub
 
 /// Ligne de destination : icône teintée, titre, résumé d'état live.
@@ -483,41 +496,29 @@ private struct SettingsLinkRow: View {
     let summary: String
     let tint: Color
     let route: SettingsRoute
-    var onSelect: ((SettingsRoute) -> Void)? = nil
-    var isSelected = false
     var showsDot = false
 
     var body: some View {
-        Group {
-            if let onSelect {
-                Button { onSelect(route) } label: { row }
-                    .buttonStyle(.plain)
-                    .listRowBackground(isSelected ? Color.accentColor.opacity(0.10) : Color(uiColor: .secondarySystemGroupedBackground))
-                    .accessibilityAddTraits(isSelected ? .isSelected : [])
-            } else {
-                NavigationLink(value: route) { row }
-            }
-        }
-    }
-
-    private var row: some View {
-        HStack(spacing: 12) {
-            HubIcon(icon, tint: tint)
-            VStack(alignment: .leading, spacing: 1) {
-                HStack(spacing: 6) {
-                    Text(title)
-                    if showsDot {
-                        Circle().fill(.orange).frame(width: 8, height: 8)
-                            .accessibilityLabel("Action recommandée")
+        NavigationLink(value: route) {
+            HStack(spacing: 12) {
+                HubIcon(icon, tint: tint)
+                VStack(alignment: .leading, spacing: 1) {
+                    HStack(spacing: 6) {
+                        Text(title)
+                        if showsDot {
+                            Circle().fill(.orange).frame(width: 8, height: 8)
+                                .accessibilityLabel("Action recommandée")
+                        }
                     }
+                    Text(summary)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
                 }
-                Text(summary)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
             }
+            .padding(.vertical, 2)
         }
-        .padding(.vertical, 2)
+        .tag(route)
     }
 }
 
@@ -545,7 +546,7 @@ private struct HubIcon: View {
 // MARK: - Espace 1 : Apparence et navigation
 
 private struct AppearanceSpace: View {
-    @Environment(\.driveLayout) private var driveLayout
+    @Environment(\.iPadLayout) private var iPadLayout
     @Binding var showFileSizes: Bool
     @Binding var showFavoriteStars: Bool
     @Binding var fileGridColumns: Int
@@ -563,7 +564,7 @@ private struct AppearanceSpace: View {
                 VStack(alignment: .leading, spacing: 10) {
                     Stepper(value: $fileGridColumns, in: 2...7) {
                         HStack {
-                            Text("Cartes par ligne")
+                            Text(iPadLayout.isPad ? "Densité des miniatures" : "Cartes par ligne")
                             Spacer()
                             Text("\(fileGridColumns)")
                                 .foregroundStyle(.secondary)
@@ -585,7 +586,7 @@ private struct AppearanceSpace: View {
 
                 Stepper(value: $tagGridColumns, in: 2...3) {
                     HStack {
-                        Text("Colonnes des tags")
+                        Text(iPadLayout.isPad ? "Colonnes des tags sur iPhone" : "Colonnes des tags")
                         Spacer()
                         Text("\(tagGridColumns)")
                             .foregroundStyle(.secondary)
@@ -595,7 +596,9 @@ private struct AppearanceSpace: View {
             } header: {
                 Text("Densité")
             } footer: {
-                Text("Moins de cartes = plus grandes miniatures. L'aperçu ci-dessus suit votre choix.")
+                Text(iPadLayout.isPad
+                     ? "La densité adapte les miniatures à la largeur de la fenêtre. Le réglage des tags concerne l’iPhone."
+                     : "Moins de cartes = plus grandes miniatures. L'aperçu ci-dessus suit votre choix.")
             }
 
             Section("Informations visibles") {
@@ -607,7 +610,7 @@ private struct AppearanceSpace: View {
 
             Section {
                 Toggle("Dossiers en premier (tags)", isOn: $foldersFirstInTags)
-                Toggle("Revenir en haut (favoris)", isOn: $favoritesReselectScrollToTop)
+                Toggle(iPadLayout.isPad ? "Retour en haut des favoris sur iPhone" : "Revenir en haut (favoris)", isOn: $favoritesReselectScrollToTop)
                 HStack {
                     Text("Couleur des dossiers")
                     Spacer()
@@ -629,7 +632,7 @@ private struct AppearanceSpace: View {
             }
         }
         .safeAreaInset(edge: .bottom) {
-            Color.clear.frame(height: driveLayout.listBottomInset)
+            Color.clear.frame(height: iPadLayout.isPad ? DS.floatingBarInset : 90)
         }
         .navigationTitle("Apparence")
         .navigationBarTitleDisplayMode(.inline)
@@ -639,7 +642,7 @@ private struct AppearanceSpace: View {
 // MARK: - Espace 2 : Médias et réseau
 
 private struct MediaSpace: View {
-    @Environment(\.driveLayout) private var driveLayout
+    @Environment(\.iPadLayout) private var iPadLayout
     @Binding var prefetchThumbnails: Bool
     @Binding var prefetchVideoURLs: Bool
     @Binding var prefetchOnWiFiOnly: Bool
@@ -690,7 +693,7 @@ private struct MediaSpace: View {
             }
         }
         .safeAreaInset(edge: .bottom) {
-            Color.clear.frame(height: driveLayout.listBottomInset)
+            Color.clear.frame(height: iPadLayout.isPad ? DS.floatingBarInset : 90)
         }
         .navigationTitle("Médias et réseau")
         .navigationBarTitleDisplayMode(.inline)
@@ -700,7 +703,7 @@ private struct MediaSpace: View {
 // MARK: - Espace 3 : Stockage
 
 private struct StorageSpace: View {
-    @Environment(\.driveLayout) private var driveLayout
+    @Environment(\.iPadLayout) private var iPadLayout
     let cacheSize: Int
     @Binding var limitMB: Int
     let onPurge: () -> Void
@@ -740,7 +743,7 @@ private struct StorageSpace: View {
             }
         }
         .safeAreaInset(edge: .bottom) {
-            Color.clear.frame(height: driveLayout.listBottomInset)
+            Color.clear.frame(height: iPadLayout.isPad ? DS.floatingBarInset : 90)
         }
         .navigationTitle("Stockage")
         .navigationBarTitleDisplayMode(.inline)
@@ -769,7 +772,7 @@ private struct StorageSpace: View {
 // MARK: - Espace 4 : Sécurité
 
 private struct SecuritySpace: View {
-    @Environment(\.driveLayout) private var driveLayout
+    @Environment(\.iPadLayout) private var iPadLayout
     let isEnabled: Bool
     let onActivate: () -> Void
     let onChange: () -> Void
@@ -814,7 +817,7 @@ private struct SecuritySpace: View {
             }
         }
         .safeAreaInset(edge: .bottom) {
-            Color.clear.frame(height: driveLayout.listBottomInset)
+            Color.clear.frame(height: iPadLayout.isPad ? DS.floatingBarInset : 90)
         }
         .navigationTitle("Sécurité")
         .navigationBarTitleDisplayMode(.inline)
@@ -824,7 +827,7 @@ private struct SecuritySpace: View {
 // MARK: - Espace 5 : Compte et drive
 
 private struct AccountSpace: View {
-    @Environment(\.driveLayout) private var driveLayout
+    @Environment(\.iPadLayout) private var iPadLayout
     let session: SessionStore
     let onChangeDrive: () -> Void
     let onSignOut: () -> Void
@@ -865,7 +868,7 @@ private struct AccountSpace: View {
             }
         }
         .safeAreaInset(edge: .bottom) {
-            Color.clear.frame(height: driveLayout.listBottomInset)
+            Color.clear.frame(height: iPadLayout.isPad ? DS.floatingBarInset : 90)
         }
         .navigationTitle("Compte")
         .navigationBarTitleDisplayMode(.inline)
