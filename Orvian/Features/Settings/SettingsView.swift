@@ -157,8 +157,6 @@ struct SettingsView: View {
                 // iPhone) ne laissait qu'une bande vide sous la liste.
             }
             .background(Color(uiColor: .systemGroupedBackground))
-            // Masquer la barre de navigation libère sa hauteur sans laisser de
-            // titre en double avec l'en-tête de la colonne.
             .toolbar(.hidden, for: .navigationBar)
             .ignoresSafeArea(.container, edges: .top)
             .navigationSplitViewColumnWidth(min: 260, ideal: 280, max: 320)
@@ -586,6 +584,7 @@ private struct HubIcon: View {
 
 private struct AppearanceSpace: View {
     @Environment(\.iPadLayout) private var iPadLayout
+    @AppStorage("iPadTabBarAtBottom") private var iPadTabBarAtBottom = false
     @Binding var showFileSizes: Bool
     @Binding var showFavoriteStars: Bool
     @Binding var fileGridColumns: Int
@@ -599,6 +598,15 @@ private struct AppearanceSpace: View {
 
     var body: some View {
         List {
+            if iPadLayout.isPad {
+                Section {
+                    Toggle("Barre d’onglets en bas", isOn: $iPadTabBarAtBottom)
+                } header: {
+                    Text("Navigation iPad")
+                } footer: {
+                    Text("Centre la barre en bas et libère la bande supérieure pour les barres latérales. Le changement est immédiat.")
+                }
+            }
             Section {
                 VStack(alignment: .leading, spacing: 10) {
                     Stepper(value: $fileGridColumns, in: 2...7) {

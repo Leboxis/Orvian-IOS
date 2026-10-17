@@ -200,10 +200,7 @@ struct TagsView: View {
     @ViewBuilder
     private var padCategoryList: some View {
         VStack(spacing: 0) {
-            // En-tête dans la colonne (et non dans la barre de navigation
-            // système) : la barre d'onglets native n'est dessinée qu'au centre
-            // de la fenêtre, la colonne peut donc remonter dans la bande
-            // laissée vide et commencer sous la barre d'état.
+            // Un seul en-tête, sans seconde barre de navigation au-dessus.
             PadSidebarHeader(title: tagNavigationTitle, columnVisibility: $columnVisibility) {
                 Menu {
                     Button {
@@ -251,8 +248,6 @@ struct TagsView: View {
             }
         }
         .background(Color(uiColor: .systemGroupedBackground))
-        // La colonne remonte dans la bande de la barre d'onglets : masquer la
-        // barre de navigation libère sa hauteur sans laisser de titre en double.
         .toolbar(.hidden, for: .navigationBar)
         .ignoresSafeArea(.container, edges: .top)
     }

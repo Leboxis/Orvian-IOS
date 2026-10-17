@@ -65,6 +65,16 @@ class IPadNavigationWiringChecks(unittest.TestCase):
         self.assertNotIn("navState.reset", selection)
         self.assertNotIn("safeAreaInset(edge: .bottom", main)
 
+    def test_ipad_bottom_bar_is_optional_and_does_not_replace_native_tab_state(self):
+        main = self.source("Orvian/App/MainTabView.swift")
+        settings = self.source("Orvian/Features/Settings/SettingsView.swift")
+        self.assertIn('@AppStorage("iPadTabBarAtBottom")', main)
+        self.assertIn('@AppStorage("iPadTabBarAtBottom")', settings)
+        self.assertIn('if iPadTabBarAtBottom {', main)
+        self.assertIn('.environment(\\.iPadLayout, IPadLayout(isPad: true', main)
+        self.assertIn('Toggle("Barre d’onglets en bas"', settings)
+        self.assertIn('if iPadLayout.isPad', settings)
+
     def test_tag_details_and_settings_use_owned_navigation_state(self):
         tags = self.source("Orvian/Features/Tag/TagsView.swift")
         self.assertIn("NavigationStack(path: $padNavigation.folders)", tags)

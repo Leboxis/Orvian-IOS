@@ -19,6 +19,9 @@ struct MainTabView: View {
     let shell: MainTabShellState
     @State private var showUploadSheet = false
     @AppStorage("favoritesReselectScrollToTop") private var favoritesReselectScrollToTop = true
+    @AppStorage("iPadTabBarAtBottom") private var iPadTabBarAtBottom = false
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @State private var iPadWidth: CGFloat = 0
 
     private let uploadManager = UploadManager.shared
 
@@ -34,16 +37,24 @@ struct MainTabView: View {
         @Bindable var shell = shell
         Group {
             if UIDevice.current.userInterfaceIdiom == .pad {
-                IPadTabView(selection: iPadSelection) { tab in
-                    tabContent(tab)
-                }
-                .overlay(alignment: .bottom) {
-                    TransferOverlayChrome(
-                        uploadManager: uploadManager,
-                        onShowUploads: { showUploadSheet = true }
-                    )
-                    .frame(maxWidth: DS.maxTabBarWidth)
-                    .padding(.bottom, 4)
+                if iPadTabBarAtBottom {
+                    phoneNavigation
+                        .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { iPadWidth = $0 }
+                        .environment(\.iPadLayout, IPadLayout(isPad: true, width: iPadWidth,
+                                                            largeText: dynamicTypeSize.isAccessibilitySize))
+                } else {
+                    IPadTabView(selection: iPadSelection) { tab in
+                        tabContent(tab)
+                    }
+                    .overlay(alignment: .bottom) {
+                        TransferOverlayChrome(
+                            uploadManager: uploadManager,
+                            onShowUploads: { showUploadSheet = true }
+                        )
+                        .frame(maxWidth: DS.maxTabBarWidth)
+                        .frame(maxWidth: .infinity)
+                        .padding(.bottom, 4)
+                    }
                 }
             } else {
                 phoneNavigation

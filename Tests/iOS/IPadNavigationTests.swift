@@ -5,6 +5,11 @@ import SwiftUI
 /// Conteneur réel, écrans locaux : aucun token ni appel réseau.
 @MainActor
 final class IPadNavigationTests: XCTestCase {
+    final class LandscapeHost<Content: View>: UIHostingController<Content> {
+        override var supportedInterfaceOrientations: UIInterfaceOrientationMask {
+            UIDevice.current.userInterfaceIdiom == .pad ? .landscape : .all
+        }
+    }
     private enum WaitError: Error { case timeout }
     final class Probe {
         var visibleTabs: Set<AppTab> = []
@@ -140,10 +145,12 @@ final class IPadNavigationTests: XCTestCase {
         }
         let defaults = UserDefaults.standard
         let oldDrive = defaults.object(forKey: "orvian.drive-id")
+        let oldBarPosition = defaults.object(forKey: "iPadTabBarAtBottom")
         let cacheKey = "home_start_dir_locked_42"
         let oldRoot = defaults.object(forKey: cacheKey)
         defer {
             defaults.set(oldDrive, forKey: "orvian.drive-id")
+            defaults.set(oldBarPosition, forKey: "iPadTabBarAtBottom")
             defaults.set(oldRoot, forKey: cacheKey)
         }
         defaults.set(try JSONEncoder().encode(DriveFile.root(name: "Accueil de test")), forKey: cacheKey)
@@ -154,7 +161,7 @@ final class IPadNavigationTests: XCTestCase {
         let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
         let previous = scene.keyWindow
         let window = UIWindow(windowScene: scene)
-        let host = UIHostingController(rootView:
+        let host = LandscapeHost(rootView:
             MainTabView(drive: drive, session: session, shell: shell).preferredColorScheme(.light))
         window.rootViewController = host
         window.makeKeyAndVisible()
@@ -162,28 +169,43 @@ final class IPadNavigationTests: XCTestCase {
             window.isHidden = true
             window.rootViewController = nil
             previous?.makeKey()
+            scene.requestGeometryUpdate(.iOS(interfaceOrientations: .portrait)) { _ in }
         }
+        if UIDevice.current.userInterfaceIdiom == .pad {
+            host.setNeedsUpdateOfSupportedInterfaceOrientations()
+            scene.requestGeometryUpdate(.iOS(interfaceOrientations: .landscapeRight)) { error in
+                XCTFail("Landscape rotation failed: \(error.localizedDescription)")
+            }
+            try await waitUntil { host.view.bounds.width > host.view.bounds.height }
+        }
+        let orientation = host.view.bounds.width > host.view.bounds.height ? "landscape" : "portrait"
         try await Task.sleep(for: .milliseconds(300))
         let home = try [folder(101, name: "Dossier Accueil")]
         let favorites = try [folder(201, name: "Dossier Favoris")]
         shell.navState.homePath = home
         shell.navState.favoritesPath = favorites
 
-        for theme in [ColorScheme.light, .dark] {
-            host.rootView = MainTabView(drive: drive, session: session, shell: shell).preferredColorScheme(theme)
-            for tab in [AppTab.home, .favorites, .tag, .profile, .settings] {
-                shell.tab = tab
-                try await Task.sleep(for: .milliseconds(300))
-                host.view.layoutIfNeeded()
-                XCTAssertEqual(shell.navState.homePath, home)
-                XCTAssertEqual(shell.navState.favoritesPath, favorites)
-                let image = UIGraphicsImageRenderer(bounds: host.view.bounds).image { _ in
-                    host.view.drawHierarchy(in: host.view.bounds, afterScreenUpdates: true)
+        for bottomBar in [false, true] {
+            defaults.set(bottomBar, forKey: "iPadTabBarAtBottom")
+            for theme in [ColorScheme.light, .dark] {
+                host.rootView = MainTabView(drive: drive, session: session, shell: shell).preferredColorScheme(theme)
+                for tab in [AppTab.home, .favorites, .tag, .profile, .settings] {
+                    shell.tab = tab
+                    try await Task.sleep(for: .milliseconds(300))
+                    host.view.layoutIfNeeded()
+                    if UIDevice.current.userInterfaceIdiom == .pad {
+                        XCTAssertGreaterThan(host.view.bounds.width, host.view.bounds.height)
+                    }
+                    XCTAssertEqual(shell.navState.homePath, home)
+                    XCTAssertEqual(shell.navState.favoritesPath, favorites)
+                    let image = UIGraphicsImageRenderer(bounds: host.view.bounds).image { _ in
+                        host.view.drawHierarchy(in: host.view.bounds, afterScreenUpdates: true)
+                    }
+                    let attachment = XCTAttachment(image: image)
+                    attachment.name = "iPad-\(orientation)-\(bottomBar ? "bottom" : "top")-\(tab.rawValue)-\(theme == .dark ? "sombre" : "clair")-sans-compte"
+                    attachment.lifetime = .keepAlways
+                    add(attachment)
                 }
-                let attachment = XCTAttachment(image: image)
-                attachment.name = "iPad-\(tab.rawValue)-\(theme == .dark ? "sombre" : "clair")-sans-compte"
-                attachment.lifetime = .keepAlways
-                add(attachment)
             }
         }
     }

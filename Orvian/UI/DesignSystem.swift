@@ -55,11 +55,10 @@ enum DS {
     static let floatingActionInset: CGFloat = 104
     /// Marge basse des pastilles de progression centrées au-dessus de la barre.
     static let floatingPillInset: CGFloat = 130
-    /// Marge basse des listes iPad : la barre d'onglets native y est une
-    /// pastille en **haut** ; seule la pastille de transfert flotte encore en
-    /// bas. Y réserver `floatingBarInset` laissait 130 pt de vide sous chaque
-    /// liste de détail.
-    static let padBottomInset: CGFloat = 72
+    /// La barre en bas et les transferts partagent la même réserve que sur iPhone.
+    static var padBottomInset: CGFloat {
+        UserDefaults.standard.bool(forKey: "iPadTabBarAtBottom") ? floatingBarInset : 72
+    }
 
     // MARK: - Ombres
 
