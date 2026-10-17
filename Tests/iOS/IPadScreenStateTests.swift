@@ -3,6 +3,19 @@ import XCTest
 
 @MainActor
 final class IPadScreenStateTests: XCTestCase {
+    func testOneCrossButtonStartsAndStopsTheWholePadMode() {
+        var cross = TagIntersectionState()
+        cross.toggleMode()
+        XCTAssertTrue(cross.isEditing)
+        cross.toggle(7); cross.toggle(9)
+        XCTAssertEqual(cross.selectedIDs, [7, 9])
+        cross.toggleMode()
+        XCTAssertFalse(cross.isActive)
+        XCTAssertTrue(cross.selectedIDs.isEmpty)
+        cross.toggleMode()
+        XCTAssertTrue(cross.isEditing)
+        XCTAssertTrue(cross.selectedIDs.isEmpty)
+    }
     func testCrossedTagsSurviveTabChangesButNotANewSession() {
         let shell = MainTabShellState(driveId: 42)
         shell.navState.tagIntersection.toggle(7)

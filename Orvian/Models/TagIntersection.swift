@@ -57,4 +57,7 @@ struct TagIntersectionState {
     }
     mutating func finish() { isEditing = false }
     mutating func clear() { selectedIDs = []; isEditing = false }
+    mutating func toggleMode() {
+        if isActive { clear() } else { isEditing = true }
+    }
 }
