@@ -14,6 +14,8 @@ extension EnvironmentValues {
 /// unique de ces valeurs ; les modificateurs `floatingChrome` /
 /// `inlineChrome` / `inputChrome` en portent l'application.
 enum DS {
+    /// Shell safe-area insets own navigation and transfer height, not each screen.
+    static let contentBottomInset: CGFloat = 12
     // MARK: - Rayons
 
     /// Coins arrondis des cartes de fichiers.
@@ -44,22 +46,6 @@ enum DS {
     /// ses cinq onglets occupent toute la largeur d'un iPad.
     static let maxTabBarWidth: CGFloat = 560
 
-    // MARK: - Marges basses du contenu
-
-    /// Espace réservé sous une grille pour la barre d'onglets flottante **et**
-    /// pour la pastille de transfert qui flotte au-dessus d'elle. Égal à
-    /// `floatingPillInset` : sans cela, une pastille visible recouvrirait le
-    /// bas de la dernière rangée de cartes.
-    static let floatingBarInset: CGFloat = 130
-    /// Marge basse des actions superposées à la barre (bouton « + »).
-    static let floatingActionInset: CGFloat = 104
-    /// Marge basse des pastilles de progression centrées au-dessus de la barre.
-    static let floatingPillInset: CGFloat = 130
-    /// La barre en bas et les transferts partagent la même réserve que sur iPhone.
-    static var padBottomInset: CGFloat {
-        UserDefaults.standard.bool(forKey: "iPadTabBarAtBottom") ? floatingBarInset : 72
-    }
-
     // MARK: - Ombres
 
     /// Ombre du chrome flottant (barre d'onglets, pastilles, bouton « + »).
@@ -81,6 +67,7 @@ enum DS {
 /// Fond translucide, liseré et ombre appliqués d'un coup, avec la même
 /// matière et le même liseré (0,5 pt) pour tout le chrome flottant.
 private struct ChromeBackground<S: InsettableShape>: ViewModifier {
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     let shape: S
     let material: Material
     let shadow: Color
@@ -89,7 +76,13 @@ private struct ChromeBackground<S: InsettableShape>: ViewModifier {
 
     func body(content: Content) -> some View {
         content
-            .background(material, in: shape)
+            .background {
+                if reduceTransparency {
+                    shape.fill(Color(uiColor: .secondarySystemBackground))
+                } else {
+                    shape.fill(material)
+                }
+            }
             .overlay {
                 shape.strokeBorder(HierarchicalShapeStyle.quaternary, lineWidth: 0.5)
             }

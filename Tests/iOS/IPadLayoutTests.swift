@@ -4,10 +4,10 @@ import XCTest
 
 final class IPadLayoutTests: XCTestCase {
     func testPhoneColumnsKeepTheirStoredMeaning() {
-        let phone = IPadLayout(isPad: false, width: 1366)
+        let phone = IPadLayout(isPad: false, width: 430)
         XCTAssertEqual(phone.fileColumns(preferred: 3, margin: 14, spacing: 10), 3)
         XCTAssertEqual(phone.fileColumns(preferred: 0, margin: 14, spacing: 10), 2)
-        XCTAssertEqual(phone.fileColumns(preferred: 99, margin: 14, spacing: 10), 7)
+        XCTAssertEqual(phone.fileColumns(preferred: 99, margin: 14, spacing: 10), 3)
         XCTAssertEqual(phone.horizontalInset(base: 14), 14)
         XCTAssertFalse(phone.usesTwoColumns)
         XCTAssertEqual(phone.recentPreviewLimit, 3)
@@ -16,8 +16,8 @@ final class IPadLayoutTests: XCTestCase {
     func testPadColumnsUseTheActualPaneWidth() {
         let wide = IPadLayout(isPad: true, width: 1366)
         let pane = IPadLayout(isPad: true, width: 760)
-        XCTAssertEqual(wide.fileColumns(preferred: 3, margin: 14, spacing: 10), 7)
-        XCTAssertEqual(pane.fileColumns(preferred: 3, margin: 14, spacing: 10), 4)
+        XCTAssertEqual(wide.fileColumns(preferred: 3, margin: 14, spacing: 10), 5)
+        XCTAssertEqual(pane.fileColumns(preferred: 3, margin: 14, spacing: 10), 2)
         XCTAssertEqual(wide.horizontalInset(base: 14), 28)
         XCTAssertTrue(wide.usesTwoColumns)
         XCTAssertEqual(wide.recentPreviewLimit, 6)
@@ -40,5 +40,17 @@ final class IPadLayoutTests: XCTestCase {
                           regular.fileColumns(preferred: 3, margin: 14, spacing: 10))
         XCTAssertFalse(accessible.usesTwoColumns)
         XCTAssertEqual(accessible.recentPreviewLimit, 3)
+    }
+
+    func testPhoneMinimumSizeAndAccessibleText() {
+        for width: CGFloat in [320, 375, 430] {
+            let phone = IPadLayout(isPad: false, width: width)
+            let count = phone.fileColumns(preferred: 7, margin: 14, spacing: 10)
+            XCTAssertGreaterThanOrEqual((width - 28 - CGFloat(count - 1) * 10) / CGFloat(count), 100)
+            XCTAssertEqual(IPadLayout(isPad: false, width: width, largeText: true)
+                .fileColumns(preferred: 7, margin: 14, spacing: 10), 1)
+        }
+        let pad = IPadLayout(isPad: true, width: 1366)
+        XCTAssertEqual(Set((2...7).map { pad.fileColumns(preferred: $0, margin: 14, spacing: 10) }).count, 6)
     }
 }

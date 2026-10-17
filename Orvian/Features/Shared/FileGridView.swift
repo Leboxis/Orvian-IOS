@@ -17,6 +17,9 @@ struct FileGridView: View {
     /// Les actions de masse utilisent ainsi la même source que les cartes.
     var onVisibleItemsChanged: (([DriveFile]) -> Void)?
 
+    var onResetFilters: (() -> Void)? = nil
+    var onEmptyAction: (() -> Void)? = nil
+
     /// Filtre client des éléments affichés (barre de recherche de l'Accueil).
     var searchText: String = ""
     
@@ -56,6 +59,7 @@ struct FileGridView: View {
     @AppStorage("prefetchOnWiFiOnly") private var prefetchOnWiFiOnly = true
     @AppStorage("fileGridColumns") private var fileGridColumns = 3
     @Environment(\.iPadLayout) private var iPadLayout
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @State private var containerWidth: CGFloat = 0
     @AppStorage("foldersFirstInTags") private var foldersFirstInTags = true
     /// Préférence globale : affiche l'étoile des favoris sur les cartes,
@@ -369,7 +373,7 @@ struct FileGridView: View {
                 .padding(.top, 6 + contentTopInset)
                 // iPhone : barre flottante à réserver. iPad : la barre est en
                 // haut, seule la pastille de transfert flotte en bas.
-                .padding(.bottom, iPadLayout.isPad ? DS.padBottomInset : DS.floatingBarInset)
+                .padding(.bottom, DS.contentBottomInset)
                 // L'iPhone garde sa borne ; l'iPad adapte les colonnes à la largeur du panneau.
                 .frame(maxWidth: iPadLayout.isPad ? .infinity : DS.maxContentWidth)
                 .frame(maxWidth: .infinity)
@@ -379,7 +383,7 @@ struct FileGridView: View {
             .scrollBounceBehavior(.always, axes: .vertical)
             .scrollIndicators(.hidden)
             .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { width in
-                if iPadLayout.isPad { containerWidth = width }
+                containerWidth = width
             }
             .onChange(of: scrollToTopRequest) { oldValue, newValue in
                 guard oldValue != newValue else { return }
@@ -504,6 +508,10 @@ struct FileGridView: View {
                 Label("Aucun résultat", systemImage: "line.3.horizontal.decrease.circle")
             } description: {
                 Text(noResultsMessage)
+            } actions: {
+                if let onResetFilters {
+                    Button("Effacer la recherche et les filtres", action: onResetFilters)
+                }
             }
             .padding(.top, 60)
         }
@@ -605,7 +613,7 @@ struct FileGridView: View {
     private var gridLayout: IPadLayout {
         IPadLayout(isPad: iPadLayout.isPad,
                    width: containerWidth > 0 ? containerWidth : iPadLayout.width,
-                   largeText: iPadLayout.largeText)
+                   largeText: dynamicTypeSize.isAccessibilitySize)
     }
 
     private var columns: [GridItem] {
@@ -747,7 +755,7 @@ struct FileGridView: View {
 
     private var skeleton: some View {
         LazyVGrid(columns: columns, spacing: DS.gridSpacing) {
-            ForEach(0..<9, id: \.self) { _ in
+            ForEach(0..<(columns.count * 3), id: \.self) { _ in
                 // Le squelette reprend la hauteur finale d'une carte (vignette
                 // carrée + deux lignes de texte) : le contenu ne se décale plus
                 // quand les données remplacent le chargement.
@@ -755,9 +763,10 @@ struct FileGridView: View {
                     RoundedRectangle(cornerRadius: DS.cardRadius, style: .continuous)
                         .fill(.quaternary.opacity(0.4))
                         .aspectRatio(1, contentMode: .fit)
-                    RoundedRectangle(cornerRadius: DS.smallRadius, style: .continuous)
-                        .fill(.quaternary.opacity(0.3))
-                        .frame(height: 10)
+                    Text("Chargement")
+                        .font(.footnote)
+                        .lineLimit(dynamicTypeSize.isAccessibilitySize ? 4 : 2, reservesSpace: true)
+                        .frame(maxWidth: .infinity)
                     RoundedRectangle(cornerRadius: DS.smallRadius, style: .continuous)
                         .fill(.quaternary.opacity(0.25))
                         .frame(width: 34, height: 8)
@@ -769,11 +778,30 @@ struct FileGridView: View {
     }
 
     private var emptyState: some View {
-        EmptyStateView(
-            symbol: emptySymbol,
-            title: emptyTitle,
-            message: "Tirez vers le bas pour rafraîchir."
-        )
+        ContentUnavailableView {
+            Label(emptyTitle, systemImage: emptySymbol)
+        } description: {
+            Text(emptyMessage)
+        } actions: {
+            if let onEmptyAction, case .directory = viewModel.source {
+                Button("Importer des fichiers", action: onEmptyAction)
+                    .buttonStyle(.borderedProminent)
+            }
+            if let onResetFilters, isSearching || filters.isActive {
+                Button("Effacer la recherche et les filtres", action: onResetFilters)
+            }
+        }
+    }
+
+    private var emptyMessage: String {
+        switch viewModel.source {
+        case .directory: return "Importez des fichiers ou créez un dossier avec le bouton Ajouter."
+        case .favorites: return "Ajoutez un fichier aux favoris depuis son menu ou sa fiche de détails."
+        case .category: return "Appliquez ce tag à un fichier depuis son menu ou sa fiche de détails."
+        case .search: return "Essayez un autre nom ou élargissez la portée de la recherche."
+        case .recents: return "Vos prochains imports apparaîtront ici."
+        case .trash: return "Les fichiers supprimés apparaîtront ici."
+        }
     }
 
     private func errorState(_ message: String) -> some View {
@@ -804,7 +832,7 @@ struct FileGridView: View {
         switch viewModel.source {
         case .directory: return "Dossier vide"
         case .favorites: return "Aucun favori"
-        case .recents: return "Aucun upload récent"
+        case .recents: return "Aucun import récent"
         case .category: return "Aucun fichier avec ce tag"
         case .trash: return "Corbeille vide"
         case .search: return "Aucun résultat"

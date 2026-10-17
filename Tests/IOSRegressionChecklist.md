@@ -12,6 +12,35 @@ utilisent des secrets factices et des transferts simulés, sans compte kDrive.
 
 ## Refonte iPad du 17 octobre 2026
 
+### Corrections de l'audit iPhone / iPad
+
+- iPhone 320/375/430 pt et iPad 1024×1366 / 1366×1024 : vérifier les six niveaux
+  de densité, puis une fenêtre étroite. Les préférences restent enregistrées ;
+  une carte n'est jamais comprimée sous 100 pt (220 pt en texte accessible,
+  sauf panneau plus étroit affichant une seule colonne).
+- VoiceOver : activer une carte, appeler Renommer dans ses actions, sélectionner
+  un fichier et entendre son état et ses tags. Contrôler aussi le clavier complet.
+- Au texte maximum, ouvrir le menu Navigation en bas : les cinq onglets gardent
+  leurs noms. Vérifier champ de recherche, portée et noms de fichiers longs.
+- Lancer envoi et téléchargement simultanément : la dernière ligne et les
+  commandes restent accessibles, sans collision avec Ajouter (désormais en haut).
+- Clavier : Command-F ouvre la recherche, Échap quitte la sélection/recherche,
+  Command-A sélectionne uniquement les fichiers affichés et laisse la sélection
+  du texte native quand le champ est actif. Un onglet masqué ne reçoit rien.
+- Déposer depuis Fichiers 1 puis 20 documents ; contrôler nom, destination,
+  progression, échec de copie et réessai. Refuser dossiers et liens. Changer
+  de drive, déconnecter ou verrouiller pendant la préparation : aucun import
+  tardif dans une autre session. Les fichiers sources ne sont jamais supprimés.
+- Mode avion sans cache : Activité affiche une erreur et Réessayer, pas un état
+  vide. Avec cache, les fichiers restent présents malgré l'erreur d'actualisation.
+- Remonter directement à chaque parent depuis le menu du chemin, dans Accueil,
+  Favoris et Tags, puis tester retour et changement d'onglet.
+- Visionneuses image/vidéo : titre long, copie accessible, commandes de 44 pt,
+  portrait/paysage, texte maximum, photos blanches et noires. Échap ferme ;
+  Espace contrôle la lecture vidéo.
+- Aide de connexion : défilement avec texte maximal et clavier, fermeture et
+  passage de la feuille moyenne à grande. Réduire la transparence sur les cartes.
+
 La CI exécute `IPadNavigationTests`, `IPadLayoutTests` et `IPadScreenStateTests`
 sur un simulateur iPad, en plus des vérifications iPhone existantes. Le résultat
 `Orvian-iPad-tests` contient les captures des véritables écrans clair/sombre sans

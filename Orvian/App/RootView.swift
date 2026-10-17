@@ -38,6 +38,12 @@ struct RootView: View {
         .reduceMotionGate()
         .onAppear { privacy.contentDidAppear() }
         .allowsHitTesting(privacy.allowsInteraction(snapshot))
+        .disabled(!privacy.allowsInteraction(snapshot))
+        .environment(\.canImportFiles, { driveId in
+            privacy.allowsInteraction(privacy.snapshot)
+                && privacy.snapshot.phase == .active
+                && session.selectedDrive?.id == driveId
+        })
         .accessibilityHidden(!privacy.allowsInteraction(snapshot))
         .background { AppPrivacyWindow(state: privacy) }
         .onReceive(NotificationCenter.default.publisher(for: .apiUnauthorized)) { notification in

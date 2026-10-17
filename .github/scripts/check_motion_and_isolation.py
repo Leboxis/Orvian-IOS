@@ -114,20 +114,22 @@ assert "case .settings, .profile: return false" in tabbar
 assert ".animation(Motion.animation(.snappy(duration: 0.25)), value: selection)" in tabbar
 assert "withAnimation(.snappy(duration: 0.25))" not in tabbar
 main_tabs = source("Orvian/App/MainTabView.swift")
-assert "safeAreaInset(edge: .bottom" not in main_tabs, \
-    "La pastille de transfert ne doit plus pousser la grille"
+assert main_tabs.count(".safeAreaInset(edge: .bottom, spacing: 0)") == 2, \
+    "Chaque coque doit réserver la hauteur réelle de sa navigation et des deux transferts"
 assert "target == shell.tab || (target.isKeptAlive && shell.visitedTabs.contains(target))" in main_tabs, \
     "Un onglet conservé ne doit être monté qu'à partir de sa première visite"
 assert "shell.markVisited(targetTab)" in main_tabs
 assert "private(set) var visitedTabs: Set<AppTab> = [.home]" in source("Orvian/App/TabNavigationState.swift")
-assert "let floatingBarInset: CGFloat = 130" in source("Orvian/UI/DesignSystem.swift"), \
-    "La grille doit réserver la place de la pastille flottante"
+assert "DS.contentBottomInset" in grid
+assert "static let floatingBarInset" not in source("Orvian/UI/DesignSystem.swift"), \
+    "Les écrans ne doivent plus compter une seconde réserve fixe sous la coque"
 
-# --- Le titre de la visionneuse se mesure sur le conteneur ----------------
+# --- Le titre partage la disposition native, sans sonde ni padding circulaire
 chrome = source("Orvian/UI/MediaChrome.swift")
-assert "containerWidth" in chrome
-assert "availableWidth" not in chrome, "Sonder la pastille liait sa largeur à son padding"
-assert ".frame(height: 0)" in chrome, "La sonde doit être bridée en hauteur"
+assert "containerWidth" not in chrome
+assert "sideInsetFraction" not in chrome
+assert 'accessibilityHint("Copier le nom du fichier")' in chrome
+assert "Button {" in chrome
 
 # --- Le double-tap vidéo diffère la bascule des contrôles -----------------
 video = source("Orvian/Features/Viewer/VideoPlayerView.swift")

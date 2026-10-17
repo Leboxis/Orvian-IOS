@@ -10,17 +10,53 @@ struct FloatingTabBar: View {
     @AppStorage("hapticFeedbackEnabled") private var hapticFeedbackEnabled = true
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     @Environment(\.iPadLayout) private var iPadLayout
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @Namespace private var selectionAnimation
 
-    private let height: CGFloat = 64
+    @ScaledMetric(relativeTo: .caption2) private var height: CGFloat = 64
     private let spacing: CGFloat = 8
     private let inset: CGFloat = 4
     private var groupedTabs: [AppTab] {
-        iPadLayout.isPad ? [.settings, .tag, .home, .favorites, .profile]
-            : [.settings, .tag, .home, .favorites]
+        iPadLayout.isPad ? [.home, .favorites, .tag, .settings, .profile]
+            : [.home, .favorites, .tag, .settings]
     }
 
     var body: some View {
+        Group {
+            if dynamicTypeSize.isAccessibilitySize {
+                Menu {
+                    ForEach(AppTab.presentationOrder) { tab in
+                        Button { select(tab) } label: {
+                            Label(tab.title, systemImage: selection == tab ? "checkmark" : tab.symbol)
+                        }
+                    }
+                } label: {
+                    HStack {
+                        Label(selection.title, systemImage: selection.symbol)
+                        Spacer(minLength: 8)
+                        Text("Onglets")
+                        Image(systemName: "chevron.up.chevron.down")
+                    }
+                    .font(.body)
+                    .padding(16)
+                    .frame(minHeight: 44)
+                    .background(Color(uiColor: .systemBackground), in: RoundedRectangle(cornerRadius: DS.panelRadius))
+                }
+                .accessibilityLabel("Navigation, \(selection.title)")
+                .accessibilityHint("Choisir un onglet")
+            } else {
+                regularBar
+            }
+        }
+        .animation(Motion.animation(.snappy(duration: 0.25)), value: selection)
+        .frame(maxWidth: DS.maxTabBarWidth)
+        .padding(.horizontal, 16)
+        .sensoryFeedback(.selection, trigger: selection) { oldValue, newValue in
+            hapticFeedbackEnabled && oldValue != newValue
+        }
+    }
+
+    private var regularBar: some View {
         GlassEffectContainer(spacing: spacing) {
             HStack(spacing: spacing) {
                 HStack(spacing: 0) {
@@ -50,21 +86,14 @@ struct FloatingTabBar: View {
                         tab: .profile,
                         isSelected: selection == .profile,
                         height: height,
-                        iconOnly: true
+                        iconOnly: false
                     ) {
                         select(.profile)
                     }
-                    .frame(width: height, height: height)
-                    .modifier(TabGlassSurface(shape: Circle(), opaque: reduceTransparency))
+                    .frame(width: 72, height: height)
+                    .modifier(TabGlassSurface(shape: Capsule(), opaque: reduceTransparency))
                 }
             }
-        }
-        // La valeur couvre aussi les changements d'onglet programmatiques.
-        .animation(Motion.animation(.snappy(duration: 0.25)), value: selection)
-        .frame(maxWidth: DS.maxTabBarWidth)
-        .padding(.horizontal, 16)
-        .sensoryFeedback(.selection, trigger: selection) { oldValue, newValue in
-            hapticFeedbackEnabled && oldValue != newValue
         }
     }
 
@@ -107,7 +136,7 @@ private struct TabButton: View {
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     private var showsTitle: Bool {
-        !iconOnly && dynamicTypeSize < .accessibility1
+        !iconOnly
     }
 
     var body: some View {
@@ -120,8 +149,8 @@ private struct TabButton: View {
                 if showsTitle {
                     Text(tab.title)
                         .font(.caption2.weight(.medium))
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.75)
+                        .lineLimit(2)
+                        .multilineTextAlignment(.center)
                 }
             }
             .foregroundStyle(isSelected ? Color.accentColor : Color.primary)
@@ -137,6 +166,7 @@ private struct TabButton: View {
 
 /// Onglets de l'application, de gauche à droite dans la barre.
 enum AppTab: String, CaseIterable, Identifiable {
+    static let presentationOrder: [AppTab] = [.home, .favorites, .tag, .settings, .profile]
     case settings
     case tag
     case home
@@ -148,10 +178,10 @@ enum AppTab: String, CaseIterable, Identifiable {
     var title: String {
         switch self {
         case .settings: return "Réglages"
-        case .tag: return "Tag"
+        case .tag: return "Tags"
         case .home: return "Accueil"
         case .favorites: return "Favoris"
-        case .profile: return "Profil"
+        case .profile: return "Activité"
         }
     }
 
@@ -172,7 +202,7 @@ enum AppTab: String, CaseIterable, Identifiable {
         case .settings: return "slider.horizontal.3"
         case .tag: return "tag"
         case .home: return "house.fill"
-        case .favorites: return "heart"
+        case .favorites: return "star"
         case .profile: return "person.crop.circle"
         }
     }
@@ -182,7 +212,7 @@ enum AppTab: String, CaseIterable, Identifiable {
         case .settings: return "slider.horizontal.3"
         case .tag: return "tag.fill"
         case .home: return "house.fill"
-        case .favorites: return "heart.fill"
+        case .favorites: return "star.fill"
         case .profile: return "person.crop.circle.fill"
         }
     }

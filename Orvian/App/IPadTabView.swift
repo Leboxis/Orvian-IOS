@@ -23,11 +23,11 @@ struct IPadTabView<Content: View>: View {
             Tab(AppTab.tag.title, systemImage: AppTab.tag.symbol, value: AppTab.tag) {
                 content(.tag)
             }
-            Tab(AppTab.profile.title, systemImage: AppTab.profile.symbol, value: AppTab.profile) {
-                content(.profile)
-            }
             Tab(AppTab.settings.title, systemImage: AppTab.settings.symbol, value: AppTab.settings) {
                 content(.settings)
+            }
+            Tab(AppTab.profile.title, systemImage: AppTab.profile.symbol, value: AppTab.profile) {
+                content(.profile)
             }
         }
         .tabViewStyle(.tabBarOnly)

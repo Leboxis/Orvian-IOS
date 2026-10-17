@@ -25,6 +25,7 @@ struct TagsEditorSheet: View {
     private let service = KDriveService()
     /// Colonnes pilotées par Réglages → Affichage → Colonnes des tags.
     @AppStorage("tagGridColumns") private var tagGridColumns = 2
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     init(
         driveId: Int,
@@ -57,7 +58,7 @@ struct TagsEditorSheet: View {
                     ContentUnavailableView {
                         Label("Aucun tag", systemImage: "tag")
                     } description: {
-                        Text("Créez des tags dans l'onglet Tag pour les appliquer ici.")
+                        Text("Créez des tags dans l'onglet Tags pour les appliquer ici.")
                     }
                 } else {
                     ScrollView {
@@ -103,7 +104,7 @@ struct TagsEditorSheet: View {
 
     /// Grille resserrée : cartes compactes et colonnes du réglage partagé.
     private var editorColumns: [GridItem] {
-        Array(repeating: GridItem(.flexible(), spacing: DS.gridSpacing), count: max(2, tagGridColumns))
+        Array(repeating: GridItem(.flexible(), spacing: DS.gridSpacing), count: dynamicTypeSize.isAccessibilitySize ? 1 : min(3, max(2, tagGridColumns)))
     }
 
     /// Même carte que la grille dédiée, enrichie d'une coche de sélection.
@@ -188,4 +189,3 @@ struct TagsEditorSheet: View {
         }
     }
 }
-

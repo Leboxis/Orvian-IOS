@@ -61,7 +61,7 @@ struct ApplyTagsSheet: View {
                     ContentUnavailableView {
                         Label("Aucun tag", systemImage: "tag")
                     } description: {
-                        Text("Créez des tags dans l'onglet Tag pour les appliquer ici.")
+                        Text("Créez des tags dans l'onglet Tags pour les appliquer ici.")
                     }
                 } else {
                     List {
@@ -339,4 +339,3 @@ struct ApplyTagsSheet: View {
         return (changes, firstError)
     }
 }
-

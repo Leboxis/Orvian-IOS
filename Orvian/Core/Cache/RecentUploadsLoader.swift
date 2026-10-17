@@ -24,7 +24,7 @@ final class RecentUploadsLoader {
         /// est faux : un geste manuel ne doit pas rejoindre une revalidation
         /// ordinaire susceptible d'utiliser le cache HTTP.
         let forcesNetwork: Bool
-        let task: Task<DirectoryListSnapshot?, Never>
+        let task: Task<RefreshOutcome?, Never>
     }
 
     private var inFlightByDrive: [Int: InFlight] = [:]
@@ -142,6 +142,16 @@ final class RecentUploadsLoader {
     /// Renvoie l'état réseau courant. Les appels concurrents pour un même
     /// drive attendent la même tâche afin de ne pas doubler la requête lente.
     func refresh(driveId: Int, forceNetwork: Bool = false) async -> DirectoryListSnapshot? {
+        await refreshOutcome(driveId: driveId, forceNetwork: forceNetwork)?.snapshot
+    }
+
+    struct RefreshOutcome {
+        let snapshot: DirectoryListSnapshot?
+        let error: Error?
+    }
+
+    /// L'erreur appartient à cette requête, jamais à un état partagé entre drives.
+    func refreshOutcome(driveId: Int, forceNetwork: Bool = false) async -> RefreshOutcome? {
         guard let credential = TokenStore.credentialFingerprint(), !Task.isCancelled else { return nil }
         let refreshGeneration = generation
         let cached = latestMemorySnapshot(driveId: driveId)
@@ -162,28 +172,22 @@ final class RecentUploadsLoader {
 
         if !forceNetwork, !cameFromDisk, let cached,
            Date().timeIntervalSince(cached.fetchedAt) < Self.revalidationInterval {
-            return cached
+            return RefreshOutcome(snapshot: cached, error: nil)
         }
         let requestID = UUID()
         let requestStartedAt = Date()
-        let task = Task<DirectoryListSnapshot?, Never> { [service] in
+        let task = Task<RefreshOutcome?, Never> { [service] in
             guard !Task.isCancelled, credential == TokenStore.credentialFingerprint(),
-                  let page = try? await service.page(
+                  refreshGeneration == generation else { return nil }
+            do {
+                let page = try await service.page(
                 Self.source,
                 driveId: driveId,
                 cursor: nil,
                 forceNetwork: forcesNetwork
-            ),
-                  !Task.isCancelled
-            else {
-                // Échec réseau : ne pas écraser avec l'instantané d'avant
-                // requête, qui ignore les uploads fusionnés pendant
-                // l'aller-retour. Relire le magasin courant (à jour), sinon
-                // restaurer le disque seulement si sa portée reste valide.
-                guard credential == TokenStore.credentialFingerprint(), !Task.isCancelled else { return nil }
-                return await cachedSnapshot(driveId: driveId)
-            }
-            guard !Task.isCancelled, credential == TokenStore.credentialFingerprint() else { return nil }
+                )
+            guard !Task.isCancelled, credential == TokenStore.credentialFingerprint(),
+                  refreshGeneration == generation else { return nil }
             let serverFiles = (page.data ?? []).filter { !$0.isDirectory }
             // Preserve only uploads confirmed in this session, never every
             // recently modified cached file absent from the server.
@@ -203,7 +207,12 @@ final class RecentUploadsLoader {
             // marquer ni le cache ni le curseur obsolètes comme fraîchement lus.
             guard !FileGridMutationCenter.shared.isSnapshotStale(
                 snapshot, source: Self.source, driveId: driveId
-            ) else { return await cachedSnapshot(driveId: driveId) }
+            ) else {
+                let current = await cachedSnapshot(driveId: driveId)
+                guard !Task.isCancelled, credential == TokenStore.credentialFingerprint(),
+                      refreshGeneration == generation, let current else { return nil }
+                return RefreshOutcome(snapshot: current, error: nil)
+            }
             firstPageByDrive[driveId] = FirstPage(
                 credential: credential, generation: refreshGeneration, snapshot: snapshot
             )
@@ -225,7 +234,17 @@ final class RecentUploadsLoader {
                     fetchedAt: snapshot.fetchedAt
                 )
             }
-            return snapshot
+            return RefreshOutcome(snapshot: snapshot, error: nil)
+            } catch {
+                guard !Task.isCancelled, !(error is CancellationError),
+                      credential == TokenStore.credentialFingerprint(),
+                      refreshGeneration == generation else { return nil }
+                // Relire le cache courant pour conserver les uploads arrivés pendant le GET.
+                let current = await cachedSnapshot(driveId: driveId)
+                guard !Task.isCancelled, credential == TokenStore.credentialFingerprint(),
+                      refreshGeneration == generation else { return nil }
+                return RefreshOutcome(snapshot: current, error: error)
+            }
         }
         inFlightByDrive[driveId] = InFlight(
             id: requestID,
@@ -260,4 +279,3 @@ final class RecentUploadsLoader {
         _ = await refresh(driveId: driveId)
     }
 }
-

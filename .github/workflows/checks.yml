@@ -44,6 +44,7 @@ jobs:
           python3 -m unittest discover -s Tests -p 'test_ui_cleanup.py'
           python3 -m unittest discover -s Tests -p 'test_ipad_navigation.py'
           python3 .github/scripts/check_audit_regressions.py
+          python3 .github/scripts/check_adaptive_ui.py
 
       - name: Check GIF decoding
         run: |
@@ -76,6 +77,7 @@ jobs:
             -only-testing:OrvianTests/IPadNavigationTests \
             -only-testing:OrvianTests/IPadLayoutTests \
             -only-testing:OrvianTests/IPadScreenStateTests \
+            -only-testing:OrvianTests/FileCardAccessibilityTests \
             CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO test
 
       - name: Upload iPad test results

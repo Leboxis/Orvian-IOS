@@ -1,6 +1,7 @@
 import SwiftUI
 
 struct FavoritesView: View {
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @State private var mutationCredentialFingerprint = TokenStore.credentialFingerprint()
     @State private var viewModel: FileGridViewModel
     @State private var filters = FileFilters()
@@ -165,6 +166,7 @@ struct FavoritesView: View {
                 onVisibleItemsChanged: { items in
                     updateVisibleSelectionItems(items, context: visibleItemsContext)
                 },
+                onResetFilters: { searchText = ""; filters = FileFilters() },
                 searchText: searchText,
                 filters: filters,
                 allowsPullToRefresh: true,
@@ -215,17 +217,18 @@ struct FavoritesView: View {
                     }
 
                     ToolbarItemGroup(placement: .topBarTrailing) {
+                        Menu {
                         Button {
                             toggleAll()
                         } label: {
-                            Image(systemName: allSelected ? "checkmark.circle.fill" : "checkmark.circle")
+                            Label(allSelected ? "Tout désélectionner" : "Sélectionner les fichiers affichés", systemImage: "checkmark.circle")
                         }
-                        .accessibilityLabel(allSelected ? "Tout désélectionner" : "Tout sélectionner")
+                        .accessibilityLabel(allSelected ? "Tout désélectionner" : "Sélectionner les fichiers affichés")
 
                         Button {
                             prepareTagSheet()
                         } label: {
-                            Image(systemName: "tag")
+                            Label("Appliquer des tags", systemImage: "tag")
                         }
                         .disabled(actionableSelectedIDs.isEmpty)
                         .accessibilityLabel("Mettre des tags")
@@ -233,7 +236,7 @@ struct FavoritesView: View {
                         Button {
                             prepareSelectedMove()
                         } label: {
-                            Image(systemName: "folder")
+                            Label("Déplacer", systemImage: "folder")
                         }
                         .disabled(actionableSelectedIDs.isEmpty || moveBusy)
                         .accessibilityLabel("Déplacer")
@@ -241,10 +244,13 @@ struct FavoritesView: View {
                         Button(role: .destructive) {
                             showDeleteConfirm = true
                         } label: {
-                            Image(systemName: "trash")
+                            Label("Supprimer", systemImage: "trash")
                         }
                         .disabled(actionableSelectedIDs.isEmpty || deleteBusy)
                         .accessibilityLabel("Supprimer")
+                        } label: {
+                            Label("Actions de sélection", systemImage: "ellipsis.circle")
+                        }
                     }
                 } else {
                     ToolbarItemGroup(placement: .topBarLeading) {
@@ -261,8 +267,7 @@ struct FavoritesView: View {
                     }
 
                     ToolbarItemGroup(placement: .topBarTrailing) {
-                        randomFileButton
-
+                        Menu {
                         Button {
                             startSelection()
                         } label: {
@@ -270,13 +275,23 @@ struct FavoritesView: View {
                         }
                         .disabled(visibleSelectionItems.isEmpty || moveBusy)
                         .accessibilityIdentifier("browser.select")
+                        randomFileButton
+                        } label: {
+                            Label("Actions", systemImage: "ellipsis.circle")
+                        }
                     }
                 }
             }
-            .overlay(alignment: .bottom) {
+            .safeAreaInset(edge: .bottom, spacing: 0) {
                 if moveBusy || deleteBusy {
                     busyIndicator
                 }
+            }
+            .background {
+                BrowserKeyboardCommands(isEditingText: searchFocused, canSelect: !visibleSelectionItems.isEmpty,
+                    search: { searchRevealed = true; searchFocused = true },
+                    cancel: { if selectionMode { endSelection() }; searchFocused = false; searchRevealed = false },
+                    selectAll: { if !selectionMode { startSelection() }; selectedIDs = visibleSelectionIDs })
             }
             .sheet(item: $pendingMove) { request in
                 MoveDestinationPicker(
@@ -324,6 +339,7 @@ struct FavoritesView: View {
                     driveId: viewModel.driveId,
                     crumbs: crumbs,
                     router: router,
+                    onNavigateAncestor: { depth in path = Array(path.prefix(depth)) },
                     onOpenFolder: { folder in
                         path.append(folder)
                     }
@@ -344,21 +360,25 @@ struct FavoritesView: View {
             .focused($searchFocused)
             .autocorrectionDisabled()
             .submitLabel(.search)
+            .accessibilityLabel("Rechercher dans les favoris")
+            .frame(minHeight: 44)
             if !searchText.isEmpty {
                 Button {
                     searchText = ""
                 } label: {
                     Image(systemName: "xmark.circle.fill")
                         .foregroundStyle(.secondary)
+                        .frame(width: 44, height: 44)
                 }
                 .accessibilityLabel("Effacer la recherche")
             }
         }
         .padding(.leading, 14)
         .padding(.trailing, 8)
-        .padding(.vertical, 7)
+        .padding(.vertical, 2)
         .inputChrome(Capsule())
-        .frame(maxWidth: 260)
+        .frame(maxWidth: horizontalSizeClass == .regular ? 600 : .infinity)
+        .padding(.horizontal, DS.gridMargin)
     }
 
     private var searchToggleButton: some View {
@@ -385,11 +405,7 @@ struct FavoritesView: View {
         Button {
             openRandomFile()
         } label: {
-            Image(systemName: "dice")
-                .font(.system(size: 17, weight: .medium))
-                .foregroundStyle(Color.accentColor)
-                .frame(width: 32, height: 32)
-                .contentShape(Rectangle())
+            Label("Ouvrir un fichier au hasard", systemImage: "dice")
         }
         .disabled(playableFiles.isEmpty)
         .accessibilityLabel("Ouvrir un fichier au hasard")
@@ -409,7 +425,7 @@ struct FavoritesView: View {
 
     private var itemCountLabel: some View {
         Text(itemCountText)
-            .font(.system(size: 11, weight: .medium))
+            .font(.caption.weight(.medium))
             .foregroundStyle(.secondary)
             .padding(.horizontal, 10)
             .padding(.vertical, 3.5)
@@ -428,7 +444,7 @@ struct FavoritesView: View {
         .padding(.horizontal, 16)
         .padding(.vertical, 10)
         .background(.black.opacity(0.75), in: Capsule())
-        .padding(.bottom, DS.floatingPillInset)
+        .padding(.vertical, 8)
         .transition(.opacity)
     }
 

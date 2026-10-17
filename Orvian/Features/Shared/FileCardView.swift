@@ -49,6 +49,7 @@ struct FileCardView: View {
 
     @State private var thumbnail: UIImage?
     @State private var thumbnailLoaded = false
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     private var kind: FileKind { file.fileKind }
 
@@ -108,21 +109,24 @@ struct FileCardView: View {
         VStack(spacing: 5) {
             thumbnailArea
                 .overlay(alignment: .center) { playBadge }
+                .accessibilityHidden(true)
 
             Text(file.name)
                 .font(.footnote)
-                .lineLimit(1)
+                .lineLimit(dynamicTypeSize.isAccessibilitySize ? 4 : 2, reservesSpace: true)
                 .truncationMode(.middle)
                 .foregroundStyle(.primary)
                 .frame(maxWidth: .infinity)
+                .accessibilityHidden(enabled)
 
             HStack(spacing: 4) {
                 Text(subtitle)
                 categoryDots
             }
             .font(.caption2)
-            .foregroundStyle(.tertiary)
+            .foregroundStyle(.secondary)
             .frame(maxWidth: .infinity)
+            .accessibilityHidden(enabled)
         }
         .opacity(enabled ? 1 : 0.55)
         .contentShape(Rectangle())
@@ -133,6 +137,9 @@ struct FileCardView: View {
             if enabled {
                 CardInteraction(
                     menuItems: menuItems,
+                    label: file.name,
+                    value: accessibilityValue,
+                    isSelected: selectionMode && isSelected,
                     onTap: {
                         if selectionMode {
                             onToggleSelection?()
@@ -250,10 +257,13 @@ struct FileCardView: View {
                     .font(.system(size: 14, weight: .semibold))
                     .foregroundStyle(.yellow)
                     .shadow(color: .black.opacity(0.55), radius: 2, x: 0, y: 1)
+                    .frame(width: 24, height: 24)
+                    .background(.black.opacity(0.75), in: Circle())
+                    .frame(width: 44, height: 44)
+                    .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
             .accessibilityLabel("Retirer des favoris")
-            .padding(7)
         }
     }
 
@@ -265,6 +275,15 @@ struct FileCardView: View {
             .foregroundStyle(isSelected ? Color.accentColor : .white)
             .shadow(color: .black.opacity(isSelected ? 0 : 0.35), radius: 3, y: 1)
             .padding(5)
+            .allowsHitTesting(false)
+            .accessibilityHidden(true)
+    }
+
+    private var accessibilityValue: String {
+        let names = (file.categories ?? []).compactMap { categoriesById[$0.categoryId]?.name }
+        return ([subtitle, file.isFavorite == true ? "Favori" : "",
+                 selectionMode ? (isSelected ? "Sélectionné" : "Non sélectionné") : ""]
+            + names).filter { !$0.isEmpty }.joined(separator: ", ")
     }
 
     /// Indicateur de lecture sur les vidéos.
@@ -429,7 +448,11 @@ private struct CardMenuItem {
 /// Remplace l'ancien `Button` + `contextMenu` SwiftUI qui offrait moins de
 /// contrôle sur le tap depuis iOS 16.
 private struct CardInteraction: UIViewRepresentable {
+    @Environment(\.isEnabled) private var isEnabled
     let menuItems: [CardMenuItem]
+    let label: String
+    let value: String
+    let isSelected: Bool
     let onTap: () -> Void
 
     func makeCoordinator() -> Coordinator {
@@ -447,25 +470,42 @@ private struct CardInteraction: UIViewRepresentable {
     func updateUIView(_ uiView: InteractionView, context: Context) {
         context.coordinator.parent = self
         uiView.onTap = { [weak coordinator = context.coordinator] in coordinator?.parent.onTap() }
+        uiView.accessibilityLabel = label
+        uiView.isEnabled = isEnabled
+        uiView.accessibilityValue = value
+        uiView.accessibilityTraits = isSelected ? [.button, .selected] : [.button]
+        uiView.accessibilityCustomActions = (isEnabled ? menuItems : []).map { item in
+            UIAccessibilityCustomAction(name: item.title) { _ in item.action(); return true }
+        }
     }
 
     /// Vue transparente pleine taille : tap court = ouverture, long-press =
     /// menu contextuel sans aperçu. `UIContextMenuInteraction` gère les deux.
-    final class InteractionView: UIView {
+    final class InteractionView: UIButton {
         var onTap: (() -> Void)?
 
         override init(frame: CGRect) {
             super.init(frame: frame)
             backgroundColor = .clear
-            let tap = UITapGestureRecognizer(target: self, action: #selector(handleTap))
-            addGestureRecognizer(tap)
+            isAccessibilityElement = true
+            addTarget(self, action: #selector(handleTap), for: .primaryActionTriggered)
         }
 
         @available(*, unavailable)
         required init?(coder: NSCoder) { fatalError() }
 
-        @objc private func handleTap(_ gesture: UITapGestureRecognizer) {
-            guard gesture.state == .ended else { return }
+        override func accessibilityActivate() -> Bool {
+            guard isEnabled else { return false }
+            onTap?()
+            return true
+        }
+
+        override var isHighlighted: Bool {
+            didSet { backgroundColor = isHighlighted ? UIColor.label.withAlphaComponent(0.08) : .clear }
+        }
+
+        @objc private func handleTap() {
+            guard isEnabled else { return }
             onTap?()
         }
     }
@@ -482,7 +522,8 @@ private struct CardInteraction: UIViewRepresentable {
             _ interaction: UIContextMenuInteraction,
             configurationForMenuAtLocation location: CGPoint
         ) -> UIContextMenuConfiguration? {
-            UIContextMenuConfiguration(
+            guard (interaction.view as? UIControl)?.isEnabled == true else { return nil }
+            return UIContextMenuConfiguration(
                 identifier: nil,
                 previewProvider: nil,
                 actionProvider: { [weak self] _ in

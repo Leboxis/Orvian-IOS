@@ -34,20 +34,23 @@ struct FakePage {
 @MainActor final class FakeServer {
     static let shared = FakeServer()
     var drives: [Int] = []
-    var pending: [Int: CheckedContinuation<FakePage, Never>] = [:]
-    func page(driveId: Int) async -> FakePage {
+    var pending: [Int: CheckedContinuation<FakePage, Error>] = [:]
+    func page(driveId: Int) async throws -> FakePage {
         let index = drives.count
         drives.append(driveId)
-        return await withCheckedContinuation { pending[index] = $0 }
+        return try await withCheckedThrowingContinuation { pending[index] = $0 }
     }
     func complete(_ index: Int, fileID: Int) {
         pending.removeValue(forKey: index)!.resume(returning: FakePage(data: [DriveFile(id: fileID)]))
+    }
+    func fail(_ index: Int) {
+        pending.removeValue(forKey: index)!.resume(throwing: URLError(.notConnectedToInternet))
     }
 }
 struct KDriveService {
     func page(_ source: FileSource, driveId: Int, cursor: String?, forceNetwork: Bool) async throws -> FakePage {
         precondition(cursor == nil, "The preview must never paginate to fill three cards")
-        return await FakeServer.shared.page(driveId: driveId)
+        return try await FakeServer.shared.page(driveId: driveId)
     }
 }
 @MainActor final class DirectoryListStore {

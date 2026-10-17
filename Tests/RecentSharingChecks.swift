@@ -109,6 +109,19 @@ import Foundation
         loader.clear()
         let clearedHead = await loader.cachedSnapshot(driveId: 3)
         precondition(clearedHead == nil)
+        let firstFailure = Task { await loader.refreshOutcome(driveId: 4, forceNetwork: true) }
+        while server.drives.count < 8 { await Task.yield() }
+        server.fail(7)
+        let failed = await firstFailure.value
+        precondition(failed?.error != nil && failed?.snapshot == nil, "Failure must not be reported as an empty success")
+
+        store.entries[store.key(4)] = snapshot([41])
+        let cachedFailure = Task { await loader.refreshOutcome(driveId: 4, forceNetwork: true) }
+        while server.drives.count < 9 { await Task.yield() }
+        server.fail(8)
+        let preserved = await cachedFailure.value
+        precondition(preserved?.error != nil && preserved?.snapshot?.items.first?.id == 41,
+                     "A failed refresh must preserve cached content and its error")
         print("Recent cache races, isolation, upload merge and paginated-head reuse checks passed")
     }
 }

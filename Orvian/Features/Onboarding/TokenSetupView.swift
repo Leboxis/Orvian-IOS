@@ -29,6 +29,8 @@ struct TokenSetupView: View {
                     Text("Token API")
                         .font(.subheadline.weight(.semibold))
                     SecureField("Coller le token…", text: $token)
+                        .accessibilityLabel("Token API")
+                        .frame(minHeight: 44)
                         .textFieldStyle(.roundedBorder)
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
@@ -36,7 +38,7 @@ struct TokenSetupView: View {
 
                     Text("Le token est conservé sur cet appareil et utilisé uniquement pour accéder à votre service de fichiers.")
                         .font(.caption)
-                        .foregroundStyle(.tertiary)
+                        .foregroundStyle(.secondary)
                 }
                 .padding(.horizontal, 4)
 
@@ -75,22 +77,25 @@ struct TokenSetupView: View {
                     showHelp = true
                 }
                 .font(.footnote)
+                .frame(minHeight: 44)
                 .buttonStyle(.borderless)
 
                 Spacer(minLength: 40)
             }
             .padding(.horizontal, 24)
+            .frame(maxWidth: 520)
+            .frame(maxWidth: .infinity)
         }
         .background(Color(uiColor: .systemGroupedBackground))
         .sheet(isPresented: $showHelp) {
             TokenHelpSheet()
-                .presentationDetents([.medium])
+                .presentationDetents([.medium, .large])
         }
     }
 
     private func connect() {
         let trimmed = token.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty, !isWorking else { return }
+        guard trimmed.count >= 20, !isWorking else { return }
         isWorking = true
         errorMessage = nil
         Task {
@@ -105,16 +110,29 @@ struct TokenSetupView: View {
 }
 
 private struct TokenHelpSheet: View {
+    @Environment(\.dismiss) private var dismiss
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            Label("Créer un token API", systemImage: "key.fill")
-                .font(.headline)
-            steps
-            Link("Ouvrir le portail développeur", destination: URL(string: "https://developer.infomaniak.com")!)
-                .font(.footnote.weight(.semibold))
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 16) {
+                    Label("Créer un token API", systemImage: "key.fill")
+                        .font(.headline)
+                    steps
+                    Link("Ouvrir le portail développeur", destination: URL(string: "https://developer.infomaniak.com")!)
+                        .font(.footnote.weight(.semibold))
+                        .frame(minHeight: 44)
+                }
+                .padding(24)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .navigationTitle("Aide à la connexion")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Fermer") { dismiss() }
+                }
+            }
         }
-        .padding(24)
-        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private var steps: some View {

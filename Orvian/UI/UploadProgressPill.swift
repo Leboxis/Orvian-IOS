@@ -36,7 +36,7 @@ struct UploadProgressPill: View {
                         .font(.system(size: 15))
                         .foregroundStyle(.green)
 
-                    Text("Upload terminé")
+                    Text("Import terminé")
                         .font(.footnote.weight(.medium))
                         .foregroundStyle(.primary)
                 }
@@ -47,18 +47,20 @@ struct UploadProgressPill: View {
             }
             .padding(.horizontal, 14)
             .padding(.vertical, 8)
+            .frame(minHeight: 44)
             .floatingChrome(Capsule())
         }
         .buttonStyle(.plain)
-        .accessibilityLabel("Suivi de l'upload")
+        .accessibilityLabel("Suivi des imports")
+        .accessibilityValue(manager.activeTasksCount > 0 ? "\(Int(manager.overallProgress * 100)) pour cent" : (manager.hasFailures ? "Erreur de transfert" : "Import terminé"))
     }
 
     private var titleText: String {
         let count = manager.activeTasksCount
         if count == 1 {
-            return "1 upload en cours"
+            return "1 import en cours"
         } else {
-            return "\(count) uploads en cours"
+            return "\(count) imports en cours"
         }
     }
 }

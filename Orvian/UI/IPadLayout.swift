@@ -15,9 +15,13 @@ struct IPadLayout {
 
     func fileColumns(preferred: Int, margin: CGFloat, spacing: CGFloat) -> Int {
         let preferred = min(max(preferred, 2), 7)
-        guard isPad, width.isFinite, width > 0 else { return preferred }
-        let minimum = max(largeText ? 220 : 140, 480 / CGFloat(preferred))
+        guard width.isFinite, width > 0 else { return largeText ? 1 : min(preferred, 3) }
+        // Each density has its own thumbnail size; stored phone preferences stay intact.
+        let minimum = largeText ? CGFloat(220) : (isPad ? Self.thumbnailSizes[preferred - 2] : 100)
         let available = max(0, width - horizontalInset(base: margin) * 2)
-        return Int(min(12, max(1, floor((available + spacing) / (minimum + spacing)))))
+        let fitting = Int(min(12, max(1, floor((available + spacing) / (minimum + spacing)))))
+        return isPad ? fitting : min(preferred, fitting)
     }
+
+    static let thumbnailSizes: [CGFloat] = [300, 240, 200, 165, 140, 110]
 }

@@ -45,8 +45,9 @@ struct MainTabView: View {
                 } else {
                     IPadTabView(selection: iPadSelection) { tab in
                         tabContent(tab)
+                            .environment(\.isActiveTab, shell.tab == tab)
                     }
-                    .overlay(alignment: .bottom) {
+                    .safeAreaInset(edge: .bottom, spacing: 0) {
                         TransferOverlayChrome(
                             uploadManager: uploadManager,
                             onShowUploads: { showUploadSheet = true }
@@ -60,7 +61,6 @@ struct MainTabView: View {
                 phoneNavigation
             }
         }
-        .ignoresSafeArea(.keyboard, edges: .bottom)
         .tint(.accentColor)
         .sheet(isPresented: $showUploadSheet) {
             UploadProgressSheet(manager: uploadManager)
@@ -75,34 +75,28 @@ struct MainTabView: View {
 
     private var phoneNavigation: some View {
         @Bindable var shell = shell
-        return ZStack(alignment: .bottom) {
-            tabs
+        return tabs
+            .safeAreaInset(edge: .bottom, spacing: 0) {
+                // Reserve the rendered height, including simultaneous transfers.
+                VStack(spacing: 0) {
+                    TransferOverlayChrome(
+                        uploadManager: uploadManager,
+                        onShowUploads: { showUploadSheet = true }
+                    )
 
-            // Barre et pastilles partagent un seul bloc ancré en bas : la
-            // pastille apparaît **au-dessus** de la grille, qui ne se décale
-            // plus. Une réservation d'espace était ajoutée autrefois sous le
-            // contenu, puis animée : un import poussait la liste de 110 points
-            // sous le doigt du milieu d'un scroll. `DS.floatingBarInset`
-            // réserve déjà la hauteur de la barre et de la pastille.
-            VStack(spacing: 0) {
-                TransferOverlayChrome(
-                    uploadManager: uploadManager,
-                    onShowUploads: { showUploadSheet = true }
-                )
-
-                FloatingTabBar(
-                    selection: $shell.tab,
-                    onSelect: prepareTab,
-                    onReselect: { targetTab in
-                        shell.navState.reset(
-                            tab: targetTab,
-                            scrollFavoritesToTop: favoritesReselectScrollToTop
-                        )
-                    }
-                )
+                    FloatingTabBar(
+                        selection: $shell.tab,
+                        onSelect: prepareTab,
+                        onReselect: { targetTab in
+                            shell.navState.reset(
+                                tab: targetTab,
+                                scrollFavoritesToTop: favoritesReselectScrollToTop
+                            )
+                        }
+                    )
+                }
+                .padding(.bottom, 4)
             }
-            .padding(.bottom, 4)
-        }
     }
 
     private var iPadSelection: Binding<AppTab> {
@@ -190,6 +184,7 @@ struct MainTabView: View {
         // d'un onglet conservé jamais ouvert.
         if target == shell.tab || (target.isKeptAlive && shell.visitedTabs.contains(target)) {
             content()
+                .environment(\.isActiveTab, shell.tab == target)
                 .opacity(shell.tab == target ? 1 : 0)
                 .allowsHitTesting(shell.tab == target)
                 .accessibilityHidden(shell.tab != target)
@@ -285,8 +280,12 @@ private struct DownloadProgressBanner: View {
 
             Spacer(minLength: 8)
 
-            Button("Annuler", action: onCancel)
-                .font(.footnote.weight(.semibold))
+            Button(action: onCancel) {
+                Text("Annuler")
+                    .font(.footnote.weight(.semibold))
+                    .frame(minHeight: 44)
+                    .contentShape(Rectangle())
+            }
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 8)

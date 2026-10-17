@@ -125,7 +125,7 @@ struct SettingsView: View {
                 destinationView(for: route)
             }
             .safeAreaInset(edge: .bottom) {
-                Color.clear.frame(height: 90)
+                Color.clear.frame(height: DS.contentBottomInset)
             }
         }
     }
@@ -161,7 +161,7 @@ struct SettingsView: View {
                 if isSearching {
                     List { searchResultsSection }
                         .listStyle(.insetGrouped)
-                        .safeAreaInset(edge: .bottom) { Color.clear.frame(height: DS.padBottomInset) }
+                        .safeAreaInset(edge: .bottom) { Color.clear.frame(height: DS.contentBottomInset) }
                 } else if let selectedSpace {
                     destinationView(for: selectedSpace)
                 } else {
@@ -607,23 +607,13 @@ private struct AppearanceSpace: View {
                 VStack(alignment: .leading, spacing: 10) {
                     Stepper(value: $fileGridColumns, in: 2...7) {
                         HStack {
-                            Text(iPadLayout.isPad ? "Densité des miniatures" : "Cartes par ligne")
+                            Text("Densité des miniatures")
                             Spacer()
-                            Text("\(fileGridColumns)")
+                            Text("\(fileGridColumns - 1) / 6")
                                 .foregroundStyle(.secondary)
                                 .monospacedDigit()
                         }
                     }
-                    // Aperçu vivant : la densité se comprend d'un coup d'œil.
-                    HStack(spacing: 6) {
-                        ForEach(0..<fileGridColumns, id: \.self) { _ in
-                            RoundedRectangle(cornerRadius: 6, style: .continuous)
-                                .fill(Color.accentColor.opacity(0.25))
-                                .frame(height: 44)
-                        }
-                    }
-                    .animation(Motion.animation(.snappy), value: fileGridColumns)
-                    .accessibilityHidden(true)
                 }
                 .padding(.vertical, 4)
 
@@ -640,8 +630,8 @@ private struct AppearanceSpace: View {
                 Text("Densité")
             } footer: {
                 Text(iPadLayout.isPad
-                     ? "La densité adapte les miniatures à la largeur de la fenêtre. Le réglage des tags concerne l’iPhone."
-                     : "Moins de cartes = plus grandes miniatures. L'aperçu ci-dessus suit votre choix.")
+                      ? "De 1 (grandes) à 6 (petites). Le nombre réel dépend de la largeur et de la taille du texte. Le réglage des tags concerne l’iPhone."
+                      : "De 1 (grandes) à 6 (petites). Le nombre de colonnes est limité pour conserver des cartes lisibles.")
             }
 
             Section("Informations visibles") {
@@ -675,7 +665,7 @@ private struct AppearanceSpace: View {
             }
         }
         .safeAreaInset(edge: .bottom) {
-            Color.clear.frame(height: iPadLayout.isPad ? DS.padBottomInset : 90)
+            Color.clear.frame(height: DS.contentBottomInset)
         }
         .navigationTitle("Apparence")
         .navigationBarTitleDisplayMode(.inline)
@@ -732,11 +722,11 @@ private struct MediaSpace: View {
             } header: {
                 Text("Diagnostic")
             } footer: {
-                Text("Journal des durées et codes HTTP, consultable dans Profil → Mesures réseau. Désactivé, rien n'est collecté.")
+                Text("Journal des durées et codes HTTP, consultable dans Activité → Mesures réseau. Désactivé, rien n'est collecté.")
             }
         }
         .safeAreaInset(edge: .bottom) {
-            Color.clear.frame(height: iPadLayout.isPad ? DS.padBottomInset : 90)
+            Color.clear.frame(height: DS.contentBottomInset)
         }
         .navigationTitle("Médias et réseau")
         .navigationBarTitleDisplayMode(.inline)
@@ -786,7 +776,7 @@ private struct StorageSpace: View {
             }
         }
         .safeAreaInset(edge: .bottom) {
-            Color.clear.frame(height: iPadLayout.isPad ? DS.padBottomInset : 90)
+            Color.clear.frame(height: DS.contentBottomInset)
         }
         .navigationTitle("Stockage")
         .navigationBarTitleDisplayMode(.inline)
@@ -860,7 +850,7 @@ private struct SecuritySpace: View {
             }
         }
         .safeAreaInset(edge: .bottom) {
-            Color.clear.frame(height: iPadLayout.isPad ? DS.padBottomInset : 90)
+            Color.clear.frame(height: DS.contentBottomInset)
         }
         .navigationTitle("Sécurité")
         .navigationBarTitleDisplayMode(.inline)
@@ -911,7 +901,7 @@ private struct AccountSpace: View {
             }
         }
         .safeAreaInset(edge: .bottom) {
-            Color.clear.frame(height: iPadLayout.isPad ? DS.padBottomInset : 90)
+            Color.clear.frame(height: DS.contentBottomInset)
         }
         .navigationTitle("Compte")
         .navigationBarTitleDisplayMode(.inline)

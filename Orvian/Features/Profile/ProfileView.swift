@@ -10,9 +10,11 @@ struct ProfileView: View {
     /// racine + rafraîchissement des sections).
     var refreshRequest: Int = 0
     @Environment(\.iPadLayout) private var iPadLayout
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     @State private var recentUploads: [DriveFile] = []
     @State private var isLoadingRecents = true
+    @State private var recentError: String?
     @State private var previewRequestID = UUID()
     @State private var previewDriveId: Int?
     @State private var previewCredential: String?
@@ -33,9 +35,9 @@ struct ProfileView: View {
                 }
             }
             .safeAreaInset(edge: .bottom) {
-                Color.clear.frame(height: iPadLayout.isPad ? 0 : 90)
+                Color.clear.frame(height: DS.contentBottomInset)
             }
-            .navigationTitle("Profil")
+            .navigationTitle("Activité")
             // Le mode inline masque la barre sur un contenu qui défile : le
             // grand titre reste, et le bloc ci-dessous prend l'axe du titre.
             .navigationBarTitleDisplayMode(.large)
@@ -79,7 +81,7 @@ struct ProfileView: View {
             }
             .padding(.horizontal, iPadLayout.horizontalInset(base: DS.gridMargin))
             .padding(.top, 16)
-            .padding(.bottom, DS.padBottomInset)
+            .padding(.bottom, DS.contentBottomInset)
             // Même décision que la grille de tags : au-delà de 900 pt, les
             // trois aperçus s'étirent et les vignettes deviennent énormes.
             // Le bloc reste sur l'axe du grand titre (pas centré).
@@ -91,23 +93,26 @@ struct ProfileView: View {
     private var padRecents: some View {
         VStack(alignment: .leading, spacing: 16) {
             HStack {
-                Text("Uploads récents").font(.headline)
+                Text("Imports récents").font(.headline)
                 Spacer()
                 if let drive = session.selectedDrive,
                    isLoadingRecents || !recentUploads.isEmpty {
                     NavigationLink("Voir plus") {
-                        RecentFilesView(driveId: drive.id, title: "Uploads récents",
+                        RecentFilesView(driveId: drive.id, title: "Imports récents",
                                         source: RecentUploadsLoader.source, router: router)
                     }
                 }
             }
-            if !isLoadingRecents && recentUploads.isEmpty {
-                Text("Aucun upload récent")
+            if let recentError {
+                recentFailure(recentError)
+            }
+            if !isLoadingRecents && recentUploads.isEmpty && recentError == nil {
+                Text("Aucun import récent")
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, minHeight: 120)
-            } else {
+            } else if isLoadingRecents || !recentUploads.isEmpty {
                 LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: DS.gridSpacing),
-                                         count: iPadLayout.largeText ? 2 : 3), spacing: 16) {
+                                          count: iPadLayout.largeText ? 1 : 3), spacing: 16) {
                     if isLoadingRecents {
                         ForEach(0..<iPadLayout.recentPreviewLimit, id: \.self) { _ in
                             RoundedRectangle(cornerRadius: DS.cardRadius)
@@ -161,14 +166,17 @@ struct ProfileView: View {
     private var recentUploadsSection: some View {
         Section {
             if let drive = session.selectedDrive {
+                if let recentError { recentFailure(recentError) }
                 if isLoadingRecents {
                     thumbnailsSkeleton
-                } else if recentUploads.isEmpty {
-                    Text("Aucun upload récent")
+                } else if recentUploads.isEmpty && recentError == nil {
+                    Text("Aucun import récent")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                 } else {
-                    HStack(spacing: 10) {
+                    let layout = dynamicTypeSize.isAccessibilitySize
+                        ? AnyLayout(VStackLayout(spacing: 10)) : AnyLayout(HStackLayout(spacing: 10))
+                    layout {
                         ForEach(recentUploads.prefix(3)) { file in
                             Button {
                                 router.open(file, siblings: recentUploads)
@@ -187,13 +195,13 @@ struct ProfileView: View {
                 NavigationLink {
                     RecentFilesView(
                         driveId: drive.id,
-                        title: "Uploads récents",
+                        title: "Imports récents",
                         source: RecentUploadsLoader.source,
                         router: router
                     )
                 } label: {
                     HStack {
-                        Text("Uploads récents")
+                        Text("Imports récents")
                             .foregroundStyle(.primary)
                         Spacer()
                         Image(systemName: "chevron.right")
@@ -202,7 +210,7 @@ struct ProfileView: View {
                     }
                 }
             } else {
-                Text("Uploads récents")
+                Text("Imports récents")
             }
         }
     }
@@ -264,6 +272,19 @@ struct ProfileView: View {
 
     // MARK: - Chargement
 
+    private func recentFailure(_ message: String) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Label(recentUploads.isEmpty ? "Chargement impossible" : "Actualisation impossible",
+                  systemImage: "wifi.exclamationmark")
+                .font(.subheadline.weight(.semibold))
+            Text(message).font(.footnote).foregroundStyle(.secondary)
+            Button("Réessayer") {
+                Task { await loadPreviews(forceNetwork: true) }
+            }
+            .frame(minHeight: 44)
+        }
+    }
+
     /// Ordre déterministe de l'aperçu : date décroissante, `id` décroissant
     /// en cas d'égalité. Les horodatages kDrive sont à la seconde : les
     /// imports en rafale partagent la même seconde et l'ordre serveur des
@@ -287,6 +308,7 @@ struct ProfileView: View {
         guard let drive = session.selectedDrive,
               let credential = TokenStore.credentialFingerprint() else {
             recentUploads = []
+            recentError = nil
             isLoadingRecents = false
             previewDriveId = nil
             previewCredential = nil
@@ -294,6 +316,7 @@ struct ProfileView: View {
         }
         if previewDriveId != drive.id || previewCredential != credential {
             recentUploads = []
+            recentError = nil
             isLoadingRecents = true
             previewDriveId = drive.id
             previewCredential = credential
@@ -313,11 +336,18 @@ struct ProfileView: View {
         }
 
         guard isCurrentRequest() else { return }
-        if let snapshot = await recentUploadsLoader.refresh(
+        if recentUploads.isEmpty {
+            isLoadingRecents = true
+            recentError = nil
+        }
+        if let outcome = await recentUploadsLoader.refreshOutcome(
             driveId: drive.id, forceNetwork: forceNetwork
         ) {
             guard isCurrentRequest() else { return }
-            recentUploads = Self.previewOrder(snapshot.items.filter { !$0.isDirectory })
+            if let snapshot = outcome.snapshot {
+                recentUploads = Self.previewOrder(snapshot.items.filter { !$0.isDirectory })
+            }
+            recentError = outcome.error.map { ($0 as? APIError)?.errorDescription ?? $0.localizedDescription }
         }
         guard isCurrentRequest() else { return }
         isLoadingRecents = false

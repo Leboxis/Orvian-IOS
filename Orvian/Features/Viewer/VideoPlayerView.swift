@@ -50,6 +50,7 @@ struct VideoPlayerView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.layoutDirection) private var layoutDirection
     @Environment(\.accessibilityVoiceOverEnabled) private var voiceOverEnabled
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @Environment(\.scenePhase) private var scenePhase
     @State private var player: AVPlayer?
     @State private var poster: UIImage?
@@ -366,21 +367,18 @@ struct VideoPlayerView: View {
     // MARK: - Barre du haut (hors zone vidéo)
 
     private var topBar: some View {
-        ZStack {
+        VStack(spacing: 4) {
+            MediaTitlePill(name: file.name)
             HStack(spacing: 8) {
                 tagMenu
                 favoriteButton
-                Spacer()
-            }
-            MediaTitlePill(name: file.name)
-            HStack(spacing: 8) {
                 Spacer()
                 muteButton
                 closeButton
             }
         }
-        .padding(.horizontal, 0)
-        .padding(.top, -4)
+        .padding(.horizontal, 8)
+        .padding(.top, 4)
         .padding(.bottom, 2)
     }
 
@@ -452,32 +450,37 @@ struct VideoPlayerView: View {
     // MARK: - Barre du bas (transport, hors zone vidéo)
 
     private var bottomBar: some View {
+        VStack(spacing: 4) {
+            if dynamicTypeSize.isAccessibilitySize { timeControls }
         HStack(spacing: 8) {
             playButton
-
-            // Position, durée et plage tampon sont observées par cette seule
-            // sous-vue (`TransportTimeView`) : l'observateur périodique
-            // d'AVPlayer ne reconstruit donc plus le lecteur, ni la zone vidéo,
-            // ni les barres du haut, quatre fois par seconde.
-            TransportTimeView(
-                clock: clock,
-                isScrubbing: isScrubbing,
-                isSeeking: isSeeking,
-                timeFormatter: { timeText($0) },
-                onDragStarted: beginScrub,
-                onDragChanged: updateScrub(to:),
-                onDragEnded: endScrub(to:),
-                onDragCancelled: cancelScrub
-            )
-
+            if dynamicTypeSize.isAccessibilitySize {
+                Spacer(minLength: 8)
+            } else {
+                timeControls
+            }
             speedMenu
-
             AirPlayButton()
-                .frame(width: 32, height: 32)
+                .frame(width: 44, height: 44)
+        }
         }
         .padding(.horizontal, 0)
         .padding(.top, 2)
-        .padding(.bottom, -4)
+        .padding(.bottom, 4)
+    }
+
+    /// Only this subtree observes the playback clock.
+    private var timeControls: some View {
+        TransportTimeView(
+            clock: clock,
+            isScrubbing: isScrubbing,
+            isSeeking: isSeeking,
+            timeFormatter: { timeText($0) },
+            onDragStarted: beginScrub,
+            onDragChanged: updateScrub(to:),
+            onDragEnded: endScrub(to:),
+            onDragCancelled: cancelScrub
+        )
     }
 
     // MARK: - Scrubbing (barre personnalisée)
@@ -548,11 +551,12 @@ struct VideoPlayerView: View {
             Image(systemName: transport.wantsPlayback ? "pause.fill" : "play.fill")
                 .font(.system(size: 17, weight: .semibold))
                 .foregroundStyle(.white)
-                .frame(width: 36, height: 36)
+                .frame(width: 44, height: 44)
                 .background(.white.opacity(0.12), in: Circle())
         }
-        .disabled(player == nil)
+        .disabled(player == nil || !isActive)
         .accessibilityLabel(transport.wantsPlayback ? "Pause" : "Lecture")
+        .keyboardShortcut(.space, modifiers: [])
     }
 
     private var favoriteButton: some View {
@@ -573,7 +577,8 @@ struct VideoPlayerView: View {
             Image(systemName: isMuted ? "speaker.slash.fill" : "speaker.wave.2.fill")
                 .font(.system(size: 16, weight: .medium))
                 .foregroundStyle(.white)
-                .frame(width: 30, height: 30)
+                .frame(width: 44, height: 44)
+                .background(.black.opacity(0.75), in: Circle())
         }
         .accessibilityLabel(isMuted ? "Réactiver le son" : "Couper le son")
     }
@@ -585,9 +590,12 @@ struct VideoPlayerView: View {
             Image(systemName: "xmark")
                 .font(.system(size: 15, weight: .semibold))
                 .foregroundStyle(.white)
-                .padding(10)
+                .frame(width: 44, height: 44)
+                .background(.black.opacity(0.75), in: Circle())
         }
         .accessibilityLabel("Fermer")
+        .disabled(!isActive)
+        .keyboardShortcut(.escape, modifiers: [])
     }
 
     /// Titre formaté de la vitesse actuelle (ex: 1x, 1,5x, 2x).
@@ -618,7 +626,7 @@ struct VideoPlayerView: View {
             Text(currentSpeedTitle)
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(.white)
-                .frame(width: 36, height: 36)
+                .frame(width: 44, height: 44)
                 .background(.white.opacity(0.12), in: Circle())
                 .contentShape(Circle())
         }
@@ -1330,4 +1338,3 @@ private struct TransportTimeView: View {
         }
     }
 }
-

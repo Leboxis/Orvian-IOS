@@ -12,6 +12,11 @@ struct DirectoryView: View {
     let isActive: Bool
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.iPadLayout) private var iPadLayout
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    @Environment(\.isActiveTab) private var isActiveTab
+    @Environment(\.isEnabled) private var isEnabled
+    @Environment(\.canImportFiles) private var canImportFiles
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     @State private var mutationCredentialFingerprint = TokenStore.credentialFingerprint()
     @State private var viewModel: FileGridViewModel
@@ -48,9 +53,11 @@ struct DirectoryView: View {
     /// désactivée, elle couvre tout le drive.
     @AppStorage("searchRestrictedToFolder") private var searchRestrictedToFolder = false
     @FocusState private var searchFocused: Bool
+    @State private var showImportPicker = false
 
     private let router: ViewerRouter
     private let onOpenFolder: (DriveFile) -> Void
+    private let onNavigateAncestor: ((Int) -> Void)?
 
     /// Fige la sélection au moment où le sélecteur de destination s'ouvre.
     /// La feuille peut ainsi naviguer sans dépendre d'un état de sélection qui
@@ -88,7 +95,8 @@ struct DirectoryView: View {
         crumbs: [String],
         router: ViewerRouter,
         isActive: Bool = true,
-        showsSearchBar: Bool = false,
+        showsSearchBar: Bool = true,
+        onNavigateAncestor: ((Int) -> Void)? = nil,
         onOpenFolder: @escaping (DriveFile) -> Void
     ) {
         self.directory = directory
@@ -98,6 +106,7 @@ struct DirectoryView: View {
         self.isActive = isActive
         self.showsSearchBar = showsSearchBar
         self.onOpenFolder = onOpenFolder
+        self.onNavigateAncestor = onNavigateAncestor
         _viewModel = State(initialValue: FileGridViewModel(source: .directory(directory.id), driveId: driveId))
     }
 
@@ -154,6 +163,8 @@ struct DirectoryView: View {
             onVisibleItemsChanged: { items in
                 updateVisibleSelectionItems(items, context: visibleItemsContext)
             },
+            onResetFilters: { searchText = ""; filters = FileFilters() },
+            onEmptyAction: { showImportPicker = true },
             searchText: searchText,
             filters: filters,
             allowsPullToRefresh: true,
@@ -164,10 +175,28 @@ struct DirectoryView: View {
         )
         .navigationTitle("")
         .navigationBarTitleDisplayMode(.inline)
+        .modifier(FileDropTarget(
+            isEnabled: isEnabled && isActive && isActiveTab && !selectionMode && !addBusy && !moveBusy,
+            onFiles: { urls in
+                guard canImportFiles(driveId),
+                      mutationCredentialFingerprint != nil,
+                      mutationCredentialFingerprint == TokenStore.credentialFingerprint() else {
+                    Task.detached { DroppedFileStaging.remove(urls) }
+                    return
+                }
+                UploadManager.shared.enqueueDocuments(driveId: driveId, directoryId: directory.id,
+                    urls: urls) { files in
+                    Task { await refreshAfterImport(files) }
+                }
+            },
+            onError: { addError = $0 }
+        ))
         .safeAreaInset(edge: .top, spacing: 0) {
             if !selectionMode {
                 VStack(spacing: 6) {
-                    HStack(spacing: 6) {
+                    let summaryLayout = dynamicTypeSize.isAccessibilitySize
+                        ? AnyLayout(VStackLayout(spacing: 6)) : AnyLayout(HStackLayout(spacing: 6))
+                    summaryLayout {
                         if showBreadcrumb {
                             breadcrumb
                         }
@@ -206,17 +235,18 @@ struct DirectoryView: View {
                 }
 
                 ToolbarItemGroup(placement: .topBarTrailing) {
+                    Menu {
                     Button {
                         toggleAll()
                     } label: {
-                        Image(systemName: allSelected ? "checkmark.circle.fill" : "checkmark.circle")
+                        Label(allSelected ? "Tout désélectionner" : "Sélectionner les fichiers affichés", systemImage: "checkmark.circle")
                     }
-                    .accessibilityLabel(allSelected ? "Tout désélectionner" : "Tout sélectionner")
+                    .accessibilityLabel(allSelected ? "Tout désélectionner" : "Sélectionner les fichiers affichés")
 
                     Button {
                         prepareTagSheet()
                     } label: {
-                        Image(systemName: "tag")
+                        Label("Appliquer des tags", systemImage: "tag")
                     }
                     .disabled(actionableSelectedIDs.isEmpty)
                     .accessibilityLabel("Mettre des tags")
@@ -224,7 +254,7 @@ struct DirectoryView: View {
                     Button {
                         prepareSelectedMove()
                     } label: {
-                        Image(systemName: "folder")
+                        Label("Déplacer", systemImage: "folder")
                     }
                     .disabled(actionableSelectedIDs.isEmpty || moveBusy)
                     .accessibilityLabel("Déplacer")
@@ -232,10 +262,13 @@ struct DirectoryView: View {
                     Button(role: .destructive) {
                         showDeleteConfirm = true
                     } label: {
-                        Image(systemName: "trash")
+                        Label("Supprimer", systemImage: "trash")
                     }
                     .disabled(actionableSelectedIDs.isEmpty || deleteBusy)
                     .accessibilityLabel("Supprimer")
+                    } label: {
+                        Label("Actions de sélection", systemImage: "ellipsis.circle")
+                    }
                 }
             } else {
                 ToolbarItemGroup(placement: .topBarLeading) {
@@ -248,8 +281,7 @@ struct DirectoryView: View {
                 }
 
                 ToolbarItemGroup(placement: .topBarTrailing) {
-                    randomFileButton
-
+                    Menu {
                     Button {
                         startSelection()
                     } label: {
@@ -258,21 +290,32 @@ struct DirectoryView: View {
                     .disabled(visibleSelectionItems.isEmpty || moveBusy || addBusy)
                     .accessibilityIdentifier("browser.select")
 
-                    if iPadLayout.isPad {
-                        addMenu
-                            .accessibilityLabel("Ajouter ou importer")
+                        randomFileButton
+                    } label: {
+                        Label("Actions", systemImage: "ellipsis.circle")
                     }
+                    addMenu
+                        .accessibilityLabel("Ajouter ou importer")
                 }
             }
         }
-        .overlay(alignment: .bottom) {
+        .safeAreaInset(edge: .bottom, spacing: 0) {
             if addBusy || moveBusy || deleteBusy {
                 busyIndicator
             }
         }
-        .overlay(alignment: .bottomTrailing) {
-            if !selectionMode && !iPadLayout.isPad {
-                floatingAddButton
+        .background {
+            BrowserKeyboardCommands(isEditingText: searchFocused, canSelect: !visibleSelectionItems.isEmpty,
+                search: { searchRevealed = true; searchFocused = true },
+                cancel: { if selectionMode { endSelection() }; searchFocused = false; searchRevealed = false },
+                selectAll: { if !selectionMode { startSelection() }; selectedIDs = Set(visibleSelectionItems.map(\.id)) })
+                .disabled(!isActive)
+        }
+        .sheet(isPresented: $showImportPicker) {
+            DocumentPicker { urls in
+                UploadManager.shared.enqueueDocuments(driveId: driveId, directoryId: directory.id, urls: urls) { files in
+                    Task { await refreshAfterImport(files) }
+                }
             }
         }
         .alert("Impossible", isPresented: addErrorBinding) {
@@ -398,6 +441,7 @@ struct DirectoryView: View {
 
     /// Pastille de recherche centrée et compacte.
     private var searchBar: some View {
+        VStack(spacing: 2) {
         HStack(spacing: 6) {
             Image(systemName: "magnifyingglass")
                 .font(.system(size: 13, weight: .medium))
@@ -409,39 +453,43 @@ struct DirectoryView: View {
             .focused($searchFocused)
             .autocorrectionDisabled()
             .submitLabel(.search)
+            .accessibilityLabel("Rechercher des fichiers")
+            .frame(minHeight: 44)
             if !searchText.isEmpty {
                 Button {
                     searchText = ""
                 } label: {
                     Image(systemName: "xmark.circle.fill")
                         .foregroundStyle(.secondary)
+                        .frame(width: 44, height: 44)
                 }
                 .accessibilityLabel("Effacer la recherche")
             }
-            searchScopeButton
+            if !dynamicTypeSize.isAccessibilitySize { searchScopeButton }
+        }
+        if dynamicTypeSize.isAccessibilitySize { searchScopeButton }
         }
         .padding(.leading, 14)
         .padding(.trailing, 8)
-        .padding(.vertical, 7)
-        .inputChrome(Capsule())
-        .frame(maxWidth: 260)
+        .padding(.vertical, 2)
+        .inputChrome(RoundedRectangle(cornerRadius: DS.panelRadius))
+        .frame(maxWidth: horizontalSizeClass == .regular ? 600 : .infinity)
+        .padding(.horizontal, DS.gridMargin)
     }
 
     /// Bascule la portée : dossier courant + sous-dossiers, ou tout le drive.
     private var searchScopeButton: some View {
-        Button {
-            searchRestrictedToFolder.toggle()
+        Menu {
+            Button("Ce dossier et ses sous-dossiers") { searchRestrictedToFolder = true }
+            Button("Tout le drive") { searchRestrictedToFolder = false }
         } label: {
-            Image(systemName: searchRestrictedToFolder ? "smallcircle.fill.circle.fill" : "smallcircle.filled.circle")
-                .font(.system(size: 16, weight: .medium))
+            Label(searchRestrictedToFolder ? "Ce dossier" : "Tout le drive", systemImage: "chevron.down")
+                .font(.caption)
                 .foregroundStyle(searchRestrictedToFolder ? Color.accentColor : .secondary)
-                .frame(width: 30, height: 30)
+                .frame(minWidth: 44, minHeight: 44)
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        // La zone tactile (30 pt) déborde de la ligne : la pastille conserve
-        // la hauteur d'origine au lieu d'épouser celle du bouton.
-        .padding(.vertical, -4)
         .accessibilityLabel(searchRestrictedToFolder
             ? "Recherche limitée au dossier et ses sous-dossiers"
             : "Recherche sur tout le drive")
@@ -480,11 +528,7 @@ struct DirectoryView: View {
         Button {
             openRandomFile()
         } label: {
-            Image(systemName: "dice")
-                .font(.system(size: 17, weight: .medium))
-                .foregroundStyle(Color.accentColor)
-                .frame(width: 32, height: 32)
-                .contentShape(Rectangle())
+            Label("Ouvrir un fichier au hasard", systemImage: "dice")
         }
         .disabled(playableFiles.isEmpty)
         .accessibilityLabel("Ouvrir un fichier au hasard")
@@ -690,20 +734,8 @@ struct DirectoryView: View {
         .padding(.horizontal, 16)
         .padding(.vertical, 10)
         .background(.black.opacity(0.75), in: Capsule())
-        .padding(.bottom, DS.floatingPillInset)
+        .padding(.vertical, 8)
         .transition(.opacity)
-    }
-
-    /// Action d'import séparée de la barre d'outils pour préserver la place
-    /// du titre du dossier. La marge basse l'aligne au-dessus de la barre
-    /// d'onglets flottante sans recouvrir la dernière rangée de cartes.
-    private var floatingAddButton: some View {
-        addMenu
-            .frame(width: 52, height: 52)
-            .floatingChrome(Circle())
-            .padding(.trailing, DS.gridMargin + 4)
-            .padding(.bottom, DS.floatingActionInset)
-            .accessibilityLabel("Ajouter ou importer")
     }
 
     private var addMenu: some View {
@@ -754,6 +786,24 @@ struct DirectoryView: View {
     }
 
     private var breadcrumb: some View {
+        Group {
+            if let onNavigateAncestor, crumbs.count > 1 {
+                Menu {
+                    ForEach(Array(crumbs.dropLast().enumerated()), id: \.offset) { index, name in
+                        Button(name) { searchFocused = false; onNavigateAncestor(index) }
+                    }
+                } label: {
+                    breadcrumbLabel
+                        .frame(minHeight: 44)
+                }
+                .accessibilityHint("Revenir à un dossier parent")
+            } else {
+                breadcrumbLabel
+            }
+        }
+    }
+
+    private var breadcrumbLabel: some View {
         HStack(spacing: 5) {
             Image(systemName: "folder.fill")
                 .font(.system(size: 10, weight: .medium))
@@ -761,7 +811,7 @@ struct DirectoryView: View {
                 .lineLimit(1)
                 .truncationMode(.head)
         }
-        .font(.system(size: 11, weight: .medium))
+        .font(.caption.weight(.medium))
         .foregroundStyle(.secondary)
         .padding(.horizontal, 10)
         .padding(.vertical, 3.5)
@@ -775,7 +825,7 @@ struct DirectoryView: View {
     private var itemCountLabel: some View {
         let text = itemCountText
         return Text(text)
-            .font(.system(size: 11, weight: .medium))
+            .font(.caption.weight(.medium))
             .foregroundStyle(.secondary)
             .padding(.horizontal, 10)
             .padding(.vertical, 3.5)

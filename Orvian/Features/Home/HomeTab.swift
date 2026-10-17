@@ -54,6 +54,7 @@ struct HomeTab: View {
                 router: router,
                 isActive: isSelected,
                 showsSearchBar: true,
+                onNavigateAncestor: { depth in path = Array(path.prefix(depth)) },
                 onOpenFolder: { folder in
                     path.append(folder)
                 }
@@ -69,6 +70,7 @@ struct HomeTab: View {
                     router: router,
                     isActive: isSelected,
                     showsSearchBar: true,
+                    onNavigateAncestor: { depth in path = Array(path.prefix(depth)) },
                     onOpenFolder: { folder in
                         path.append(folder)
                     }

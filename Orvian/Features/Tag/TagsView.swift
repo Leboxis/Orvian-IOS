@@ -17,6 +17,7 @@ struct TagsView: View {
     /// Visibilité de la colonne de gauche (bouton de masquage de l'en-tête).
     @Binding var columnVisibility: NavigationSplitViewVisibility
     @Environment(\.iPadLayout) private var iPadLayout
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     @State private var categories: [Category] = []
     @State private var orderedCategories: [Category] = []
@@ -127,6 +128,10 @@ struct TagsView: View {
                         driveId: driveId,
                         crumbs: trail,
                         router: router,
+                        onNavigateAncestor: { depth in
+                            let retained = depth + 1
+                            if path.count > retained { path.removeLast(path.count - retained) }
+                        },
                         onOpenFolder: { folder in
                             push(folder)
                         }
@@ -181,7 +186,10 @@ struct TagsView: View {
                     let index = padNavigation.folders.firstIndex { $0.id == directory.id }
                     let names = index.map { Array(padNavigation.folders[...$0].map(\.name)) } ?? [directory.name]
                     DirectoryView(directory: directory, driveId: driveId,
-                                  crumbs: [selectedCategory?.name ?? "Tag"] + names, router: router,
+                                   crumbs: [selectedCategory?.name ?? "Tag"] + names, router: router,
+                                   onNavigateAncestor: { depth in
+                                       padNavigation.folders = Array(padNavigation.folders.prefix(depth))
+                                   },
                                   onOpenFolder: { padNavigation.folders.append($0) })
                 }
             }
@@ -201,7 +209,7 @@ struct TagsView: View {
     private var padCategoryList: some View {
         VStack(spacing: 0) {
             // Un seul en-tête, sans seconde barre de navigation au-dessus.
-            PadSidebarHeader(title: Text(hasLoadedCategories ? "Tag (\(categories.count))" : "Tag"),
+            PadSidebarHeader(title: Text(hasLoadedCategories ? "Tags (\(categories.count))" : "Tags"),
                              columnVisibility: $columnVisibility) {
                 Menu {
                     Button {
@@ -281,7 +289,7 @@ struct TagsView: View {
     /// Conserve le titre « Tag » et ajoute le nombre avec une hiérarchie plus
     /// discrète, directement dans le même texte du titre de navigation.
     private var tagNavigationTitle: Text {
-        let title = Text("Tag")
+        let title = Text("Tags")
         guard hasLoadedCategories else { return title }
         return title + Text(" (\(categories.count))")
             .font(.system(size: 10, weight: .medium))
@@ -311,7 +319,7 @@ struct TagsView: View {
             }
             .padding(.horizontal, DS.gridMargin)
             .padding(.top, 6)
-            .padding(.bottom, DS.floatingBarInset)
+            .padding(.bottom, DS.contentBottomInset)
             // Bloc centré et borné en largeur : sur iPad, deux colonnes
             // étirées sur 1 000 pt rendaient les cartes illisibles.
             .frame(maxWidth: DS.maxContentWidth)
@@ -323,7 +331,7 @@ struct TagsView: View {
         }
     }
     private var gridColumns: [GridItem] {
-        Array(repeating: GridItem(.flexible(), spacing: DS.gridSpacing), count: max(2, tagGridColumns))
+        Array(repeating: GridItem(.flexible(), spacing: DS.gridSpacing), count: dynamicTypeSize.isAccessibilitySize ? 1 : min(3, max(2, tagGridColumns)))
     }
 
     private var list: some View {
@@ -364,7 +372,7 @@ struct TagsView: View {
             }
             .padding(.horizontal, DS.gridMargin)
             .padding(.top, 6)
-            .padding(.bottom, DS.floatingBarInset)
+            .padding(.bottom, DS.contentBottomInset)
             .frame(maxWidth: DS.maxContentWidth)
             .frame(maxWidth: .infinity)
         }
@@ -638,6 +646,7 @@ private struct CategoryRow: View {
 /// Employée aussi dans l'éditeur de tags afin de conserver une présentation
 /// parfaitement cohérente entre l'onglet dédié et le menu d'un fichier.
 struct TagGridCard: View {
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     let category: Category
     /// Variante resserrée des éditeurs de tags : icône et textes réduits,
     /// compteur d'usage masqué, pour en afficher davantage à l'écran.
@@ -659,7 +668,7 @@ struct TagGridCard: View {
                 Text(category.name)
                     .font(compact ? .caption.weight(.semibold) : .subheadline.weight(.semibold))
                     .foregroundStyle(.primary)
-                    .lineLimit(compact ? 1 : 2)
+                    .lineLimit(dynamicTypeSize.isAccessibilitySize ? 4 : (compact ? 1 : 2))
                     .multilineTextAlignment(.center)
                 if !compact, let uses = category.userUses, uses > 0 {
                     Text("\(uses) élément\(uses > 1 ? "s" : "")")
@@ -724,6 +733,7 @@ struct CategoryFilesView: View {
                     viewModel: viewModel
                 )
             },
+            onResetFilters: { filters = FileFilters() },
             filters: filters
         )
         .navigationTitle(category.name)

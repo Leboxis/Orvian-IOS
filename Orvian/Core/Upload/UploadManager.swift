@@ -441,6 +441,9 @@ private static let fallbackDateFormatter: DateFormatter = {
         }
 
         let payload = await UploadFileIO.copyToTemporaryDirectory(sourceURL: url, fileName: url.lastPathComponent)
+        if payload != nil {
+            Task.detached { DroppedFileStaging.remove([url]) }
+        }
 
         guard !Task.isCancelled else {
             if let payload, payload.isTemporary {
@@ -620,11 +623,14 @@ private static let fallbackDateFormatter: DateFormatter = {
 
     private func discardRetryContexts(for taskIDs: Set<UUID>) {
         let urls = taskIDs.compactMap { taskID -> URL? in
-            guard let context = retryContexts.removeValue(forKey: taskID),
-                  case let .payload(payload) = context.source,
-                  payload.isTemporary
-            else { return nil }
-            return payload.fileURL
+            guard let context = retryContexts.removeValue(forKey: taskID) else { return nil }
+            switch context.source {
+            case let .payload(payload): return payload.isTemporary ? payload.fileURL : nil
+            case let .document(url):
+                Task.detached { DroppedFileStaging.remove([url]) }
+                return nil
+            case .photo: return nil
+            }
         }
         guard !urls.isEmpty else { return }
         Task {
@@ -678,4 +684,3 @@ private static let fallbackDateFormatter: DateFormatter = {
         }
     }
 }
-

@@ -28,7 +28,7 @@ class IPadNavigationWiringChecks(unittest.TestCase):
         self.assertIn(".tabViewStyle(.tabBarOnly)", native)
         self.assertEqual(
             re.findall(r"value: AppTab\.(\w+)", native),
-            ["home", "favorites", "tag", "profile", "settings"],
+            ["home", "favorites", "tag", "settings", "profile"],
         )
         for forbidden in ["NavigationSplitView", "NavigationStack", "ZStack", ".opacity(", "tabPane("]:
             self.assertNotIn(forbidden, native)
@@ -42,7 +42,7 @@ class IPadNavigationWiringChecks(unittest.TestCase):
         self.assertIn("private var phoneNavigation:", main)
         phone = main[main.index("    private var phoneNavigation:"):main.index("    private var iPadSelection:")]
         for expected in [
-            "ZStack(alignment: .bottom)", "FloatingTabBar(",
+            "safeAreaInset(edge: .bottom, spacing: 0)", "FloatingTabBar(",
             "selection: $shell.tab", "onSelect: prepareTab", "onReselect:",
             "scrollFavoritesToTop: favoritesReselectScrollToTop", "TransferOverlayChrome(",
         ]:
@@ -63,7 +63,7 @@ class IPadNavigationWiringChecks(unittest.TestCase):
         self.assertIn("guard targetTab != shell.tab else { return }", selection)
         self.assertLess(selection.index("prepareTab(targetTab)"), selection.index("shell.tab = targetTab"))
         self.assertNotIn("navState.reset", selection)
-        self.assertNotIn("safeAreaInset(edge: .bottom", main)
+        self.assertEqual(main.count(".safeAreaInset(edge: .bottom, spacing: 0)"), 2)
 
     def test_ipad_bottom_bar_is_optional_and_does_not_replace_native_tab_state(self):
         main = self.source("Orvian/App/MainTabView.swift")
@@ -107,10 +107,13 @@ class IPadNavigationWiringChecks(unittest.TestCase):
         menu = tags[tags.index("PadSidebarHeader("):tags.index("if categories.isEmpty", tags.index("PadSidebarHeader("))]
         self.assertIn(".frame(width: 44, height: 44)", menu)
 
-    def test_pad_profile_joins_the_capsule_without_changing_phone_group(self):
+    def test_bar_order_matches_native_tabs_and_retains_accessible_text(self):
         bar = self.source("Orvian/UI/FloatingTabBar.swift")
         self.assertIn("@Environment(\\.iPadLayout)", bar)
-        self.assertIn("iPadLayout.isPad ? [.settings, .tag, .home, .favorites, .profile]", bar)
+        self.assertIn("iPadLayout.isPad ? [.home, .favorites, .tag, .settings, .profile]", bar)
+        self.assertIn(": [.home, .favorites, .tag, .settings]", bar)
+        self.assertIn("ForEach(AppTab.presentationOrder)", bar)
+        self.assertNotIn("dynamicTypeSize < .accessibility1", bar)
         self.assertIn("if !iPadLayout.isPad {", bar)
 
     def test_profile_preserves_phone_preview_without_an_extra_pad_fetch(self):

@@ -348,16 +348,13 @@ struct MediaPagerView: View {
             // transport, fermer) : on n'ajoute rien au-dessus. Les images, en
             // revanche, n'ont aucun chrome propre : la barre du pager les sert.
             if let currentFile, currentFile.isImage {
-                ZStack {
-                    HStack(spacing: 8) {
-                        favoriteButton(for: currentFile)
-                        tagButton(for: currentFile)
-                        Spacer()
-                    }
+                VStack(spacing: 4) {
                     MediaTitlePill(name: currentFile.name)
                     HStack(spacing: 8) {
-                        Spacer()
-                        closeButton
+                    favoriteButton(for: currentFile)
+                    tagButton(for: currentFile)
+                    Spacer(minLength: 8)
+                    closeButton
                     }
                 }
                 .padding(.horizontal, 14)
@@ -449,10 +446,11 @@ struct MediaPagerView: View {
             Image(systemName: "xmark")
                 .font(.system(size: 15, weight: .semibold))
                 .foregroundStyle(.white)
-                .padding(10)
-                .background(.ultraThinMaterial, in: Circle())
+                .frame(width: 44, height: 44)
+                .background(.black.opacity(0.75), in: Circle())
         }
         .accessibilityLabel("Fermer")
+        .keyboardShortcut(.escape, modifiers: [])
     }
 
     /// État favori par fichier : la valeur connue du pager fait foi, sinon
@@ -870,4 +868,3 @@ private struct ZoomablePhotoPage: View {
         }
     }
 }
-
