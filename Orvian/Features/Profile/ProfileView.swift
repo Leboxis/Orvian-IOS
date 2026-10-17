@@ -78,6 +78,10 @@ struct ProfileView: View {
             .padding(.horizontal, iPadLayout.horizontalInset(base: DS.gridMargin))
             .padding(.top, 16)
             .padding(.bottom, DS.floatingBarInset)
+            // Même décision que la grille de tags : au-delà de 900 pt, les
+            // trois aperçus s'étirent et les vignettes deviennent énormes.
+            .frame(maxWidth: DS.maxContentWidth)
+            .frame(maxWidth: .infinity)
         }
         .background(Color(uiColor: .systemGroupedBackground))
     }

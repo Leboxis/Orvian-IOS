@@ -138,7 +138,9 @@ struct SettingsView: View {
             .listStyle(.sidebar)
             .navigationTitle("Réglages")
             .navigationSplitViewColumnWidth(min: 260, ideal: 280, max: 320)
-            .safeAreaInset(edge: .bottom) { Color.clear.frame(height: DS.floatingBarInset) }
+            // Aucune réserve basse : la barre d'onglets native de l'iPad
+            // insère déjà son espace ; `DS.floatingBarInset` (barre flottante
+            // iPhone) ne laissait qu'une bande vide sous la liste.
         } detail: {
             Group {
                 if isSearching {

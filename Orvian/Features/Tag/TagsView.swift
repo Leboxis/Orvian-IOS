@@ -206,10 +206,10 @@ struct TagsView: View {
             List(selection: categorySelection) {
                 ForEach(orderedCategories) { category in
                     if isReordering {
-                        reorderCell(for: category)
+                        reorderCell(for: category, inSidebar: true)
                     } else {
                         NavigationLink(value: category.id) {
-                            CategoryRow(category: category)
+                            CategoryRow(category: category, inSidebar: true)
                         }
                         .contextMenu { tagContextMenu(for: category) }
                     }
@@ -218,7 +218,9 @@ struct TagsView: View {
             .listStyle(.sidebar)
             .navigationTitle(tagNavigationTitle)
             .refreshable { await load(force: true) }
-            .safeAreaInset(edge: .bottom) { Color.clear.frame(height: DS.floatingBarInset) }
+            // Aucune réserve basse ici : la barre d'onglets native de l'iPad
+            // insère déjà son espace. `DS.floatingBarInset` appartient à la
+            // barre flottante iPhone et laissait une bande vide sous la liste.
         }
     }
 
@@ -344,13 +346,15 @@ struct TagsView: View {
     /// Cellule du mode réarrangement : même présentation que le mode courant
     /// (grille ou liste), bordure pour signaler le mode actif, et
     /// glisser-déposer natif (`onDrag`/`onDrop`) pour déplacer le tag.
+    /// `inSidebar` force la forme ligne : la barre latérale est une liste,
+    /// y injecter des cartes de grille cassait sa présentation.
     @ViewBuilder
-    private func reorderCell(for category: Category) -> some View {
+    private func reorderCell(for category: Category, inSidebar: Bool = false) -> some View {
         Group {
-            if layout == .grid {
+            if layout == .grid && !inSidebar {
                 TagGridCard(category: category)
             } else {
-                CategoryRow(category: category)
+                CategoryRow(category: category, inSidebar: inSidebar)
             }
         }
         .overlay {
@@ -540,18 +544,39 @@ struct TagsView: View {
 
 private struct CategoryRow: View {
     let category: Category
+    /// Ligne de la barre latérale iPad : la liste native fournit déjà le fond,
+    /// le liseré et la sélection. La carte et le chevron de la version iPhone
+    /// y doublaient le relief et annonçaient une pile qui n'existe pas.
+    var inSidebar = false
 
     private var tint: Color {
         Color(hex: category.color) ?? .accentColor
     }
 
     var body: some View {
+        if inSidebar {
+            // La liste native de la barre latérale fournit déjà le fond et le
+            // liseré : encadrer la ligne d'une carte y doublait le relief.
+            row.padding(4)
+        } else {
+            row
+                .padding(12)
+                .background(.background, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+                // Ombre de pastille en ligne (DS.inlineShadow) : sur une liste
+                // qui défile, une ombre large force une passe de flou par
+                // cellule à chaque image. Le rayon minimal du système de
+                // design garde le relief sans ce surcoût par carte.
+                .shadow(color: DS.inlineShadow, radius: DS.inlineShadowRadius, x: 0, y: DS.inlineShadowY)
+        }
+    }
+
+    private var row: some View {
         HStack(spacing: 12) {
             Image(systemName: "tag.fill")
-                .font(.system(size: 15, weight: .semibold))
+                .font(.system(size: inSidebar ? 13 : 15, weight: .semibold))
                 .foregroundStyle(.white)
-                .frame(width: 38, height: 38)
-                .background(tint, in: RoundedRectangle(cornerRadius: 11, style: .continuous))
+                .frame(width: inSidebar ? 28 : 38, height: inSidebar ? 28 : 38)
+                .background(tint, in: RoundedRectangle(cornerRadius: inSidebar ? 8 : 11, style: .continuous))
 
             VStack(alignment: .leading, spacing: 2) {
                 Text(category.name)
@@ -564,17 +589,14 @@ private struct CategoryRow: View {
                 }
             }
             Spacer()
-            Image(systemName: "chevron.right")
-                .font(.footnote.weight(.semibold))
-                .foregroundStyle(.tertiary)
+            if !inSidebar {
+                // Le chevron annonce une pile poussée : la sélection de la
+                // barre latérale n'en a pas.
+                Image(systemName: "chevron.right")
+                    .font(.footnote.weight(.semibold))
+                    .foregroundStyle(.tertiary)
+            }
         }
-        .padding(12)
-        .background(.background, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-        // Ombre de pastille en ligne (DS.inlineShadow) : sur une liste qui
-        // défile, une ombre large force une passe de flou par cellule à chaque
-        // image. Le rayon minimal du système de design garde le relief sans
-        // ce surcoût par carte.
-        .shadow(color: DS.inlineShadow, radius: DS.inlineShadowRadius, x: 0, y: DS.inlineShadowY)
         .contentShape(Rectangle())
     }
 }
