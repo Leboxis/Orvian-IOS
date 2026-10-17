@@ -14,6 +14,8 @@ struct TagsView: View {
     /// `TabNavigationState` pour survivre au démontage de l'onglet.
     @Binding var trail: [String]
     @Binding var padNavigation: IPadTagNavigation
+    /// Visibilité de la colonne de gauche (bouton de masquage de l'en-tête).
+    @Binding var columnVisibility: NavigationSplitViewVisibility
     @Environment(\.iPadLayout) private var iPadLayout
 
     @State private var categories: [Category] = []
@@ -136,54 +138,32 @@ struct TagsView: View {
     @ToolbarContentBuilder
     private var categoryToolbar: some ToolbarContent {
         ToolbarItemGroup(placement: .topBarTrailing) {
-            if iPadLayout.isPad {
-                // Un seul menu : trois boutons alignés écrasaient le titre de
-                // la barre latérale, qui ne respirait plus.
-                Menu {
-                    Button {
-                        isReordering.toggle()
-                    } label: {
-                        Label(isReordering ? "Terminer le réarrangement" : "Réarranger les tags",
-                              systemImage: isReordering ? "checkmark.circle" : "arrow.up.arrow.down")
-                    }
-                    Button {
-                        showCreateSheet = true
-                    } label: {
-                        Label("Nouveau tag", systemImage: "plus")
-                    }
-                } label: {
-                    Image(systemName: isReordering ? "checkmark.circle" : "ellipsis.circle")
+            Button {
+                withAnimation(Motion.animation(.snappy(duration: 0.25))) {
+                    layout = layout == .grid ? .list : .grid
                 }
-                .accessibilityLabel(isReordering ? "Terminer le réarrangement" : "Actions des tags")
-            } else {
-                Button {
-                    withAnimation(Motion.animation(.snappy(duration: 0.25))) {
-                        layout = layout == .grid ? .list : .grid
-                    }
-                } label: {
-                    Image(systemName: layout == .grid ? "list.bullet" : "square.grid.2x2")
-                }
-                .accessibilityLabel(layout == .grid ? "Afficher en liste" : "Afficher en grille")
-                Button {
-                    isReordering.toggle()
-                } label: {
-                    Image(systemName: "pencil")
-                }
-                .accessibilityLabel(isReordering ? "Terminer le réarrangement" : "Réarranger les tags")
-                Button {
-                    showCreateSheet = true
-                } label: {
-                    Image(systemName: "plus")
-                }
-                .accessibilityLabel("Nouveau tag")
+            } label: {
+                Image(systemName: layout == .grid ? "list.bullet" : "square.grid.2x2")
             }
+            .accessibilityLabel(layout == .grid ? "Afficher en liste" : "Afficher en grille")
+            Button {
+                isReordering.toggle()
+            } label: {
+                Image(systemName: "pencil")
+            }
+            .accessibilityLabel(isReordering ? "Terminer le réarrangement" : "Réarranger les tags")
+            Button {
+                showCreateSheet = true
+            } label: {
+                Image(systemName: "plus")
+            }
+            .accessibilityLabel("Nouveau tag")
         }
     }
 
     private var padNavigationView: some View {
-        NavigationSplitView {
+        NavigationSplitView(columnVisibility: $columnVisibility) {
             padCategoryList
-                .toolbar { categoryToolbar }
                 .navigationSplitViewColumnWidth(min: 260, ideal: 280, max: 320)
         } detail: {
             NavigationStack(path: $padNavigation.folders) {
@@ -219,33 +199,62 @@ struct TagsView: View {
 
     @ViewBuilder
     private var padCategoryList: some View {
-        if categories.isEmpty {
-            root
-        } else {
-            List(selection: categorySelection) {
-                ForEach(orderedCategories) { category in
-                    if isReordering {
-                        reorderCell(for: category, inSidebar: true)
-                    } else {
-                        NavigationLink(value: category.id) {
-                            CategoryRow(category: category, inSidebar: true)
+        VStack(spacing: 0) {
+            // En-tête dans la colonne (et non dans la barre de navigation
+            // système) : la barre d'onglets native n'est dessinée qu'au centre
+            // de la fenêtre, la colonne peut donc remonter dans la bande
+            // laissée vide et commencer sous la barre d'état.
+            PadSidebarHeader(title: tagNavigationTitle, columnVisibility: $columnVisibility) {
+                Menu {
+                    Button {
+                        isReordering.toggle()
+                    } label: {
+                        Label(isReordering ? "Terminer le réarrangement" : "Réarranger les tags",
+                              systemImage: isReordering ? "checkmark.circle" : "arrow.up.arrow.down")
+                    }
+                    Button {
+                        showCreateSheet = true
+                    } label: {
+                        Label("Nouveau tag", systemImage: "plus")
+                    }
+                } label: {
+                    Image(systemName: isReordering ? "checkmark.circle" : "ellipsis.circle")
+                }
+                .accessibilityLabel(isReordering ? "Terminer le réarrangement" : "Actions des tags")
+            }
+
+            if categories.isEmpty {
+                root
+            } else {
+                List(selection: categorySelection) {
+                    ForEach(orderedCategories) { category in
+                        if isReordering {
+                            reorderCell(for: category, inSidebar: true)
+                        } else {
+                            NavigationLink(value: category.id) {
+                                CategoryRow(category: category, inSidebar: true)
+                            }
+                            .contextMenu { tagContextMenu(for: category) }
                         }
-                        .contextMenu { tagContextMenu(for: category) }
                     }
                 }
+                .listStyle(.sidebar)
+                .navigationTitle(tagNavigationTitle)
+                .refreshable { await load(force: true) }
+                .scrollContentBackground(.hidden)
+                // Couleur de page de l'app : le matériau de barre latérale rend
+                // ≈ `secondarySystemGroupedBackground`, la couleur de *carte*, donc
+                // la colonne lisait comme une carte géante collée au détail.
+                // Aucune réserve basse : la barre d'onglets native de l'iPad
+                // insère déjà son espace. `DS.floatingBarInset` appartient à la
+                // barre flottante iPhone et laissait une bande vide sous la liste.
             }
-            .listStyle(.sidebar)
-            .navigationTitle(tagNavigationTitle)
-            .refreshable { await load(force: true) }
-            .scrollContentBackground(.hidden)
-            // Couleur de page de l'app : le matériau de barre latérale rend
-            // ≈ `secondarySystemGroupedBackground`, la couleur de *carte*, donc
-            // la colonne lisait comme une carte géante collée au détail.
-            .background(Color(uiColor: .systemGroupedBackground))
-            // Aucune réserve basse ici : la barre d'onglets native de l'iPad
-            // insère déjà son espace. `DS.floatingBarInset` appartient à la
-            // barre flottante iPhone et laissait une bande vide sous la liste.
         }
+        .background(Color(uiColor: .systemGroupedBackground))
+        // La colonne remonte dans la bande de la barre d'onglets : masquer la
+        // barre de navigation libère sa hauteur sans laisser de titre en double.
+        .toolbar(.hidden, for: .navigationBar)
+        .ignoresSafeArea(.container, edges: .top)
     }
 
     private var root: some View {

@@ -36,9 +36,9 @@ struct ProfileView: View {
                 Color.clear.frame(height: iPadLayout.isPad ? 0 : 90)
             }
             .navigationTitle("Profil")
-            // Titre inline sur iPad : le bloc d'aperçu est borné et centré,
-            // un grand titre collé à gauche ne partageait pas son axe.
-            .navigationBarTitleDisplayMode(iPadLayout.isPad ? .inline : .large)
+            // Le mode inline masque la barre sur un contenu qui défile : le
+            // grand titre reste, et le bloc ci-dessous prend l'axe du titre.
+            .navigationBarTitleDisplayMode(.large)
         }
         .task(id: session.selectedDrive?.id) {
             await loadPreviews()
@@ -82,8 +82,8 @@ struct ProfileView: View {
             .padding(.bottom, DS.padBottomInset)
             // Même décision que la grille de tags : au-delà de 900 pt, les
             // trois aperçus s'étirent et les vignettes deviennent énormes.
+            // Le bloc reste sur l'axe du grand titre (pas centré).
             .frame(maxWidth: DS.maxContentWidth)
-            .frame(maxWidth: .infinity)
         }
         .background(Color(uiColor: .systemGroupedBackground))
     }

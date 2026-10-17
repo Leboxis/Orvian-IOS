@@ -134,14 +134,16 @@ struct MainTabView: View {
         switch tab {
         case .settings:
             SettingsView(session: session, path: $shell.navState.settingsPath,
-                         selectedSpace: $shell.navState.settingsSelection)
+                         selectedSpace: $shell.navState.settingsSelection,
+                         columnVisibility: $shell.navState.splitVisibility)
         case .tag:
             TagsView(
                 driveId: drive.id,
                 router: shell.router,
                 path: $shell.navState.tagsPath,
                 trail: $shell.navState.tagsTrail,
-                padNavigation: $shell.navState.iPadTags
+                padNavigation: $shell.navState.iPadTags,
+                columnVisibility: $shell.navState.splitVisibility
             )
         case .home:
             HomeTab(

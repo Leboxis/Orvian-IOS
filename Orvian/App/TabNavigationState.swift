@@ -38,6 +38,11 @@ final class TabNavigationState {
     var settingsPath = NavigationPath()
     var settingsSelection: SettingsRoute? = .appearance
     var iPadTags = IPadTagNavigation()
+    /// Visibilité de la colonne de gauche des onglets « Tag » et « Réglages ».
+    /// Partagée par les deux onglets et possédée par la session : les deux
+    /// barres latérales restent dans le même état et la valeur survit au
+    /// démontage des vues.
+    var splitVisibility = NavigationSplitViewVisibility.all
 
     func reset(tab: AppTab, scrollFavoritesToTop: Bool = true) {
         switch tab {

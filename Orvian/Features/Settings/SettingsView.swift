@@ -11,6 +11,8 @@ struct SettingsView: View {
     let session: SessionStore
     @Binding var path: NavigationPath
     @Binding var selectedSpace: SettingsRoute?
+    /// Visibilité de la colonne de gauche (bouton de masquage de l'en-tête).
+    @Binding var columnVisibility: NavigationSplitViewVisibility
     @Environment(\.iPadLayout) private var iPadLayout
 
     @State private var searchText = ""
@@ -129,23 +131,37 @@ struct SettingsView: View {
     }
 
     private var padNavigation: some View {
-        NavigationSplitView {
-            List(selection: $selectedSpace) {
-                accountHeaderSection
-                destinationsSection
-                aboutSection
+        NavigationSplitView(columnVisibility: $columnVisibility) {
+            VStack(spacing: 0) {
+                // En-tête dans la colonne (et non dans la barre de navigation
+                // système) : la barre d'onglets native n'est dessinée qu'au
+                // centre de la fenêtre, la colonne remonte donc dans la bande
+                // laissée vide et commence sous la barre d'état.
+                PadSidebarHeader(title: Text("Réglages"), columnVisibility: $columnVisibility) {
+                    EmptyView()
+                }
+
+                List(selection: $selectedSpace) {
+                    accountHeaderSection
+                    destinationsSection
+                    aboutSection
+                }
+                .listStyle(.sidebar)
+                .navigationTitle("Réglages")
+                .scrollContentBackground(.hidden)
+                // Couleur de page de l'app. Le matériau de barre latérale rend
+                // ≈ `secondarySystemGroupedBackground`, la couleur de *carte* :
+                // la colonne lisait donc comme une carte géante collée au détail.
+                // Aucune réserve basse : la barre d'onglets native de l'iPad
+                // insère déjà son espace ; `DS.floatingBarInset` (barre flottante
+                // iPhone) ne laissait qu'une bande vide sous la liste.
             }
-            .listStyle(.sidebar)
-            .navigationTitle("Réglages")
-            .navigationSplitViewColumnWidth(min: 260, ideal: 280, max: 320)
-            .scrollContentBackground(.hidden)
-            // Couleur de page de l'app. Le matériau de barre latérale rend
-            // ≈ `secondarySystemGroupedBackground`, la couleur de *carte* :
-            // la colonne lisait donc comme une carte géante collée au détail.
             .background(Color(uiColor: .systemGroupedBackground))
-            // Aucune réserve basse : la barre d'onglets native de l'iPad
-            // insère déjà son espace ; `DS.floatingBarInset` (barre flottante
-            // iPhone) ne laissait qu'une bande vide sous la liste.
+            // Masquer la barre de navigation libère sa hauteur sans laisser de
+            // titre en double avec l'en-tête de la colonne.
+            .toolbar(.hidden, for: .navigationBar)
+            .ignoresSafeArea(.container, edges: .top)
+            .navigationSplitViewColumnWidth(min: 260, ideal: 280, max: 320)
         } detail: {
             Group {
                 if isSearching {
