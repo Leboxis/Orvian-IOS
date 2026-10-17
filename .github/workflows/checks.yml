@@ -1,0 +1,102 @@
+name: Checks
+
+# Les vérifications lentes ne bloquent pas la publication d'une IPA sur main :
+# elles s'exécutent sur les pull requests.
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  checks:
+    name: Static and hosted checks
+    runs-on: macos-26
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install model verification tools
+        run: python -m pip install -r scripts/nsfw/requirements.txt
+
+      - name: Verify model transformation and embedded weights
+        run: |
+          python -m unittest discover -s Tests -p 'test_nsfw_model.py'
+          python scripts/nsfw/verify_model.py
+          python scripts/nsfw/convert_model.py --fetch-only --upstream "$RUNNER_TEMP/nsfw-reference.mlpackage"
+          python scripts/nsfw/verify_model.py --reference "$RUNNER_TEMP/nsfw-reference.mlpackage"
+
+      - name: Verify classification policy
+        run: python .github/scripts/check_image_classification.py
+
+      - name: Check concurrency and bounded caches
+        run: python3 .github/scripts/check_concurrency.py
+
+      - name: Check performance regressions
+        run: python3 .github/scripts/check_performance_regressions.py
+
+      - name: Check favorites disk cache
+        run: python3 .github/scripts/check_favorites_cache.py
+
+      - name: Check motion switch and isolation invariants
+        run: python3 .github/scripts/check_motion_and_isolation.py
+
+      - name: Check security, transfers and metadata isolation
+        run: python3 .github/scripts/check_ios_regressions.py
+
+      - name: Check audit regressions
+        run: |
+          python3 -m unittest discover -s Tests -p 'test_audit_integration.py'
+          python3 -m unittest discover -s Tests -p 'test_requested_fixes.py'
+          python3 -m unittest discover -s Tests -p 'test_filter_menu.py'
+          python3 -m unittest discover -s Tests -p 'test_recent_sharing.py'
+          python3 -m unittest discover -s Tests -p 'test_ui_cleanup.py'
+          python3 -m unittest discover -s Tests -p 'test_ipad_navigation.py'
+          python3 .github/scripts/check_audit_regressions.py
+
+      - name: Check GIF decoding
+        run: |
+          swiftc Orvian/Core/Media/GIFImageStore.swift Tests/GIFImageChecks.swift -o /tmp/orvian-gif-checks
+          /tmp/orvian-gif-checks
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Generate project and run hosted iOS tests
+        shell: bash
+        run: |
+          set -o pipefail
+          xcodegen generate
+          SIMULATOR_ID=$(xcrun simctl list devices available -j | python -c 'import json,re,sys; d=json.load(sys.stdin); print(next(x["udid"] for k,v in d["devices"].items() if (m := re.search(r"iOS-(\d+)", k)) and int(m[1]) >= 26 for x in v if "iPhone" in x["name"]))')
+          xcodebuild -project Orvian.xcodeproj -scheme Orvian \
+            -destination "platform=iOS Simulator,id=$SIMULATOR_ID" \
+            -configuration Debug -derivedDataPath "$RUNNER_TEMP/orvian-tests" \
+            -only-testing:OrvianTests/NSFWClassifierTests \
+            -only-testing:OrvianTests/ImageClassificationStoreTests \
+            -only-testing:OrvianTests/FolderImageScannerTests \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO test
+
+      - name: Verify native iPad navigation and adaptive layout
+        shell: bash
+        run: |
+          set -o pipefail
+          IPAD_ID=$(xcrun simctl list devices available -j | python -c 'import json,re,sys; d=json.load(sys.stdin); pads=[x for k,v in d["devices"].items() if (m := re.search(r"iOS-(\d+)", k)) and int(m[1]) >= 26 for x in v if "iPad" in x["name"]]; assert pads, "No iPadOS 26 simulator available"; print(next((x["udid"] for x in pads if "13-inch" in x["name"]), pads[0]["udid"]))')
+          xcodebuild -project Orvian.xcodeproj -scheme Orvian \
+            -destination "platform=iOS Simulator,id=$IPAD_ID" \
+            -configuration Debug -derivedDataPath "$RUNNER_TEMP/orvian-tests" \
+            -resultBundlePath "$RUNNER_TEMP/orvian-ipad.xcresult" \
+            -only-testing:OrvianTests/IPadNavigationTests \
+            -only-testing:OrvianTests/IPadLayoutTests \
+            -only-testing:OrvianTests/IPadScreenStateTests \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO test
+
+      - name: Upload iPad test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Orvian-iPad-tests
+          path: ${{ runner.temp }}/orvian-ipad.xcresult

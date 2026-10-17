@@ -64,6 +64,10 @@ checkout → xcodegen → xcodebuild (unsigned, generic/platform=iOS)
 Ce workflow sert aussi de **vérification de compilation** : le code est développé
 hors Mac, la CI valide chaque push.
 
+`.github/workflows/checks.yml` exécute les vérifications statiques et les tests
+hébergés iPhone / iPad, mais uniquement sur les **pull requests** : `main` ne
+paye plus que la production de l'IPA.
+
 ## Architecture
 
 ### Interface iPad

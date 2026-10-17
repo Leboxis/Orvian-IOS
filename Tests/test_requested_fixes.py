@@ -51,7 +51,10 @@ class RequestedFixChecks(unittest.TestCase):
         self.assertIn("completionHandler(nil)", cleanup)
 
     def test_all_new_behavior_checks_run_in_existing_ci(self):
-        workflow = source(".github/workflows/build.yml")
+        # Les vérifications vivent dans checks.yml : build.yml ne publie que
+        # l'IPA, main n'attend plus ces étapes.
+        workflow = source(".github/workflows/checks.yml")
+        self.assertIn("pull_request:", workflow)
         self.assertIn("python3 .github/scripts/check_audit_regressions.py", workflow)
         runner = source(".github/scripts/check_audit_regressions.py")
         for name in ["check_grid_mutation_regressions.py", "check_tag_apply_regressions.py",
