@@ -112,6 +112,7 @@ private struct DestinationFolderLevel: View {
     let onOpen: (DriveFile) -> Void
 
     @State private var viewModel: FileGridViewModel
+    @State private var handledReloadRevision: Int
     @AppStorage("defaultFolderColor") private var defaultFolderColor = "#4285F5"
 
     init(
@@ -126,6 +127,7 @@ private struct DestinationFolderLevel: View {
         self.excludedDirectoryIDs = excludedDirectoryIDs
         self.reloadRevision = reloadRevision
         self.onOpen = onOpen
+        _handledReloadRevision = State(initialValue: reloadRevision)
         _viewModel = State(initialValue: FileGridViewModel(source: .directory(directory.id), driveId: driveId))
     }
 
@@ -192,8 +194,11 @@ private struct DestinationFolderLevel: View {
         }
         .refreshable { await viewModel.reload(forceNetwork: true) }
         .task(id: reloadRevision) {
-            if reloadRevision == 0 { await viewModel.loadIfNeeded() }
-            else { await viewModel.reload(forceNetwork: true) }
+            if handledReloadRevision == reloadRevision { await viewModel.loadIfNeeded() }
+            else {
+                handledReloadRevision = reloadRevision
+                await viewModel.reload(forceNetwork: true)
+            }
         }
     }
 

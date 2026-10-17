@@ -73,12 +73,15 @@ final class IPadNavigationTests: XCTestCase {
         return try JSONDecoder().decode(DriveFile.self, from: data)
     }
 
-    private func waitUntil(_ condition: () -> Bool) async throws {
-        for _ in 0..<100 {
+    private func waitUntil(_ context: @autoclosure () -> String = "navigation state",
+                           file: StaticString = #filePath, line: UInt = #line,
+                           _ condition: () -> Bool) async throws {
+        let deadline = ContinuousClock.now.advanced(by: .seconds(5))
+        while ContinuousClock.now < deadline {
             if condition() { return }
             try await Task.sleep(for: .milliseconds(20))
         }
-        XCTFail("The native tab did not settle into the expected navigation state")
+        XCTFail("The native tab did not settle: \(context())", file: file, line: line)
         throw WaitError.timeout
     }
 
@@ -90,26 +93,31 @@ final class IPadNavigationTests: XCTestCase {
         let window = UIWindow(windowScene: scene)
         let shell = MainTabShellState(driveId: 42)
         let probe = Probe()
-        window.rootViewController = UIHostingController(rootView: Fixture(shell: shell, probe: probe))
+        // Exercise state preservation without overlapping navigation animations.
+        // Motion is covered separately; appearance can precede transition completion.
+        window.rootViewController = UIHostingController(rootView:
+            Fixture(shell: shell, probe: probe).transaction { $0.disablesAnimations = true })
         window.makeKeyAndVisible()
         defer {
             window.isHidden = true
             window.rootViewController = nil
             previous?.makeKey()
         }
-        try await waitUntil { probe.visibleTabs == Set([.home]) }
+        try await waitUntil("initial home; visible=\(probe.visibleTabs)") { probe.visibleTabs == Set([.home]) }
 
         let home = try [folder(101, name: "Images"), folder(102, name: "À classer")]
         let favorites = try [folder(201, name: "Dossier favori")]
         shell.navState.homePath = home
-        try await waitUntil { probe.directories[.home] == "À classer" }
+        try await waitUntil("home push; directories=\(probe.directories)") { probe.directories[.home] == "À classer" }
         shell.navState.favoritesPath = favorites
 
         var identities: [AppTab: UUID] = [:]
-        for _ in 0..<10 {
+        for cycle in 0..<10 {
             for tab in [AppTab.home, .favorites, .tag, .profile, .settings] {
                 shell.tab = tab
-                try await waitUntil { probe.visibleTabs == Set([tab]) }
+                try await waitUntil("cycle \(cycle), tab \(tab); visible=\(probe.visibleTabs)") {
+                    probe.visibleTabs == Set([tab])
+                }
                 if let identity = identities[tab] {
                     XCTAssertEqual(probe.identities[tab], identity, "Revisiting a tab must not replace its local state")
                 } else {
@@ -118,9 +126,13 @@ final class IPadNavigationTests: XCTestCase {
                 XCTAssertEqual(shell.navState.homePath, home)
                 XCTAssertEqual(shell.navState.favoritesPath, favorites)
                 if tab == .home {
-                    try await waitUntil { probe.directories[.home] == "À classer" }
+                    try await waitUntil("cycle \(cycle), home; directories=\(probe.directories)") {
+                        probe.directories[.home] == "À classer"
+                    }
                 } else if tab == .favorites {
-                    try await waitUntil { probe.directories[.favorites] == "Dossier favori" }
+                    try await waitUntil("cycle \(cycle), favorites; directories=\(probe.directories)") {
+                        probe.directories[.favorites] == "Dossier favori"
+                    }
                 }
             }
         }
