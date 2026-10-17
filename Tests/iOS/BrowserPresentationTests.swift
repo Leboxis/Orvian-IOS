@@ -85,6 +85,55 @@ final class BrowserPresentationTests: XCTestCase {
         var cards = CGRect.zero
     }
 
+    func testActualGridDetailsActionInEachBrowserScope() async throws {
+        // Seed a fresh in-memory listing, then remove the dummy credential
+        // before mounting any view. No network or real account is involved.
+        guard TokenStore.current() == nil else {
+            XCTFail("Use a clean test simulator without account credentials")
+            return
+        }
+        TokenStore.save("details-test-" + UUID().uuidString)
+        let source = FileSource.trash
+        DirectoryListStore.shared.store(source: source, driveId: -9001, orderBy: [], order: "asc",
+            items: [.root(name: "Dossier de test")], cursor: nil, hasMore: false, totalItemCount: 1)
+        let model = FileGridViewModel(source: source, driveId: -9001)
+        await model.loadIfNeeded()
+        TokenStore.clear()
+        XCTAssertEqual(model.items.count, 1)
+
+        let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+        let previous = scene.keyWindow
+        let window = UIWindow(windowScene: scene)
+        defer {
+            window.isHidden = true
+            window.rootViewController = nil
+            previous?.makeKey()
+        }
+        for scope in [FileBrowserScope.home, .favorites, .tag] {
+            let browser = NavigationStack {
+                FileGridView(viewModel: model, onOpenDirectory: { _ in })
+                    .environment(\.fileBrowserScope, scope)
+                    .environment(\.iPadLayout, IPadLayout(isPad: UIDevice.current.userInterfaceIdiom == .pad, width: 1366))
+            }
+            let host = UIHostingController(rootView: browser)
+            window.rootViewController = host
+            window.makeKeyAndVisible()
+            try await waitUntil {
+                self.descendants(window).contains { $0.accessibilityLabel == "Dossier de test" }
+            }
+            let card = try XCTUnwrap(descendants(window).compactMap { $0 as? UIButton }
+                .first { $0.accessibilityLabel == "Dossier de test" })
+            let details = try XCTUnwrap(card.accessibilityCustomActions?.first { $0.name == "Détails" })
+            XCTAssertEqual(details.actionHandler?(details), true)
+            try await waitUntil {
+                self.descendants(window).contains { $0.accessibilityIdentifier == "file.details.content" }
+            }
+            window.isHidden = true
+            window.rootViewController = nil
+            try await Task.sleep(for: .milliseconds(150))
+        }
+    }
+
     func testCardTitleUsesNinetyFivePercentAndPadHeaderStaysAboveCards() async throws {
         let frames = Frames()
         let fixture = VStack {
@@ -105,8 +154,16 @@ final class BrowserPresentationTests: XCTestCase {
         }
         .environment(\.iPadLayout, IPadLayout(isPad: true, width: 1000))
         let host = UIHostingController(rootView: fixture)
-        host.loadViewIfNeeded()
-        host.view.frame = CGRect(x: 0, y: 0, width: 1000, height: 800)
+        let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+        let previous = scene.keyWindow
+        let window = UIWindow(windowScene: scene)
+        window.rootViewController = host
+        window.makeKeyAndVisible()
+        defer {
+            window.isHidden = true
+            window.rootViewController = nil
+            previous?.makeKey()
+        }
         host.view.layoutIfNeeded()
         try await waitUntil { frames.title.width > 0 && frames.header.height > 0 && frames.cards.height > 0 }
         XCTAssertEqual(frames.title.width, 228, accuracy: 0.5)

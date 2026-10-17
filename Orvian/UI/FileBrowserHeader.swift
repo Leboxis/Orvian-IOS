@@ -10,7 +10,6 @@ struct FileBrowserHeader<Header: View>: ViewModifier {
         if layout.isPad {
             VStack(spacing: 0) {
                 header()
-                    .padding(.vertical, 6)
                     .frame(maxWidth: .infinity)
                     .background(Color(uiColor: .systemGroupedBackground))
                 content.frame(maxWidth: .infinity, maxHeight: .infinity)

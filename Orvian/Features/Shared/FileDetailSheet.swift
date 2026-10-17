@@ -104,29 +104,29 @@ struct FileDetailSheet: View {
 
     @ViewBuilder private var facts: some View {
         if hasFacts || model.isLoading {
-        VStack(alignment: .leading, spacing: 12) {
-            sectionTitle("Informations")
-            if model.isLoading && !hasFacts { ProgressView("Actualisation…") }
-            if let date = current.addedAt { dateRow("Ajouté", date) }
-            if let date = current.lastModifiedAt { dateRow("Contenu modifié", date) }
-            if let date = current.updatedAt, date != current.lastModifiedAt { dateRow("Mis à jour", date) }
-            if let pixelSize {
-                valueRow("Dimensions", "\(Int(pixelSize.width)) × \(Int(pixelSize.height)) px")
-            }
-            if !isTrashed, let video = videoInfo {
-                if video.duration.isFinite && video.duration > 0 {
-                    valueRow("Durée", Duration.seconds(video.duration).formatted(.time(pattern: .hourMinuteSecond)))
+            VStack(alignment: .leading, spacing: 12) {
+                sectionTitle("Informations")
+                if model.isLoading && !hasFacts { ProgressView("Actualisation…") }
+                if let date = current.addedAt { dateRow("Ajouté", date) }
+                if let date = current.lastModifiedAt { dateRow("Contenu modifié", date) }
+                if let date = current.updatedAt, date != current.lastModifiedAt { dateRow("Mis à jour", date) }
+                if let pixelSize {
+                    valueRow("Dimensions", "\(Int(pixelSize.width)) × \(Int(pixelSize.height)) px")
                 }
-                if video.maximumDimension.isFinite && video.maximumDimension > 0 {
-                    valueRow("Côté long", "\(Int(video.maximumDimension)) px")
+                if !isTrashed, let video = videoInfo {
+                    if video.duration.isFinite && video.duration > 0 {
+                        valueRow("Durée", Duration.seconds(video.duration).formatted(.time(pattern: .hourMinuteSecond)))
+                    }
+                    if video.maximumDimension.isFinite && video.maximumDimension > 0 {
+                        valueRow("Côté long", "\(Int(video.maximumDimension)) px")
+                    }
+                    valueRow("Orientation", video.orientation.rawValue == "portrait" ? "Portrait" : video.orientation.rawValue == "landscape" ? "Paysage" : "Carré")
                 }
-                valueRow("Orientation", video.orientation.rawValue == "portrait" ? "Portrait" : video.orientation.rawValue == "landscape" ? "Paysage" : "Carré")
+                if let error = model.infoError { recovery(error) }
             }
-            if let error = model.infoError { recovery(error) }
-        }
-        .padding(16)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color(uiColor: .secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: DS.cardRadius))
+            .padding(16)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Color(uiColor: .secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: DS.cardRadius))
         }
     }
 
@@ -143,27 +143,27 @@ struct FileDetailSheet: View {
                 Text("Emplacement non communiqué").font(.subheadline).foregroundStyle(.secondary)
             }
             detailRow("Tags") {
-            if model.isLoading && model.categories.isEmpty {
-                ProgressView("Chargement…")
-            } else if isTrashed {
-                Text("Élément dans la corbeille").font(.subheadline).foregroundStyle(.secondary)
-            } else if model.categories.isEmpty && model.tagsError == nil {
-                Text("Aucun tag").font(.subheadline).foregroundStyle(.secondary)
-            } else {
-                VStack(alignment: .leading, spacing: 8) {
-                    ForEach(model.categories) { category in
-                        Label {
-                            Text(category.name).fixedSize(horizontal: false, vertical: true)
-                        } icon: {
-                            Image(systemName: "tag.fill").foregroundStyle(Color(hex: category.color) ?? .accentColor)
+                if model.isLoading && model.categories.isEmpty {
+                    ProgressView("Chargement…")
+                } else if isTrashed {
+                    Text("Élément dans la corbeille").font(.subheadline).foregroundStyle(.secondary)
+                } else if model.categories.isEmpty && model.tagsError == nil {
+                    Text("Aucun tag").font(.subheadline).foregroundStyle(.secondary)
+                } else {
+                    VStack(alignment: .leading, spacing: 8) {
+                        ForEach(model.categories) { category in
+                            Label {
+                                Text(category.name).fixedSize(horizontal: false, vertical: true)
+                            } icon: {
+                                Image(systemName: "tag.fill").foregroundStyle(Color(hex: category.color) ?? .accentColor)
+                            }
+                            .font(.footnote).padding(8)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .background(Color.accentColor.opacity(0.06), in: RoundedRectangle(cornerRadius: DS.smallRadius))
                         }
-                        .font(.footnote).padding(8)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .background(Color.accentColor.opacity(0.06), in: RoundedRectangle(cornerRadius: DS.smallRadius))
                     }
                 }
-            }
-            if let error = model.tagsError { recovery(error) }
+                if let error = model.tagsError { recovery(error) }
             }
         }
         .padding(16)
