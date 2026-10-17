@@ -382,7 +382,12 @@ struct FileCardView: View {
 struct CardNameLayout: Layout {
     func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
         guard let title = subviews.first else { return .zero }
-        let width = proposal.width ?? title.sizeThatFits(.unspecified).width / 0.95
+        let width: CGFloat
+        if let proposedWidth = proposal.width, proposedWidth.isFinite {
+            width = max(0, proposedWidth)
+        } else {
+            width = title.sizeThatFits(.unspecified).width / 0.95
+        }
         let size = title.sizeThatFits(ProposedViewSize(width: width * 0.95, height: proposal.height))
         return CGSize(width: width, height: size.height)
     }
