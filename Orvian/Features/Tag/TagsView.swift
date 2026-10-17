@@ -581,7 +581,9 @@ private struct CategoryRow: View {
         if inSidebar {
             // La liste native de la barre latérale fournit déjà le fond et le
             // liseré : encadrer la ligne d'une carte y doublait le relief.
-            row.padding(4)
+            // Une liste ne pose qu'une hauteur minimale : c'est ce rembourrage
+            // vertical qui règle l'air entre les lignes de la colonne.
+            row.padding(.vertical, 12)
         } else {
             row
                 .padding(12)

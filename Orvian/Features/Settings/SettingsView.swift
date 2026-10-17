@@ -517,6 +517,7 @@ private struct SettingsLinkRow: View {
     let tint: Color
     let route: SettingsRoute
     var showsDot = false
+    @Environment(\.iPadLayout) private var iPadLayout
 
     var body: some View {
         NavigationLink(value: route) {
@@ -536,7 +537,9 @@ private struct SettingsLinkRow: View {
                         .lineLimit(1)
                 }
             }
-            .padding(.vertical, 2)
+            // Une liste ne pose qu'une hauteur minimale : sur iPad, ce
+            // rembourrage vertical règle l'air des lignes de la barre latérale.
+            .padding(.vertical, iPadLayout.isPad ? 10 : 2)
         }
         .tag(route)
     }
