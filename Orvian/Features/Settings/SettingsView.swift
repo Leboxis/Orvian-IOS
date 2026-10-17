@@ -24,7 +24,7 @@ struct SettingsView: View {
     @AppStorage("showFavoriteStars") private var showFavoriteStars = true
     @AppStorage("phoneFileGridColumns") private var phoneColumns = 3
     @AppStorage("padFileGridDensity") private var padDensity = 3
-    private var fileGridColumns: Int { iPadLayout.isPad ? padDensity : min(3, phoneColumns) }
+    private var fileGridColumns: Int { iPadLayout.isPad ? padDensity : min(3, max(2, phoneColumns)) }
     private var gridColumnsBinding: Binding<Int> {
         Binding(get: { fileGridColumns }, set: { if iPadLayout.isPad { padDensity = $0 } else { phoneColumns = $0 } })
     }

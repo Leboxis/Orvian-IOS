@@ -3,7 +3,7 @@ import Foundation
 @main struct BrowserPreferencesChecks {
     static func main() {
         let defaults = UserDefaults(suiteName: "Orvian-test-\(UUID())")!
-        for old in [0, 2, 3, 4, 7] {
+        for old in [-4, 0, 2, 3, 4, 7, 99] {
             defaults.removeObject(forKey: "phoneFileGridColumns")
             defaults.removeObject(forKey: "padFileGridDensity")
             defaults.set(old, forKey: "fileGridColumns")

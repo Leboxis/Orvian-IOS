@@ -30,6 +30,11 @@ struct FileFilters: Hashable {
     var orientation: Int? = nil
     var highResolutionVideosOnly = false
     var excludedIDs: Set<Int> = []
+    func visible(_ items: [DriveFile], searchText: String, metadata: Int, source: FileSource) -> [DriveFile] {
+        guard searchText.isEmpty else { return [] }
+        let visible = items.filter { !excludedIDs.contains($0.id) }
+        return sort == .duration ? Array(visible.reversed()) : visible
+    }
 }
 enum FileSource: Hashable {
     case directory, search, category, intersection
@@ -40,16 +45,20 @@ struct VisibleItemsKey: Hashable {
     let filters: FileFilters; let searchText: String; let metadataRevision: Int; let foldersFirst: Bool
 }
 struct VisibleFileSnapshot { let key: VisibleItemsKey; let items: [DriveFile] }
-final class MediaMetadataStore { static let shared = MediaMetadataStore(); var revision = 0 }
-final class FileGridViewModel {
+final class MediaMetadataStore {
+    static let shared = MediaMetadataStore()
+    var revision = 0
+    var snapshotRequests = 0
+    func snapshot(driveId: Int, items: [DriveFile]) -> Int { snapshotRequests += 1; return revision }
+}
+@MainActor final class FileGridViewModel {
     var driveId = 42
     var source = FileSource.directory
     var itemsRevision = 0
-    var items: [DriveFile] = []
-    func visibleItems(key: VisibleItemsKey, mediaMetadata: MediaMetadataStore) -> [DriveFile] {
-        key.searchText.isEmpty ? items.filter { !key.filters.excludedIDs.contains($0.id) } : []
-    }
-''' + block((ROOT / 'Orvian/Features/Shared/FileGridViewModel.swift').read_text(encoding='utf-8'), '    func visibleSnapshot(') + '''
+    var items: [DriveFile] = [] { didSet { itemsRevision += 1 } }
+    private var visibleItemsCache = VisibleItemsCache()
+''' + '\n'.join(block((ROOT / 'Orvian/Features/Shared/FileGridViewModel.swift').read_text(encoding='utf-8'), marker)
+                for marker in ['    func visibleSnapshot(', '    func visibleItems(']) + '''
 }
 final class ViewerRouter {
     var opened: DriveFile?
@@ -73,7 +82,7 @@ final class ViewerRouter {
             '    private var visibleSelectionItems:',
             '    private var playableFiles:', '    private func openRandomFile()',
         ]]
-        classes.append('final class ' + name + ''' {
+        classes.append('@MainActor final class ' + name + ''' {
     var viewModel = FileGridViewModel()
     var activeViewModel: FileGridViewModel { viewModel }
     var filters = FileFilters()
@@ -132,9 +141,13 @@ final class ViewerRouter {
     }
 }
 '''
-    return common + '\n'.join(classes) + cache + '''
+    grid = (ROOT / 'Orvian/Features/Shared/FileGridView.swift').read_text(encoding='utf-8')
+    visible_cache = grid[grid.index('@MainActor\nstruct VisibleItemsCache'):]
+    checks = (ROOT / 'Tests/VisibleSnapshotChecks.swift').read_text(encoding='utf-8')
+    return common + visible_cache + checks + '\n'.join(classes) + cache + '''
 @main struct RequestedChecks {
-    static func main() {
+    @MainActor static func main() {
+        SnapshotFixture.check()
         FavoritesFixture().check()
         DirectoryFixture().check()
         CacheFixture.check()
