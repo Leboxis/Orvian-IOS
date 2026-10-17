@@ -228,10 +228,12 @@ struct TagsView: View {
                 crossState.isEditing.toggle()
             }
         } label: {
-            Image(systemName: "line.3.horizontal.decrease.circle")
+            Image(systemName: !iPadLayout.isPad && crossState.isEditing ? "checkmark.circle" : "line.3.horizontal.decrease.circle")
                 .frame(minWidth: 44, minHeight: 44)
         }
-        .accessibilityLabel(crossState.isEditing ? "Arrêter le croisement des tags" : "Croiser plusieurs tags")
+        .accessibilityLabel(iPadLayout.isPad
+            ? (crossState.isActive ? "Arrêter le croisement des tags" : "Croiser plusieurs tags")
+            : (crossState.isEditing ? "Terminer la sélection des tags" : "Croiser plusieurs tags"))
         .accessibilityIdentifier("tags.cross")
         .tint(crossState.isActive ? .accentColor : .primary)
     }
