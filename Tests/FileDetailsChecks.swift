@@ -27,8 +27,16 @@ import Foundation
         server.fail(3)
         await failing.value
         precondition(model.file?.name == "Known name" && model.infoError != nil && model.tagsError != nil)
+        let partial = Task { await model.load(file: DriveFile(id: 7, categories: [FileCategory(categoryId: 1)]), driveId: 42, isTrashed: false) }
+        while server.pending.count < 5 { await Task.yield() }
+        precondition(model.categories.map(\.id) == [1], "Known tags must display before the file-info request finishes")
+        server.fail(4)
+        await partial.value
+        precondition(model.infoError != nil && model.tagsError == nil && model.categories.map(\.id) == [1])
+        await model.load(file: DriveFile(id: 8, path: "/unknown-tag", categories: [FileCategory(categoryId: 99)]), driveId: 42, isTrashed: false)
+        precondition(model.tagsError != nil, "Unresolvable membership must not be announced as no tags")
         await model.load(file: DriveFile(id: 6), driveId: 42, isTrashed: true)
-        precondition(server.pending.count == 4 && !model.isLoading)
+        precondition(server.pending.count == 5 && !model.isLoading)
         print("Details cache, obsolete responses, account isolation and partial errors checks passed")
     }
 }

@@ -110,7 +110,8 @@ enum TokenStore {
 }
 @MainActor final class VideoAssetCache {
     static let shared = VideoAssetCache()
-    func asset(driveId: Int, fileId: Int) async -> AVURLAsset? { nil }
+    var calls = 0
+    func asset(driveId: Int, fileId: Int) async -> AVURLAsset? { calls += 1; return nil }
 }
 ''', encoding="utf-8")
     run_check(temp / "metadata", [dependencies, ROOT / "Orvian/Core/Media/MediaMetadataStore.swift",
