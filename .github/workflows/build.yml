@@ -102,6 +102,8 @@ jobs:
         run: xcodegen generate
 
       - name: Build (unsigned, generic iOS device)
+        # Le runner est vierge : `clean` ne nettoierait que le DerivedDataPath
+        # créé quelques secondes plus tôt par cette même étape.
         run: |
           set -o pipefail
           xcodebuild \
@@ -113,7 +115,7 @@ jobs:
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGN_IDENTITY="" \
-            clean build
+            build
 
       - name: Package IPA
         run: |
