@@ -78,7 +78,7 @@ struct FileCardView: View {
     private var menuItems: [CardMenuItem] {
         guard !selectionMode else { return [] }
         var items: [CardMenuItem] = [
-            CardMenuItem(title: "Détails", systemImage: "info.circle") { onPresent?(.details) }
+            CardMenuItem(title: "Détails", systemImage: "info.circle", waitsForDismissal: true) { onPresent?(.details) }
         ]
         if !isTrashed {
             if file.isDirectory, onPresent != nil {
@@ -183,11 +183,13 @@ struct FileCardView: View {
         } else {
             VStack(spacing: 5) {
                 thumbnailArea.overlay { playBadge }.accessibilityHidden(true)
-                Text(file.name)
+                CardNameLayout {
+                    Text(file.name)
                     .font(.footnote)
                     .lineLimit(dynamicTypeSize.isAccessibilitySize ? 4 : 2, reservesSpace: true)
                     .truncationMode(.middle).foregroundStyle(.primary)
                     .frame(maxWidth: .infinity).accessibilityHidden(enabled)
+                }
                 HStack(spacing: 4) { Text(subtitle); categoryDots }
                     .font(.caption2).foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity).accessibilityHidden(enabled)
@@ -375,6 +377,27 @@ struct FileCardView: View {
     }
 }
 
+/// A proportional inset without a GeometryReader or per-card measurement state.
+/// The title uses 95% of its own card, regardless of screen or grid density.
+struct CardNameLayout: Layout {
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        guard let title = subviews.first else { return .zero }
+        let width: CGFloat
+        if let proposedWidth = proposal.width, proposedWidth.isFinite {
+            width = max(0, proposedWidth)
+        } else {
+            width = title.sizeThatFits(.unspecified).width / 0.95
+        }
+        let size = title.sizeThatFits(ProposedViewSize(width: width * 0.95, height: proposal.height))
+        return CGSize(width: width, height: size.height)
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        subviews.first?.place(at: CGPoint(x: bounds.midX, y: bounds.minY), anchor: .top,
+                             proposal: ProposedViewSize(width: bounds.width * 0.95, height: bounds.height))
+    }
+}
+
 /// Sélecteur de couleur d'un dossier (menu contextuel → « Changer la couleur »).
 /// Grille des couleurs officielles de kDrive ; un tap applique la couleur
 /// directement via l'API et referme la feuille. Présenté par la grille
@@ -456,19 +479,40 @@ struct FolderColorPickerSheet: View {
 }
 
 
-/// Élément de menu reconstruit pour `UIMenu` : titre, icône SF Symbol,
-/// style destructeur optionnel. Permet de conserver le menu complet de la
-/// carte dans le même geste que l'aperçu détaché.
+/// Keeps a structural presentation behind the native menu's dismissal.
+@MainActor
+final class ContextMenuDismissal {
+    private var isActive = false
+    private var pending: (() -> Void)?
+
+    func begin() { isActive = true; pending = nil }
+
+    func perform(_ action: @escaping () -> Void) {
+        if isActive { pending = action } else { action() }
+    }
+
+    func complete() {
+        isActive = false
+        let action = pending
+        pending = nil
+        action?()
+    }
+}
+
+/// Élément de menu reconstruit pour `UIMenu` : titre, icône et action.
 private struct CardMenuItem {
     let title: String
     let systemImage: String
     let destructive: Bool
+    let waitsForDismissal: Bool
     let action: () -> Void
 
-    init(title: String, systemImage: String, destructive: Bool = false, action: @escaping () -> Void) {
+    init(title: String, systemImage: String, destructive: Bool = false,
+         waitsForDismissal: Bool = false, action: @escaping () -> Void) {
         self.title = title
         self.systemImage = systemImage
         self.destructive = destructive
+        self.waitsForDismissal = waitsForDismissal
         self.action = action
     }
 }
@@ -542,6 +586,7 @@ private struct CardInteraction: UIViewRepresentable {
     @MainActor
     final class Coordinator: NSObject, UIContextMenuInteractionDelegate {
         var parent: CardInteraction
+        private let dismissal = ContextMenuDismissal()
 
         init(parent: CardInteraction) {
             self.parent = parent
@@ -552,6 +597,7 @@ private struct CardInteraction: UIViewRepresentable {
             configurationForMenuAtLocation location: CGPoint
         ) -> UIContextMenuConfiguration? {
             guard (interaction.view as? UIControl)?.isEnabled == true else { return nil }
+            dismissal.begin()
             return UIContextMenuConfiguration(
                 identifier: nil,
                 previewProvider: nil,
@@ -562,13 +608,28 @@ private struct CardInteraction: UIViewRepresentable {
             )
         }
 
+        func contextMenuInteraction(
+            _ interaction: UIContextMenuInteraction,
+            willEndFor configuration: UIContextMenuConfiguration,
+            animator: UIContextMenuInteractionAnimating?
+        ) {
+            // Opening an inspector resizes the card's navigation column.
+            // Wait until UIKit has finished using that card as its menu anchor.
+            let finish = { [dismissal] in dismissal.complete() }
+            if let animator { animator.addCompletion(finish) }
+            else { DispatchQueue.main.async(execute: finish) }
+        }
+
         private func buildMenu() -> UIMenu {
             let actions = parent.menuItems.map { item in
                 UIAction(
                     title: item.title,
                     image: UIImage(systemName: item.systemImage),
                     attributes: item.destructive ? .destructive : []
-                ) { _ in item.action() }
+                ) { [dismissal] _ in
+                    if item.waitsForDismissal { dismissal.perform(item.action) }
+                    else { item.action() }
+                }
             }
             return UIMenu(title: "", children: actions)
         }

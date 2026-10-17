@@ -72,6 +72,7 @@ struct AppLockSetupSheet: View {
                         .disabled(isWorking || isRecoveringError || (stage == .verifyCurrent && retryAfter > 0))
                         .padding(.bottom, 16)
                 }
+                .frame(maxWidth: 440)
                 .frame(maxWidth: .infinity)
                 .padding(.horizontal, 24)
                 .padding(.top, 20)

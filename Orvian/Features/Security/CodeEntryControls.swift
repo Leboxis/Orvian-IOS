@@ -33,6 +33,7 @@ struct CodeDots: View {
 struct CodeKeypad: View {
     var onDigit: (String) -> Void
     var onDelete: () -> Void
+    var keySize = CGSize(width: 76, height: 64)
 
     private let rows: [[String]] = [
         ["1", "2", "3"],
@@ -56,13 +57,13 @@ struct CodeKeypad: View {
     @ViewBuilder
     private func keyButton(_ key: String) -> some View {
         if key.isEmpty {
-            Color.clear.frame(width: 76, height: 64)
+            Color.clear.frame(width: keySize.width, height: keySize.height)
         } else if key == "delete" {
             Button(action: onDelete) {
                 Image(systemName: "delete.left")
                     .font(.system(size: 21, weight: .medium))
                     .foregroundStyle(.primary)
-                    .frame(width: 76, height: 64)
+                    .frame(width: keySize.width, height: keySize.height)
                     .background(.background, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
             }
             .buttonStyle(KeypadButtonStyle())
@@ -72,7 +73,7 @@ struct CodeKeypad: View {
                 Text(key)
                     .font(.system(size: 26, weight: .medium))
                     .foregroundStyle(.primary)
-                    .frame(width: 76, height: 64)
+                    .frame(width: keySize.width, height: keySize.height)
                     .background(.background, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
             }
             .buttonStyle(KeypadButtonStyle())

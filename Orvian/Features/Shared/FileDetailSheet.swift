@@ -5,7 +5,11 @@ struct FileDetailSheet: View {
     let file: DriveFile
     let driveId: Int
     var isTrashed = false
+    var inInspector = false
+    var close: (() -> Void)?
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @ScaledMetric(relativeTo: .subheadline) private var labelWidth = 104
     @State private var model = FileDetailsViewModel()
     @State private var thumbnail: UIImage?
     @State private var pixelSize: CGSize?
@@ -17,30 +21,33 @@ struct FileDetailSheet: View {
     }
 
     var body: some View {
-        NavigationStack {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 20) {
-                    identity
-                    facts
-                    organization
+        Group {
+            if inInspector {
+                VStack(spacing: 0) {
+                    HStack {
+                        Text("Détails").font(.headline)
+                        Spacer()
+                        closeButton
+                    }
+                    .padding(.horizontal, 20)
+                    detailContent
                 }
-                .padding(20)
-                .frame(maxWidth: 540, alignment: .leading)
-                .frame(maxWidth: .infinity)
-            }
-            .background(Color(uiColor: .systemGroupedBackground))
-            .navigationTitle("Détails")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Fermer", systemImage: "xmark") { dismiss() }
-                        .labelStyle(.iconOnly)
-                        .keyboardShortcut(.escape, modifiers: [])
+                .background(Color(uiColor: .systemGroupedBackground))
+            } else {
+                NavigationStack {
+                    detailContent
+                        .navigationTitle("Détails")
+                        .navigationBarTitleDisplayMode(.inline)
+                        .toolbar {
+                            ToolbarItem(placement: .confirmationAction) {
+                                closeButton
+                            }
+                        }
                 }
+                .presentationDetents([.large])
+                .presentationDragIndicator(.visible)
             }
         }
-        .presentationDetents([.large])
-        .presentationDragIndicator(.visible)
         // Independent tasks: file info must not delay the cached preview.
         .task(id: file) {
             await model.load(file: file, driveId: driveId, isTrashed: isTrashed)
@@ -71,31 +78,55 @@ struct FileDetailSheet: View {
         }
     }
 
+    private var closeButton: some View {
+        Button("Fermer", systemImage: "xmark") {
+            if let close { close() } else { dismiss() }
+        }
+        .labelStyle(.iconOnly)
+        .frame(minWidth: 44, minHeight: 44)
+        .keyboardShortcut(.escape, modifiers: [])
+    }
+
+    private var detailContent: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 20) {
+                identity
+                facts
+                organization
+            }
+            .padding(20)
+            .frame(maxWidth: 540, alignment: .leading)
+            .frame(maxWidth: .infinity)
+        }
+        .background(Color(uiColor: .systemGroupedBackground))
+        .accessibilityIdentifier("file.details.content")
+    }
+
     @ViewBuilder private var facts: some View {
         if hasFacts || model.isLoading {
-        VStack(alignment: .leading, spacing: 12) {
-            sectionTitle("Informations")
-            if model.isLoading && !hasFacts { ProgressView("Actualisation…") }
-            if let date = current.addedAt { dateRow("Ajouté", date) }
-            if let date = current.lastModifiedAt { dateRow("Contenu modifié", date) }
-            if let date = current.updatedAt, date != current.lastModifiedAt { dateRow("Mis à jour", date) }
-            if let pixelSize {
-                valueRow("Dimensions", "\(Int(pixelSize.width)) × \(Int(pixelSize.height)) px")
-            }
-            if !isTrashed, let video = videoInfo {
-                if video.duration.isFinite && video.duration > 0 {
-                    valueRow("Durée", Duration.seconds(video.duration).formatted(.time(pattern: .hourMinuteSecond)))
+            VStack(alignment: .leading, spacing: 12) {
+                sectionTitle("Informations")
+                if model.isLoading && !hasFacts { ProgressView("Actualisation…") }
+                if let date = current.addedAt { dateRow("Ajouté", date) }
+                if let date = current.lastModifiedAt { dateRow("Contenu modifié", date) }
+                if let date = current.updatedAt, date != current.lastModifiedAt { dateRow("Mis à jour", date) }
+                if let pixelSize {
+                    valueRow("Dimensions", "\(Int(pixelSize.width)) × \(Int(pixelSize.height)) px")
                 }
-                if video.maximumDimension.isFinite && video.maximumDimension > 0 {
-                    valueRow("Côté long", "\(Int(video.maximumDimension)) px")
+                if !isTrashed, let video = videoInfo {
+                    if video.duration.isFinite && video.duration > 0 {
+                        valueRow("Durée", Duration.seconds(video.duration).formatted(.time(pattern: .hourMinuteSecond)))
+                    }
+                    if video.maximumDimension.isFinite && video.maximumDimension > 0 {
+                        valueRow("Côté long", "\(Int(video.maximumDimension)) px")
+                    }
+                    valueRow("Orientation", video.orientation.rawValue == "portrait" ? "Portrait" : video.orientation.rawValue == "landscape" ? "Paysage" : "Carré")
                 }
-                valueRow("Orientation", video.orientation.rawValue == "portrait" ? "Portrait" : video.orientation.rawValue == "landscape" ? "Paysage" : "Carré")
+                if let error = model.infoError { recovery(error) }
             }
-            if let error = model.infoError { recovery(error) }
-        }
-        .padding(16)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color(uiColor: .secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: DS.cardRadius))
+            .padding(16)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Color(uiColor: .secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: DS.cardRadius))
         }
     }
 
@@ -107,36 +138,33 @@ struct FileDetailSheet: View {
                     let parent = (path as NSString).deletingLastPathComponent
                     valueRow("Dossier parent", parent.isEmpty || parent == "/" ? "Racine du drive" : (parent as NSString).lastPathComponent)
                 }
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Emplacement").font(.caption).foregroundStyle(.secondary)
-                    Text(path).font(.subheadline).textSelection(.enabled)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
+                valueRow("Emplacement", path)
             } else {
                 Text("Emplacement non communiqué").font(.subheadline).foregroundStyle(.secondary)
             }
-            Text("Tags").font(.caption).foregroundStyle(.secondary)
-            if model.isLoading && model.categories.isEmpty {
-                ProgressView("Chargement…")
-            } else if isTrashed {
-                Text("Élément dans la corbeille").font(.subheadline).foregroundStyle(.secondary)
-            } else if model.categories.isEmpty && model.tagsError == nil {
-                Text("Aucun tag").font(.subheadline).foregroundStyle(.secondary)
-            } else {
-                LazyVGrid(columns: [GridItem(.adaptive(minimum: 120))], alignment: .leading, spacing: 8) {
-                    ForEach(model.categories) { category in
-                        Label {
-                            Text(category.name).fixedSize(horizontal: false, vertical: true)
-                        } icon: {
-                            Image(systemName: "tag.fill").foregroundStyle(Color(hex: category.color) ?? .accentColor)
+            detailRow("Tags") {
+                if model.isLoading && model.categories.isEmpty {
+                    ProgressView("Chargement…")
+                } else if isTrashed {
+                    Text("Élément dans la corbeille").font(.subheadline).foregroundStyle(.secondary)
+                } else if model.categories.isEmpty && model.tagsError == nil {
+                    Text("Aucun tag").font(.subheadline).foregroundStyle(.secondary)
+                } else {
+                    VStack(alignment: .leading, spacing: 8) {
+                        ForEach(model.categories) { category in
+                            Label {
+                                Text(category.name).fixedSize(horizontal: false, vertical: true)
+                            } icon: {
+                                Image(systemName: "tag.fill").foregroundStyle(Color(hex: category.color) ?? .accentColor)
+                            }
+                            .font(.footnote).padding(8)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .background(Color.accentColor.opacity(0.06), in: RoundedRectangle(cornerRadius: DS.smallRadius))
                         }
-                        .font(.footnote).padding(8)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .background(Color.accentColor.opacity(0.06), in: RoundedRectangle(cornerRadius: DS.smallRadius))
                     }
                 }
+                if let error = model.tagsError { recovery(error) }
             }
-            if let error = model.tagsError { recovery(error) }
         }
         .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -176,19 +204,24 @@ struct FileDetailSheet: View {
         Text(text).font(.subheadline.weight(.semibold)).accessibilityAddTraits(.isHeader)
     }
     private func valueRow(_ label: String, _ value: String) -> some View {
-        ViewThatFits(in: .horizontal) {
-            HStack(alignment: .firstTextBaseline, spacing: 16) {
-                Text(label).foregroundStyle(.secondary).fixedSize()
-                Spacer(minLength: 8)
-                Text(value).textSelection(.enabled).fixedSize()
-            }
-            VStack(alignment: .leading, spacing: 4) {
-                Text(label).foregroundStyle(.secondary)
-                Text(value).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
-            }
+        detailRow(label) {
+            Text(value).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
+        }
+        .accessibilityElement(children: .combine)
+    }
+
+    private func detailRow<Value: View>(_ label: String, @ViewBuilder value: () -> Value) -> some View {
+        let layout = dynamicTypeSize.isAccessibilitySize
+            ? AnyLayout(VStackLayout(alignment: .leading, spacing: 4))
+            : AnyLayout(HStackLayout(alignment: .top, spacing: 12))
+        return layout {
+            Text(label).foregroundStyle(.secondary)
+                .frame(width: dynamicTypeSize.isAccessibilitySize ? nil : labelWidth, alignment: .leading)
+                .fixedSize(horizontal: false, vertical: true)
+            VStack(alignment: .leading, spacing: 8, content: value)
+                .frame(maxWidth: .infinity, alignment: .leading)
         }
         .font(.subheadline)
-        .accessibilityElement(children: .combine)
     }
     private func dateRow(_ label: String, _ timestamp: Double) -> some View {
         valueRow(label, Date(timeIntervalSince1970: timestamp).formatted(date: .abbreviated, time: .shortened))

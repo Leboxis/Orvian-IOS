@@ -174,7 +174,7 @@ struct FavoritesView: View {
             )
             .navigationTitle("")
             .navigationBarTitleDisplayMode(.inline)
-            .safeAreaInset(edge: .top, spacing: 0) {
+            .modifier(FileBrowserHeader {
                 if !selectionMode {
                     VStack(spacing: 6) {
                         HStack(spacing: 6) {
@@ -189,11 +189,11 @@ struct FavoritesView: View {
                                 .transition(.move(edge: .top).combined(with: .opacity))
                         }
                     }
-                    .padding(.top, 4)
-                    .padding(.bottom, 2)
+                    .padding(.top, iPadLayout.isPad ? 6 : 4)
+                    .padding(.bottom, iPadLayout.isPad ? 8 : 2)
                     .animation(Motion.animation(.snappy(duration: 0.25)), value: searchBarVisible)
                 }
-            }
+            })
             .toolbar {
                 if selectionMode {
                     ToolbarItem(placement: .topBarLeading) {

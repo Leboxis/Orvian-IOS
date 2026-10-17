@@ -225,7 +225,8 @@ final class PrivacyWindowTests: XCTestCase {
 
     func testLockLayoutInBothThemesAndCompactHeight() async throws {
         for dark in [false, true] {
-            for size in [CGSize(width: 390, height: 844), CGSize(width: 844, height: 390), CGSize(width: 844, height: 240)] {
+            for size in [CGSize(width: 390, height: 844), CGSize(width: 844, height: 390), CGSize(width: 844, height: 240),
+                         CGSize(width: 1024, height: 1366), CGSize(width: 1366, height: 1024), CGSize(width: 600, height: 900)] {
                 let host = UIHostingController(rootView:
                     AppLockView(onUnlock: {})
                         .environment(\.colorScheme, dark ? .dark : .light)
