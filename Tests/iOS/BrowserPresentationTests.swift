@@ -61,7 +61,7 @@ final class BrowserPresentationTests: XCTestCase {
             ? [(false, false), (true, false), (true, true)] : [(false, false)]
         for (inspector, split) in modes {
             let selection = Selection()
-            let host = UIHostingController(rootView: DetailFixture(selection: selection, inspector: inspector, split: split))
+            let host = UIHostingController(rootView: AnyView(DetailFixture(selection: selection, inspector: inspector, split: split)))
             window.rootViewController = host
             window.makeKeyAndVisible()
             try await Task.sleep(for: .milliseconds(150))
@@ -78,6 +78,10 @@ final class BrowserPresentationTests: XCTestCase {
                 selection.file = nil
                 try await waitUntil { scrollCount() == baseline }
             }
+            // Unmount navigation while its window is still visible. UIKit
+            // must finish retiring the inspector before another host takes over.
+            host.rootView = AnyView(EmptyView())
+            try await waitUntil { scrollCount() == 0 && host.presentedViewController == nil }
         }
     }
 
@@ -117,7 +121,7 @@ final class BrowserPresentationTests: XCTestCase {
                     .environment(\.fileBrowserScope, scope)
                     .environment(\.iPadLayout, IPadLayout(isPad: UIDevice.current.userInterfaceIdiom == .pad, width: 1366))
             }
-            let host = UIHostingController(rootView: browser)
+            let host = UIHostingController(rootView: AnyView(browser))
             window.rootViewController = host
             window.makeKeyAndVisible()
             try await waitUntil {
@@ -130,6 +134,16 @@ final class BrowserPresentationTests: XCTestCase {
             XCTAssertEqual(details.actionHandler?(details), true)
             try await waitUntil {
                 self.descendants(window).filter { $0 is UIScrollView }.count > baseline
+            }
+            if host.presentedViewController != nil {
+                await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+                    host.dismiss(animated: false) { continuation.resume() }
+                }
+            }
+            host.rootView = AnyView(EmptyView())
+            try await waitUntil {
+                self.descendants(window).allSatisfy { !($0 is UIScrollView) }
+                    && host.presentedViewController == nil
             }
             window.isHidden = true
             window.rootViewController = nil
