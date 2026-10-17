@@ -125,8 +125,10 @@ struct FavoritesDiskCacheChecks {
         precondition(addCategory.lowerBound < onChanged.lowerBound && removeCategory.lowerBound < onChanged.lowerBound,
                      "Category callbacks must run only after the API succeeds")
 
-        precondition(gridSource.contains("onToggleFavorite: { await viewModel.toggleFavorite("))
-        precondition(detailSource.contains("(() async -> Bool)?"))
+        precondition(gridSource.contains("onToggleFavorite: {") && gridSource.contains("await viewModel.toggleFavorite(file)"),
+                     "Context-menu favorite changes must use the confirmed view-model operation")
+        precondition(!detailSource.contains("onToggleFavorite"),
+                     "Details is read-only; favorite operations stay in the context menu")
         precondition(!detailSource.contains("@State private var isFavorite: Bool"),
                      "FileDetailSheet must render favorite state from its parent")
         guard let favoriteAPI = viewModelSource.range(of: "try await service.setFavorite("),
