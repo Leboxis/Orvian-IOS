@@ -36,6 +36,7 @@ struct DirectoryView: View {
     @State private var searchResultsReady = false
     /// La barre de recherche n'est plus pilotée par le scroll : seul le
     /// bouton loupe (et le focus / une recherche active) la révèle.
+    @State private var searchDismissed = false
     @State private var searchRevealed = false
     @State private var filters = FileFilters()
 
@@ -134,6 +135,7 @@ struct DirectoryView: View {
             },
             onResetFilters: { searchText = ""; filters = FileFilters() },
             onEmptyAction: { showImportPicker = true },
+            onBackgroundTap: searchBarPresented ? dismissSearch : nil,
             searchText: searchText,
             filters: filters,
             allowsPullToRefresh: true,
@@ -175,7 +177,7 @@ struct DirectoryView: View {
                     .padding(.horizontal, 16)
                     .frame(maxWidth: .infinity)
 
-                    if searchBarPresented {
+                    if searchBarPresented && !iPadLayout.isPad {
                         searchBar
                             .transition(.move(edge: .top).combined(with: .opacity))
                     }
@@ -204,7 +206,7 @@ struct DirectoryView: View {
                 }
 
                 ToolbarItemGroup(placement: .topBarTrailing) {
-                    Menu {
+                    SelectionActionLayout {
                     Button {
                         toggleAll()
                     } label: {
@@ -235,8 +237,6 @@ struct DirectoryView: View {
                     }
                     .disabled(actionableSelectedIDs.isEmpty || deleteBusy)
                     .accessibilityLabel("Supprimer")
-                    } label: {
-                        Label("Actions de sélection", systemImage: "ellipsis.circle")
                     }
                 }
             } else {
@@ -254,6 +254,9 @@ struct DirectoryView: View {
                     addMenu
                         .accessibilityLabel("Ajouter ou importer")
                 }
+                if iPadLayout.isPad && searchBarPresented {
+                    ToolbarItem(placement: .principal) { searchBar }
+                }
                 BrowserToolbar(canOpenRandom: !playableFiles.isEmpty,
                                canSelect: !visibleSelectionItems.isEmpty && !moveBusy && !addBusy,
                                onRandom: openRandomFile, onSelect: startSelection)
@@ -266,7 +269,7 @@ struct DirectoryView: View {
         }
         .background {
             BrowserKeyboardCommands(isEditingText: searchFocused, canSelect: !visibleSelectionItems.isEmpty,
-                search: { searchRevealed = true; searchFocused = true },
+                search: { searchDismissed = false; searchRevealed = true; searchFocused = true },
                 cancel: { if selectionMode { endSelection() }; searchFocused = false; searchRevealed = false },
                 selectAll: { if !selectionMode { startSelection() }; selectedIDs = Set(visibleSelectionItems.map(\.id)) })
                 .disabled(!isActive)
@@ -289,7 +292,7 @@ struct DirectoryView: View {
                 itemCount: request.files.count,
                 excludedDirectoryIDs: Set(request.files.filter(\.isDirectory).map(\.id)),
                 unavailableDestinationIDs: unavailableDestinationIDs(for: request.files),
-                parentDirectory: directory.parentId == nil ? nil : directory,
+                files: request.files, initialDirectory: isSearching ? nil : directory,
                 onSelect: { destination in
                     pendingMove = nil
                     Task { await move(request.files, to: destination) }
@@ -380,7 +383,7 @@ struct DirectoryView: View {
 
     /// La barre apparaît sur demande (bouton loupe) ou lorsque la recherche est active.
     private var searchBarVisible: Bool {
-        alwaysShowSearch || searchFocused || isSearching || searchRevealed
+        !searchDismissed && (alwaysShowSearch || searchFocused || isSearching || searchRevealed)
     }
 
     /// Applique les effets de disposition uniquement aux écrans qui possèdent
@@ -427,9 +430,9 @@ struct DirectoryView: View {
                 }
                 .accessibilityLabel("Effacer la recherche")
             }
-            if !dynamicTypeSize.isAccessibilitySize { searchScopeButton }
+            if !dynamicTypeSize.isAccessibilitySize || iPadLayout.isPad { searchScopeButton }
         }
-        if dynamicTypeSize.isAccessibilitySize { searchScopeButton }
+        if dynamicTypeSize.isAccessibilitySize && !iPadLayout.isPad { searchScopeButton }
         }
         .padding(.leading, 14)
         .padding(.trailing, 8)
@@ -461,22 +464,22 @@ struct DirectoryView: View {
 
     /// Bouton loupe à droite du filtre : révèle la barre de recherche
     /// et y met le focus. Un second tap referme (clavier + barre).
-    /// Le texte est conservé : avec une recherche active, la barre reste
-    /// visible (comme avant), l'effacement reste dédié à la croix
-    /// dans la pastille.
+    /// Le texte est conservé lorsque la barre est masquée. La croix dans
+    /// la pastille reste dédiée à l'effacement de la requête.
+    private func dismissSearch() {
+        searchFocused = false
+        searchRevealed = false
+        searchDismissed = true
+    }
+
     private var searchToggleButton: some View {
         Button {
-            if searchFocused || searchBarPresented {
-                searchFocused = false
-                if !alwaysShowSearch {
-                    searchRevealed = false
-                }
+            if searchBarPresented {
+                dismissSearch()
             } else {
+                searchDismissed = false
                 searchRevealed = true
-                // Laisse la pastille apparaître avant de demander le focus.
-                DispatchQueue.main.async {
-                    searchFocused = true
-                }
+                DispatchQueue.main.async { searchFocused = true }
             }
         } label: {
             Image(systemName: searchBarPresented ? "magnifyingglass.circle.fill" : "magnifyingglass")

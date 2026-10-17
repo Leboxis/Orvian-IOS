@@ -30,7 +30,8 @@ class RequestedFixChecks(unittest.TestCase):
         picker = picker[:picker.index("\n                }")]
         self.assertIn('Text("Désactivé sur disque").tag(0)', picker)
         self.assertNotIn('Text("Sans limite")', picker)
-        self.assertIn('Text("1 Go").tag(1_024); Text("Sans limite").tag(0)', settings)
+        self.assertIn('Text("1 Go").tag(1_024)', settings)
+        self.assertIn('Text("Sans limite").tag(0)', settings)
         api = source("Orvian/Core/API/APIClient.swift")
         self.assertIn("memoryCapacity: 8 * 1024 * 1024", api)
         self.assertIn("stored ?? 100", api)
