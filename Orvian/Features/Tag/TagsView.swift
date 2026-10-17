@@ -249,7 +249,6 @@ struct TagsView: View {
         }
         .background(Color(uiColor: .systemGroupedBackground))
         .toolbar(.hidden, for: .navigationBar)
-        .ignoresSafeArea(.container, edges: .top)
     }
 
     private var root: some View {

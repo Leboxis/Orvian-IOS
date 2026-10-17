@@ -90,6 +90,12 @@ class IPadNavigationWiringChecks(unittest.TestCase):
         self.assertIn("var settingsSelection: SettingsRoute? = .appearance", state)
         self.assertIn("var iPadTags = IPadTagNavigation()", state)
 
+    def test_sidebar_content_respects_the_status_bar_safe_area(self):
+        for name in ["Tag/TagsView", "Settings/SettingsView"]:
+            with self.subTest(view=name):
+                source = self.source(f"Orvian/Features/{name}.swift")
+                self.assertNotIn(".ignoresSafeArea(.container, edges: .top)", source)
+
     def test_profile_preserves_phone_preview_without_an_extra_pad_fetch(self):
         profile = self.source("Orvian/Features/Profile/ProfileView.swift")
         self.assertIn("ForEach(recentUploads.prefix(3))", profile)

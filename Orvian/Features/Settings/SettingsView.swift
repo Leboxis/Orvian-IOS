@@ -133,10 +133,7 @@ struct SettingsView: View {
     private var padNavigation: some View {
         NavigationSplitView(columnVisibility: $columnVisibility) {
             VStack(spacing: 0) {
-                // En-tête dans la colonne (et non dans la barre de navigation
-                // système) : la barre d'onglets native n'est dessinée qu'au
-                // centre de la fenêtre, la colonne remonte donc dans la bande
-                // laissée vide et commence sous la barre d'état.
+                // Un seul en-tête, dans la zone de sécurité de la colonne.
                 PadSidebarHeader(title: Text("Réglages"), columnVisibility: $columnVisibility) {
                     EmptyView()
                 }
@@ -158,7 +155,6 @@ struct SettingsView: View {
             }
             .background(Color(uiColor: .systemGroupedBackground))
             .toolbar(.hidden, for: .navigationBar)
-            .ignoresSafeArea(.container, edges: .top)
             .navigationSplitViewColumnWidth(min: 260, ideal: 280, max: 320)
         } detail: {
             Group {

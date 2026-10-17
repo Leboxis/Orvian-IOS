@@ -2,11 +2,6 @@ import SwiftUI
 
 /// En-tête d'une barre latérale iPad : titre de colonne, actions et bouton de
 /// masquage, placés **dans** la colonne plutôt que dans sa barre de navigation.
-///
-/// La barre d'onglets native d'iPadOS n'est dessinée qu'au centre de la
-/// fenêtre. En masquant la barre de navigation de la colonne et en laissant
-/// celle-ci remonter, l'en-tête occupe la bande laissée vide à gauche au lieu
-/// de la réserver à une barre système vide.
 struct PadSidebarHeader<Trailing: View>: View {
     let title: Text
     @Binding var columnVisibility: NavigationSplitViewVisibility
@@ -39,9 +34,6 @@ struct PadSidebarHeader<Trailing: View>: View {
             .accessibilityLabel(isCollapsed ? "Afficher la barre latérale" : "Masquer la barre latérale")
         }
         .padding(.horizontal, DS.gridMargin)
-        // Respiration au-dessus de l'en-tête. La colonne ne remonte pas sous
-        // la barre d'état (la bande de la barre d'onglets reste réservée), donc
-        // quelques points suffisent : la barre resterait sinon bien plus basse.
         .padding(.top, 8)
         .padding(.bottom, 6)
     }
