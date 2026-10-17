@@ -42,9 +42,20 @@ final class DownloadPrivacyTests: XCTestCase {
         // Même si la fenêtre clé est encore le verrou, le présentateur doit
         // être la fenêtre de contenu explicitement autorisée.
         service.updatePresentation(isAllowed: true, window: owner)
-        try await Task.sleep(for: .milliseconds(250))
+        // The simulator may need several seconds to start the system sharing
+        // process. Wait for the actual transition, not a fixed 250 ms delay.
+        for _ in 0..<500 {
+            if let presented = content.presentedViewController as? UIActivityViewController,
+               !presented.isBeingPresented { break }
+            try await Task.sleep(for: .milliseconds(20))
+        }
         XCTAssertNil(lock.presentedViewController)
         XCTAssertTrue(content.presentedViewController is UIActivityViewController)
+        if content.presentedViewController != nil {
+            await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+                content.dismiss(animated: false) { continuation.resume() }
+            }
+        }
     }
 
     func testLogoutRemovesDeferredFileBeforeAnyLaterUnlock() throws {

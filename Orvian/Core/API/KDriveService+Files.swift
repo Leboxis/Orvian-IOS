@@ -26,9 +26,30 @@ extension KDriveService {
         switch source {
         case let .intersection(selection):
             guard !selection.ids.isEmpty else { throw APIError.invalidResponse }
-            endpoint = safeOrdering(.intersectionFiles(driveId: driveId, selection: selection, cursor: cursor),
-                                    requested: orderBy, order: order, allowed: ["last_modified_at"],
-                                    aliases: ["updated_at": "last_modified_at"])
+            guard let credential = TokenStore.credentialFingerprint() else { throw CancellationError() }
+            let query = safeOrdering(.intersectionFiles(driveId: driveId, selection: selection, cursor: cursor),
+                                     requested: orderBy, order: order, allowed: ["last_modified_at"],
+                                     aliases: ["updated_at": "last_modified_at"])
+            let page = try await api.get(CursorPage<DriveFile>.self, query,
+                                         cachePolicy: cachePolicy, originatingCredential: credential)
+            let client = api
+            let matching = try await selection.filterPage(page.data ?? [], membership: { file in
+                guard let categories = file.categories, categories.allSatisfy({ $0.categoryId >= 0 }) else { return nil }
+                return Set(categories.map(\.categoryId))
+            }, resolve: { file in
+                try Task.checkCancellation()
+                guard credential == TokenStore.credentialFingerprint() else { throw CancellationError() }
+                let info = try await client.get(DataResponse<DriveFile>.self,
+                                             .fileInfo(driveId: driveId, fileId: file.id),
+                                             cachePolicy: cachePolicy, originatingCredential: credential)
+                guard let fresh = info.data, fresh.categories != nil else { throw TagIntersectionError.missingMembership }
+                var resolved = file
+                resolved.categories = fresh.categories
+                return resolved
+            })
+            guard credential == TokenStore.credentialFingerprint() else { throw CancellationError() }
+            // An empty filtered page still carries the server's next cursor.
+            return CursorPage(result: page.result, data: matching, cursor: page.cursor, hasMore: page.hasMore)
         case let .directory(directoryId):
             endpoint = safeOrdering(
                 .directoryContent(driveId: driveId, directoryId: directoryId, cursor: cursor),

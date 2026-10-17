@@ -19,6 +19,12 @@ struct AdaptiveLayoutChecks {
         let pad = IPadLayout(isPad: true, width: 1366)
         let counts = (2...7).map { pad.fileColumns(preferred: $0, margin: 14, spacing: 10) }
         assert(Set(counts).count == counts.count, "Every iPad density must have a visible effect")
+        for preference in 2...7 {
+            let regular = pad.fileColumns(preferred: preference, margin: 14, spacing: 10)
+            let accessible = IPadLayout(isPad: true, width: 1366, largeText: true)
+                .fileColumns(preferred: preference, margin: 14, spacing: 10)
+            assert(accessible < regular, "Large text must never shrink thumbnails relative to the chosen density")
+        }
         assert(IPadLayout(isPad: false, width: 375, largeText: true).fileColumns(preferred: 7, margin: 14, spacing: 10) == 1)
         for width: CGFloat in [0, -1, .nan, .infinity, .greatestFiniteMagnitude] {
             let count = IPadLayout(isPad: true, width: width).fileColumns(preferred: 7, margin: 14, spacing: 10)

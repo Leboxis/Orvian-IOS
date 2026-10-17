@@ -3,6 +3,22 @@ import XCTest
 
 @MainActor
 final class IPadScreenStateTests: XCTestCase {
+    func testCrossedTagsSurviveTabChangesButNotANewSession() {
+        let shell = MainTabShellState(driveId: 42)
+        shell.navState.tagIntersection.toggle(7)
+        shell.navState.tagIntersection.toggle(9)
+        shell.tab = .favorites
+        shell.tab = .tag
+        XCTAssertEqual(shell.navState.tagIntersection.selectedIDs, [7, 9])
+        shell.navState.tagIntersection.finish()
+        XCTAssertFalse(shell.navState.tagIntersection.isEditing)
+        XCTAssertEqual(shell.navState.tagIntersection.selectedIDs, [7, 9])
+        let newSession = MainTabShellState(driveId: 43)
+        XCTAssertTrue(newSession.navState.tagIntersection.selectedIDs.isEmpty)
+        shell.navState.tagIntersection.clear()
+        XCTAssertFalse(shell.navState.tagIntersection.isActive)
+    }
+
     func testChangingTagClearsThePreviousFolderPath() {
         var navigation = IPadTagNavigation()
         navigation.select(10)

@@ -24,7 +24,7 @@ struct Category: Codable, Identifiable, Hashable {
 /// ne fait plus échouer toute la réponse (`categoryId = -1`, ignoré par
 /// l'interface). Le nom et la couleur se résolvent via
 /// `GET /2/drive/{id}/categories`.
-struct FileCategory: Codable, Hashable {
+struct FileCategory: Codable, Hashable, Sendable {
     let categoryId: Int
     let isGeneratedByAi: Bool?
     let userValidation: String?

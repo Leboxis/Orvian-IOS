@@ -63,7 +63,7 @@ struct FileGridView: View {
     @AppStorage("favoritesFilePresentation") private var favoritesPresentation = FilePresentation.grid
     @AppStorage("tagFilePresentation") private var tagPresentation = FilePresentation.grid
     @Environment(\.fileBrowserScope) private var browserScope
-    private var fileGridColumns: Int { iPadLayout.isPad ? padDensity : min(3, phoneColumns) }
+    private var fileGridColumns: Int { iPadLayout.isPad ? padDensity : min(3, max(2, phoneColumns)) }
     private var presentation: FilePresentation {
         guard iPadLayout.isPad else { return .grid }
         switch browserScope {
@@ -75,6 +75,11 @@ struct FileGridView: View {
     @Environment(\.iPadLayout) private var iPadLayout
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @State private var containerWidth: CGFloat = 0
+    // Measure the window-level layout, not the grid after the inspector has
+    // taken its width: using that width would alternate inspector and sheet.
+    private var usesDetailsInspector: Bool {
+        iPadLayout.isPad && iPadLayout.width >= (browserScope == .tag ? 1300 : 1000)
+    }
     @AppStorage("foldersFirstInTags") private var foldersFirstInTags = true
     /// Préférence globale : affiche l'étoile des favoris sur les cartes,
     /// y compris dans l'onglet Favoris où elle était autrefois masquée d'office.
@@ -187,14 +192,26 @@ struct FileGridView: View {
             } message: {
                 Text(viewModel.mutationErrorMessage ?? "")
             }
-            .inspector(isPresented: Binding(get: { detailRequest != nil }, set: { if !$0 { detailRequest = nil } })) {
+            .inspector(isPresented: Binding(
+                get: { usesDetailsInspector && detailRequest != nil },
+                set: { if !$0 && usesDetailsInspector { detailRequest = nil } }
+            )) {
                 if let request = detailRequest {
+                    FileDetailSheet(file: currentFile(matching: request), driveId: viewModel.driveId,
+                                    isTrashed: viewModel.source == .trash)
+                        .id(request.id)
+                        .inspectorColumnWidth(min: 300, ideal: 340, max: 360)
+                }
+            }
+            .sheet(item: Binding(
+                get: { usesDetailsInspector ? nil : detailRequest },
+                set: { if !usesDetailsInspector { detailRequest = $0 } }
+            )) { request in
                 FileDetailSheet(
                     file: currentFile(matching: request),
                     driveId: viewModel.driveId,
                     isTrashed: viewModel.source == .trash
                 )
-                }
             }
             .sheet(item: $tagsRequest) { request in
                 TagsEditorSheet(

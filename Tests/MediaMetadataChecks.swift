@@ -20,6 +20,9 @@ struct MediaMetadataChecks {
         let store = MediaMetadataStore(storageURL: url)
         let file = DriveFile(id: 42)
         TokenStore.credential = "account-a"
+        let cached = await store.cachedInfo(driveId: 1, file: file)
+        precondition(cached?.duration == 10 && VideoAssetCache.shared.calls == 0,
+                     "Details must read disk facts without creating a video asset")
         await store.resolveAll(driveId: 1, items: [file])
         await store.resolveAll(driveId: 2, items: [file])
         precondition(store.info(driveId: 1, for: 42)?.duration == 10)
@@ -29,6 +32,8 @@ struct MediaMetadataChecks {
         await store.resolveAll(driveId: 1, items: [file])
         precondition(store.info(driveId: 1, for: 42)?.duration == 30)
         TokenStore.credential = "account-c"
+        let unavailable = await store.cachedInfo(driveId: 1, file: file)
+        precondition(unavailable == nil && VideoAssetCache.shared.calls == 0)
         await store.resolveAll(driveId: 1, items: [file])
         precondition(store.info(driveId: 1, for: 42) == nil, "Unscoped legacy disk entries must be ignored")
         print("Media metadata isolation checks passed")

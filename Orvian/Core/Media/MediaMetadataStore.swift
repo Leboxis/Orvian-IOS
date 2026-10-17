@@ -244,6 +244,16 @@ final class MediaMetadataStore {
 
     // MARK: - Résolution
 
+    /// Details may read known media facts but must never start downloading a
+    /// video simply to show its duration. Restore the existing disk cache only.
+    func cachedInfo(driveId: Int, file: DriveFile) async -> Info? {
+        let credential = TokenStore.credentialFingerprint()
+        await ensurePersistenceLoaded()
+        guard !Task.isCancelled, credential != nil,
+              credential == TokenStore.credentialFingerprint() else { return nil }
+        return persistedInfo(driveId: driveId, file: file)
+    }
+
     /// Résout en arrière-plan les métadonnées des vidéos d'une liste,
     /// par petits lots pour ne pas saturer le réseau. Les entrées déjà
     /// connues (mémoire ou disque valide) sont servies sans aucun appel

@@ -16,7 +16,8 @@ final class FileDetailsViewModel {
         let request = generation
         let credential = TokenStore.credentialFingerprint()
         self.file = file
-        categories = []
+        let knownCategories = CategoryLibrary.shared.categories(for: driveId)
+        categories = (file.categories ?? []).compactMap { knownCategories[$0.categoryId] }
         infoError = nil
         tagsError = nil
         isLoading = true
@@ -42,6 +43,9 @@ final class FileDetailsViewModel {
             let library = CategoryLibrary.shared.categories(for: driveId)
             if let membership = self.file?.categories {
                 categories = membership.compactMap { library[$0.categoryId] }
+                if categories.count != Set(membership.map(\.categoryId)).count {
+                    tagsError = "Certains tags ne sont plus disponibles."
+                }
             } else {
                 tagsError = "Impossible de vérifier les tags de cet élément."
             }
