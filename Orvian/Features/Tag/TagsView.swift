@@ -169,6 +169,7 @@ struct TagsView: View {
                 Image(systemName: "pencil")
             }
             .accessibilityLabel(isReordering ? "Terminer le réarrangement" : "Réarranger les tags")
+            .disabled(iPadLayout.isPad && crossState.isActive)
             Button {
                 showCreateSheet = true
             } label: {
@@ -324,6 +325,7 @@ struct TagsView: View {
                         .frame(width: 44, height: 44)
                 }
                 .accessibilityLabel(isReordering ? "Terminer le réarrangement" : "Réarranger les tags")
+                .disabled(crossState.isActive)
                 Button { showCreateSheet = true } label: {
                     Image(systemName: "plus").frame(width: 44, height: 44)
                 }
