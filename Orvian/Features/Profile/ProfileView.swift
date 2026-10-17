@@ -36,7 +36,9 @@ struct ProfileView: View {
                 Color.clear.frame(height: iPadLayout.isPad ? 0 : 90)
             }
             .navigationTitle("Profil")
-            .navigationBarTitleDisplayMode(.large)
+            // Titre inline sur iPad : le bloc d'aperçu est borné et centré,
+            // un grand titre collé à gauche ne partageait pas son axe.
+            .navigationBarTitleDisplayMode(iPadLayout.isPad ? .inline : .large)
         }
         .task(id: session.selectedDrive?.id) {
             await loadPreviews()
@@ -77,7 +79,7 @@ struct ProfileView: View {
             }
             .padding(.horizontal, iPadLayout.horizontalInset(base: DS.gridMargin))
             .padding(.top, 16)
-            .padding(.bottom, DS.floatingBarInset)
+            .padding(.bottom, DS.padBottomInset)
             // Même décision que la grille de tags : au-delà de 900 pt, les
             // trois aperçus s'étirent et les vignettes deviennent énormes.
             .frame(maxWidth: DS.maxContentWidth)
@@ -91,7 +93,8 @@ struct ProfileView: View {
             HStack {
                 Text("Uploads récents").font(.headline)
                 Spacer()
-                if let drive = session.selectedDrive {
+                if let drive = session.selectedDrive,
+                   isLoadingRecents || !recentUploads.isEmpty {
                     NavigationLink("Voir plus") {
                         RecentFilesView(driveId: drive.id, title: "Uploads récents",
                                         source: RecentUploadsLoader.source, router: router)
@@ -135,7 +138,7 @@ struct ProfileView: View {
             Text("Stockage et informations").font(.headline)
             if let drive = session.selectedDrive {
                 NavigationLink(destination: TrashView(driveId: drive.id, router: router)) {
-                    Label("Corbeille", systemImage: "trash")
+                    LinkRowLabel(title: "Corbeille", systemImage: "trash")
                 }
             }
             Divider()
@@ -146,7 +149,7 @@ struct ProfileView: View {
                     .foregroundStyle(.secondary)
             }
             NavigationLink(destination: PerfView()) {
-                Label("Mesures réseau", systemImage: "gauge.with.dots")
+                LinkRowLabel(title: "Mesures réseau", systemImage: "gauge.with.dots")
             }
         }
         .padding(20)
@@ -329,6 +332,26 @@ struct ProfileView: View {
             files + recentUploads.filter { !uploadedIDs.contains($0.id) }
         ).prefix(12))
         isLoadingRecents = false
+    }
+}
+
+// MARK: - Ligne de lien d'une carte iPad
+
+/// Ligne cliquable d'une carte iPad : le chevron signale ce qui répond, et la
+/// ligne entière est tapable (la « Version » voisine, elle, ne l'est pas).
+private struct LinkRowLabel: View {
+    let title: String
+    let systemImage: String
+
+    var body: some View {
+        HStack {
+            Label(title, systemImage: systemImage)
+            Spacer(minLength: 8)
+            Image(systemName: "chevron.right")
+                .font(.caption.weight(.bold))
+                .foregroundStyle(.tertiary)
+        }
+        .contentShape(Rectangle())
     }
 }
 

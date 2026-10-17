@@ -367,7 +367,9 @@ struct FileGridView: View {
                 }
                 .padding(.horizontal, gridLayout.horizontalInset(base: DS.gridMargin))
                 .padding(.top, 6 + contentTopInset)
-                .padding(.bottom, DS.floatingBarInset) // barre flottante
+                // iPhone : barre flottante à réserver. iPad : la barre est en
+                // haut, seule la pastille de transfert flotte en bas.
+                .padding(.bottom, iPadLayout.isPad ? DS.padBottomInset : DS.floatingBarInset)
                 // L'iPhone garde sa borne ; l'iPad adapte les colonnes à la largeur du panneau.
                 .frame(maxWidth: iPadLayout.isPad ? .infinity : DS.maxContentWidth)
                 .frame(maxWidth: .infinity)

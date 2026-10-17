@@ -138,6 +138,11 @@ struct SettingsView: View {
             .listStyle(.sidebar)
             .navigationTitle("Réglages")
             .navigationSplitViewColumnWidth(min: 260, ideal: 280, max: 320)
+            .scrollContentBackground(.hidden)
+            // Couleur de page de l'app. Le matériau de barre latérale rend
+            // ≈ `secondarySystemGroupedBackground`, la couleur de *carte* :
+            // la colonne lisait donc comme une carte géante collée au détail.
+            .background(Color(uiColor: .systemGroupedBackground))
             // Aucune réserve basse : la barre d'onglets native de l'iPad
             // insère déjà son espace ; `DS.floatingBarInset` (barre flottante
             // iPhone) ne laissait qu'une bande vide sous la liste.
@@ -146,7 +151,7 @@ struct SettingsView: View {
                 if isSearching {
                     List { searchResultsSection }
                         .listStyle(.insetGrouped)
-                        .safeAreaInset(edge: .bottom) { Color.clear.frame(height: DS.floatingBarInset) }
+                        .safeAreaInset(edge: .bottom) { Color.clear.frame(height: DS.padBottomInset) }
                 } else if let selectedSpace {
                     destinationView(for: selectedSpace)
                 } else {
@@ -198,9 +203,14 @@ struct SettingsView: View {
                             }
                         }
                         Spacer(minLength: 6)
-                        Image(systemName: "chevron.right")
-                            .font(.caption.weight(.bold))
-                            .foregroundStyle(.tertiary)
+                        if !iPadLayout.isPad {
+                            // Sur iPad, « Compte et drive » figure déjà trois
+                            // lignes plus bas : le chevron de la carte ferait
+                            // doublon avec cette destination.
+                            Image(systemName: "chevron.right")
+                                .font(.caption.weight(.bold))
+                                .foregroundStyle(.tertiary)
+                        }
                     }
                     if let drive = session.selectedDrive {
                         quotaBar(drive)
@@ -288,9 +298,15 @@ struct SettingsView: View {
                 route: .account
             )
         } header: {
-            Text("Réglages")
+            // Sur iPad, le titre de la colonne dit déjà « Réglages » et les
+            // textes d'aide d'une barre latérale se lisent comme du contenu.
+            if !iPadLayout.isPad {
+                Text("Réglages")
+            }
         } footer: {
-            Text("Chaque espace regroupe les options qui vont ensemble.")
+            if !iPadLayout.isPad {
+                Text("Chaque espace regroupe les options qui vont ensemble.")
+            }
         }
     }
 
@@ -306,7 +322,9 @@ struct SettingsView: View {
         } header: {
             Text("À propos")
         } footer: {
-            Text("Orvian conserve le token et le drive choisi uniquement sur cet appareil.")
+            if !iPadLayout.isPad {
+                Text("Orvian conserve le token et le drive choisi uniquement sur cet appareil.")
+            }
         }
     }
 
@@ -634,7 +652,7 @@ private struct AppearanceSpace: View {
             }
         }
         .safeAreaInset(edge: .bottom) {
-            Color.clear.frame(height: iPadLayout.isPad ? DS.floatingBarInset : 90)
+            Color.clear.frame(height: iPadLayout.isPad ? DS.padBottomInset : 90)
         }
         .navigationTitle("Apparence")
         .navigationBarTitleDisplayMode(.inline)
@@ -695,7 +713,7 @@ private struct MediaSpace: View {
             }
         }
         .safeAreaInset(edge: .bottom) {
-            Color.clear.frame(height: iPadLayout.isPad ? DS.floatingBarInset : 90)
+            Color.clear.frame(height: iPadLayout.isPad ? DS.padBottomInset : 90)
         }
         .navigationTitle("Médias et réseau")
         .navigationBarTitleDisplayMode(.inline)
@@ -745,7 +763,7 @@ private struct StorageSpace: View {
             }
         }
         .safeAreaInset(edge: .bottom) {
-            Color.clear.frame(height: iPadLayout.isPad ? DS.floatingBarInset : 90)
+            Color.clear.frame(height: iPadLayout.isPad ? DS.padBottomInset : 90)
         }
         .navigationTitle("Stockage")
         .navigationBarTitleDisplayMode(.inline)
@@ -819,7 +837,7 @@ private struct SecuritySpace: View {
             }
         }
         .safeAreaInset(edge: .bottom) {
-            Color.clear.frame(height: iPadLayout.isPad ? DS.floatingBarInset : 90)
+            Color.clear.frame(height: iPadLayout.isPad ? DS.padBottomInset : 90)
         }
         .navigationTitle("Sécurité")
         .navigationBarTitleDisplayMode(.inline)
@@ -870,7 +888,7 @@ private struct AccountSpace: View {
             }
         }
         .safeAreaInset(edge: .bottom) {
-            Color.clear.frame(height: iPadLayout.isPad ? DS.floatingBarInset : 90)
+            Color.clear.frame(height: iPadLayout.isPad ? DS.padBottomInset : 90)
         }
         .navigationTitle("Compte")
         .navigationBarTitleDisplayMode(.inline)

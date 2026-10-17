@@ -136,7 +136,26 @@ struct TagsView: View {
     @ToolbarContentBuilder
     private var categoryToolbar: some ToolbarContent {
         ToolbarItemGroup(placement: .topBarTrailing) {
-            if !iPadLayout.isPad {
+            if iPadLayout.isPad {
+                // Un seul menu : trois boutons alignés écrasaient le titre de
+                // la barre latérale, qui ne respirait plus.
+                Menu {
+                    Button {
+                        isReordering.toggle()
+                    } label: {
+                        Label(isReordering ? "Terminer le réarrangement" : "Réarranger les tags",
+                              systemImage: isReordering ? "checkmark.circle" : "arrow.up.arrow.down")
+                    }
+                    Button {
+                        showCreateSheet = true
+                    } label: {
+                        Label("Nouveau tag", systemImage: "plus")
+                    }
+                } label: {
+                    Image(systemName: isReordering ? "checkmark.circle" : "ellipsis.circle")
+                }
+                .accessibilityLabel(isReordering ? "Terminer le réarrangement" : "Actions des tags")
+            } else {
                 Button {
                     withAnimation(Motion.animation(.snappy(duration: 0.25))) {
                         layout = layout == .grid ? .list : .grid
@@ -145,19 +164,19 @@ struct TagsView: View {
                     Image(systemName: layout == .grid ? "list.bullet" : "square.grid.2x2")
                 }
                 .accessibilityLabel(layout == .grid ? "Afficher en liste" : "Afficher en grille")
+                Button {
+                    isReordering.toggle()
+                } label: {
+                    Image(systemName: "pencil")
+                }
+                .accessibilityLabel(isReordering ? "Terminer le réarrangement" : "Réarranger les tags")
+                Button {
+                    showCreateSheet = true
+                } label: {
+                    Image(systemName: "plus")
+                }
+                .accessibilityLabel("Nouveau tag")
             }
-            Button {
-                isReordering.toggle()
-            } label: {
-                Image(systemName: "pencil")
-            }
-            .accessibilityLabel(isReordering ? "Terminer le réarrangement" : "Réarranger les tags")
-            Button {
-                showCreateSheet = true
-            } label: {
-                Image(systemName: "plus")
-            }
-            .accessibilityLabel("Nouveau tag")
         }
     }
 
@@ -218,6 +237,11 @@ struct TagsView: View {
             .listStyle(.sidebar)
             .navigationTitle(tagNavigationTitle)
             .refreshable { await load(force: true) }
+            .scrollContentBackground(.hidden)
+            // Couleur de page de l'app : le matériau de barre latérale rend
+            // ≈ `secondarySystemGroupedBackground`, la couleur de *carte*, donc
+            // la colonne lisait comme une carte géante collée au détail.
+            .background(Color(uiColor: .systemGroupedBackground))
             // Aucune réserve basse ici : la barre d'onglets native de l'iPad
             // insère déjà son espace. `DS.floatingBarInset` appartient à la
             // barre flottante iPhone et laissait une bande vide sous la liste.
