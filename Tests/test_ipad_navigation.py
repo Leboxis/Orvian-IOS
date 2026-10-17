@@ -96,6 +96,21 @@ class IPadNavigationWiringChecks(unittest.TestCase):
                 source = self.source(f"Orvian/Features/{name}.swift")
                 self.assertNotIn(".ignoresSafeArea(.container, edges: .top)", source)
 
+    def test_sidebar_header_has_readable_title_and_toolbar_sized_controls(self):
+        header = self.source("Orvian/UI/PadSidebarHeader.swift")
+        tags = self.source("Orvian/Features/Tag/TagsView.swift")
+        self.assertIn(".font(.title2.weight(.semibold))", header)
+        self.assertIn(".frame(minWidth: 44, minHeight: 44)", header)
+        self.assertIn(".buttonStyle(.glass)", header)
+        menu = tags[tags.index("PadSidebarHeader("):tags.index("if categories.isEmpty", tags.index("PadSidebarHeader("))]
+        self.assertIn(".frame(minWidth: 44, minHeight: 44)", menu)
+
+    def test_pad_profile_joins_the_capsule_without_changing_phone_group(self):
+        bar = self.source("Orvian/UI/FloatingTabBar.swift")
+        self.assertIn("@Environment(\\.iPadLayout)", bar)
+        self.assertIn("iPadLayout.isPad ? [.settings, .tag, .home, .favorites, .profile]", bar)
+        self.assertIn("if !iPadLayout.isPad {", bar)
+
     def test_profile_preserves_phone_preview_without_an_extra_pad_fetch(self):
         profile = self.source("Orvian/Features/Profile/ProfileView.swift")
         self.assertIn("ForEach(recentUploads.prefix(3))", profile)

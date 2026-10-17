@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// Disposition Apple Music : quatre onglets dans une capsule et Profil à part.
+/// Cinq onglets regroupés sur iPad ; sur iPhone, Profil reste à part.
 /// La coque des onglets reste propriétaire de leur état et de leur navigation.
 struct FloatingTabBar: View {
     @Binding var selection: AppTab
@@ -9,12 +9,16 @@ struct FloatingTabBar: View {
     var onReselect: ((AppTab) -> Void)? = nil
     @AppStorage("hapticFeedbackEnabled") private var hapticFeedbackEnabled = true
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+    @Environment(\.iPadLayout) private var iPadLayout
     @Namespace private var selectionAnimation
 
     private let height: CGFloat = 64
     private let spacing: CGFloat = 8
     private let inset: CGFloat = 4
-    private let groupedTabs: [AppTab] = [.settings, .tag, .home, .favorites]
+    private var groupedTabs: [AppTab] {
+        iPadLayout.isPad ? [.settings, .tag, .home, .favorites, .profile]
+            : [.settings, .tag, .home, .favorites]
+    }
 
     var body: some View {
         GlassEffectContainer(spacing: spacing) {
@@ -41,16 +45,18 @@ struct FloatingTabBar: View {
                 .frame(height: height)
                 .modifier(TabGlassSurface(shape: Capsule(), opaque: reduceTransparency))
 
-                TabButton(
-                    tab: .profile,
-                    isSelected: selection == .profile,
-                    height: height,
-                    iconOnly: true
-                ) {
-                    select(.profile)
+                if !iPadLayout.isPad {
+                    TabButton(
+                        tab: .profile,
+                        isSelected: selection == .profile,
+                        height: height,
+                        iconOnly: true
+                    ) {
+                        select(.profile)
+                    }
+                    .frame(width: height, height: height)
+                    .modifier(TabGlassSurface(shape: Circle(), opaque: reduceTransparency))
                 }
-                .frame(width: height, height: height)
-                .modifier(TabGlassSurface(shape: Circle(), opaque: reduceTransparency))
             }
         }
         // La valeur couvre aussi les changements d'onglet programmatiques.

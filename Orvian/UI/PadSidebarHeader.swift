@@ -22,7 +22,7 @@ struct PadSidebarHeader<Trailing: View>: View {
     var body: some View {
         HStack(spacing: 10) {
             title
-                .font(.headline)
+                .font(.title2.weight(.semibold))
                 .lineLimit(1)
             Spacer(minLength: 6)
             trailing()
@@ -30,9 +30,13 @@ struct PadSidebarHeader<Trailing: View>: View {
                 columnVisibility = isCollapsed ? .all : .detailOnly
             } label: {
                 Image(systemName: "sidebar.leading")
+                    .frame(minWidth: 44, minHeight: 44)
             }
             .accessibilityLabel(isCollapsed ? "Afficher la barre latérale" : "Masquer la barre latérale")
         }
+        .font(.title3)
+        .buttonStyle(.glass)
+        .buttonBorderShape(.circle)
         .padding(.horizontal, DS.gridMargin)
         .padding(.top, 8)
         .padding(.bottom, 6)

@@ -201,7 +201,8 @@ struct TagsView: View {
     private var padCategoryList: some View {
         VStack(spacing: 0) {
             // Un seul en-tête, sans seconde barre de navigation au-dessus.
-            PadSidebarHeader(title: tagNavigationTitle, columnVisibility: $columnVisibility) {
+            PadSidebarHeader(title: Text(hasLoadedCategories ? "Tag (\(categories.count))" : "Tag"),
+                             columnVisibility: $columnVisibility) {
                 Menu {
                     Button {
                         isReordering.toggle()
@@ -216,6 +217,7 @@ struct TagsView: View {
                     }
                 } label: {
                     Image(systemName: isReordering ? "checkmark.circle" : "ellipsis.circle")
+                        .frame(minWidth: 44, minHeight: 44)
                 }
                 .accessibilityLabel(isReordering ? "Terminer le réarrangement" : "Actions des tags")
             }
