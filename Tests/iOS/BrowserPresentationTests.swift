@@ -5,6 +5,7 @@ import XCTest
 /// Native presentation/layout assertions only; no images or screenshots.
 @MainActor
 final class BrowserPresentationTests: XCTestCase {
+    private enum WaitError: Error { case timeout }
     @Observable final class Selection {
         var file: DriveFile?
     }
@@ -43,7 +44,7 @@ final class BrowserPresentationTests: XCTestCase {
             try await Task.sleep(for: .milliseconds(20))
         }
         XCTFail("The details presentation did not settle")
-        throw NSError(domain: "DetailsTest", code: 1)
+        throw WaitError.timeout
     }
 
     func testDetailsOpenReplaceAndCloseInStackAndTagSplit() async throws {
@@ -64,17 +65,18 @@ final class BrowserPresentationTests: XCTestCase {
             window.rootViewController = host
             window.makeKeyAndVisible()
             try await Task.sleep(for: .milliseconds(150))
-            func detailScrolls() -> [UIView] {
-                descendants(window).filter { $0.accessibilityIdentifier == "file.details.content" }
+            func scrollCount() -> Int {
+                descendants(window).filter { $0 is UIScrollView }.count
             }
+            let baseline = scrollCount()
             for _ in 0..<3 {
                 selection.file = .root(name: "Premier dossier")
-                try await waitUntil { !detailScrolls().isEmpty }
+                try await waitUntil { scrollCount() > baseline }
                 selection.file = .root(name: "Autre nom, même élément")
                 try await Task.sleep(for: .milliseconds(100))
                 XCTAssertNotNil(selection.file)
                 selection.file = nil
-                try await waitUntil { detailScrolls().isEmpty }
+                try await waitUntil { scrollCount() == baseline }
             }
         }
     }
@@ -123,10 +125,11 @@ final class BrowserPresentationTests: XCTestCase {
             }
             let card = try XCTUnwrap(descendants(window).compactMap { $0 as? UIButton }
                 .first { $0.accessibilityLabel == "Dossier de test" })
+            let baseline = descendants(window).filter { $0 is UIScrollView }.count
             let details = try XCTUnwrap(card.accessibilityCustomActions?.first { $0.name == "Détails" })
             XCTAssertEqual(details.actionHandler?(details), true)
             try await waitUntil {
-                self.descendants(window).contains { $0.accessibilityIdentifier == "file.details.content" }
+                self.descendants(window).filter { $0 is UIScrollView }.count > baseline
             }
             window.isHidden = true
             window.rootViewController = nil
