@@ -100,10 +100,12 @@ class IPadNavigationWiringChecks(unittest.TestCase):
         header = self.source("Orvian/UI/PadSidebarHeader.swift")
         tags = self.source("Orvian/Features/Tag/TagsView.swift")
         self.assertIn(".font(.title2.weight(.semibold))", header)
-        self.assertIn(".frame(minWidth: 44, minHeight: 44)", header)
-        self.assertIn(".buttonStyle(.glass)", header)
+        self.assertIn(".frame(width: 44, height: 44)", header)
+        self.assertIn(".buttonStyle(.plain)", header)
+        self.assertIn(".font(.body)", header)
+        self.assertNotIn(".buttonStyle(.glass)", header)
         menu = tags[tags.index("PadSidebarHeader("):tags.index("if categories.isEmpty", tags.index("PadSidebarHeader("))]
-        self.assertIn(".frame(minWidth: 44, minHeight: 44)", menu)
+        self.assertIn(".frame(width: 44, height: 44)", menu)
 
     def test_pad_profile_joins_the_capsule_without_changing_phone_group(self):
         bar = self.source("Orvian/UI/FloatingTabBar.swift")

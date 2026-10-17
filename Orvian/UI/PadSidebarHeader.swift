@@ -30,13 +30,14 @@ struct PadSidebarHeader<Trailing: View>: View {
                 columnVisibility = isCollapsed ? .all : .detailOnly
             } label: {
                 Image(systemName: "sidebar.leading")
-                    .frame(minWidth: 44, minHeight: 44)
+                    .frame(width: 44, height: 44)
+                    .contentShape(Circle())
+                    .glassEffect(.regular.interactive(), in: .circle)
             }
             .accessibilityLabel(isCollapsed ? "Afficher la barre latérale" : "Masquer la barre latérale")
         }
-        .font(.title3)
-        .buttonStyle(.glass)
-        .buttonBorderShape(.circle)
+        .font(.body)
+        .buttonStyle(.plain)
         .padding(.horizontal, DS.gridMargin)
         .padding(.top, 8)
         .padding(.bottom, 6)

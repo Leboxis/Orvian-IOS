@@ -217,7 +217,9 @@ struct TagsView: View {
                     }
                 } label: {
                     Image(systemName: isReordering ? "checkmark.circle" : "ellipsis.circle")
-                        .frame(minWidth: 44, minHeight: 44)
+                        .frame(width: 44, height: 44)
+                        .contentShape(Circle())
+                        .glassEffect(.regular.interactive(), in: .circle)
                 }
                 .accessibilityLabel(isReordering ? "Terminer le réarrangement" : "Actions des tags")
             }
