@@ -4,6 +4,22 @@ import XCTest
 
 @MainActor
 final class FileCardAccessibilityTests: XCTestCase {
+    func testDetailsWaitsUntilContextMenuHasReleasedItsCard() {
+        let dismissal = ContextMenuDismissal()
+        var openings = 0
+        dismissal.begin()
+        dismissal.perform { openings += 1 }
+        XCTAssertEqual(openings, 0, "The inspector must not resize the menu's anchor during dismissal")
+        dismissal.complete()
+        XCTAssertEqual(openings, 1)
+        dismissal.complete()
+        XCTAssertEqual(openings, 1, "A completion must not open details twice")
+        dismissal.perform { openings += 1 }
+        XCTAssertEqual(openings, 2, "Actions without an active menu remain immediate")
+        dismissal.begin()
+        dismissal.complete()
+        XCTAssertEqual(openings, 2, "Cancelling a menu must not open details")
+    }
     private func descendants(_ view: UIView) -> [UIView] {
         [view] + view.subviews.flatMap(descendants)
     }
