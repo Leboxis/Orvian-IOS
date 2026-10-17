@@ -111,7 +111,7 @@ Le processus d'acceptation exige les parcours rapportés sur simulateur iPad et 
 - Toujours : repartir des sources restaurées, préserver les couleurs et l'iPhone, conserver les validations et la sécurité, vérifier chaque changement de comportement.
 - Demander avant : publication, push, changement d'API ou de stockage, nouvelle dépendance et modification des destinations de test de la CI.
 - Ne jamais : supprimer des données utilisateur, réécrire l'historique, supprimer une release existante, désactiver un test pour masquer un échec ou promettre l'absence totale de bugs sans preuve d'exécution.
-- Hors périmètre : nouveau moteur de favoris, changement des API, du modèle NSFW ou de l'identité graphique.
+- Hors périmètre : nouveau moteur de favoris, changement des API ou de l'identité graphique.
 - Direction approuvée : conserver l'identité visuelle et utiliser une navigation principale par onglets natifs, sans reprendre la barre latérale globale supprimée. L'utilisateur a ensuite demandé le push sur main et la surveillance de GitHub Actions.
 
 ## Sources

@@ -14,7 +14,6 @@ class UICleanupChecks(unittest.TestCase):
     def test_readme_has_no_provider_mentions(self):
         text = source("README.md")
         self.assertIsNone(re.search(r"kdrive|infomaniak", text, re.IGNORECASE))
-        self.assertIn("À analyser", text)
         self.assertIn("licence MIT", text)
 
     def test_authored_user_facing_copy_is_neutral(self):
@@ -48,7 +47,6 @@ class UICleanupChecks(unittest.TestCase):
         self.assertIn("Text(selectionTitle)", folder)
         self.assertIn('navigationTitle("")', folder)
         self.assertIn("if showBreadcrumb", folder)
-        self.assertIn("folderScanner.start(driveId: driveId, directory: directory)", folder)
 
     def test_default_recent_reload_uses_shared_loader_only(self):
         vm = source("Orvian/Features/Shared/FileGridViewModel.swift")

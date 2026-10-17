@@ -3,7 +3,6 @@ import SwiftUI
 @main
 struct OrvianApp: App {
     @State private var session = SessionStore()
-    @Environment(\.scenePhase) private var scenePhase
 
     var body: some Scene {
         WindowGroup {
@@ -13,9 +12,6 @@ struct OrvianApp: App {
                 .fontDesign(.default)
                 .task {
                     await session.bootstrap()
-                }
-                .onChange(of: scenePhase) { _, phase in
-                    if phase == .background { FolderImageScanner.shared.cancel() }
                 }
         }
     }

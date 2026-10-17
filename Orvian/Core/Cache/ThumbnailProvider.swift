@@ -50,10 +50,10 @@ actor ThumbnailProvider {
     /// passagère quelques secondes. Les marqueurs ne concernent que le réseau :
     /// une miniature déjà présente en mémoire ou sur disque fait toujours foi.
     private var failures = ThumbnailFailureLedger()
-    /// Dernier échec observé par clé, en attente de classification. Le type
-    /// d'erreur n'est transformé en cache négatif qu'à la fin d'une fenêtre de
-    /// réessais : un 404 pendant la génération du poster d'un import récent ne
-    /// doit pas condamner la miniature dès la première tentative.
+    /// Dernier échec observé par clé. Le type d'erreur n'est transformé en cache
+    /// négatif qu'à la fin d'une fenêtre de réessais : un 404 pendant la
+    /// génération du poster d'un import récent ne doit pas condamner la
+    /// miniature dès la première tentative.
     private var lastFailures: [Key: (outcome: FetchOutcome, at: Date)] = [:]
     private let lastFailureLimit = 512
 
@@ -110,24 +110,6 @@ actor ThumbnailProvider {
     func thumbnail(driveId: Int, fileId: Int, isTrashed: Bool = false) async -> UIImage? {
         let key = Self.key(driveId: driveId, fileId: fileId, isTrashed: isTrashed)
         return await thumbnail(for: key)
-    }
-
-    /// A new classification must see current bytes: the UI cache is keyed by
-    /// file ID rather than content revision, so never reuse it for inference.
-    func classificationImageData(driveId: Int, fileId: Int) async throws -> Data {
-        let capturedCredential = Self.currentCredentialFingerprint()
-        try Task.checkCancellation()
-        guard capturedCredential != "signed-out" else { throw CancellationError() }
-        let service = service
-        let data = try await throttler.withPermit {
-            try Task.checkCancellation()
-            guard capturedCredential == Self.currentCredentialFingerprint() else { throw CancellationError() }
-            return try await service.thumbnailData(driveId: driveId, fileId: fileId)
-        }
-        try Task.checkCancellation()
-        guard capturedCredential == Self.currentCredentialFingerprint() else { throw CancellationError() }
-        guard !data.isEmpty else { throw ClassificationError.invalidImage }
-        return data
     }
 
     /// La clé est capturée une seule fois par demande afin que les attentes,
@@ -218,7 +200,7 @@ actor ThumbnailProvider {
     /// annulable et chaque tentative passe par le cache/dédoublonnage normal.
     /// À la fin d'une fenêtre de réessais sans résultat, l'échec est classé :
     /// absence prouvée par le serveur (mémorisée durablement) ou panne
-    /// passagère (écartée quelques secondes). Sans classification, une carte
+    /// passagère (écartée quelques secondes). Une carte
     /// réapparue ne relance plus 8 tentatives sur ~60 s.
     func thumbnailWhenAvailable(
         driveId: Int,
@@ -410,7 +392,7 @@ actor ThumbnailProvider {
         } catch {
             // L'échec est classé mais pas encore mémorisé : juste après un
             // upload, kDrive peut répondre 404 quelques secondes avant que la
-            // miniature soit générée. La classification ne devient un marqueur
+            // miniature soit générée. Le classement ne devient un marqueur
             // qu'à la fin d'une fenêtre de réessais (voir `classifyFailure`).
             recordFailure(Self.classify(error), for: key)
             return nil

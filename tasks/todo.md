@@ -105,7 +105,7 @@ Plan : `tasks/plan.md`. Statut : code des tâches 1 à 8 implémenté ; vérific
 - Quatre contrôles structurels ont échoué avant l'ajout du conteneur natif, puis sont passés. Une inversion temporaire de la garde de sélection a été détectée ; le code correct est restauré.
 - Dix tests iOS couvrent la disposition, les sélections de tags et réglages, dix cycles du conteneur natif et le rendu des véritables écrans et destinations de dossiers dans les deux thèmes sans credentials. Les captures sont jointes au résultat XCTest ; ces essais sans compte ne prouvent pas le chargement des favoris d'un compte réel.
 - Les couleurs et constantes existantes restent inchangées ; les nouveaux fonds utilisent uniquement les couleurs système déjà présentes dans l'application.
-- Aucun changement d'API, d'authentification, de cache ou de modèle NSFW. Aucun test existant désactivé pour masquer un défaut.
+- Aucun changement d'API ni d'authentification. Aucun test existant désactivé pour masquer un défaut.
 - Sous Windows, aucun build SwiftUI ni test XCTest n'a pu être lancé localement. Le contrôle préalable sur macOS est réussi : https://github.com/Leboxis/Orvian-IOS/actions/runs/39013332197.
 - Le commit de code `e1be8ce` a passé 17 tests iPhone, 10 tests sur iPad Pro 13 pouces (M5), iPadOS 26.4.1, les contrôles Swift/Python existants et la compilation Release. Le résultat XCTest et ses captures sont joints en artefact `Orvian-iPad-tests`.
 - La publication sur main est autorisée après ce contrôle. Les essais avec un compte et sur appareil réel restent ouverts ; aucun statut « sans bug » n'est revendiqué.

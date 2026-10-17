@@ -33,8 +33,7 @@ struct DirectoryView: View {
     /// bouton loupe (et le focus / une recherche active) la révèle.
     @State private var searchRevealed = false
     @State private var filters = FileFilters()
-    @State private var showsFolderScan = false
-    private let folderScanner = FolderImageScanner.shared
+
     @State private var selectionMode = false
     @State private var selectedIDs: Set<Int> = []
     @State private var visibleItemsReport: VisibleItemsReport?
@@ -240,19 +239,16 @@ struct DirectoryView: View {
                 }
             } else {
                 ToolbarItemGroup(placement: .topBarLeading) {
-                        FilterMenu(filters: $filters)
-                            .accessibilityIdentifier("browser.filter")
-                        if showsSearchBar {
-                            searchToggleButton
-                                .accessibilityIdentifier("browser.search")
+                    FilterMenu(filters: $filters)
+                        .accessibilityIdentifier("browser.filter")
+                    if showsSearchBar {
+                        searchToggleButton
+                            .accessibilityIdentifier("browser.search")
                     }
                 }
 
                 ToolbarItemGroup(placement: .topBarTrailing) {
-                    if !iPadLayout.isPad {
-                        randomFileButton
-                        scanFolderButton
-                    }
+                    randomFileButton
 
                     Button {
                         startSelection()
@@ -265,13 +261,6 @@ struct DirectoryView: View {
                     if iPadLayout.isPad {
                         addMenu
                             .accessibilityLabel("Ajouter ou importer")
-                        Menu {
-                            randomFileButton
-                            scanFolderButton
-                        } label: {
-                            Image(systemName: "ellipsis.circle")
-                        }
-                        .accessibilityLabel("Autres actions du dossier")
                     }
                 }
             }
@@ -290,9 +279,6 @@ struct DirectoryView: View {
             Button("OK", role: .cancel) {}
         } message: {
             Text(addError ?? "")
-        }
-        .sheet(isPresented: $showsFolderScan) {
-            FolderScanSheet(scanner: folderScanner, store: ImageClassificationStore.shared)
         }
         .sheet(item: $pendingMove) { request in
             MoveDestinationPicker(
@@ -718,17 +704,6 @@ struct DirectoryView: View {
             .padding(.trailing, DS.gridMargin + 4)
             .padding(.bottom, DS.floatingActionInset)
             .accessibilityLabel("Ajouter ou importer")
-    }
-
-    private var scanFolderButton: some View {
-        Button {
-            folderScanner.start(driveId: driveId, directory: directory)
-            showsFolderScan = true
-        } label: {
-            Image(systemName: folderScanner.isRunning ? "viewfinder.circle.fill" : "viewfinder")
-        }
-        .accessibilityLabel("Scanner ce dossier")
-        .accessibilityHint("Classer les images de ce dossier en SFW ou NSFW")
     }
 
     private var addMenu: some View {

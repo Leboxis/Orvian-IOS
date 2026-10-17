@@ -75,23 +75,6 @@ struct FilterMenu: View {
                 .accessibilityLabel("Type de média")
             }
 
-            Section("Classification des images") {
-                // `.inline` déroule les choix verticalement dans un Menu.
-                // Comme le sélecteur de médias, `.palette` conserve une
-                // rangée horizontale et la sélection native, y compris « Tous ».
-                Picker(selection: classificationBinding) {
-                    ForEach(FileFilters.ClassificationFilter.allCases) { classification in
-                        Text(classification == .unscanned ? "À analyser" : classification.title)
-                            .accessibilityLabel(classification.title)
-                            .tag(classification)
-                    }
-                } label: {
-                    EmptyView()
-                }
-                .pickerStyle(.palette)
-                .accessibilityLabel("Classification des images")
-            }
-
             if filters.isActive {
                 Divider()
                 Button(role: .destructive) {
@@ -117,7 +100,6 @@ struct FilterMenu: View {
             return
         }
         filters.orientation = orientation
-        filters.classification = .all
         if filters.media == .images || filters.media == .folders || filters.media == .other {
             filters.media = .videos
         }
@@ -131,7 +113,6 @@ struct FilterMenu: View {
             set: { isOn in
                 filters.highResolutionVideosOnly = isOn
                 if isOn {
-                    filters.classification = .all
                     filters.media = .videos
                 }
             }
@@ -147,27 +128,12 @@ struct FilterMenu: View {
             get: { filters.media },
             set: { media in
                 filters.media = media
-                if media != .images { filters.classification = .all }
                 if media == .images || media == .folders || media == .other {
                     filters.orientation = nil
                     filters.highResolutionVideosOnly = false
                 }
                 if media == .folders {
                     filters.filesOnly = false
-                }
-            }
-        )
-    }
-
-    private var classificationBinding: Binding<FileFilters.ClassificationFilter> {
-        Binding(
-            get: { filters.classification },
-            set: { classification in
-                filters.classification = classification
-                if classification != .all {
-                    filters.media = .images
-                    filters.orientation = nil
-                    filters.highResolutionVideosOnly = false
                 }
             }
         )

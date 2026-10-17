@@ -95,11 +95,6 @@ jobs:
           path.write_text(updated, encoding="utf-8")
           PY
 
-      - name: Verify the embedded classification model
-        # Standard library only: the reference conversion needs coremltools and
-        # stays in the pull request checks.
-        run: python3 scripts/nsfw/verify_model.py
-
       - name: Install XcodeGen
         run: brew install xcodegen
 
@@ -123,7 +118,7 @@ jobs:
       - name: Package IPA
         run: |
           APP="build/Build/Products/Release-iphoneos/Orvian.app"
-          test -d "$APP/NSFWClassifier.mlmodelc"
+          test -d "$APP"
           VERSION=$(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" "$APP/Info.plist")
           mkdir -p Payload
           cp -R "$APP" Payload/

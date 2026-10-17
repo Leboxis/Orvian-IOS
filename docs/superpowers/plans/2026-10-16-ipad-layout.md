@@ -48,7 +48,7 @@
 - Les fichiers locaux préexistants `.model-tools/`, `model-cache/` et `.superpowers/` restent intacts.
 - Validation de rendu et compilation iOS à effectuer sur macOS/simulateur ; les tests Swift purs peuvent s’exécuter sous Windows.
 - Tests Swift purs : RED (DriveLayout absent), puis GREEN sous Windows. Les tests hébergés sont branchés à la CI mais ne peuvent pas être exécutés localement.
-- Suite Python complète : 29 tests passent, 3 erreurs préexistantes de préparation du modèle NSFW (`scripts/nsfw/requirements.txt` non installé). Pas de modification de ce sous-système.
+- Suite Python complète : 29 tests passent. (Historique : la version 0.16.2 a ensuite supprimé la détection d'images et le modèle Core ML.)
 - Vérification dédiée : les 29 tests Python hors conversion du modèle passent ; analyse syntaxique de tous les fichiers Swift modifiés réussie (`swiftc -frontend -parse`). Cela ne constitue pas un build iOS.
 - Revue indépendante demandée sur l’ensemble du diff non commité. Les essais de rendu, de bascule et d’accessibilité de la checklist restent à réaliser sur iPad/simulateur.
 - Revue indépendante terminée : un problème important de conservation de l’espace Réglages corrigé en utilisant un chemin typé unique possédé par la session, partagé entre détail large et pile compacte. Reset et changements d’onglet testés avec le véritable TabNavigationState (dépendances SwiftUI remplacées uniquement dans le harnais de test). Échec sur l’ancienne interface, puis exécution réussie avec le chemin typé ; test hébergé ajouté aussi à la CI. Aucun autre problème confirmé par le reviewer.

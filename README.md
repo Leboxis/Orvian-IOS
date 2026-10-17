@@ -80,29 +80,6 @@ jusqu'à six uploads récents depuis les données déjà chargées.
 Les couleurs, les matières et les cartes restent celles de l'application.
 L'iPhone conserve sa barre flottante et ses préférences de présentation.
 
-### Scan SFW / NSFW du dossier ouvert
-
-Dans un dossier, le bouton **Scanner ce dossier** (icône de viseur dans la barre
-supérieure) analyse ses images directement contenues, sur toutes ses pages.
-La feuille indique la progression, les résultats SFW / NSFW et les erreurs ;
-elle permet d'annuler le scan et de régler le seuil NSFW (80 % par défaut).
-Les résultats se retrouvent dans **Filtres → Classification des images** :
-Tous, SFW, NSFW ou À analyser. Le seuil reclasse les scores sans nouvelle analyse.
-
-Core ML / Vision réalise la classification sur l'appareil avec le modèle
-Marqo ViT-Tiny embarqué (~11 Mo). Les miniatures à analyser sont récupérées
-depuis votre espace de fichiers ; aucune image ou classification n'est envoyée à un service d'IA.
-Les scores restent locaux, isolés par compte / drive, et sont réanalysés après
-une modification du fichier. La navigation conserve le scan au premier plan ;
-passer l'app en arrière-plan l'interrompt en gardant les résultats obtenus.
-
-Le scan concerne le dossier ouvert uniquement. Les sous-dossiers et les vidéos
-ne sont pas parcourus ; un GIF est classé à partir d'une miniature fixe.
-Le classement dépend des miniatures, du modèle et du seuil, et peut se tromper.
-Une erreur reste Non analysée. Préparation reproductible du modèle :
-`scripts/nsfw/convert_model.py` ; vérifications : `scripts/nsfw/verify_model.py`.
-Les attributions figurent dans `Orvian/Resources/NSFW-MODEL-NOTICE.md`.
-
 ```
 View (SwiftUI) → ViewModel (@MainActor @Observable) → Repository
                                                         → APIClient (actor, URLSession)

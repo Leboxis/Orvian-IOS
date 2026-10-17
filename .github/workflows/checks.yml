@@ -20,19 +20,6 @@ jobs:
         with:
           python-version: '3.12'
 
-      - name: Install model verification tools
-        run: python -m pip install -r scripts/nsfw/requirements.txt
-
-      - name: Verify model transformation and embedded weights
-        run: |
-          python -m unittest discover -s Tests -p 'test_nsfw_model.py'
-          python scripts/nsfw/verify_model.py
-          python scripts/nsfw/convert_model.py --fetch-only --upstream "$RUNNER_TEMP/nsfw-reference.mlpackage"
-          python scripts/nsfw/verify_model.py --reference "$RUNNER_TEMP/nsfw-reference.mlpackage"
-
-      - name: Verify classification policy
-        run: python .github/scripts/check_image_classification.py
-
       - name: Check concurrency and bounded caches
         run: python3 .github/scripts/check_concurrency.py
 
@@ -75,9 +62,6 @@ jobs:
           xcodebuild -project Orvian.xcodeproj -scheme Orvian \
             -destination "platform=iOS Simulator,id=$SIMULATOR_ID" \
             -configuration Debug -derivedDataPath "$RUNNER_TEMP/orvian-tests" \
-            -only-testing:OrvianTests/NSFWClassifierTests \
-            -only-testing:OrvianTests/ImageClassificationStoreTests \
-            -only-testing:OrvianTests/FolderImageScannerTests \
             CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO test
 
       - name: Verify native iPad navigation and adaptive layout
