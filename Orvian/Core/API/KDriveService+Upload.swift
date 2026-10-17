@@ -131,9 +131,10 @@ extension KDriveService {
     }
 
     /// Crée un dossier dans `directoryId`.
-    func createFolder(driveId: Int, directoryId: Int, name: String) async throws {
+    func createFolder(driveId: Int, directoryId: Int, name: String, credentialFingerprint: String? = TokenStore.credentialFingerprint()) async throws {
         let body = try JSONEncoder().encode(CreateFolderRequest(name: name))
-        try await api.post(.createFolder(driveId: driveId, directoryId: directoryId), body: body, contentType: "application/json")
+        try await api.post(.createFolder(driveId: driveId, directoryId: directoryId), body: body,
+                           contentType: "application/json", credentialFingerprint: credentialFingerprint)
     }
 
     /// Remplace le contenu d'un fichier existant (nouvelle version) : utilisé

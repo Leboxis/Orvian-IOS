@@ -83,6 +83,7 @@ jobs:
             -only-testing:OrvianTests/IPadLayoutTests \
             -only-testing:OrvianTests/IPadScreenStateTests \
             -only-testing:OrvianTests/FileCardAccessibilityTests \
+            -only-testing:OrvianTests/MoveDestinationTests \
             CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO test
 
       # Presentation fixtures create temporary windows/inspectors. Run them in
