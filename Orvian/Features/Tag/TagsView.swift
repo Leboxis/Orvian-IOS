@@ -292,33 +292,25 @@ struct TagsView: View {
         VStack(spacing: 0) {
             // Un seul en-tête, sans seconde barre de navigation au-dessus.
             PadSidebarHeader(title: Text(hasLoadedCategories ? "Tags (\(categories.count))" : "Tags"),
-                             columnVisibility: $columnVisibility) {
+                             columnVisibility: $columnVisibility, centersActions: true) {
                 Button { layout = layout == .grid ? .list : .grid } label: {
                     Image(systemName: layout == .grid ? "list.bullet" : "square.grid.2x2")
                         .frame(width: 44, height: 44)
                 }
                 .accessibilityLabel(layout == .grid ? "Afficher les tags en liste" : "Afficher les tags en grille")
                 crossButton
-                Menu {
-                    Button {
-                        crossState.isEditing = false
-                        isReordering.toggle()
-                    } label: {
-                        Label(isReordering ? "Terminer le réarrangement" : "Réarranger les tags",
-                              systemImage: isReordering ? "checkmark.circle" : "arrow.up.arrow.down")
-                    }
-                    Button {
-                        showCreateSheet = true
-                    } label: {
-                        Label("Nouveau tag", systemImage: "plus")
-                    }
+                Button {
+                    crossState.isEditing = false
+                    isReordering.toggle()
                 } label: {
-                    Image(systemName: isReordering ? "checkmark.circle" : "ellipsis.circle")
+                    Image(systemName: isReordering ? "checkmark.circle" : "arrow.up.arrow.down")
                         .frame(width: 44, height: 44)
-                        .contentShape(Circle())
-                        .glassEffect(.regular.interactive(), in: .circle)
                 }
-                .accessibilityLabel(isReordering ? "Terminer le réarrangement" : "Actions des tags")
+                .accessibilityLabel(isReordering ? "Terminer le réarrangement" : "Réarranger les tags")
+                Button { showCreateSheet = true } label: {
+                    Image(systemName: "plus").frame(width: 44, height: 44)
+                }
+                .accessibilityLabel("Nouveau tag")
             }
 
             crossSummary
@@ -785,11 +777,13 @@ struct TagGridCard: View {
                 .background(tint, in: RoundedRectangle(cornerRadius: compact ? 8 : 10, style: .continuous))
 
             VStack(spacing: 2) {
-                Text(category.name)
+                CardNameLayout {
+                    Text(category.name)
                     .font(compact ? .caption.weight(.semibold) : .subheadline.weight(.semibold))
                     .foregroundStyle(.primary)
                     .lineLimit(dynamicTypeSize.isAccessibilitySize ? 4 : (compact ? 1 : 2))
                     .multilineTextAlignment(.center)
+                }
                 if !compact, let uses = category.userUses, uses > 0 {
                     Text("\(uses) élément\(uses > 1 ? "s" : "")")
                         .font(.caption)
@@ -798,7 +792,7 @@ struct TagGridCard: View {
             }
         }
         .frame(maxWidth: .infinity)
-        .padding(compact ? 8 : 12)
+        .padding(.vertical, compact ? 8 : 12)
         .background(Color(uiColor: .secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: compact ? 12 : 16, style: .continuous))
         .overlay {
             RoundedRectangle(cornerRadius: compact ? 12 : 16, style: .continuous)

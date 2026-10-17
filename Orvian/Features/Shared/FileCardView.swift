@@ -183,11 +183,13 @@ struct FileCardView: View {
         } else {
             VStack(spacing: 5) {
                 thumbnailArea.overlay { playBadge }.accessibilityHidden(true)
-                Text(file.name)
+                CardNameLayout {
+                    Text(file.name)
                     .font(.footnote)
                     .lineLimit(dynamicTypeSize.isAccessibilitySize ? 4 : 2, reservesSpace: true)
                     .truncationMode(.middle).foregroundStyle(.primary)
                     .frame(maxWidth: .infinity).accessibilityHidden(enabled)
+                }
                 HStack(spacing: 4) { Text(subtitle); categoryDots }
                     .font(.caption2).foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity).accessibilityHidden(enabled)
@@ -372,6 +374,22 @@ struct FileCardView: View {
         }
         guard !Task.isCancelled else { return }
         thumbnailLoaded = true
+    }
+}
+
+/// A proportional inset without a GeometryReader or per-card measurement state.
+/// The title uses 95% of its own card, regardless of screen or grid density.
+struct CardNameLayout: Layout {
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        guard let title = subviews.first else { return .zero }
+        let width = proposal.width ?? title.sizeThatFits(.unspecified).width / 0.95
+        let size = title.sizeThatFits(ProposedViewSize(width: width * 0.95, height: proposal.height))
+        return CGSize(width: width, height: size.height)
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        subviews.first?.place(at: CGPoint(x: bounds.midX, y: bounds.minY), anchor: .top,
+                             proposal: ProposedViewSize(width: bounds.width * 0.95, height: bounds.height))
     }
 }
 

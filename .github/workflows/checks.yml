@@ -83,6 +83,7 @@ jobs:
             -only-testing:OrvianTests/IPadLayoutTests \
             -only-testing:OrvianTests/IPadScreenStateTests \
             -only-testing:OrvianTests/FileCardAccessibilityTests \
+            -only-testing:OrvianTests/BrowserPresentationTests \
             CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO test
 
       - name: Upload iPad test results

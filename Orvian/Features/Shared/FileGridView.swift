@@ -192,27 +192,15 @@ struct FileGridView: View {
             } message: {
                 Text(viewModel.mutationErrorMessage ?? "")
             }
-            .inspector(isPresented: Binding(
-                get: { usesDetailsInspector && detailRequest != nil },
-                set: { if !$0 && usesDetailsInspector { detailRequest = nil } }
-            )) {
-                if let request = detailRequest {
-                    FileDetailSheet(file: currentFile(matching: request), driveId: viewModel.driveId,
-                                    isTrashed: viewModel.source == .trash)
-                        .id(request.id)
-                        .inspectorColumnWidth(min: 300, ideal: 340, max: 360)
-                }
-            }
-            .sheet(item: Binding(
-                get: { usesDetailsInspector ? nil : detailRequest },
-                set: { if !usesDetailsInspector { detailRequest = $0 } }
-            )) { request in
-                FileDetailSheet(
-                    file: currentFile(matching: request),
-                    driveId: viewModel.driveId,
-                    isTrashed: viewModel.source == .trash
-                )
-            }
+            .modifier(FileDetailsPresentation(
+                file: Binding(
+                    get: { detailRequest.map { currentFile(matching: $0) } },
+                    set: { detailRequest = $0.map { FileRequest(file: $0) } }
+                ),
+                usesInspector: usesDetailsInspector,
+                driveId: viewModel.driveId,
+                isTrashed: viewModel.source == .trash
+            ))
             .sheet(item: $tagsRequest) { request in
                 TagsEditorSheet(
                     driveId: viewModel.driveId,
@@ -874,6 +862,37 @@ struct FileGridView: View {
         case .trash: return "Corbeille vide"
         case .search: return "Aucun résultat"
         }
+    }
+}
+
+/// A single owner for the current detail target in either presentation.
+/// Inspector content has its own header, without nesting a NavigationStack
+/// inside the browser's navigation column.
+struct FileDetailsPresentation: ViewModifier {
+    @Binding var file: DriveFile?
+    let usesInspector: Bool
+    let driveId: Int
+    var isTrashed = false
+
+    func body(content: Content) -> some View {
+        content
+            .inspector(isPresented: Binding(
+                get: { usesInspector && file != nil },
+                set: { if !$0 && usesInspector { file = nil } }
+            )) {
+                if let file {
+                    FileDetailSheet(file: file, driveId: driveId, isTrashed: isTrashed,
+                                    inInspector: true, close: { self.file = nil })
+                        .id(file.id)
+                        .inspectorColumnWidth(min: 300, ideal: 340, max: 360)
+                }
+            }
+            .sheet(item: Binding(
+                get: { usesInspector ? nil : file },
+                set: { if !usesInspector { file = $0 } }
+            )) { file in
+                FileDetailSheet(file: file, driveId: driveId, isTrashed: isTrashed)
+            }
     }
 }
 

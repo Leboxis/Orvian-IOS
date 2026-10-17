@@ -6,20 +6,45 @@ struct PadSidebarHeader<Trailing: View>: View {
     let title: Text
     @Binding var columnVisibility: NavigationSplitViewVisibility
     let trailing: () -> Trailing
+    var centersActions = false
 
     init(
         title: Text,
         columnVisibility: Binding<NavigationSplitViewVisibility>,
+        centersActions: Bool = false,
         @ViewBuilder trailing: @escaping () -> Trailing
     ) {
         self.title = title
         self._columnVisibility = columnVisibility
+        self.centersActions = centersActions
         self.trailing = trailing
     }
 
     private var isCollapsed: Bool { columnVisibility == .detailOnly }
 
     var body: some View {
+        Group {
+            if centersActions {
+                VStack(spacing: 6) {
+                    heading.frame(maxWidth: .infinity, alignment: .leading)
+                    HStack(spacing: 0) {
+                        trailing()
+                        hideButton
+                    }
+                    .frame(maxWidth: .infinity, alignment: .center)
+                }
+            } else {
+                adaptiveHeader
+            }
+        }
+        .font(.body)
+        .buttonStyle(.plain)
+        .padding(.horizontal, DS.gridMargin)
+        .padding(.top, 8)
+        .padding(.bottom, 6)
+    }
+
+    private var adaptiveHeader: some View {
         ViewThatFits(in: .horizontal) {
             HStack(spacing: 6) {
                 heading
@@ -32,11 +57,6 @@ struct PadSidebarHeader<Trailing: View>: View {
                 HStack(spacing: 6) { Spacer(minLength: 0); trailing() }
             }
         }
-        .font(.body)
-        .buttonStyle(.plain)
-        .padding(.horizontal, DS.gridMargin)
-        .padding(.top, 8)
-        .padding(.bottom, 6)
     }
 
     private var heading: some View {

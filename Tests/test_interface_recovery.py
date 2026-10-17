@@ -41,7 +41,8 @@ class InterfaceRecoveryChecks(unittest.TestCase):
         decision = grid[grid.index("    private var usesDetailsInspector:"):grid.index('@AppStorage("foldersFirstInTags")')]
         self.assertIn("iPadLayout.width", decision)
         self.assertNotIn("containerWidth", decision)
-        self.assertIn("usesDetailsInspector ? nil : detailRequest", grid)
+        self.assertIn("usesInspector: usesDetailsInspector", grid)
+        self.assertIn("usesInspector ? nil : file", grid)
 
     def test_details_never_downloads_video_for_duration(self):
         details = source("Orvian/Features/Shared/FileDetailSheet.swift")

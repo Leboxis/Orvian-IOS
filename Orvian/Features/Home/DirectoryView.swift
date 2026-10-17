@@ -160,7 +160,7 @@ struct DirectoryView: View {
             },
             onError: { addError = $0 }
         ))
-        .safeAreaInset(edge: .top, spacing: 0) {
+        .modifier(FileBrowserHeader {
             if !selectionMode {
                 VStack(spacing: 6) {
                     let summaryLayout = dynamicTypeSize.isAccessibilitySize
@@ -184,7 +184,7 @@ struct DirectoryView: View {
                 .padding(.bottom, 2)
                 .animation(Motion.animation(.snappy(duration: 0.25)), value: searchBarPresented)
             }
-        }
+        })
         .toolbar {
             if selectionMode {
                 ToolbarItem(placement: .topBarLeading) {

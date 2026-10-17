@@ -36,7 +36,11 @@ struct AppLockView: View {
 
             GeometryReader { proxy in
                 ScrollView(.vertical) {
-                    if proxy.size.width > proxy.size.height {
+                    if proxy.size.width >= 600 && proxy.size.height >= 500 {
+                        padContent(wide: proxy.size.width > proxy.size.height)
+                            .padding(32)
+                            .frame(maxWidth: .infinity, minHeight: proxy.size.height)
+                    } else if proxy.size.width > proxy.size.height {
                         landscapeContent
                             .padding(.horizontal, 24)
                             .padding(.vertical, 16)
@@ -69,6 +73,19 @@ struct AppLockView: View {
                 do { try await Task.sleep(for: .seconds(1)) } catch { return }
             }
         }
+    }
+
+    private func padContent(wide: Bool) -> some View {
+        let layout = wide
+            ? AnyLayout(HStackLayout(spacing: 64))
+            : AnyLayout(VStackLayout(spacing: 40))
+        return layout {
+            lockIdentity.frame(maxWidth: 340)
+            CodeKeypad(onDigit: handleDigit, onDelete: handleDelete,
+                       keySize: CGSize(width: 96, height: 76))
+                .disabled(isCheckingCode || isAuthenticating || showWrong || retryAfter > 0)
+        }
+        .frame(maxWidth: wide ? 760 : 420)
     }
 
     /// En portrait, conserve la composition historique. Le `ScrollView`
