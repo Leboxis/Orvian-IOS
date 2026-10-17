@@ -83,6 +83,8 @@ final class IPadNavigationTests: XCTestCase {
     }
 
     func testNativeTabsKeepIndependentFoldersAcrossTenCycles() async throws {
+        try XCTSkipIf(UIDevice.current.userInterfaceIdiom != .pad,
+                      "Native iPad lifecycle is exercised on the dedicated iPad destination.")
         let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
         let previous = scene.keyWindow
         let window = UIWindow(windowScene: scene)

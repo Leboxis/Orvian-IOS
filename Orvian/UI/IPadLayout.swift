@@ -17,7 +17,10 @@ struct IPadLayout {
         let preferred = min(max(preferred, 2), isPad ? 7 : 3)
         guard width.isFinite, width > 0 else { return largeText ? 1 : min(preferred, 3) }
         // Each density has its own thumbnail size; stored phone preferences stay intact.
-        let minimum = largeText ? CGFloat(220) : (isPad ? Self.thumbnailSizes[preferred - 2] : 100)
+        let regularMinimum: CGFloat = isPad ? Self.thumbnailSizes[preferred - 2] : 100
+        // Accessibility must enlarge cards relative to the selected density;
+        // a fixed 220 pt minimum could make medium/large cards smaller.
+        let minimum = largeText ? max(220, regularMinimum * 1.3) : regularMinimum
         let available = max(0, width - horizontalInset(base: margin) * 2)
         let fitting = Int(min(12, max(1, floor((available + spacing) / (minimum + spacing)))))
         return isPad ? fitting : min(preferred, fitting)
