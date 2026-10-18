@@ -2,7 +2,7 @@ import SwiftUI
 import Observation
 
 enum SettingsRoute: Hashable {
-    case appearance, media, storage, security, account
+    case appearance, media, storage, security
 }
 
 struct IPadTagNavigation {

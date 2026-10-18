@@ -145,9 +145,14 @@ final class SessionStore {
         mainShell = MainTabShellState(driveId: drive.id)
     }
 
-    /// Force le rechargement des drives (onglet Plus).
+    /// Actualise le quota sans restaurer un ancien choix de drive après l'attente réseau.
     func reloadDrives() async throws {
-        try await loadDrives(preferredDriveId: selectedDrive?.id)
+        guard let accountId else { return }
+        let generation = sessionGeneration
+        let list = try await service.drives(accountId: accountId)
+        guard !Task.isCancelled, generation == sessionGeneration else { throw CancellationError() }
+        guard !list.isEmpty else { throw APIError.invalidResponse }
+        apply(list, accountId: accountId, preferredDriveId: selectedDrive?.id)
     }
 
     // MARK: - Internes

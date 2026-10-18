@@ -19,6 +19,8 @@ struct ProfileView: View {
     @State private var previewDriveId: Int?
     @State private var previewCredential: String?
     @State private var previewVisitID: UUID?
+    @State private var isRefreshingStorage = false
+    @State private var storageRefreshFailed = false
 
     private let recentUploadsLoader = RecentUploadsLoader.shared
     private var showsRecentPlaceholders: Bool {
@@ -33,6 +35,9 @@ struct ProfileView: View {
                     padOverview
                 } else {
                     List {
+                        Section {
+                            storageCard
+                        }
                         recentUploadsSection
                         trashSection
                         aboutSection
@@ -49,11 +54,13 @@ struct ProfileView: View {
         }
         .task(id: session.selectedDrive?.id) {
             await loadPreviews()
+            await refreshStorage()
         }
         .onChange(of: isSelected) { _, selected in
             if selected {
                 Task {
                     await loadPreviews()
+                    await refreshStorage()
                 }
             }
         }
@@ -62,6 +69,7 @@ struct ProfileView: View {
                 // Retour à la racine par second appui sur l'onglet : lecture
                 // réseau explicite, hors seuil de fraîcheur.
                 await loadPreviews(forceNetwork: true)
+                await refreshStorage()
             }
         }
         .onReceive(FileGridMutationCenter.shared.mutations) { mutation in
@@ -73,16 +81,30 @@ struct ProfileView: View {
 
     // MARK: - Uploads récents (3 miniatures + bouton voir plus)
 
+    @ViewBuilder
+    private var storageCard: some View {
+        if let drive = session.selectedDrive {
+            ProfileDriveStorageCard(session: session, drive: drive,
+                                    refreshFailed: storageRefreshFailed)
+        }
+    }
+
     private var padOverview: some View {
         let layout = iPadLayout.usesTwoColumns
             ? AnyLayout(HStackLayout(alignment: .top, spacing: 24))
             : AnyLayout(VStackLayout(alignment: .leading, spacing: 24))
         return ScrollView {
-            layout {
-                padRecents
-                    .frame(maxWidth: .infinity, alignment: .topLeading)
-                padInformation
-                    .frame(width: iPadLayout.usesTwoColumns ? 280 : nil)
+            VStack(alignment: .leading, spacing: 20) {
+                storageCard
+                    .padding(16)
+                    .background(Color(uiColor: .secondarySystemGroupedBackground),
+                                in: RoundedRectangle(cornerRadius: DS.panelRadius))
+                layout {
+                    padRecents
+                        .frame(maxWidth: .infinity, alignment: .topLeading)
+                    padInformation
+                        .frame(width: iPadLayout.usesTwoColumns ? 280 : nil)
+                }
             }
             .padding(.horizontal, iPadLayout.horizontalInset(base: DS.gridMargin))
             .padding(.top, 16)
@@ -102,10 +124,19 @@ struct ProfileView: View {
                 Spacer()
                 if let drive = session.selectedDrive,
                    showsRecentPlaceholders || !recentUploads.isEmpty {
-                    NavigationLink("Voir plus") {
+                    NavigationLink {
                         RecentFilesView(driveId: drive.id, title: "Imports récents",
                                         source: RecentUploadsLoader.source, router: router)
+                    } label: {
+                        Text("Voir plus")
+                            .padding(.horizontal, 12)
+                            .frame(minHeight: 44)
+                            .contentShape(Rectangle())
                     }
+                    .font(.subheadline.weight(.semibold))
+                    .buttonStyle(.plain)
+                    .foregroundStyle(.tint)
+                    .background(Color.accentColor.opacity(0.1), in: Capsule())
                 }
             }
             if let recentError {
@@ -145,7 +176,7 @@ struct ProfileView: View {
 
     private var padInformation: some View {
         VStack(alignment: .leading, spacing: 20) {
-            Text("Stockage et informations").font(.headline)
+            Text("Informations").font(.headline)
             if let drive = session.selectedDrive {
                 NavigationLink(destination: TrashView(driveId: drive.id, router: router)) {
                     LinkRowLabel(title: "Corbeille", systemImage: "trash")
@@ -362,6 +393,18 @@ struct ProfileView: View {
         isLoadingRecents = false
     }
 
+    private func refreshStorage() async {
+        guard !Task.isCancelled, !isRefreshingStorage, isSelected else { return }
+        isRefreshingStorage = true
+        defer { isRefreshingStorage = false }
+        do {
+            try await session.reloadDrives()
+            storageRefreshFailed = false
+        } catch {
+            if !Task.isCancelled { storageRefreshFailed = true }
+        }
+    }
+
     private func mergeUploaded(_ files: [DriveFile]) {
         guard previewDriveId == session.selectedDrive?.id,
               previewCredential == TokenStore.credentialFingerprint() else { return }
@@ -443,6 +486,8 @@ private struct ProfileThumbnailCard: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
         }
         .frame(maxWidth: .infinity)
+        // Le recadrage visuel ne limite pas le hit-test d'une image scaledToFill.
+        .contentShape(.interaction, Rectangle())
         .contextMenu {
             if !file.isDirectory {
                 Button {

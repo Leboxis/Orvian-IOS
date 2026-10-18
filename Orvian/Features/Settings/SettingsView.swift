@@ -1,11 +1,6 @@
 import SwiftUI
 
-/// Hub de réglages : un écran court, une seule liste.
-///
-/// En haut, une carte de compte (avatar, drive, jauge de quota) qui ouvre
-/// « Compte et drive ». En dessous, les 5 espaces — Apparence · Médias et
-/// réseau · Stockage · Sécurité · Compte — chacun résumé d'un coup d'œil par
-/// son état réel, sans avoir à entrer.
+/// Hub de réglages : apparence, médias, stockage local et sécurité.
 struct SettingsView: View {
     let session: SessionStore
     @Binding var path: NavigationPath
@@ -15,7 +10,6 @@ struct SettingsView: View {
     @Environment(\.iPadLayout) private var iPadLayout
 
     @State private var cacheSize: Int = 0
-    @State private var showDrivePicker = false
     @State private var showSignOutConfirm = false
 
     @AppStorage("showFileSizes") private var showFileSizes = true
@@ -52,9 +46,6 @@ struct SettingsView: View {
             } else {
                 phoneNavigation
             }
-        }
-        .sheet(isPresented: $showDrivePicker) {
-            DrivePickerSheet(session: session)
         }
         .sheet(isPresented: $showActivateCode, onDismiss: refreshLockState) {
             AppLockSetupSheet(flow: .activate)
@@ -103,12 +94,11 @@ struct SettingsView: View {
         }
     }
 
-    // MARK: - Hub : carte de compte
+    // MARK: - Navigation
 
     private var phoneNavigation: some View {
         NavigationStack(path: $path) {
             List {
-                accountHeaderSection
                 destinationsSection
                 aboutSection
             }
@@ -133,7 +123,6 @@ struct SettingsView: View {
                 }
 
                 List(selection: $selectedSpace) {
-                    accountHeaderSection
                     destinationsSection
                     aboutSection
                 }
@@ -166,93 +155,7 @@ struct SettingsView: View {
         .navigationSplitViewStyle(.balanced)
     }
 
-    private func open(_ route: SettingsRoute) {
-        if iPadLayout.isPad {
-            selectedSpace = route
-        } else {
-            path.append(route)
-        }
-    }
-
-    private var accountHeaderSection: some View {
-        Section {
-            Button {
-                open(.account)
-            } label: {
-                VStack(alignment: .leading, spacing: 12) {
-                    HStack(spacing: 14) {
-                        avatarView
-                        VStack(alignment: .leading, spacing: 3) {
-                            Text(session.selectedDrive?.name ?? "Mon drive")
-                                .font(.headline)
-                                .foregroundStyle(.primary)
-                                .lineLimit(1)
-                            if session.usesTemporaryCredentials {
-                                Label("Session temporaire", systemImage: "lock.trianglebadge.exclamationmark")
-                                    .font(.caption.weight(.semibold))
-                                    .foregroundStyle(.orange)
-                            } else {
-                                Text("Compte et drive")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                            }
-                        }
-                        Spacer(minLength: 6)
-                        if !iPadLayout.isPad {
-                            // Sur iPad, « Compte et drive » figure déjà trois
-                            // lignes plus bas : le chevron de la carte ferait
-                            // doublon avec cette destination.
-                            Image(systemName: "chevron.right")
-                                .font(.caption.weight(.bold))
-                                .foregroundStyle(.tertiary)
-                        }
-                    }
-                    if let drive = session.selectedDrive {
-                        quotaBar(drive)
-                    }
-                }
-                .padding(.vertical, 6)
-            }
-            .buttonStyle(.plain)
-        }
-    }
-
-    private var avatarView: some View {
-        let initial = session.selectedDrive?.name.first.map(String.init) ?? "O"
-        return Text(initial.uppercased())
-            .font(.title2.weight(.bold))
-            .foregroundStyle(.white)
-            .frame(width: 52, height: 52)
-            .background(
-                LinearGradient(
-                    colors: [.accentColor, .accentColor.opacity(0.6)],
-                    startPoint: .topLeading,
-                    endPoint: .bottomTrailing
-                ),
-                in: Circle()
-            )
-            .accessibilityHidden(true)
-    }
-
-    /// Jauge fine « X utilisés · Y libres » : l'état du drive se lit d'un
-    /// coup d'œil, sans ouvrir l'espace Compte.
-    private func quotaBar(_ drive: Drive) -> some View {
-        let used = drive.usedSize ?? 0
-        let total = max(drive.size ?? 0, 1)
-        let free = max(total - used, 0)
-        return VStack(alignment: .leading, spacing: 6) {
-            ProgressView(value: Double(used), total: Double(total))
-                .tint(.accentColor)
-            Text("\(ByteFormatter.string(fromBytes: used)) utilisés · \(ByteFormatter.string(fromBytes: free)) libres")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .monospacedDigit()
-                .lineLimit(1)
-        }
-        .accessibilityElement(children: .combine)
-    }
-
-    // MARK: - Hub : les 5 espaces, chacun avec son état réel
+    // MARK: - Espaces de réglages
 
     private var destinationsSection: some View {
         Section {
@@ -284,13 +187,6 @@ struct SettingsView: View {
                 tint: .orange,
                 route: .security,
                 showsDot: !isLockCodeEnabled
-            )
-            SettingsLinkRow(
-                icon: "person.circle.fill",
-                title: "Compte et drive",
-                summary: session.selectedDrive?.name ?? "—",
-                tint: .teal,
-                route: .account
             )
         } header: {
             // Sur iPad, le titre de la colonne dit déjà « Réglages » et les
@@ -377,15 +273,11 @@ struct SettingsView: View {
             )
         case .security:
             SecuritySpace(
+                session: session,
                 isEnabled: isLockCodeEnabled,
                 onActivate: { showActivateCode = true },
                 onChange: { showChangeCode = true },
-                onDisable: { showDisableCode = true }
-            )
-        case .account:
-            AccountSpace(
-                session: session,
-                onChangeDrive: { showDrivePicker = true },
+                onDisable: { showDisableCode = true },
                 onSignOut: { showSignOutConfirm = true }
             )
         }
@@ -411,8 +303,6 @@ struct SettingsView: View {
         )
     }
 }
-
-// MARK: - Routage
 
 // MARK: - Briques du hub
 
@@ -719,11 +609,12 @@ private struct StorageSpace: View {
 // MARK: - Espace 4 : Sécurité
 
 private struct SecuritySpace: View {
-    @Environment(\.iPadLayout) private var iPadLayout
+    let session: SessionStore
     let isEnabled: Bool
     let onActivate: () -> Void
     let onChange: () -> Void
     let onDisable: () -> Void
+    let onSignOut: () -> Void
 
     var body: some View {
         List {
@@ -762,40 +653,6 @@ private struct SecuritySpace: View {
                     }
                 }
             }
-        }
-        .safeAreaInset(edge: .bottom) {
-            Color.clear.frame(height: DS.contentBottomInset)
-        }
-        .navigationTitle("Sécurité")
-        .navigationBarTitleDisplayMode(.inline)
-    }
-}
-
-// MARK: - Espace 5 : Compte et drive
-
-private struct AccountSpace: View {
-    @Environment(\.iPadLayout) private var iPadLayout
-    let session: SessionStore
-    let onChangeDrive: () -> Void
-    let onSignOut: () -> Void
-
-    var body: some View {
-        List {
-            if let drive = session.selectedDrive {
-                Section("Drive actuel") {
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text(drive.name).font(.headline)
-                        Text(ByteFormatter.usage(used: drive.usedSize, total: drive.size))
-                            .font(.subheadline).foregroundStyle(.secondary)
-                        ProgressView(value: Double(drive.usedSize ?? 0), total: Double(max(drive.size ?? 1, 1)))
-                            .tint(.accentColor)
-                    }
-                    .padding(.vertical, 4)
-                    if session.drives.count > 1 {
-                        Button("Changer de drive…", action: onChangeDrive)
-                    }
-                }
-            }
 
             if session.usesTemporaryCredentials {
                 Section {
@@ -817,46 +674,7 @@ private struct AccountSpace: View {
         .safeAreaInset(edge: .bottom) {
             Color.clear.frame(height: DS.contentBottomInset)
         }
-        .navigationTitle("Compte")
+        .navigationTitle("Sécurité")
         .navigationBarTitleDisplayMode(.inline)
-    }
-}
-
-/// Sélection du drive quand le compte en possède plusieurs.
-private struct DrivePickerSheet: View {
-    let session: SessionStore
-    @Environment(\.dismiss) private var dismiss
-
-    var body: some View {
-        NavigationStack {
-            List(session.drives) { drive in
-                Button {
-                    session.selectDrive(drive)
-                    dismiss()
-                } label: {
-                    HStack {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(drive.name)
-                            Text(ByteFormatter.usage(used: drive.usedSize, total: drive.size))
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
-                        Spacer()
-                        if drive.id == session.selectedDrive?.id {
-                            Image(systemName: "checkmark")
-                                .foregroundStyle(.blue)
-                        }
-                    }
-                }
-                .buttonStyle(.plain)
-            }
-            .navigationTitle("Choisir un drive")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Fermer") { dismiss() }
-                }
-            }
-        }
     }
 }
