@@ -163,13 +163,14 @@ struct TagsView: View {
             }
             .accessibilityLabel(layout == .grid ? "Afficher en liste" : "Afficher en grille")
             Button {
+                guard !crossState.isActive else { return }
                 crossState.isEditing = false
                 isReordering.toggle()
             } label: {
                 Image(systemName: "pencil")
             }
             .accessibilityLabel(isReordering ? "Terminer le réarrangement" : "Réarranger les tags")
-            .disabled(iPadLayout.isPad && crossState.isActive)
+            .disabled(crossState.isActive)
             Button {
                 showCreateSheet = true
             } label: {
@@ -256,13 +257,12 @@ struct TagsView: View {
     @ViewBuilder private var crossControls: some View {
         if crossState.isActive && !iPadLayout.isPad {
             VStack(alignment: .leading, spacing: 8) {
-                Text(crossState.selectedIDs.isEmpty ? "Choisissez les tags à croiser" : "Tous les tags sélectionnés")
+                Text(crossState.selectedIDs.isEmpty ? "Choisissez les tags à croiser" : "\(crossState.selectedIDs.count) tag\(crossState.selectedIDs.count > 1 ? "s" : "") sélectionné\(crossState.selectedIDs.count > 1 ? "s" : "")")
                     .font(.subheadline.weight(.semibold))
-                let names = orderedCategories.filter { crossState.selectedIDs.contains($0.id) }.map(\.name)
-                if !names.isEmpty { Text(names.joined(separator: " + ")).font(.caption).foregroundStyle(.secondary) }
                 HStack {
                     Button(crossState.isEditing ? "Terminer" : "Modifier") {
                         let wasEditing = crossState.isEditing
+                        isReordering = false
                         crossState.isEditing.toggle()
                         if !usesTagColumns {
                             path = NavigationPath(); trail = []
@@ -709,6 +709,7 @@ struct TagsView: View {
 }
 
 private struct CategoryRow: View {
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     let category: Category
     /// Ligne de la barre latérale iPad : la liste native fournit déjà le fond,
     /// le liseré et la sélection. La carte et le chevron de la version iPhone
@@ -758,7 +759,8 @@ private struct CategoryRow: View {
                 Text(category.name)
                     .font(.body.weight(.medium))
                     .foregroundStyle(.primary)
-                    .lineLimit(1).truncationMode(.tail)
+                    .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 2)
+                    .fixedSize(horizontal: false, vertical: true)
                 if let uses = category.userUses, uses > 0 {
                     Text("\(uses) élément\(uses > 1 ? "s" : "")")
                         .font(.caption)
@@ -790,6 +792,7 @@ private struct CategoryRow: View {
 /// Employée aussi dans l'éditeur de tags afin de conserver une présentation
 /// parfaitement cohérente entre l'onglet dédié et le menu d'un fichier.
 struct TagGridCard: View {
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     let category: Category
     /// Variante resserrée des éditeurs de tags : icône et textes réduits,
     /// compteur d'usage masqué, pour en afficher davantage à l'écran.
@@ -815,10 +818,10 @@ struct TagGridCard: View {
                     Text(category.name)
                     .font(compact ? .caption.weight(.semibold) : .subheadline.weight(.semibold))
                     .foregroundStyle(.primary)
-                    .lineLimit(1).truncationMode(.tail)
+                    .lineLimit(dynamicTypeSize.isAccessibilitySize ? 4 : (compact ? 1 : 2))
+                    .fixedSize(horizontal: false, vertical: true)
                     .multilineTextAlignment(.center)
                 }
-                .clipped()
                 if !compact, let uses = category.userUses, uses > 0 {
                     Text("\(uses) élément\(uses > 1 ? "s" : "")")
                         .font(.caption)

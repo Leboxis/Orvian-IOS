@@ -126,12 +126,19 @@ final class ViewerRouter {
         searchFocused = true
         precondition(searchBarVisible)
         dismissSearch()
-        precondition(!searchBarVisible && !searchFocused && searchText == "changed",
-                     "Dismissing search must hide the field without changing its result population")
+        precondition(searchBarVisible && !searchFocused && searchText == "changed",
+                     "Dismissing the keyboard must keep an active query visible")
         alwaysShowSearch = true
-        precondition(!searchBarVisible, "An explicit background tap overrides the display preference")
+        precondition(searchBarVisible, "An active query stays visible regardless of dismissal")
+        searchText = ""
+        precondition(!searchBarVisible, "An empty dismissed field may be hidden")
         searchDismissed = false
-        precondition(searchBarVisible, "The search button can reveal the retained query again")
+        precondition(searchBarVisible, "The display preference can reveal an empty field")
+        alwaysShowSearch = false
+        searchText = "   "
+        precondition(!searchBarVisible, "Whitespace is not an active query")
+        searchRevealed = true
+        precondition(searchBarVisible, "The search button can reveal an empty field")
     }
 }
 ''')

@@ -62,7 +62,7 @@ struct FavoritesView: View {
     }
 
     private var searchBarVisible: Bool {
-        !searchDismissed && (alwaysShowSearch || searchFocused || isSearching || searchRevealed)
+        isSearching || (!searchDismissed && (alwaysShowSearch || searchFocused || searchRevealed))
     }
 
     private var visibleSelectionItems: [DriveFile] {
@@ -369,7 +369,7 @@ struct FavoritesView: View {
 
     private var searchToggleButton: some View {
         Button {
-            if searchBarVisible {
+            if searchBarVisible && (!isSearching || searchFocused) {
                 dismissSearch()
             } else {
                 searchDismissed = false
@@ -379,8 +379,8 @@ struct FavoritesView: View {
         } label: {
             Image(systemName: searchBarVisible ? "magnifyingglass.circle.fill" : "magnifyingglass")
         }
-        .accessibilityLabel(searchBarVisible ? "Fermer la recherche" : "Ouvrir la recherche")
-        .accessibilityHint("Affiche ou masque la barre de recherche")
+        .accessibilityLabel(isSearching ? (searchFocused ? "Masquer le clavier" : "Modifier la recherche") : (searchBarVisible ? "Fermer la recherche" : "Ouvrir la recherche"))
+        .accessibilityHint("Une recherche active reste visible jusqu’à son effacement")
     }
 
     private func openRandomFile() {

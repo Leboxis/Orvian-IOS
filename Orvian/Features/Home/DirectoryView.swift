@@ -167,6 +167,11 @@ struct DirectoryView: View {
                 HStack(spacing: 6) {
                     if showBreadcrumb {
                         breadcrumb
+                    } else {
+                        Text(directory.name)
+                            .font(.subheadline.weight(.semibold))
+                            .lineLimit(dynamicTypeSize.isAccessibilitySize ? 4 : 2)
+                            .accessibilityAddTraits(.isHeader)
                     }
                     itemCountLabel
                         .fixedSize(horizontal: true, vertical: false)
@@ -367,7 +372,7 @@ struct DirectoryView: View {
 
     /// La barre apparaît sur demande (bouton loupe) ou lorsque la recherche est active.
     private var searchBarVisible: Bool {
-        !searchDismissed && (alwaysShowSearch || searchFocused || isSearching || searchRevealed)
+        isSearching || (!searchDismissed && (alwaysShowSearch || searchFocused || searchRevealed))
     }
 
     /// Applique les effets de disposition uniquement aux écrans qui possèdent
@@ -446,10 +451,7 @@ struct DirectoryView: View {
         .accessibilityAddTraits(searchRestrictedToFolder ? [.isSelected] : [])
     }
 
-    /// Bouton loupe à droite du filtre : révèle la barre de recherche
-    /// et y met le focus. Un second tap referme (clavier + barre).
-    /// Le texte est conservé lorsque la barre est masquée. La croix dans
-    /// la pastille reste dédiée à l'effacement de la requête.
+    /// Masque le clavier, mais garde toute requête active visible et effaçable.
     private func dismissSearch() {
         searchFocused = false
         searchRevealed = false
@@ -458,7 +460,7 @@ struct DirectoryView: View {
 
     private var searchToggleButton: some View {
         Button {
-            if searchBarPresented {
+            if searchBarPresented && (!isSearching || searchFocused) {
                 dismissSearch()
             } else {
                 searchDismissed = false
@@ -468,8 +470,8 @@ struct DirectoryView: View {
         } label: {
             Image(systemName: searchBarPresented ? "magnifyingglass.circle.fill" : "magnifyingglass")
         }
-        .accessibilityLabel(searchBarPresented ? "Fermer la recherche" : "Ouvrir la recherche")
-        .accessibilityHint("Affiche ou masque la barre de recherche")
+        .accessibilityLabel(isSearching ? (searchFocused ? "Masquer le clavier" : "Modifier la recherche") : (searchBarPresented ? "Fermer la recherche" : "Ouvrir la recherche"))
+        .accessibilityHint("Une recherche active reste visible jusqu’à son effacement")
     }
 
     /// Bouton dé : ouvre au hasard un fichier parmi les cartes visibles.

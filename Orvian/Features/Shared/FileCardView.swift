@@ -1,4 +1,4 @@
-﻿import SwiftUI
+import SwiftUI
 import UIKit
 
 /// Carte de fichier : miniature, étoile favori, nom et informations secondaires.
@@ -159,7 +159,8 @@ struct FileCardView: View {
                 thumbnailArea.overlay { playBadge }.frame(width: 52, height: 52)
                 VStack(alignment: .leading, spacing: 4) {
                     Text(file.name).font(.body)
-                        .lineLimit(1).truncationMode(.middle)
+                        .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 2)
+                        .truncationMode(.middle)
                     Text(!showsListMetadata && showFileSizes && !file.isDirectory ? "\(kind.label) · \(subtitle)" : kind.label)
                         .font(.caption).foregroundStyle(.secondary)
                     let names = (file.categories ?? []).compactMap { categoriesById[$0.categoryId]?.name }
@@ -188,11 +189,10 @@ struct FileCardView: View {
                 CardNameLayout {
                     Text(file.name)
                     .font(.footnote)
-                    .lineLimit(1, reservesSpace: true)
+                    .lineLimit(dynamicTypeSize.isAccessibilitySize ? 4 : 2, reservesSpace: true)
                     .truncationMode(.middle).foregroundStyle(.primary)
                     .frame(maxWidth: .infinity).accessibilityHidden(enabled)
                 }
-                .clipped()
                 HStack(spacing: 4) { Text(subtitle); categoryDots }
                     .font(.caption2).foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity).accessibilityHidden(enabled)

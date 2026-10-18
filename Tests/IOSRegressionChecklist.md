@@ -10,6 +10,26 @@ python3 .github/scripts/check_favorites_cache.py
 Le build Xcode complet suit ces contrôles dans le workflow existant. Ces tests
 utilisent des secrets factices et des transferts simulés, sans compte kDrive.
 
+## Corrections de lisibilité et d’état sur iPhone
+
+Validation manuelle locale sur appareil ou simulateur Xcode, sans captures via GitHub Actions :
+
+- Noms longs de fichiers et de tags : grille deux/trois colonnes et liste,
+  taille de texte normale puis accessibilité maximale. Les noms doivent revenir
+  sur plusieurs lignes ; la liste de fichiers autorise le nom complet en grand texte.
+- Dans Accueil, Favoris et un tag : saisir une recherche, toucher le fond ou la
+  loupe pour masquer le clavier. La requête et sa croix restent visibles ; retoucher
+  la loupe permet de la modifier. Effacer restitue les éléments non recherchés.
+- Désactiver « Chemin du dossier », ouvrir plusieurs sous-dossiers : chacun garde
+  son nom visible. Réactiver le réglage restitue le chemin sans titre dupliqué.
+- Tags : sélectionner plusieurs tags, puis essayer le crayon et « Modifier ».
+  Le réarrangement ne doit pas interrompre la sélection ni empêcher les coches.
+- Croiser de nombreux tags aux noms longs : le résumé reste compact et les boutons
+  Terminer/Modifier/Effacer ainsi que les résultats restent accessibles, y compris
+  en paysage et en grand texte. Les tags sélectionnés restent identifiables.
+- Refaire ces parcours en clair/sombre et avec VoiceOver. Vérifier l’ordre protégé
+  des cinq onglets et les boutons Hasard puis Sélectionner, séparés en haut à droite.
+
 ## Refonte iPad du 17 octobre 2026
 
 ### Navigation et Détails — choix validés
