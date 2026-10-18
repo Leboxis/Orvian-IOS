@@ -62,6 +62,22 @@ import Foundation
         library.finish()
         await slowTags.value
         precondition(!model.isLoading && model.infoError == nil && model.tagsError == nil)
+        let preparedFile = DriveFile(id: 11, categories: [])
+        let preparing = Task { await model.loadIfNeeded(file: preparedFile, driveId: 42, isTrashed: false) }
+        while server.pending.count < 8 { await Task.yield() }
+        precondition(model.isLoading && !model.isLoadingTags, "Known empty tags must not wait for a missing path")
+        await model.loadIfNeeded(file: preparedFile, driveId: 42, isTrashed: false)
+        precondition(server.pending.count == 8, "Opening the inspector must reuse the menu's in-flight request")
+        server.finish(7, file: DriveFile(id: 11, path: "/prepared", categories: []))
+        await preparing.value
+        await model.loadIfNeeded(file: preparedFile, driveId: 42, isTrashed: false)
+        precondition(server.pending.count == 8, "Reopening recent details must not repeat the GET")
+        TokenStore.value = "new-account"
+        let newAccount = Task { await model.loadIfNeeded(file: preparedFile, driveId: 42, isTrashed: false) }
+        while server.pending.count < 9 { await Task.yield() }
+        server.finish(8, file: DriveFile(id: 11, path: "/new-account", categories: []))
+        await newAccount.value
+        precondition(model.file?.path == "/new-account", "Prepared details must remain scoped to the account")
         print("Details cache, concurrent loading, obsolete responses, account isolation and partial errors checks passed")
     }
 }

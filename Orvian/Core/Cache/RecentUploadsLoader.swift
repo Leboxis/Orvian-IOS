@@ -2,14 +2,15 @@ import Foundation
 
 /// Point d'entrée partagé du petit flux « Uploads récents ».
 ///
-/// Il restaure d'abord le dernier instantané disque, puis mutualise la requête
-/// réseau démarrée au clic sur l'onglet et celle de la vue Profil. Le montage
-/// de la vue ne déclenche donc pas un second `last_modified`.
+/// Le clic sur Profil démarre d'abord une requête globale de 60 fichiers.
+/// La vue rejoint cette requête avant de charger ses miniatures. Le cache
+/// disque reste disponible pour les autres consommateurs du flux.
 @MainActor
 final class RecentUploadsLoader {
     static let shared = RecentUploadsLoader()
 
-    static let source = FileSource.recents(limit: 12)
+    static let pageSize = 60
+    static let source = FileSource.recents(limit: pageSize)
     private static let revalidationInterval: TimeInterval = 60
     /// L'index serveur (`last_modified`) peut mettre plusieurs minutes à
     /// converger après un upload. Au-delà de l'aller-retour en cours, un
@@ -28,6 +29,8 @@ final class RecentUploadsLoader {
     }
 
     private var inFlightByDrive: [Int: InFlight] = [:]
+    private var profileVisit: (id: UUID, driveId: Int, credential: String, generation: Int,
+                               task: Task<RefreshOutcome?, Never>)?
     private var restoredFromDisk: [Int: String] = [:]
     private var generation = 0
     private struct FirstPage {
@@ -216,12 +219,12 @@ final class RecentUploadsLoader {
             firstPageByDrive[driveId] = FirstPage(
                 credential: credential, generation: refreshGeneration, snapshot: snapshot
             )
-            // Ne pas écraser une grille déjà paginée avec les seules 12
+            // Ne pas écraser une grille déjà paginée avec les seules 60
             // cartes de l'aperçu. Le Profil reçoit tout de même `snapshot`.
             let existing = DirectoryListStore.shared.snapshot(
                 source: Self.source, driveId: driveId, orderBy: [], order: "asc"
             )
-            if (existing?.items.count ?? 0) <= 12 {
+            if (existing?.items.count ?? 0) <= Self.pageSize {
                 DirectoryListStore.shared.store(
                     source: Self.source,
                     driveId: driveId,
@@ -265,17 +268,38 @@ final class RecentUploadsLoader {
         generation &+= 1
         inFlightByDrive.values.forEach { $0.task.cancel() }
         inFlightByDrive.removeAll()
+        profileVisit?.task.cancel()
+        profileVisit = nil
         restoredFromDisk.removeAll()
         firstPageByDrive.removeAll()
         pendingLocalUploadsByDrive.removeAll()
     }
 
-    func prefetch(driveId: Int) async {
-        guard let credential = TokenStore.credentialFingerprint(), !Task.isCancelled else { return }
-        let prefetchGeneration = generation
-        _ = await cachedSnapshot(driveId: driveId)
-        guard !Task.isCancelled, prefetchGeneration == generation,
-              credential == TokenStore.credentialFingerprint() else { return }
-        _ = await refresh(driveId: driveId)
+    /// Called synchronously at the tab tap: start the global first page before
+    /// Profile mounts. No disk preview or thumbnail request precedes this GET.
+    func prefetch(driveId: Int) {
+        guard let credential = TokenStore.credentialFingerprint() else { return }
+        let visitGeneration = generation
+        let task = Task<RefreshOutcome?, Never> {
+            guard credential == TokenStore.credentialFingerprint(), visitGeneration == generation else { return nil }
+            return await refreshOutcome(driveId: driveId, forceNetwork: true)
+        }
+        profileVisit = (UUID(), driveId, credential, generation, task)
+    }
+
+    func profileVisitID(driveId: Int) -> UUID? {
+        guard let visit = profileVisit, visit.driveId == driveId,
+              visit.credential == TokenStore.credentialFingerprint(), visit.generation == generation else { return nil }
+        return visit.id
+    }
+
+    /// Mounting, activation and the preview all await the exact tab request,
+    /// even if it has already finished. Only an explicit retry starts another.
+    func profileRefreshOutcome(driveId: Int, forceNetwork: Bool = false) async -> RefreshOutcome? {
+        if forceNetwork || profileVisitID(driveId: driveId) == nil { prefetch(driveId: driveId) }
+        guard let visit = profileVisit else { return nil }
+        let result = await visit.task.value
+        guard !Task.isCancelled, profileVisitID(driveId: driveId) == visit.id else { return nil }
+        return result
     }
 }

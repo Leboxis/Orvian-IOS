@@ -24,7 +24,9 @@ class RecentSharingWiringChecks(unittest.TestCase):
         self.assertIn("previewRequestID == requestID", profile)
         self.assertIn("session.selectedDrive?.id == drive.id", profile)
         self.assertIn("TokenStore.credentialFingerprint() == credential", profile)
-        self.assertGreaterEqual(profile.count("guard isCurrentRequest() else { return }"), 4)
+        self.assertGreaterEqual(profile.count("guard isCurrentRequest() else { return }"), 3)
+        self.assertNotIn("recentUploadsLoader.cachedSnapshot", profile)
+        self.assertIn("recentUploadsLoader.profileRefreshOutcome(", profile)
         self.assertIn("snapshot.items.filter { !$0.isDirectory }", profile)
         self.assertIn("ForEach(recentUploads.prefix(3))", profile)
 
@@ -57,7 +59,7 @@ class RecentSharingWiringChecks(unittest.TestCase):
         self.assertIn("let cached = latestMemorySnapshot(driveId: driveId)", loader)
         self.assertIn("firstPageByDrive.removeAll()", loader)
         self.assertLess(loader.index("firstPageByDrive[driveId] = FirstPage("),
-                        loader.index("if (existing?.items.count ?? 0) <= 12"))
+                        loader.index("if (existing?.items.count ?? 0) <= Self.pageSize"))
 
     def test_scoped_runner_compiles_unmodified_production_loader(self):
         path = ROOT / ".github/scripts/check_recent_sharing.py"

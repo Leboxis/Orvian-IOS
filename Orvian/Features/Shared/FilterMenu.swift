@@ -23,7 +23,7 @@ struct FilterMenu: View {
     @Binding var filters: FileFilters
     @Environment(\.iPadLayout) private var iPadLayout
     @AppStorage("padFilterMenuScale") private var padFilterMenuScale = 1.2
-    @ScaledMetric(relativeTo: .body) private var baseFontSize = 17
+    @ScaledMetric(relativeTo: .body) private var baseFontSize = 14
     @State private var showsPadFilters = false
 
     private var menuScale: CGFloat { CGFloat(min(1.5, max(1.1, padFilterMenuScale))) }
@@ -115,21 +115,25 @@ struct FilterMenu: View {
 
     private var padFilters: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 12 * menuScale) {
+            VStack(alignment: .leading, spacing: 4 * menuScale) {
                 HStack {
                     Text("Filtres").fontWeight(.semibold).accessibilityAddTraits(.isHeader)
                     Spacer()
                     Button { showsPadFilters = false } label: {
                         Image(systemName: "xmark.circle.fill")
-                            .frame(minWidth: 44 * menuScale, minHeight: 44 * menuScale)
+                            .frame(minWidth: 44, minHeight: 44)
                     }
                     .accessibilityLabel("Fermer les filtres")
                 }
-                Text("Trier par").foregroundStyle(.secondary)
-                ForEach(FileFilters.SortMode.allCases) { mode in
-                    padChoice(mode.title, symbol: mode.symbol, selected: filters.sort == mode) {
-                        filters.sort = mode
+                DisclosureGroup {
+                    ForEach(FileFilters.SortMode.allCases) { mode in
+                        padChoice(mode.title, symbol: mode.symbol, selected: filters.sort == mode) {
+                            filters.sort = mode
+                        }
                     }
+                } label: {
+                    Label("Tri : \(filters.sort.title)", systemImage: filters.sort.symbol)
+                        .frame(minHeight: 44)
                 }
                 if filters.sort != .original {
                     Divider()
@@ -164,16 +168,16 @@ struct FilterMenu: View {
                     Divider()
                     Button(role: .destructive) { filters = FileFilters() } label: {
                         Label("Réinitialiser", systemImage: "arrow.counterclockwise")
-                            .frame(maxWidth: .infinity, minHeight: 44 * menuScale, alignment: .leading)
+                            .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
                     }
                 }
             }
             .buttonStyle(.plain)
             .font(.system(size: baseFontSize * menuScale))
-            .padding(16 * menuScale)
+            .padding(10 * menuScale)
         }
-        .frame(width: min(340 * menuScale, max(280, iPadLayout.width - 32)),
-               height: min(700, 560 * menuScale))
+        .frame(width: min(260 * menuScale, max(280, iPadLayout.width - 32)),
+               height: min(520, 360 * menuScale))
         .presentationCompactAdaptation(.popover)
         .accessibilityIdentifier("browser.filter.panel")
     }
@@ -185,8 +189,8 @@ struct FilterMenu: View {
                 Spacer(minLength: 4)
                 if selected { Image(systemName: "checkmark").fontWeight(.semibold) }
             }
-            .padding(.horizontal, 10 * menuScale)
-            .frame(maxWidth: .infinity, minHeight: 44 * menuScale, alignment: .leading)
+            .padding(.horizontal, 6 * menuScale)
+            .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
             .background(selected ? Color.accentColor.opacity(0.12) : .clear,
                         in: RoundedRectangle(cornerRadius: 10 * menuScale))
             .contentShape(Rectangle())
@@ -197,7 +201,7 @@ struct FilterMenu: View {
     private func padSymbol(_ title: String, symbol: String, selected: Bool, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Image(systemName: symbol)
-                .frame(maxWidth: .infinity, minHeight: 44 * menuScale)
+                .frame(maxWidth: .infinity, minHeight: 44)
                 .background(selected ? Color.accentColor.opacity(0.12) : .clear,
                             in: RoundedRectangle(cornerRadius: 10 * menuScale))
                 .contentShape(Rectangle())

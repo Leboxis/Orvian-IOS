@@ -1,8 +1,8 @@
 import Foundation
 
-struct FileCategory { let categoryId: Int }
+struct FileCategory: Equatable { let categoryId: Int }
 struct Category { let id: Int }
-struct DriveFile {
+struct DriveFile: Equatable {
     let id: Int
     var name: String = "Known name"
     var path: String?

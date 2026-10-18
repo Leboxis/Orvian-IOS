@@ -47,6 +47,7 @@ struct FileCardView: View {
     var onMove: (() -> Void)?
     /// Demande d'ouverture d'une feuille/alerte gérée par la grille parente.
     var onPresent: ((Intent) -> Void)?
+    var onPrepareDetails: (() -> Void)?
     var action: () -> Void
 
     @State private var thumbnail: UIImage?
@@ -78,7 +79,8 @@ struct FileCardView: View {
     private var menuItems: [CardMenuItem] {
         guard !selectionMode else { return [] }
         var items: [CardMenuItem] = [
-            CardMenuItem(title: "Détails", systemImage: "info.circle", waitsForDismissal: true) { onPresent?(.details) }
+            CardMenuItem(title: "Détails", systemImage: "info.circle", waitsForDismissal: true,
+                         prepare: onPrepareDetails) { onPresent?(.details) }
         ]
         if !isTrashed {
             if file.isDirectory, onPresent != nil {
@@ -506,14 +508,16 @@ private struct CardMenuItem {
     let systemImage: String
     let destructive: Bool
     let waitsForDismissal: Bool
+    let prepare: (() -> Void)?
     let action: () -> Void
 
     init(title: String, systemImage: String, destructive: Bool = false,
-         waitsForDismissal: Bool = false, action: @escaping () -> Void) {
+         waitsForDismissal: Bool = false, prepare: (() -> Void)? = nil, action: @escaping () -> Void) {
         self.title = title
         self.systemImage = systemImage
         self.destructive = destructive
         self.waitsForDismissal = waitsForDismissal
+        self.prepare = prepare
         self.action = action
     }
 }
@@ -549,7 +553,7 @@ private struct CardInteraction: UIViewRepresentable {
         uiView.accessibilityValue = value
         uiView.accessibilityTraits = isSelected ? [.button, .selected] : [.button]
         uiView.accessibilityCustomActions = (isEnabled ? menuItems : []).map { item in
-            UIAccessibilityCustomAction(name: item.title) { _ in item.action(); return true }
+            UIAccessibilityCustomAction(name: item.title) { _ in item.prepare?(); item.action(); return true }
         }
     }
 
@@ -650,6 +654,7 @@ private struct CardInteraction: UIViewRepresentable {
                     image: UIImage(systemName: item.systemImage),
                     attributes: item.destructive ? .destructive : []
                 ) { [dismissal] _ in
+                    item.prepare?()
                     if item.waitsForDismissal { dismissal.perform(item.action) }
                     else { item.action() }
                 }

@@ -162,29 +162,16 @@ struct DirectoryView: View {
             },
             onError: { addError = $0 }
         ))
-        .modifier(FileBrowserHeader {
+        .modifier(FileBrowserHeader(isVisible: !selectionMode, searchPresented: !selectionMode && searchBarPresented, search: { searchBar }) {
             if !selectionMode {
-                VStack(spacing: 6) {
-                    let summaryLayout = dynamicTypeSize.isAccessibilitySize || iPadLayout.isPad
-                        ? AnyLayout(VStackLayout(alignment: .leading, spacing: 2)) : AnyLayout(HStackLayout(spacing: 6))
-                    summaryLayout {
-                        if showBreadcrumb {
-                            breadcrumb
-                        }
-                        itemCountLabel
-                            .fixedSize(horizontal: true, vertical: false)
+                HStack(spacing: 6) {
+                    if showBreadcrumb {
+                        breadcrumb
                     }
-                    .padding(.horizontal, iPadLayout.isPad ? 0 : 16)
-                    .frame(maxWidth: iPadLayout.isPad ? 200 : .infinity, alignment: iPadLayout.isPad ? .leading : .center)
-
-                    if searchBarPresented && !iPadLayout.isPad {
-                        searchBar
-                            .transition(.move(edge: .top).combined(with: .opacity))
-                    }
+                    itemCountLabel
+                        .fixedSize(horizontal: true, vertical: false)
                 }
-                .padding(.top, iPadLayout.isPad ? 0 : (showBreadcrumb ? 2 : 4))
-                .padding(.bottom, iPadLayout.isPad ? 0 : 2)
-                .animation(Motion.animation(.snappy(duration: 0.25)), value: searchBarPresented)
+                .padding(.horizontal, 16)
             }
         })
         .toolbar {
@@ -253,9 +240,6 @@ struct DirectoryView: View {
                 ToolbarItem(placement: .topBarLeading) {
                     addMenu
                         .accessibilityLabel("Ajouter ou importer")
-                }
-                if iPadLayout.isPad && searchBarPresented {
-                    ToolbarItem(placement: .principal) { searchBar }
                 }
                 BrowserToolbar(canOpenRandom: !playableFiles.isEmpty,
                                canSelect: !visibleSelectionItems.isEmpty && !moveBusy && !addBusy,

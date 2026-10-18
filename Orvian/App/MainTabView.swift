@@ -117,9 +117,7 @@ struct MainTabView: View {
         guard targetTab == .profile else { return }
         // Démarre au clic, avant que ProfileView soit montée.
         // Sa propre tâche rejoint ensuite la même requête.
-        Task {
-            await RecentUploadsLoader.shared.prefetch(driveId: drive.id)
-        }
+        RecentUploadsLoader.shared.prefetch(driveId: drive.id)
     }
 
     private var tabs: some View {

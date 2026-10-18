@@ -176,28 +176,17 @@ struct FavoritesView: View {
             )
             .navigationTitle("")
             .navigationBarTitleDisplayMode(.inline)
-            .modifier(FileBrowserHeader {
+            .modifier(FileBrowserHeader(isVisible: !selectionMode, searchPresented: !selectionMode && searchBarVisible, search: { searchBar }) {
                 if !selectionMode {
-                    VStack(spacing: 6) {
-                        HStack(spacing: 6) {
-                            if iPadLayout.isPad {
-                                Text(title).lineLimit(1).truncationMode(.middle)
-                                    .font(.caption.weight(.medium))
-                            }
-                            itemCountLabel
-                                .fixedSize(horizontal: true, vertical: false)
+                    HStack(spacing: 6) {
+                        if iPadLayout.isPad {
+                            Text(title).lineLimit(1).truncationMode(.middle)
+                                .font(.caption.weight(.medium))
                         }
-                        .padding(.horizontal, iPadLayout.isPad ? 0 : 16)
-                        .frame(maxWidth: iPadLayout.isPad ? 220 : .infinity)
-
-                        if searchBarVisible && !iPadLayout.isPad {
-                            searchBar
-                                .transition(.move(edge: .top).combined(with: .opacity))
-                        }
+                        itemCountLabel
+                            .fixedSize(horizontal: true, vertical: false)
                     }
-                    .padding(.top, iPadLayout.isPad ? 0 : 4)
-                    .padding(.bottom, iPadLayout.isPad ? 0 : 2)
-                    .animation(Motion.animation(.snappy(duration: 0.25)), value: searchBarVisible)
+                    .padding(.horizontal, 16)
                 }
             })
             .toolbar {
@@ -261,10 +250,9 @@ struct FavoritesView: View {
                             .accessibilityIdentifier("browser.search")
                     }
 
-                    if !iPadLayout.isPad || searchBarVisible {
+                    if !iPadLayout.isPad {
                         ToolbarItem(placement: .principal) {
-                            if iPadLayout.isPad && searchBarVisible { searchBar }
-                            else { Text(title).font(.headline).lineLimit(1) }
+                            Text(title).font(.headline).lineLimit(1)
                         }
                     }
 

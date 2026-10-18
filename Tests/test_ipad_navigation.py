@@ -58,7 +58,7 @@ class IPadNavigationWiringChecks(unittest.TestCase):
         self.assertEqual(body.count(".sheet("), 1)
         self.assertIn(".tint(.accentColor)", body)
         self.assertIn("shell.markVisited(targetTab)", main)
-        self.assertIn("await RecentUploadsLoader.shared.prefetch(driveId: drive.id)", main)
+        self.assertIn("RecentUploadsLoader.shared.prefetch(driveId: drive.id)", main)
         selection = main[main.index("    private var iPadSelection:"):main.index("    private func prepareTab(")]
         self.assertIn("guard targetTab != shell.tab else { return }", selection)
         self.assertLess(selection.index("prepareTab(targetTab)"), selection.index("shell.tab = targetTab"))

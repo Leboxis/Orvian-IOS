@@ -18,8 +18,13 @@ struct ProfileView: View {
     @State private var previewRequestID = UUID()
     @State private var previewDriveId: Int?
     @State private var previewCredential: String?
+    @State private var previewVisitID: UUID?
 
     private let recentUploadsLoader = RecentUploadsLoader.shared
+    private var showsRecentPlaceholders: Bool {
+        guard let drive = session.selectedDrive else { return isLoadingRecents }
+        return isLoadingRecents || previewVisitID != recentUploadsLoader.profileVisitID(driveId: drive.id)
+    }
 
     var body: some View {
         NavigationStack(path: $path) {
@@ -96,7 +101,7 @@ struct ProfileView: View {
                 Text("Imports récents").font(.headline)
                 Spacer()
                 if let drive = session.selectedDrive,
-                   isLoadingRecents || !recentUploads.isEmpty {
+                   showsRecentPlaceholders || !recentUploads.isEmpty {
                     NavigationLink("Voir plus") {
                         RecentFilesView(driveId: drive.id, title: "Imports récents",
                                         source: RecentUploadsLoader.source, router: router)
@@ -106,14 +111,14 @@ struct ProfileView: View {
             if let recentError {
                 recentFailure(recentError)
             }
-            if !isLoadingRecents && recentUploads.isEmpty && recentError == nil {
+            if !showsRecentPlaceholders && recentUploads.isEmpty && recentError == nil {
                 Text("Aucun import récent")
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, minHeight: 120)
-            } else if isLoadingRecents || !recentUploads.isEmpty {
+            } else if showsRecentPlaceholders || !recentUploads.isEmpty {
                 LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: DS.gridSpacing),
                                           count: iPadLayout.largeText ? 1 : 3), spacing: 16) {
-                    if isLoadingRecents {
+                    if showsRecentPlaceholders {
                         ForEach(0..<iPadLayout.recentPreviewLimit, id: \.self) { _ in
                             RoundedRectangle(cornerRadius: DS.cardRadius)
                                 .fill(.quaternary.opacity(0.4))
@@ -167,7 +172,7 @@ struct ProfileView: View {
         Section {
             if let drive = session.selectedDrive {
                 if let recentError { recentFailure(recentError) }
-                if isLoadingRecents {
+                if showsRecentPlaceholders {
                     thumbnailsSkeleton
                 } else if recentUploads.isEmpty && recentError == nil {
                     Text("Aucun import récent")
@@ -327,29 +332,23 @@ struct ProfileView: View {
                 && TokenStore.credentialFingerprint() == credential
         }
 
-        // Mémoire puis disque : les cartes connues apparaissent avant la
-        // requête `last_modified`, y compris au premier accès après lancement.
-        if !forceNetwork, let snapshot = await recentUploadsLoader.cachedSnapshot(driveId: drive.id) {
-            guard isCurrentRequest() else { return }
-            recentUploads = Self.previewOrder(snapshot.items.filter { !$0.isDirectory })
-            isLoadingRecents = false
-        }
-
         guard isCurrentRequest() else { return }
-        if recentUploads.isEmpty {
-            isLoadingRecents = true
-            recentError = nil
-        }
-        if let outcome = await recentUploadsLoader.refreshOutcome(
+        // Show neutral cards until the tab's global 60-item request succeeds.
+        // Cached lists may be obsolete; do not request their thumbnails first.
+        isLoadingRecents = true
+        recentUploads = []
+        recentError = nil
+        if let outcome = await recentUploadsLoader.profileRefreshOutcome(
             driveId: drive.id, forceNetwork: forceNetwork
         ) {
             guard isCurrentRequest() else { return }
-            if let snapshot = outcome.snapshot {
+            if outcome.error == nil, let snapshot = outcome.snapshot {
                 recentUploads = Self.previewOrder(snapshot.items.filter { !$0.isDirectory })
             }
             recentError = outcome.error.map { ($0 as? APIError)?.errorDescription ?? $0.localizedDescription }
         }
         guard isCurrentRequest() else { return }
+        previewVisitID = recentUploadsLoader.profileVisitID(driveId: drive.id)
         isLoadingRecents = false
     }
 
@@ -360,8 +359,7 @@ struct ProfileView: View {
         let uploadedIDs = Set(files.map(\.id))
         recentUploads = Array(Self.previewOrder(
             files + recentUploads.filter { !uploadedIDs.contains($0.id) }
-        ).prefix(12))
-        isLoadingRecents = false
+        ).prefix(RecentUploadsLoader.pageSize))
     }
 }
 

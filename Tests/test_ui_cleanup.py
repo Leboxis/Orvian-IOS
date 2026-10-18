@@ -43,8 +43,8 @@ class UICleanupChecks(unittest.TestCase):
     def test_folder_title_removed_but_selection_and_breadcrumb_survive(self):
         folder = source("Orvian/Features/Home/DirectoryView.swift")
         self.assertNotIn("Text(crumbs.last ?? directory.name)", folder)
-        self.assertEqual(folder.count("ToolbarItem(placement: .principal)"), 2)
-        self.assertIn('ToolbarItem(placement: .principal) { searchBar }', folder)
+        self.assertEqual(folder.count("ToolbarItem(placement: .principal)"), 1)
+        self.assertIn('search: { searchBar }', folder)
         self.assertIn("Text(selectionTitle)", folder)
         self.assertIn('navigationTitle("")', folder)
         self.assertIn("if showBreadcrumb", folder)

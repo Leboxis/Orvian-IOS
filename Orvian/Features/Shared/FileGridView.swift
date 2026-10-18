@@ -102,6 +102,7 @@ struct FileGridView: View {
     @State private var videoMetadataResolutionCount = 0
     /// Fiche détails demandée par une carte (une seule feuille pour toute la grille).
     @State private var detailRequest: FileRequest?
+    @State private var detailsModel = FileDetailsViewModel()
     /// Éditeur de tags demandé par une carte.
     @State private var tagsRequest: FileRequest?
     /// Sélecteur de couleur demandé par une carte (dossiers).
@@ -201,7 +202,8 @@ struct FileGridView: View {
                 ),
                 usesInspector: usesDetailsInspector,
                 driveId: viewModel.driveId,
-                isTrashed: viewModel.source == .trash
+                isTrashed: viewModel.source == .trash,
+                preparedModel: detailsModel
             ))
             .sheet(item: $tagsRequest) { request in
                 TagsEditorSheet(
@@ -304,7 +306,11 @@ struct FileGridView: View {
     private func present(_ intent: FileCardView.Intent, for file: DriveFile, siblings: [DriveFile]) {
         switch intent {
         case .details:
-            detailRequest = FileRequest(file: file, siblings: siblings)
+            // Avoid animating the entire grid through the inspector's resize.
+            // The native menu still finishes retiring its anchor first.
+            var transaction = Transaction(animation: nil)
+            transaction.disablesAnimations = true
+            withTransaction(transaction) { detailRequest = FileRequest(file: file) }
         case .colorPicker:
             colorRequest = FileRequest(file: file)
         case .tags:
@@ -709,6 +715,12 @@ struct FileGridView: View {
             onPresent: { intent in
                 present(intent, for: file, siblings: siblings)
             },
+            onPrepareDetails: {
+                Task {
+                    await detailsModel.loadIfNeeded(file: file, driveId: viewModel.driveId,
+                                                   isTrashed: viewModel.source == .trash)
+                }
+            },
             action: {
                 if selectionMode {
                     onToggleSelection?(file)
@@ -883,6 +895,7 @@ struct FileDetailsPresentation: ViewModifier {
     let usesInspector: Bool
     let driveId: Int
     var isTrashed = false
+    var preparedModel: FileDetailsViewModel?
 
     func body(content: Content) -> some View {
         content
@@ -892,7 +905,7 @@ struct FileDetailsPresentation: ViewModifier {
             )) {
                 if let file {
                     FileDetailSheet(file: file, driveId: driveId, isTrashed: isTrashed,
-                                    inInspector: true, close: { self.file = nil })
+                                    inInspector: true, close: { self.file = nil }, preparedModel: preparedModel)
                         .id(file.id)
                         .inspectorColumnWidth(min: 300, ideal: 340, max: 360)
                 }
@@ -901,7 +914,7 @@ struct FileDetailsPresentation: ViewModifier {
                 get: { usesInspector ? nil : file },
                 set: { if !usesInspector { file = $0 } }
             )) { file in
-                FileDetailSheet(file: file, driveId: driveId, isTrashed: isTrashed)
+                FileDetailSheet(file: file, driveId: driveId, isTrashed: isTrashed, preparedModel: preparedModel)
             }
     }
 }

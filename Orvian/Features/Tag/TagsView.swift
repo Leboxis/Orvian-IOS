@@ -229,17 +229,8 @@ struct TagsView: View {
                 crossState.toggleMode()
             }
         } label: {
-            HStack(spacing: 6) {
-                Image(systemName: crossState.isActive ? "checklist.checked" : "checklist")
-                VStack(alignment: .leading, spacing: 1) {
-                    Text("Multi-tags")
-                    Text(crossState.isActive ? "Activée" : "Désactivée")
-                        .fontWeight(.semibold)
-                }
-                .font(.caption2)
-            }
-                .frame(minWidth: 44, minHeight: 44)
-                .padding(.horizontal, 8)
+            Image(systemName: crossState.isActive ? "checklist.checked" : "checklist")
+                .frame(width: 44, height: 44)
                 .background(crossState.isActive ? Color.accentColor.opacity(0.12) : .clear, in: Capsule())
         }
         .accessibilityLabel(iPadLayout.isPad
@@ -328,6 +319,7 @@ struct TagsView: View {
                         .frame(width: 44, height: 44)
                 }
                 .accessibilityLabel(layout == .grid ? "Afficher les tags en liste" : "Afficher les tags en grille")
+                crossButton
                 Button {
                     crossState.isEditing = false
                     isReordering.toggle()
@@ -343,9 +335,6 @@ struct TagsView: View {
                 .accessibilityLabel("Nouveau tag")
             }
 
-            crossButton
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, DS.gridMargin)
             crossSummary
             if categories.isEmpty || layout == .grid {
                 root

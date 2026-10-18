@@ -7,10 +7,12 @@ struct FileDetailSheet: View {
     var isTrashed = false
     var inInspector = false
     var close: (() -> Void)?
+    var preparedModel: FileDetailsViewModel?
     @Environment(\.dismiss) private var dismiss
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @ScaledMetric(relativeTo: .subheadline) private var labelWidth = 104
-    @State private var model = FileDetailsViewModel()
+    @State private var localModel = FileDetailsViewModel()
+    private var model: FileDetailsViewModel { preparedModel ?? localModel }
     @State private var thumbnail: UIImage?
     @State private var pixelSize: CGSize?
     @State private var videoInfo: VideoMetadataInfo?
@@ -54,7 +56,7 @@ struct FileDetailSheet: View {
         }
         // Independent tasks: file info must not delay the cached preview.
         .task(id: file) {
-            await model.load(file: file, driveId: driveId, isTrashed: isTrashed)
+            await model.loadIfNeeded(file: file, driveId: driveId, isTrashed: isTrashed)
         }
         .task(id: file.id) {
             let credential = TokenStore.credentialFingerprint()
@@ -147,7 +149,7 @@ struct FileDetailSheet: View {
                 Text("Emplacement non communiqué").font(.subheadline).foregroundStyle(.secondary)
             }
             detailRow("Tags") {
-                if model.isLoading && model.categories.isEmpty {
+                if model.isLoadingTags && model.categories.isEmpty {
                     ProgressView("Chargement…")
                 } else if isTrashed {
                     Text("Élément dans la corbeille").font(.subheadline).foregroundStyle(.secondary)

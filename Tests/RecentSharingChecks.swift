@@ -77,13 +77,13 @@ import Foundation
         precondition(merged?.items.map(\.id) == [21, 20])
         // An already paginated grid retains its own items and cursor, while
         // Profile and a following grid reload reuse the newly validated head.
-        store.entries[store.key(3)] = snapshot(Array(100..<120))
+        store.entries[store.key(3)] = snapshot(Array(100..<180))
         let paginatedRefresh = Task { await loader.refresh(driveId: 3) }
         while server.drives.count < 6 { await Task.yield() }
         server.complete(5, fileID: 30)
         let freshHead = await paginatedRefresh.value
         precondition(freshHead?.items.map(\.id) == [30])
-        precondition(store.entries[store.key(3)]?.items.map(\.id) == Array(100..<120))
+        precondition(store.entries[store.key(3)]?.items.map(\.id) == Array(100..<180))
         precondition(store.entries[store.key(3)]?.cursor == "next")
         let cachedHead = await loader.cachedSnapshot(driveId: 3)
         let gridHead = await loader.refresh(driveId: 3)
@@ -122,6 +122,16 @@ import Foundation
         let preserved = await cachedFailure.value
         precondition(preserved?.error != nil && preserved?.snapshot?.items.first?.id == 41,
                      "A failed refresh must preserve cached content and its error")
+        let diskReads = store.diskReadCount
+        loader.prefetch(driveId: 4)
+        while server.drives.count < 10 { await Task.yield() }
+        precondition(RecentUploadsLoader.pageSize == 60 && RecentUploadsLoader.source == .recents(limit: 60))
+        precondition(store.diskReadCount == diskReads, "The profile tap must start the GET before any disk preview")
+        server.complete(9, fileID: 42)
+        let visit = await loader.profileRefreshOutcome(driveId: 4)
+        precondition(visit?.snapshot?.items.first?.id == 42)
+        _ = await loader.profileRefreshOutcome(driveId: 4)
+        precondition(server.drives.count == 10, "Mounting Profile after its tab GET finishes must not start a second request")
         print("Recent cache races, isolation, upload merge and paginated-head reuse checks passed")
     }
 }
