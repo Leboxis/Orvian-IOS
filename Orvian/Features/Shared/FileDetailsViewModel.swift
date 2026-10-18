@@ -27,31 +27,47 @@ final class FileDetailsViewModel {
         }
         guard credential != nil else { tagsError = "Tags indisponibles hors connexion au compte."; return }
         guard !isTrashed else { return }
-        if file.path == nil || file.categories == nil {
-            do {
-                let fresh = try await service.fileInfo(driveId: driveId, fileId: file.id)
-                guard isCurrent() else { return }
-                self.file = fresh
-            } catch {
-                guard isCurrent() else { return }
-                infoError = "Informations incomplètes : \(error.localizedDescription)"
-            }
+        // Independent requests: a missing path must not hold back known tags,
+        // and a slow tag library must not hold back the file's facts.
+        async let info: Void = loadInfo(file: file, driveId: driveId, isCurrent: isCurrent)
+        async let tags: Void = loadCategories(driveId: driveId, isCurrent: isCurrent)
+        _ = await (info, tags)
+        guard isCurrent() else { return }
+        if self.file?.categories == nil && tagsError == nil {
+            tagsError = "Impossible de vérifier les tags de cet élément."
         }
+    }
+
+    private func loadInfo(file: DriveFile, driveId: Int, isCurrent: () -> Bool) async {
+        guard file.path == nil || file.categories == nil else { return }
+        do {
+            let fresh = try await service.fileInfo(driveId: driveId, fileId: file.id)
+            guard isCurrent() else { return }
+            self.file = fresh
+            resolveCategories(driveId: driveId)
+        } catch {
+            guard isCurrent() else { return }
+            infoError = "Informations incomplètes : \(error.localizedDescription)"
+        }
+    }
+
+    private func loadCategories(driveId: Int, isCurrent: () -> Bool) async {
         do {
             try await CategoryLibrary.shared.requireLoaded(for: driveId)
             guard isCurrent() else { return }
-            let library = CategoryLibrary.shared.categories(for: driveId)
-            if let membership = self.file?.categories {
-                categories = membership.compactMap { library[$0.categoryId] }
-                if categories.count != Set(membership.map(\.categoryId)).count {
-                    tagsError = "Certains tags ne sont plus disponibles."
-                }
-            } else {
-                tagsError = "Impossible de vérifier les tags de cet élément."
-            }
+            resolveCategories(driveId: driveId)
         } catch {
             guard isCurrent() else { return }
             tagsError = "Tags indisponibles : \(error.localizedDescription)"
         }
+    }
+
+    private func resolveCategories(driveId: Int) {
+        guard let membership = file?.categories,
+              CategoryLibrary.shared.hasLoaded(for: driveId) else { return }
+        let library = CategoryLibrary.shared.categories(for: driveId)
+        categories = membership.compactMap { library[$0.categoryId] }
+        tagsError = categories.count == Set(membership.map(\.categoryId)).count
+            ? nil : "Certains tags ne sont plus disponibles."
     }
 }

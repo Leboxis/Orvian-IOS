@@ -89,6 +89,7 @@ final class BrowserPresentationTests: XCTestCase {
         var title = CGRect.zero
         var header = CGRect.zero
         var cards = CGRect.zero
+        var command = CGRect.zero
     }
 
     func testActualGridDetailsActionInEachBrowserScope() async throws {
@@ -151,23 +152,39 @@ final class BrowserPresentationTests: XCTestCase {
         }
     }
 
-    func testCardTitleUsesNinetyFivePercentAndPadHeaderStaysAboveCards() async throws {
+    func testCardTitleUsesNinetyFivePercentAndPadSummarySharesTopToolbar() async throws {
         let frames = Frames()
-        let fixture = VStack {
-            CardNameLayout {
-                Text("Un nom de fichier très long qui doit remplir la largeur disponible")
-                    .lineLimit(2).frame(maxWidth: .infinity)
-                    .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { frames.title = $0 }
-            }
-            .frame(width: 240)
-            ScrollView {
-                Color.clear.frame(height: 1000)
-                    .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { frames.cards = $0 }
-            }
-            .modifier(FileBrowserHeader {
-                Text("Tags / Dossier / Sous-dossier").frame(height: 44)
+        let fixture = IPadTabView(selection: .constant(.home)) { _ in
+            NavigationStack {
+                VStack {
+                    CardNameLayout {
+                        Text("Un nom de fichier très long qui doit remplir la largeur disponible")
+                            .lineLimit(1).frame(maxWidth: .infinity)
+                            .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { frames.title = $0 }
+                    }
+                    .frame(width: 240)
+                    ScrollView {
+                        Color.clear.frame(height: 1000)
+                            .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { frames.cards = $0 }
+                    }
+                }
+                .modifier(FileBrowserHeader {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Tags / Dossier / Sous-dossier").lineLimit(1)
+                        Text("12 éléments")
+                    }
+                    .font(.caption).frame(width: 180)
                     .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { frames.header = $0 }
-            })
+                })
+                .toolbar {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Button("Sélectionner", systemImage: "checkmark.circle") {}
+                            .labelStyle(.iconOnly).frame(width: 44, height: 44)
+                            .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { frames.command = $0 }
+                    }
+                }
+                .navigationBarTitleDisplayMode(.inline)
+            }
         }
         .environment(\.iPadLayout, IPadLayout(isPad: true, width: 1000))
         let host = UIHostingController(rootView: fixture)
@@ -182,8 +199,10 @@ final class BrowserPresentationTests: XCTestCase {
             previous?.makeKey()
         }
         host.view.layoutIfNeeded()
-        try await waitUntil { frames.title.width > 0 && frames.header.height > 0 && frames.cards.height > 0 }
+        try await waitUntil { frames.title.width > 0 && frames.header.height > 0 && frames.cards.height > 0 && frames.command.height > 0 }
         XCTAssertEqual(frames.title.width, 228, accuracy: 0.5)
+        XCTAssertEqual(frames.header.midY, frames.command.midY, accuracy: 2,
+                       "The summary must share the system toolbar's vertical center, not add a content row")
         XCTAssertGreaterThanOrEqual(frames.cards.minY, frames.header.maxY)
     }
 }

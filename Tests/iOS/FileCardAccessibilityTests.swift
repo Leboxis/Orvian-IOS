@@ -51,6 +51,14 @@ final class FileCardAccessibilityTests: XCTestCase {
         XCTAssertTrue(button.accessibilityTraits.contains(.button))
         XCTAssertGreaterThanOrEqual(button.bounds.width, 44)
         XCTAssertGreaterThanOrEqual(button.bounds.height, 44)
+        button.isHighlighted = true
+        XCTAssertEqual(button.backgroundColor, .clear, "A long press must not gray the card")
+        button.isHighlighted = false
+        let interaction = try XCTUnwrap(button.interactions.compactMap { $0 as? UIContextMenuInteraction }.first)
+        let configuration = try XCTUnwrap(interaction.delegate?.contextMenuInteraction(interaction, configurationForMenuAtLocation: .zero))
+        let preview = try XCTUnwrap(interaction.delegate?.contextMenuInteraction?(interaction, previewForHighlightingMenuWithConfiguration: configuration))
+        XCTAssertEqual(preview.parameters.backgroundColor, .clear)
+        XCTAssertTrue(preview.parameters.shadowPath?.isEmpty == true, "The native preview must not outline the whole card")
         XCTAssertTrue(button.accessibilityActivate())
         XCTAssertEqual(opened, 1)
         let rename = try XCTUnwrap(button.accessibilityCustomActions?.first { $0.name == "Renommer" })

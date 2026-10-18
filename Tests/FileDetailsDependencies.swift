@@ -14,8 +14,18 @@ struct DriveFile {
 }
 @MainActor final class CategoryLibrary {
     static let shared = CategoryLibrary()
-    func requireLoaded(for driveId: Int) async throws {}
-    func categories(for driveId: Int) -> [Int: Category] { [1: Category(id: 1)] }
+    var loaded = true
+    var pending: CheckedContinuation<Void, Error>?
+    func hasLoaded(for driveId: Int) -> Bool { loaded }
+    func requireLoaded(for driveId: Int) async throws {
+        if !loaded { try await withCheckedThrowingContinuation { pending = $0 } }
+    }
+    func finish() {
+        loaded = true
+        pending?.resume()
+        pending = nil
+    }
+    func categories(for driveId: Int) -> [Int: Category] { loaded ? [1: Category(id: 1)] : [:] }
 }
 @MainActor final class DetailsServer {
     static let shared = DetailsServer()

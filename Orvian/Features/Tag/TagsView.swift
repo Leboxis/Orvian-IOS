@@ -226,16 +226,28 @@ struct TagsView: View {
                 if !wasActive { padNavigation.select(nil) }
                 if wasActive && !usesTagColumns { path = NavigationPath(); trail = [] }
             } else {
-                crossState.isEditing.toggle()
+                crossState.toggleMode()
             }
         } label: {
-            Image(systemName: !iPadLayout.isPad && crossState.isEditing ? "checkmark.circle" : "line.3.horizontal.decrease.circle")
+            HStack(spacing: 6) {
+                Image(systemName: crossState.isActive ? "checklist.checked" : "checklist")
+                VStack(alignment: .leading, spacing: 1) {
+                    Text("Multi-tags")
+                    Text(crossState.isActive ? "Activée" : "Désactivée")
+                        .fontWeight(.semibold)
+                }
+                .font(.caption2)
+            }
                 .frame(minWidth: 44, minHeight: 44)
+                .padding(.horizontal, 8)
+                .background(crossState.isActive ? Color.accentColor.opacity(0.12) : .clear, in: Capsule())
         }
         .accessibilityLabel(iPadLayout.isPad
             ? (crossState.isActive ? "Arrêter le croisement des tags" : "Croiser plusieurs tags")
-            : (crossState.isEditing ? "Terminer la sélection des tags" : "Croiser plusieurs tags"))
+            : (crossState.isActive ? "Désactiver la sélection multiple des tags" : "Activer la sélection multiple des tags"))
         .accessibilityIdentifier("tags.cross")
+        .accessibilityValue(crossState.isActive ? "Sélection multiple activée" : "Sélection multiple désactivée")
+        .accessibilityAddTraits(crossState.isActive ? .isSelected : [])
         .tint(crossState.isActive ? .accentColor : .primary)
     }
 
@@ -316,7 +328,6 @@ struct TagsView: View {
                         .frame(width: 44, height: 44)
                 }
                 .accessibilityLabel(layout == .grid ? "Afficher les tags en liste" : "Afficher les tags en grille")
-                crossButton
                 Button {
                     crossState.isEditing = false
                     isReordering.toggle()
@@ -332,6 +343,9 @@ struct TagsView: View {
                 .accessibilityLabel("Nouveau tag")
             }
 
+            crossButton
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, DS.gridMargin)
             crossSummary
             if categories.isEmpty || layout == .grid {
                 root
@@ -340,9 +354,10 @@ struct TagsView: View {
                     ForEach(orderedCategories) { category in
                         if crossState.isEditing {
                             Button { crossState.toggle(category.id) } label: {
-                                CategoryRow(category: category, inSidebar: true)
+                                CategoryRow(category: category, inSidebar: true, isSelecting: true,
+                                            isSelected: crossState.selectedIDs.contains(category.id))
                             }
-                            .listRowBackground(crossState.selectedIDs.contains(category.id) ? Color.accentColor.opacity(0.18) : Color.clear)
+                            .listRowBackground(Color.clear)
                             .accessibilityAddTraits(crossState.selectedIDs.contains(category.id) ? .isSelected : [])
                         } else if isReordering {
                             reorderCell(for: category, inSidebar: true)
@@ -422,21 +437,12 @@ struct TagsView: View {
                         Button {
                             open(category)
                         } label: {
-                            TagGridCard(category: category)
-                                .overlay {
-                                    RoundedRectangle(cornerRadius: 16).fill(tagSelectionBackground(category).opacity(0.18))
-                                        .allowsHitTesting(false)
-                                    RoundedRectangle(cornerRadius: 16).strokeBorder(tagSelectionBackground(category), lineWidth: 3)
-                                        .allowsHitTesting(false)
-                                }
-                                .overlay(alignment: .topTrailing) {
-                                    if crossState.isEditing && !iPadLayout.isPad {
-                                        Image(systemName: crossState.selectedIDs.contains(category.id) ? "checkmark.circle.fill" : "circle")
-                                            .padding(6).foregroundStyle(Color.accentColor)
-                                    }
-                                }
+                            TagGridCard(category: category, backgroundOpacity: iPadLayout.isPad ? 0.2 : 1,
+                                        isSelecting: crossState.isEditing,
+                                        isSelected: crossState.selectedIDs.contains(category.id))
                         }
                         .buttonStyle(.plain)
+                        .accessibilityAddTraits(crossState.selectedIDs.contains(category.id) ? .isSelected : [])
                         .contextMenu {
                             tagContextMenu(for: category)
                         }
@@ -470,19 +476,11 @@ struct TagsView: View {
                         Button {
                             open(category)
                         } label: {
-                            CategoryRow(category: category)
-                                .overlay {
-                                    RoundedRectangle(cornerRadius: 16).fill(tagSelectionBackground(category).opacity(0.18))
-                                        .allowsHitTesting(false)
-                                }
-                                .overlay(alignment: .trailing) {
-                                    if crossState.isEditing && !iPadLayout.isPad {
-                                        Image(systemName: crossState.selectedIDs.contains(category.id) ? "checkmark.circle.fill" : "circle")
-                                            .foregroundStyle(Color.accentColor)
-                                    }
-                                }
+                            CategoryRow(category: category, isSelecting: crossState.isEditing,
+                                        isSelected: crossState.selectedIDs.contains(category.id))
                         }
                         .buttonStyle(.plain)
+                        .accessibilityAddTraits(crossState.selectedIDs.contains(category.id) ? .isSelected : [])
                         .contextMenu {
                             tagContextMenu(for: category)
                         }
@@ -518,11 +516,6 @@ struct TagsView: View {
         }
     }
 
-    private func tagSelectionBackground(_ category: Category) -> Color {
-        iPadLayout.isPad && crossState.isActive && crossState.selectedIDs.contains(category.id)
-            ? .accentColor : .clear
-    }
-
     /// Cellule du mode réarrangement : même présentation que le mode courant
     /// (grille ou liste), bordure pour signaler le mode actif, et
     /// glisser-déposer natif (`onDrag`/`onDrop`) pour déplacer le tag.
@@ -532,11 +525,12 @@ struct TagsView: View {
     private func reorderCell(for category: Category, inSidebar: Bool = false) -> some View {
         Group {
             if layout == .grid && !inSidebar {
-                TagGridCard(category: category)
+                TagGridCard(category: category, backgroundOpacity: iPadLayout.isPad ? 0.2 : 1)
             } else {
                 CategoryRow(category: category, inSidebar: inSidebar)
             }
         }
+        .padding(.horizontal, inSidebar ? 10 : 0)
         .overlay {
             RoundedRectangle(cornerRadius: 16, style: .continuous)
                 .strokeBorder(Color.accentColor.opacity(0.6), lineWidth: 1.5)
@@ -731,6 +725,8 @@ private struct CategoryRow: View {
     /// le liseré et la sélection. La carte et le chevron de la version iPhone
     /// y doublaient le relief et annonçaient une pile qui n'existe pas.
     var inSidebar = false
+    var isSelecting = false
+    var isSelected = false
 
     private var tint: Color {
         Color(hex: category.color) ?? .accentColor
@@ -742,11 +738,17 @@ private struct CategoryRow: View {
             // liseré : encadrer la ligne d'une carte y doublait le relief.
             // Une liste ne pose qu'une hauteur minimale : c'est ce rembourrage
             // vertical qui règle l'air entre les lignes de la colonne.
-            row.padding(.vertical, 12)
+            row.padding(.vertical, 12).padding(.horizontal, isSelecting ? 10 : 0)
+                .background(isSelected ? Color.accentColor.opacity(0.08) : .clear,
+                            in: RoundedRectangle(cornerRadius: 12, style: .continuous))
         } else {
             row
                 .padding(12)
                 .background(.background, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+                .overlay {
+                    RoundedRectangle(cornerRadius: 16, style: .continuous)
+                        .strokeBorder(isSelected ? Color.accentColor.opacity(0.65) : .clear, lineWidth: 1.5)
+                }
                 // Ombre de pastille en ligne (DS.inlineShadow) : sur une liste
                 // qui défile, une ombre large force une passe de flou par
                 // cellule à chaque image. Le rayon minimal du système de
@@ -767,6 +769,7 @@ private struct CategoryRow: View {
                 Text(category.name)
                     .font(.body.weight(.medium))
                     .foregroundStyle(.primary)
+                    .lineLimit(1).truncationMode(.tail)
                 if let uses = category.userUses, uses > 0 {
                     Text("\(uses) élément\(uses > 1 ? "s" : "")")
                         .font(.caption)
@@ -774,7 +777,12 @@ private struct CategoryRow: View {
                 }
             }
             Spacer()
-            if !inSidebar {
+            if isSelecting {
+                Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
+                    .font(.body.weight(.semibold))
+                    .foregroundStyle(isSelected ? Color.accentColor : .secondary)
+                    .accessibilityHidden(true)
+            } else if !inSidebar {
                 // Le chevron annonce une pile poussée : la sélection de la
                 // barre latérale n'en a pas.
                 Image(systemName: "chevron.right")
@@ -790,11 +798,13 @@ private struct CategoryRow: View {
 /// Employée aussi dans l'éditeur de tags afin de conserver une présentation
 /// parfaitement cohérente entre l'onglet dédié et le menu d'un fichier.
 struct TagGridCard: View {
-    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     let category: Category
     /// Variante resserrée des éditeurs de tags : icône et textes réduits,
     /// compteur d'usage masqué, pour en afficher davantage à l'écran.
     var compact = false
+    var backgroundOpacity: Double = 1
+    var isSelecting = false
+    var isSelected = false
 
     private var tint: Color {
         Color(hex: category.color) ?? .accentColor
@@ -813,9 +823,10 @@ struct TagGridCard: View {
                     Text(category.name)
                     .font(compact ? .caption.weight(.semibold) : .subheadline.weight(.semibold))
                     .foregroundStyle(.primary)
-                    .lineLimit(dynamicTypeSize.isAccessibilitySize ? 4 : (compact ? 1 : 2))
+                    .lineLimit(1).truncationMode(.tail)
                     .multilineTextAlignment(.center)
                 }
+                .clipped()
                 if !compact, let uses = category.userUses, uses > 0 {
                     Text("\(uses) élément\(uses > 1 ? "s" : "")")
                         .font(.caption)
@@ -825,14 +836,26 @@ struct TagGridCard: View {
         }
         .frame(maxWidth: .infinity)
         .padding(.vertical, compact ? 8 : 12)
-        .background(Color(uiColor: .secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: compact ? 12 : 16, style: .continuous))
+        .background((isSelected ? Color.accentColor : Color(uiColor: .secondarySystemGroupedBackground))
+            .opacity(isSelected ? 0.08 : backgroundOpacity), in: RoundedRectangle(cornerRadius: compact ? 12 : 16, style: .continuous))
         .overlay {
             RoundedRectangle(cornerRadius: compact ? 12 : 16, style: .continuous)
-                .strokeBorder(.quaternary, lineWidth: 0.5)
+                .strokeBorder(isSelected ? Color.accentColor.opacity(0.65) : Color.primary.opacity(0.08 * backgroundOpacity),
+                              lineWidth: isSelected ? 1.5 : 0.5)
         }
         // Même raison que `CategoryRow` : le flou d'ombre se joue par carte à
         // chaque image du défilement, le liseré suffit à détacher la carte.
-        .shadow(color: DS.inlineShadow, radius: DS.inlineShadowRadius, x: 0, y: DS.inlineShadowY)
+        .shadow(color: DS.inlineShadow.opacity(backgroundOpacity), radius: DS.inlineShadowRadius, x: 0, y: DS.inlineShadowY)
+        .overlay(alignment: .topTrailing) {
+            if isSelecting {
+                Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(isSelected ? Color.accentColor : .secondary)
+                    .padding(6)
+                    .accessibilityHidden(true)
+                    .allowsHitTesting(false)
+            }
+        }
         .contentShape(Rectangle())
     }
 }

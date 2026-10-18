@@ -165,8 +165,8 @@ struct DirectoryView: View {
         .modifier(FileBrowserHeader {
             if !selectionMode {
                 VStack(spacing: 6) {
-                    let summaryLayout = dynamicTypeSize.isAccessibilitySize
-                        ? AnyLayout(VStackLayout(spacing: 6)) : AnyLayout(HStackLayout(spacing: 6))
+                    let summaryLayout = dynamicTypeSize.isAccessibilitySize || iPadLayout.isPad
+                        ? AnyLayout(VStackLayout(alignment: .leading, spacing: 2)) : AnyLayout(HStackLayout(spacing: 6))
                     summaryLayout {
                         if showBreadcrumb {
                             breadcrumb
@@ -174,16 +174,16 @@ struct DirectoryView: View {
                         itemCountLabel
                             .fixedSize(horizontal: true, vertical: false)
                     }
-                    .padding(.horizontal, 16)
-                    .frame(maxWidth: .infinity)
+                    .padding(.horizontal, iPadLayout.isPad ? 0 : 16)
+                    .frame(maxWidth: iPadLayout.isPad ? 200 : .infinity, alignment: iPadLayout.isPad ? .leading : .center)
 
                     if searchBarPresented && !iPadLayout.isPad {
                         searchBar
                             .transition(.move(edge: .top).combined(with: .opacity))
                     }
                 }
-                .padding(.top, iPadLayout.isPad ? 6 : (showBreadcrumb ? 2 : 4))
-                .padding(.bottom, iPadLayout.isPad ? 8 : 2)
+                .padding(.top, iPadLayout.isPad ? 0 : (showBreadcrumb ? 2 : 4))
+                .padding(.bottom, iPadLayout.isPad ? 0 : 2)
                 .animation(Motion.animation(.snappy(duration: 0.25)), value: searchBarPresented)
             }
         })
@@ -741,7 +741,7 @@ struct DirectoryView: View {
                     }
                 } label: {
                     breadcrumbLabel
-                        .frame(minHeight: 44)
+                        .frame(minHeight: iPadLayout.isPad ? 22 : 44)
                 }
                 .accessibilityHint("Revenir à un dossier parent")
             } else {

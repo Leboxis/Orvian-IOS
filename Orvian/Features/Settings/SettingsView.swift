@@ -478,6 +478,7 @@ private struct HubIcon: View {
 private struct AppearanceSpace: View {
     @Environment(\.iPadLayout) private var iPadLayout
     @AppStorage("iPadTabBarAtBottom") private var iPadTabBarAtBottom = false
+    @AppStorage("padFilterMenuScale") private var padFilterMenuScale = 1.2
     @Binding var showFileSizes: Bool
     @Binding var showFavoriteStars: Bool
     @Binding var fileGridColumns: Int
@@ -498,6 +499,13 @@ private struct AppearanceSpace: View {
                     Text("Navigation iPad")
                 } footer: {
                     Text("Centre la barre en bas et libère la bande supérieure pour les barres latérales. Le changement est immédiat.")
+                }
+                Section("Menu des filtres iPad") {
+                    Picker("Taille du menu et des éléments", selection: $padFilterMenuScale) {
+                        ForEach(11...15, id: \.self) { value in
+                            Text("×1.\(value - 10)").tag(Double(value) / 10)
+                        }
+                    }
                 }
             }
             Section {

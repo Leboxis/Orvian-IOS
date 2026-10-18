@@ -180,19 +180,23 @@ struct FavoritesView: View {
                 if !selectionMode {
                     VStack(spacing: 6) {
                         HStack(spacing: 6) {
+                            if iPadLayout.isPad {
+                                Text(title).lineLimit(1).truncationMode(.middle)
+                                    .font(.caption.weight(.medium))
+                            }
                             itemCountLabel
                                 .fixedSize(horizontal: true, vertical: false)
                         }
-                        .padding(.horizontal, 16)
-                        .frame(maxWidth: .infinity)
+                        .padding(.horizontal, iPadLayout.isPad ? 0 : 16)
+                        .frame(maxWidth: iPadLayout.isPad ? 220 : .infinity)
 
                         if searchBarVisible && !iPadLayout.isPad {
                             searchBar
                                 .transition(.move(edge: .top).combined(with: .opacity))
                         }
                     }
-                    .padding(.top, iPadLayout.isPad ? 6 : 4)
-                    .padding(.bottom, iPadLayout.isPad ? 8 : 2)
+                    .padding(.top, iPadLayout.isPad ? 0 : 4)
+                    .padding(.bottom, iPadLayout.isPad ? 0 : 2)
                     .animation(Motion.animation(.snappy(duration: 0.25)), value: searchBarVisible)
                 }
             })
@@ -257,9 +261,11 @@ struct FavoritesView: View {
                             .accessibilityIdentifier("browser.search")
                     }
 
-                    ToolbarItem(placement: .principal) {
-                        if iPadLayout.isPad && searchBarVisible { searchBar }
-                        else { Text(title).font(.headline).lineLimit(1) }
+                    if !iPadLayout.isPad || searchBarVisible {
+                        ToolbarItem(placement: .principal) {
+                            if iPadLayout.isPad && searchBarVisible { searchBar }
+                            else { Text(title).font(.headline).lineLimit(1) }
+                        }
                     }
 
                     BrowserToolbar(canOpenRandom: !playableFiles.isEmpty,

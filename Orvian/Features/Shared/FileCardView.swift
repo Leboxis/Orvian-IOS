@@ -157,7 +157,7 @@ struct FileCardView: View {
                 thumbnailArea.overlay { playBadge }.frame(width: 52, height: 52)
                 VStack(alignment: .leading, spacing: 4) {
                     Text(file.name).font(.body)
-                        .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 2)
+                        .lineLimit(1).truncationMode(.middle)
                     Text(!showsListMetadata && showFileSizes && !file.isDirectory ? "\(kind.label) · \(subtitle)" : kind.label)
                         .font(.caption).foregroundStyle(.secondary)
                     let names = (file.categories ?? []).compactMap { categoriesById[$0.categoryId]?.name }
@@ -186,10 +186,11 @@ struct FileCardView: View {
                 CardNameLayout {
                     Text(file.name)
                     .font(.footnote)
-                    .lineLimit(dynamicTypeSize.isAccessibilitySize ? 4 : 2, reservesSpace: true)
+                    .lineLimit(1, reservesSpace: true)
                     .truncationMode(.middle).foregroundStyle(.primary)
                     .frame(maxWidth: .infinity).accessibilityHidden(enabled)
                 }
+                .clipped()
                 HStack(spacing: 4) { Text(subtitle); categoryDots }
                     .font(.caption2).foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity).accessibilityHidden(enabled)
@@ -574,7 +575,7 @@ private struct CardInteraction: UIViewRepresentable {
         }
 
         override var isHighlighted: Bool {
-            didSet { backgroundColor = isHighlighted ? UIColor.label.withAlphaComponent(0.08) : .clear }
+            didSet { backgroundColor = .clear }
         }
 
         @objc private func handleTap() {
@@ -606,6 +607,28 @@ private struct CardInteraction: UIViewRepresentable {
                     return self.buildMenu()
                 }
             )
+        }
+
+        func contextMenuInteraction(
+            _ interaction: UIContextMenuInteraction,
+            previewForHighlightingMenuWithConfiguration configuration: UIContextMenuConfiguration
+        ) -> UITargetedPreview? {
+            transparentPreview(for: interaction)
+        }
+
+        func contextMenuInteraction(
+            _ interaction: UIContextMenuInteraction,
+            previewForDismissingMenuWithConfiguration configuration: UIContextMenuConfiguration
+        ) -> UITargetedPreview? {
+            transparentPreview(for: interaction)
+        }
+
+        private func transparentPreview(for interaction: UIContextMenuInteraction) -> UITargetedPreview? {
+            guard let view = interaction.view else { return nil }
+            let parameters = UIPreviewParameters()
+            parameters.backgroundColor = .clear
+            parameters.shadowPath = UIBezierPath()
+            return UITargetedPreview(view: view, parameters: parameters)
         }
 
         func contextMenuInteraction(

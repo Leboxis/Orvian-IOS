@@ -15,6 +15,10 @@ struct FileDetailSheet: View {
     @State private var pixelSize: CGSize?
     @State private var videoInfo: VideoMetadataInfo?
     private var current: DriveFile { model.file?.id == file.id ? (model.file ?? file) : file }
+    private var previewImage: UIImage? {
+        thumbnail ?? ThumbnailProvider.shared.cachedMemoryThumbnail(
+            driveId: driveId, fileId: file.id, isTrashed: isTrashed)
+    }
     private var hasFacts: Bool {
         current.addedAt != nil || current.lastModifiedAt != nil || current.updatedAt != nil
             || pixelSize != nil || videoInfo != nil || model.infoError != nil
@@ -55,7 +59,7 @@ struct FileDetailSheet: View {
         .task(id: file.id) {
             let credential = TokenStore.credentialFingerprint()
             thumbnail = nil
-            if file.fileKind.supportsThumbnail {
+            if file.fileKind.supportsThumbnail && previewImage == nil {
                 let image = await ThumbnailProvider.shared.thumbnail(driveId: driveId, fileId: file.id, isTrashed: isTrashed)
                 guard !Task.isCancelled, credential == TokenStore.credentialFingerprint() else { return }
                 thumbnail = image
@@ -175,8 +179,8 @@ struct FileDetailSheet: View {
         HStack(alignment: .top, spacing: 12) {
             ZStack {
                 RoundedRectangle(cornerRadius: DS.compactRadius).fill(current.fileKind.tint.opacity(0.12))
-                if let thumbnail {
-                    Image(uiImage: thumbnail).resizable().scaledToFill()
+                if let previewImage {
+                    Image(uiImage: previewImage).resizable().scaledToFill()
                 } else {
                     Image(systemName: current.fileKind.symbolName).font(.title2).foregroundStyle(current.fileKind.tint)
                 }
