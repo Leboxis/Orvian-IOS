@@ -232,13 +232,32 @@ struct DirectoryView: View {
                     }
                 }
             } else {
-                ToolbarItemGroup(placement: .topBarLeading) {
-                    FilterMenu(filters: $filters)
-                        .accessibilityIdentifier("browser.filter")
-                    if iPadLayout.isPad { FilePresentationToggle() }
+                if iPadLayout.isPad {
+                    ToolbarItemGroup(placement: .topBarLeading) {
+                        FilterMenu(filters: $filters)
+                            .accessibilityIdentifier("browser.filter")
+                        if iPadLayout.isPad { FilePresentationToggle() }
+                        if showsSearchBar {
+                            searchToggleButton
+                                .accessibilityIdentifier("browser.search")
+                        }
+                    }
+                } else {
+                    ToolbarItem(placement: .topBarLeading) {
+                        FilterMenu(filters: $filters)
+                            .accessibilityIdentifier("browser.filter")
+                    }
                     if showsSearchBar {
-                        searchToggleButton
-                            .accessibilityIdentifier("browser.search")
+                        if #available(iOS 26.0, *) {
+                            ToolbarSpacer(.fixed, placement: .topBarLeading)
+                        }
+                        ToolbarItem(placement: .topBarLeading) {
+                            searchToggleButton
+                                .accessibilityIdentifier("browser.search")
+                        }
+                    }
+                    if #available(iOS 26.0, *) {
+                        ToolbarSpacer(.fixed, placement: .topBarLeading)
                     }
                 }
 

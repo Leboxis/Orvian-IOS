@@ -38,15 +38,22 @@ struct FileBrowserHeader<Header: View, Search: View>: ViewModifier {
             }
             .animation(Motion.animation(.snappy(duration: 0.3)), value: searchPresented)
         } else {
-            content.safeAreaInset(edge: .top, spacing: 0) {
-                VStack(spacing: 6) {
-                    if searchPresented {
-                        search().transition(.offset(y: -80).combined(with: .opacity))
+            // The breadcrumb/search row owns layout space instead of covering
+            // the scroll view's top edge with an opaque safe-area overlay.
+            VStack(spacing: 0) {
+                if isVisible {
+                    VStack(spacing: 8) {
+                        if searchPresented {
+                            search().transition(.opacity)
+                        }
+                        summary
                     }
-                    summary
+                    .padding(.vertical, 8)
+                    .background(Color(uiColor: .systemGroupedBackground))
                 }
-                .padding(.vertical, isVisible ? 4 : 0)
-                .background(Color(uiColor: .systemGroupedBackground))
+                content
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .clipped()
             }
             .animation(Motion.animation(.snappy(duration: 0.3)), value: searchPresented)
         }

@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// Cinq onglets regroupés sur iPad ; sur iPhone, Profil reste à part.
+/// Les cinq onglets partagent une seule barre, dans leur ordre protégé.
 /// La coque des onglets reste propriétaire de leur état et de leur navigation.
 struct FloatingTabBar: View {
     @Binding var selection: AppTab
@@ -17,8 +17,7 @@ struct FloatingTabBar: View {
     private let spacing: CGFloat = 8
     private let inset: CGFloat = 4
     private var groupedTabs: [AppTab] {
-        iPadLayout.isPad ? [.settings, .tag, .home, .favorites, .profile]
-            : [.settings, .tag, .home, .favorites]
+        [.settings, .tag, .home, .favorites, .profile]
     }
 
     var body: some View {
@@ -81,18 +80,6 @@ struct FloatingTabBar: View {
                 .frame(height: height)
                 .modifier(TabGlassSurface(shape: Capsule(), opaque: reduceTransparency))
 
-                if !iPadLayout.isPad {
-                    TabButton(
-                        tab: .profile,
-                        isSelected: selection == .profile,
-                        height: height,
-                        iconOnly: false
-                    ) {
-                        select(.profile)
-                    }
-                    .frame(width: 72, height: height)
-                    .modifier(TabGlassSurface(shape: Capsule(), opaque: reduceTransparency))
-                }
             }
         }
     }

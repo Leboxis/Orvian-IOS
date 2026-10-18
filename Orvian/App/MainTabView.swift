@@ -73,30 +73,46 @@ struct MainTabView: View {
         }
     }
 
+    @ViewBuilder
     private var phoneNavigation: some View {
-        @Bindable var shell = shell
-        return tabs
-            .safeAreaInset(edge: .bottom, spacing: 0) {
-                // Reserve the rendered height, including simultaneous transfers.
-                VStack(spacing: 0) {
-                    TransferOverlayChrome(
-                        uploadManager: uploadManager,
-                        onShowUploads: { showUploadSheet = true }
-                    )
+        if UIDevice.current.userInterfaceIdiom == .pad {
+            // Preserve the optional iPad bottom-bar layout.
+            tabs.safeAreaInset(edge: .bottom, spacing: 0) {
+                bottomNavigationChrome
+            }
+        } else {
+            // Give every NavigationStack a genuinely smaller viewport. An inset
+            // outside the stacks can be lost by their scroll views/destinations.
+            VStack(spacing: 0) {
+                tabs
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .clipped()
+                bottomNavigationChrome
+                    .padding(.top, 8)
+            }
+        }
+    }
 
-                    FloatingTabBar(
-                        selection: $shell.tab,
-                        onSelect: prepareTab,
-                        onReselect: { targetTab in
-                            shell.navState.reset(
-                                tab: targetTab,
-                                scrollFavoritesToTop: favoritesReselectScrollToTop
-                            )
-                        }
+    private var bottomNavigationChrome: some View {
+        @Bindable var shell = shell
+        return VStack(spacing: 0) {
+            TransferOverlayChrome(
+                uploadManager: uploadManager,
+                onShowUploads: { showUploadSheet = true }
+            )
+
+            FloatingTabBar(
+                selection: $shell.tab,
+                onSelect: prepareTab,
+                onReselect: { targetTab in
+                    shell.navState.reset(
+                        tab: targetTab,
+                        scrollFavoritesToTop: favoritesReselectScrollToTop
                     )
                 }
-                .padding(.bottom, 4)
-            }
+            )
+        }
+        .padding(.bottom, 4)
     }
 
     private var iPadSelection: Binding<AppTab> {

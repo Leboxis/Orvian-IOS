@@ -242,12 +242,26 @@ struct FavoritesView: View {
                         }
                     }
                 } else {
-                    ToolbarItemGroup(placement: .topBarLeading) {
-                        FilterMenu(filters: $filters)
-                            .accessibilityIdentifier("browser.filter")
-                        if iPadLayout.isPad { FilePresentationToggle() }
-                        searchToggleButton
-                            .accessibilityIdentifier("browser.search")
+                    if iPadLayout.isPad {
+                        ToolbarItemGroup(placement: .topBarLeading) {
+                            FilterMenu(filters: $filters)
+                                .accessibilityIdentifier("browser.filter")
+                            if iPadLayout.isPad { FilePresentationToggle() }
+                            searchToggleButton
+                                .accessibilityIdentifier("browser.search")
+                        }
+                    } else {
+                        ToolbarItem(placement: .topBarLeading) {
+                            FilterMenu(filters: $filters)
+                                .accessibilityIdentifier("browser.filter")
+                        }
+                        if #available(iOS 26.0, *) {
+                            ToolbarSpacer(.fixed, placement: .topBarLeading)
+                        }
+                        ToolbarItem(placement: .topBarLeading) {
+                            searchToggleButton
+                                .accessibilityIdentifier("browser.search")
+                        }
                     }
 
                     if !iPadLayout.isPad {

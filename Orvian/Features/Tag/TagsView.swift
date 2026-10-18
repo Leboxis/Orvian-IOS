@@ -152,31 +152,73 @@ struct TagsView: View {
 
     @ToolbarContentBuilder
     private var categoryToolbar: some ToolbarContent {
-        ToolbarItemGroup(placement: .topBarTrailing) {
-            crossButton
-            Button {
-                withAnimation(Motion.animation(.snappy(duration: 0.25))) {
-                    layout = layout == .grid ? .list : .grid
+        if iPadLayout.isPad {
+            ToolbarItemGroup(placement: .topBarTrailing) {
+                crossButton
+                Button {
+                    withAnimation(Motion.animation(.snappy(duration: 0.25))) {
+                        layout = layout == .grid ? .list : .grid
+                    }
+                } label: {
+                    Image(systemName: layout == .grid ? "list.bullet" : "square.grid.2x2")
                 }
-            } label: {
-                Image(systemName: layout == .grid ? "list.bullet" : "square.grid.2x2")
+                .accessibilityLabel(layout == .grid ? "Afficher en liste" : "Afficher en grille")
+                Button {
+                    guard !crossState.isActive else { return }
+                    crossState.isEditing = false
+                    isReordering.toggle()
+                } label: {
+                    Image(systemName: "pencil")
+                }
+                .accessibilityLabel(isReordering ? "Terminer le réarrangement" : "Réarranger les tags")
+                .disabled(crossState.isActive)
+                Button {
+                    showCreateSheet = true
+                } label: {
+                    Image(systemName: "plus")
+                }
+                .accessibilityLabel("Nouveau tag")
             }
-            .accessibilityLabel(layout == .grid ? "Afficher en liste" : "Afficher en grille")
-            Button {
-                guard !crossState.isActive else { return }
-                crossState.isEditing = false
-                isReordering.toggle()
-            } label: {
-                Image(systemName: "pencil")
+        } else {
+            ToolbarItem(placement: .topBarTrailing) { crossButton }
+            if #available(iOS 26.0, *) {
+                ToolbarSpacer(.fixed, placement: .topBarTrailing)
             }
-            .accessibilityLabel(isReordering ? "Terminer le réarrangement" : "Réarranger les tags")
-            .disabled(crossState.isActive)
-            Button {
-                showCreateSheet = true
-            } label: {
-                Image(systemName: "plus")
+            ToolbarItem(placement: .topBarTrailing) {
+                Button {
+                    withAnimation(Motion.animation(.snappy(duration: 0.25))) {
+                        layout = layout == .grid ? .list : .grid
+                    }
+                } label: {
+                    Image(systemName: layout == .grid ? "list.bullet" : "square.grid.2x2")
+                }
+                .accessibilityLabel(layout == .grid ? "Afficher en liste" : "Afficher en grille")
             }
-            .accessibilityLabel("Nouveau tag")
+            if #available(iOS 26.0, *) {
+                ToolbarSpacer(.fixed, placement: .topBarTrailing)
+            }
+            ToolbarItem(placement: .topBarTrailing) {
+                Button {
+                    guard !crossState.isActive else { return }
+                    crossState.isEditing = false
+                    isReordering.toggle()
+                } label: {
+                    Image(systemName: "pencil")
+                }
+                .accessibilityLabel(isReordering ? "Terminer le réarrangement" : "Réarranger les tags")
+                .disabled(crossState.isActive)
+            }
+            if #available(iOS 26.0, *) {
+                ToolbarSpacer(.fixed, placement: .topBarTrailing)
+            }
+            ToolbarItem(placement: .topBarTrailing) {
+                Button {
+                    showCreateSheet = true
+                } label: {
+                    Image(systemName: "plus")
+                }
+                .accessibilityLabel("Nouveau tag")
+            }
         }
     }
 
@@ -907,6 +949,7 @@ enum TagPalette {
 
 /// Feuille « Nouveau tag » : nom + choix de couleur dans une palette + couleur personnalisée.
 private struct CreateTagSheet: View {
+    @Environment(\.iPadLayout) private var iPadLayout
     let driveId: Int
     let onCreated: () -> Void
 
@@ -963,7 +1006,9 @@ private struct CreateTagSheet: View {
 
     private var colorGrid: some View {
         LazyVGrid(
-            columns: Array(repeating: GridItem(.flexible(), spacing: 14), count: 6),
+            columns: iPadLayout.isPad
+                ? Array(repeating: GridItem(.flexible(), spacing: 14), count: 6)
+                : [GridItem(.adaptive(minimum: 44), spacing: 14)],
             spacing: 14
         ) {
             ForEach(TagPalette.colors, id: \.self) { hex in
@@ -975,23 +1020,33 @@ private struct CreateTagSheet: View {
                         }
                     }
                 } label: {
-                    Circle()
-                        .fill(Color(hex: hex) ?? .gray)
-                        .frame(width: 38, height: 38)
-                        .overlay {
-                            if color.lowercased() == hex.lowercased() {
-                                Image(systemName: "checkmark")
-                                    .font(.system(size: 14, weight: .bold))
-                                    .foregroundStyle(.white)
-                                    .shadow(color: .black.opacity(0.3), radius: 1)
-                            }
-                        }
+                    if iPadLayout.isPad {
+                        colorSwatch(hex)
+                    } else {
+                        colorSwatch(hex)
+                            .frame(width: 44, height: 44)
+                            .contentShape(Rectangle())
+                    }
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel("Couleur \(hex)")
             }
         }
         .padding(.vertical, 6)
+    }
+
+    private func colorSwatch(_ hex: String) -> some View {
+        Circle()
+            .fill(Color(hex: hex) ?? .gray)
+            .frame(width: 38, height: 38)
+            .overlay {
+                if color.lowercased() == hex.lowercased() {
+                    Image(systemName: "checkmark")
+                        .font(.system(size: 14, weight: .bold))
+                        .foregroundStyle(.white)
+                        .shadow(color: .black.opacity(0.3), radius: 1)
+                }
+            }
     }
 
     private func create() async {
