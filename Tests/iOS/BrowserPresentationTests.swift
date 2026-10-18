@@ -89,7 +89,6 @@ final class BrowserPresentationTests: XCTestCase {
         var title = CGRect.zero
         var header = CGRect.zero
         var cards = CGRect.zero
-        var command = CGRect.zero
     }
 
     func testActualGridDetailsActionInEachBrowserScope() async throws {
@@ -189,9 +188,6 @@ final class BrowserPresentationTests: XCTestCase {
                     ToolbarItem(placement: .topBarTrailing) {
                         Button("Sélectionner", systemImage: "checkmark.circle") {}
                             .labelStyle(.iconOnly).frame(width: 44, height: 44)
-                            .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: {
-                                if tab == .home { frames.command = $0 }
-                            }
                     }
                 }
                 .navigationBarTitleDisplayMode(.inline)
@@ -210,12 +206,21 @@ final class BrowserPresentationTests: XCTestCase {
             previous?.makeKey()
         }
         host.view.layoutIfNeeded()
+        // A native bar button has its own SwiftUI hosting coordinate space.
+        // Convert UIKit's bar to the window instead of comparing that local
+        // button frame with the header's global frame.
+        func toolbarFrame() -> CGRect? {
+            descendants(window).compactMap { $0 as? UINavigationBar }
+                .first { !$0.isHidden && $0.alpha > 0 && $0.bounds.height > 0 }
+                .map { $0.convert($0.bounds, to: window) }
+        }
         try await waitUntil {
             frames.title.width > 0 && frames.header.height > 0
-                && frames.cards.height > 0 && frames.command.height > 0 && frames.command.midY > 0
+                && frames.cards.height > 0 && toolbarFrame() != nil
         }
         XCTAssertEqual(frames.title.width, 228, accuracy: 0.5)
-        XCTAssertEqual(frames.header.midY, frames.command.midY, accuracy: 2,
+        let toolbar = try XCTUnwrap(toolbarFrame())
+        XCTAssertEqual(frames.header.midY, toolbar.midY, accuracy: 2,
                        "The summary must share the system toolbar's vertical center, not add a content row")
         XCTAssertGreaterThanOrEqual(frames.cards.minY, frames.header.maxY)
     }
