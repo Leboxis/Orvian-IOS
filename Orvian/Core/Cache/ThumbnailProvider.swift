@@ -349,7 +349,7 @@ actor ThumbnailProvider {
     }
 
     private func popNextPrefetchKey() -> Key? {
-        guard !pendingPrefetchKeys.isEmpty else { return nil }
+        guard !Task.isCancelled, !pendingPrefetchKeys.isEmpty else { return nil }
         return pendingPrefetchKeys.removeFirst()
     }
 

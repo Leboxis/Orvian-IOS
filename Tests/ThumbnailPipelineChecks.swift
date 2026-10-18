@@ -8,6 +8,16 @@ extension ThumbnailProvider {
     func subscriberCount(fileId: Int) async -> Int {
         await requests.subscriberCount(for: Self.key(driveId: 1, fileId: fileId, isTrashed: false))
     }
+
+    func checkCancelledPrefetchDequeue() async {
+        pendingPrefetchKeys = [Self.key(driveId: 1, fileId: 45, isTrashed: false)]
+        let oldWorker = Task { self.popNextPrefetchKey() }
+        oldWorker.cancel()
+        let discarded = await oldWorker.value
+        precondition(discarded == nil && pendingPrefetchKeys.count == 1,
+                     "A cancelled worker must not consume the replacement row")
+        pendingPrefetchKeys.removeAll()
+    }
 }
 
 actor ThumbnailTestServer {
@@ -107,6 +117,7 @@ struct ThumbnailPipelineChecks {
         for task in occupied { _ = await task.value }
         _ = await newest.value
         await waitUntil { await server.pendingCount == 0 }
+        await provider.checkCancelledPrefetchDequeue()
         print("Thumbnail subscriber cancellation, cache reuse and obsolete queue checks passed")
     }
 }
