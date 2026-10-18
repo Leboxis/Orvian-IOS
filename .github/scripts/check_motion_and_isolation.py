@@ -69,7 +69,9 @@ for index, line in enumerate(declarations):
 grid_body = source("Orvian/Features/Shared/FileGridView.swift")
 call = grid_body[grid_body.index("FileCardView("):]
 call = call[:call.index("\n        )")]
-label = re.compile(r"^\s*([A-Za-z_][A-Za-z0-9_]*):")
+# Only direct arguments belong to FileCardView. Labels inside its callbacks
+# (such as loadIfNeeded's isTrashed) have a deeper indentation.
+label = re.compile(r"^ {12}([A-Za-z_][A-Za-z0-9_]*):")
 passed = [
     match.group(1)
     for line in call.splitlines()
