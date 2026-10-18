@@ -97,6 +97,7 @@ final class MediaMetadataStore {
     private var persistenceLoaded = false
     private var persistenceLoadTask: Task<[String: PersistedEntry], Never>?
     private var pendingSaveTask: Task<Void, Never>?
+    @ObservationIgnored private var pendingRevisionTask: Task<Void, Never>?
     /// Limite douce du cache disque ; l'écriture écarte les entrées les plus
     /// anciennes au-delà (des milliers de vidéos restent couvertes).
     private static let persistedEntryLimit = 6_000
@@ -109,6 +110,25 @@ final class MediaMetadataStore {
 
     func info(driveId: Int, for fileId: Int) -> Info? {
         cache[persistenceKey(driveId: driveId, fileId: fileId)]
+    }
+
+    /// Les lots rapprochés partagent une publication sur une fenêtre de 200 ms.
+    /// La fin d'une résolution publie le reliquat avant que l'appelant relise
+    /// son cache de filtres : aucun résultat final n'attend une autre vidéo.
+    private func scheduleRevisionUpdate() {
+        guard pendingRevisionTask == nil else { return }
+        pendingRevisionTask = Task { [weak self] in
+            do { try await Task.sleep(for: .milliseconds(200)) }
+            catch { return }
+            self?.publishPendingRevision()
+        }
+    }
+
+    private func publishPendingRevision() {
+        guard let task = pendingRevisionTask else { return }
+        pendingRevisionTask = nil
+        task.cancel()
+        revision &+= 1
     }
 
     /// Instantané des métadonnées connues pour les vidéos d'une liste, destiné
@@ -260,6 +280,7 @@ final class MediaMetadataStore {
     /// réseau ; seules les vidéos réellement inconnues sont analysées.
     func resolveAll(driveId: Int, items: [DriveFile]) async {
         await ensurePersistenceLoaded()
+        defer { publishPendingRevision() }
         let credential = TokenStore.credentialFingerprint()
 
         var pending: [DriveFile] = []
@@ -281,7 +302,7 @@ final class MediaMetadataStore {
             pending.append(file)
         }
         if promotedAny {
-            revision += 1
+            scheduleRevisionUpdate()
         }
 
         // Lots de 4 (et non 8) : chaque résolution lit le `moov` via le réseau.
@@ -337,7 +358,7 @@ final class MediaMetadataStore {
                 // Un seul signal de rafraichissement par lot termine : la grille
                 // se re-trie une fois par lot au lieu d'une fois par video.
                 if !resolved.isEmpty {
-                    revision &+= 1
+                    scheduleRevisionUpdate()
                 }
             }
             index += batch

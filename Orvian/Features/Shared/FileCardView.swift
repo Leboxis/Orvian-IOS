@@ -364,6 +364,7 @@ struct FileCardView: View {
         }
         // Affiche immédiatement le remplacement, puis continue d'attendre le
         // poster vidéo sans figer un squelette pendant tout l'encodage.
+        guard !Task.isCancelled else { return }
         thumbnailLoaded = true
         if let image = await ThumbnailProvider.shared.thumbnailWhenAvailable(
             driveId: driveId,

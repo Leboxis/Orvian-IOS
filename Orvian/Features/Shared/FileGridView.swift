@@ -90,6 +90,7 @@ struct FileGridView: View {
     @AppStorage("defaultFolderColor") private var defaultFolderColor = "#4285F5"
     @State private var metadataRevision = 0
     @State private var prefetchTask: Task<Void, Never>?
+    @State private var prefetchRequestID: UUID?
     /// Demande de préchargement la plus récente. Une rafale d'apparitions de
     /// cartes pendant le scroll ne fait que remplacer cette demande : la
     /// tâche d'accalmie unique la relit, au lieu d'être annulée et recréée
@@ -184,6 +185,7 @@ struct FileGridView: View {
                 paginationRequestID = nil
                 prefetchTask?.cancel()
                 prefetchTask = nil
+                prefetchRequestID = nil
                 pendingPrefetch = nil
                 sortReloadTask?.cancel()
                 sortReloadTask = nil
@@ -266,11 +268,9 @@ struct FileGridView: View {
 
     // MARK: - Présentations contextuelles
 
-    /// Fichier ciblé par une présentation de la grille, avec les voisins du
-    /// pager pour l'ouverture depuis la fiche détails.
+    /// Fichier ciblé par une présentation de la grille.
     private struct FileRequest: Identifiable {
         let file: DriveFile
-        var siblings: [DriveFile] = []
         var id: Int { file.id }
     }
 
@@ -303,7 +303,7 @@ struct FileGridView: View {
     /// Ouvre la présentation demandée par une carte. Une seule occurrence de
     /// chaque feuille/alerte est montée au niveau de la grille : le view-graph
     /// ne porte plus ces modificateurs sur chacune des cartes.
-    private func present(_ intent: FileCardView.Intent, for file: DriveFile, siblings: [DriveFile]) {
+    private func present(_ intent: FileCardView.Intent, for file: DriveFile) {
         switch intent {
         case .details:
             // Avoid animating the entire grid through the inspector's resize.
@@ -320,18 +320,6 @@ struct FileGridView: View {
             renameRequest = FileRequest(file: file)
         case .deleteConfirm:
             deleteRequest = FileRequest(file: file)
-        }
-    }
-
-    /// Ouverture depuis la fiche détails : même routage que le tap sur la
-    /// carte, avec les voisins capturés au moment de la demande (le pager
-    /// navigue dans l'ordre du tri et des filtres affichés).
-    private func open(request: FileRequest) {
-        let file = request.file
-        if file.isDirectory {
-            onOpenDirectory?(file)
-        } else {
-            onOpenFile?(file, request.siblings)
         }
     }
 
@@ -713,7 +701,7 @@ struct FileGridView: View {
                 onMove?(file)
             },
             onPresent: { intent in
-                present(intent, for: file, siblings: siblings)
+                present(intent, for: file)
             },
             onPrepareDetails: {
                 Task {
@@ -746,7 +734,8 @@ struct FileGridView: View {
             requestMoreFiles()
         }
 
-        let ahead = siblings.dropFirst(index + 1).prefix(3)
+        let lookahead = presentation == .list ? 3 : max(3, columns.count)
+        let ahead = siblings.dropFirst(index + 1).prefix(lookahead)
         if prefetchThumbnails || prefetchVideoURLs,
            !prefetchOnWiFiOnly || NetworkMonitor.shared.allowsBackgroundPrefetch {
             pendingPrefetch = PrefetchRequest(
@@ -763,15 +752,25 @@ struct FileGridView: View {
         guard pendingPrefetch != nil else { return }
         guard prefetchTask == nil else { return }
 
+        let requestID = UUID()
+        prefetchRequestID = requestID
         prefetchTask = Task {
-            while !Task.isCancelled {
-                guard let request = pendingPrefetch else { break }
-                pendingPrefetch = nil
+            defer {
+                if prefetchRequestID == requestID {
+                    prefetchTask = nil
+                    prefetchRequestID = nil
+                }
+            }
+            while !Task.isCancelled, pendingPrefetch != nil {
                 do {
                     try await Task.sleep(for: .milliseconds(180))
                 } catch {
                     break
                 }
+                guard !Task.isCancelled,
+                      !prefetchOnWiFiOnly || NetworkMonitor.shared.allowsBackgroundPrefetch,
+                      let request = pendingPrefetch else { break }
+                pendingPrefetch = nil
                 if prefetchThumbnails, !request.thumbnailIds.isEmpty {
                     await ThumbnailProvider.shared.prefetch(
                         driveId: request.driveId,
@@ -779,6 +778,7 @@ struct FileGridView: View {
                         isTrashed: request.isTrashed
                     )
                 }
+                guard !Task.isCancelled else { break }
                 if prefetchVideoURLs, !request.videoIds.isEmpty {
                     await VideoAssetCache.shared.prefetch(
                         driveId: request.driveId,
@@ -786,7 +786,6 @@ struct FileGridView: View {
                     )
                 }
             }
-            prefetchTask = nil
         }
     }
 

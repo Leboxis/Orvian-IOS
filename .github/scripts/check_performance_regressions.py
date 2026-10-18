@@ -30,8 +30,10 @@ assert "Task.detached(priority: .utility)" in metadata[load_start:load_end]
 # Cache des miniatures : la lecture locale (mémoire puis disque) précède le
 # réseau, l'écriture disque n'a lieu qu'après validation du contenu, et le
 # cache négatif ne peut jamais masquer une entrée disque.
-assert "if let image = await loadFromDisk(key)" in thumbnails
-assert thumbnails.index("await loadFromDisk(key)") < thumbnails.index("return await fetch(key: key)")
+assert "if let cached = await loadFromDisk(key)" in thumbnails
+assert thumbnails.index("await loadFromDisk(key)") < thumbnails.index("image = await fetch(key: key)")
+assert "SharedRequests<Key, ImageResult>()" in thumbnails
+assert "private var inFlight:" not in thumbnails
 assert "private nonisolated func decodeAndStore" in thumbnails
 assert thumbnails.index("guard let image = UIImage.decode(data)") < thumbnails.index("disk.store(")
 assert "private var failures = ThumbnailFailureLedger()" in thumbnails
@@ -45,5 +47,14 @@ assert thumbnails.index("guard let apiError = error as? APIError") < thumbnails.
 assert "let absenceTTL" in ledger and "let transientTTL" in ledger and "let limit: Int" in ledger
 assert "markAbsent" in ledger and "markTransientFailure" in ledger and "mutating func clear" in ledger
 assert "markAbsent" in ledger and "markTransientFailure" in ledger and "func clear" in ledger
+
+# La demande la plus récente est lue après l'accalmie, avec une fenêtre
+# adaptée aux colonnes. Le dernier lot de métadonnées est toujours publié.
+prefetch = grid[grid.index("    private func appeared("):grid.index("    // MARK: - États")]
+assert "max(3, columns.count)" in prefetch
+assert prefetch.index("Task.sleep") < prefetch.index("let request = pendingPrefetch")
+assert "prefetchRequestID == requestID" in prefetch
+assert "defer { publishPendingRevision() }" in metadata
+assert "private func scheduleRevisionUpdate()" in metadata
 
 print("Performance regression checks passed")

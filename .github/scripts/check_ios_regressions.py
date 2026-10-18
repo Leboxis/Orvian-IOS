@@ -114,8 +114,13 @@ enum TokenStore {
     func asset(driveId: Int, fileId: Int) async -> AVURLAsset? { calls += 1; return nil }
 }
 ''', encoding="utf-8")
-    run_check(temp / "metadata", [dependencies, ROOT / "Orvian/Core/Media/MediaMetadataStore.swift",
-                                   ROOT / "Tests/MediaMetadataChecks.swift"])
+    metadata_checks = temp / "MediaMetadataChecks.swift"
+    metadata_checks.write_text(
+        (ROOT / "Orvian/Core/Media/MediaMetadataStore.swift").read_text(encoding="utf-8")
+        + "\n" + (ROOT / "Tests/MediaMetadataChecks.swift").read_text(encoding="utf-8"),
+        encoding="utf-8",
+    )
+    run_check(temp / "metadata", [dependencies, metadata_checks])
 
     # Exercise actual move handling and cache invalidation without the HTTP client.
     mutation_dependencies = temp / "MutationDependencies.swift"
