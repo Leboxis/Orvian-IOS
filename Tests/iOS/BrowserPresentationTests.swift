@@ -154,18 +154,25 @@ final class BrowserPresentationTests: XCTestCase {
 
     func testCardTitleUsesNinetyFivePercentAndPadSummarySharesTopToolbar() async throws {
         let frames = Frames()
-        let fixture = IPadTabView(selection: .constant(.home)) { _ in
+        // Native tabs may lay out inactive panes too. Only the selected pane
+        // may publish into these shared probes; hidden toolbar frames are not
+        // coordinates of the visible Home toolbar.
+        let fixture = IPadTabView(selection: .constant(.home)) { tab in
             NavigationStack {
                 VStack {
                     CardNameLayout {
                         Text("Un nom de fichier très long qui doit remplir la largeur disponible")
                             .lineLimit(1).frame(maxWidth: .infinity)
-                            .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { frames.title = $0 }
+                            .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: {
+                                if tab == .home { frames.title = $0 }
+                            }
                     }
                     .frame(width: 240)
                     ScrollView {
                         Color.clear.frame(height: 1000)
-                            .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { frames.cards = $0 }
+                            .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: {
+                                if tab == .home { frames.cards = $0 }
+                            }
                     }
                 }
                 .modifier(FileBrowserHeader {
@@ -174,13 +181,17 @@ final class BrowserPresentationTests: XCTestCase {
                         Text("12 éléments")
                     }
                     .font(.caption).frame(width: 180)
-                    .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { frames.header = $0 }
+                    .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: {
+                        if tab == .home { frames.header = $0 }
+                    }
                 })
                 .toolbar {
                     ToolbarItem(placement: .topBarTrailing) {
                         Button("Sélectionner", systemImage: "checkmark.circle") {}
                             .labelStyle(.iconOnly).frame(width: 44, height: 44)
-                            .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { frames.command = $0 }
+                            .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: {
+                                if tab == .home { frames.command = $0 }
+                            }
                     }
                 }
                 .navigationBarTitleDisplayMode(.inline)
@@ -199,7 +210,10 @@ final class BrowserPresentationTests: XCTestCase {
             previous?.makeKey()
         }
         host.view.layoutIfNeeded()
-        try await waitUntil { frames.title.width > 0 && frames.header.height > 0 && frames.cards.height > 0 && frames.command.height > 0 }
+        try await waitUntil {
+            frames.title.width > 0 && frames.header.height > 0
+                && frames.cards.height > 0 && frames.command.height > 0 && frames.command.midY > 0
+        }
         XCTAssertEqual(frames.title.width, 228, accuracy: 0.5)
         XCTAssertEqual(frames.header.midY, frames.command.midY, accuracy: 2,
                        "The summary must share the system toolbar's vertical center, not add a content row")
