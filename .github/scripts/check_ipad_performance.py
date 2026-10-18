@@ -31,7 +31,18 @@ final class UIImage: @unchecked Sendable {
     init?(data: Data) { if data.isEmpty { return nil } }
     func preparingForDisplay() -> UIImage? { self }
 }
-enum TokenStore { static func credentialFingerprint() -> String? { "account-a" } }
+enum TokenStore {
+    private static let lock = NSLock()
+    private static var credential = "account-a"
+    static func credentialFingerprint() -> String? {
+        lock.lock(); defer { lock.unlock() }
+        return credential
+    }
+    static func setCredential(_ value: String) {
+        lock.lock(); defer { lock.unlock() }
+        credential = value
+    }
+}
 struct KDriveService {
     func thumbnailData(driveId: Int, fileId: Int, isTrashed: Bool) async throws -> Data {
         try await ThumbnailTestServer.shared.data(fileId: fileId)

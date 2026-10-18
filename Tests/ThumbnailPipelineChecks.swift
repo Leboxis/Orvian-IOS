@@ -18,6 +18,8 @@ extension ThumbnailProvider {
                      "A cancelled worker must not consume the replacement row")
         pendingPrefetchKeys.removeAll()
     }
+
+    func waitForPrefetch() async { await prefetchTask?.value }
 }
 
 actor ThumbnailTestServer {
@@ -118,6 +120,24 @@ struct ThumbnailPipelineChecks {
         _ = await newest.value
         await waitUntil { await server.pendingCount == 0 }
         await provider.checkCancelledPrefetchDequeue()
+
+        let late = Task { await provider.thumbnail(driveId: 1, fileId: 200) }
+        await waitUntil { await server.count(200) == 1 }
+        TokenStore.setCredential("account-b")
+        await server.complete(200)
+        let lateImage = await late.value
+        precondition(lateImage == nil && provider.cachedMemoryThumbnail(driveId: 1, fileId: 200, isTrashed: false) == nil,
+                     "A late account-a response must never enter account-b's cache")
+
+        TokenStore.setCredential("account-a")
+        await provider.prefetch(driveId: 1, fileIds: [201, 202])
+        await waitUntil { await server.count(201) == 1 }
+        TokenStore.setCredential("account-b")
+        await server.complete(201)
+        await provider.waitForPrefetch()
+        let crossedSessionCount = await server.count(202)
+        precondition(crossedSessionCount == 0, "A queued prefetch must retain its captured account")
+        TokenStore.setCredential("account-a")
         print("Thumbnail subscriber cancellation, cache reuse and obsolete queue checks passed")
     }
 }
