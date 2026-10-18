@@ -77,7 +77,8 @@ struct SecurityChecks {
             "Thumbnail memory, in-flight, failures and sync lookup must share the scoped key"
         )
         precondition(
-            thumbnailProvider.contains("private var inFlight: [Key:") &&
+            thumbnailProvider.contains("SharedRequests<Key, ImageResult>()") &&
+            thumbnailProvider.contains("requests.value(for: key)") &&
             thumbnailProvider.contains("private var failures = ThumbnailFailureLedger()") &&
             thumbnailProvider.contains("private var lastFailures: [Key: (outcome: FetchOutcome, at: Date)]") &&
             thumbnailProvider.contains("private var pendingPrefetchKeys: [Key]") &&

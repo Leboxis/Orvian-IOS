@@ -26,6 +26,9 @@ jobs:
       - name: Check performance regressions
         run: python3 .github/scripts/check_performance_regressions.py
 
+      - name: Check iPad media scheduling without rendering
+        run: python3 .github/scripts/check_ipad_performance.py
+
       - name: Check favorites disk cache
         run: python3 .github/scripts/check_favorites_cache.py
 

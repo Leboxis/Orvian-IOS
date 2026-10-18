@@ -31,11 +31,15 @@ actor ThumbnailProvider {
     private let disk: DiskImageCache
     private let service: KDriveService
     private let throttler = AsyncThrottler(maxConcurrent: 8)
-    private var inFlight: [Key: Task<UIImage?, Never>] = [:]
+    private struct ImageResult: @unchecked Sendable {
+        let image: UIImage?
+    }
+    private let requests = SharedRequests<Key, ImageResult>()
 
     private var pendingPrefetchKeys: [Key] = []
     private var prefetchTask: Task<Void, Never>?
-    private let maxPendingPrefetch = 6
+    private var prefetchRequestID: UUID?
+    private let maxPendingPrefetch = 12
     /// Les posters de vidéos sont produits de façon asynchrone côté kDrive.
     /// Fenêtre de réessais plafonnée à ~60 s : couvre la majorité des
     /// encodages sans laisser une activité réseau/batterie persister
@@ -115,16 +119,27 @@ actor ThumbnailProvider {
     /// La clé est capturée une seule fois par demande afin que les attentes,
     /// retries et prefetch ne basculent jamais silencieusement de session.
     private func thumbnail(for key: Key) async -> UIImage? {
-        guard Self.isCurrentCredential(key) else { return nil }
+        guard !Task.isCancelled, Self.isCurrentCredential(key) else { return nil }
 
         if let cached = Self.memory.object(forKey: key.nsString) {
             return cached
         }
-        if let existing = inFlight[key] {
-            let image = await existing.value
-            guard Self.isCurrentCredential(key) else { return nil }
-            return image
+        do {
+            // Chaque carte possède un abonnement : seule la disparition du
+            // dernier consommateur annule la lecture ou le téléchargement.
+            let result = try await requests.value(for: key) { [self] in
+                ImageResult(image: await loadThumbnail(for: key))
+            }
+            guard !Task.isCancelled, Self.isCurrentCredential(key) else { return nil }
+            return result.image
+        } catch {
+            return nil
         }
+    }
+
+    private func loadThumbnail(for key: Key) async -> UIImage? {
+        guard !Task.isCancelled, Self.isCurrentCredential(key) else { return nil }
+        if let cached = Self.memory.object(forKey: key.nsString) { return cached }
 
         // Cache négatif : la clé n'est écartée que si le disque n'a rien à
         // servir. Une miniature déjà écrite (session précédente, préchargement
@@ -133,18 +148,15 @@ actor ThumbnailProvider {
             return nil
         }
 
-        let task = Task<UIImage?, Never> { [self] in
-            defer { inFlight[key] = nil }
-            // La lecture disque et le décodage s'exécutent hors de l'actor :
-            // sur l'executor sérialisé, chaque décodage JPEG bloquait tous
-            // les autres chargements (scroll rapide, préchargement…).
-            if let image = await loadFromDisk(key) {
-                return image
-            }
-            return await fetch(key: key)
+        let image: UIImage?
+        // La lecture disque et le décodage s'exécutent hors de l'actor :
+        // sur l'executor sérialisé, chaque décodage JPEG bloquait tous
+        // les autres chargements (scroll rapide, préchargement…).
+        if let cached = await loadFromDisk(key) {
+            image = cached
+        } else {
+            image = await fetch(key: key)
         }
-        inFlight[key] = task
-        let image = await task.value
         guard !Task.isCancelled, Self.isCurrentCredential(key), let image else { return nil }
         Self.memory.setObject(image, forKey: key.nsString, cost: image.estimatedByteSize)
         // Une miniature obtenue par le chemin direct invalide une absence
@@ -169,7 +181,7 @@ actor ThumbnailProvider {
     /// async = global concurrent executor) : les chargements tournent en
     /// parallèle au lieu de se sérialiser derrière chaque décodage.
     private nonisolated func loadFromDisk(_ key: Key) async -> UIImage? {
-        guard disk.hasEntry(
+        guard !Task.isCancelled, disk.hasEntry(
             credentialFingerprint: key.credentialFingerprint,
             driveId: key.driveId,
             fileId: key.fileId,
@@ -210,6 +222,7 @@ actor ThumbnailProvider {
         shouldRetry: Bool = true
     ) async -> UIImage? {
         let key = Self.key(driveId: driveId, fileId: fileId, isTrashed: isTrashed)
+        guard !Task.isCancelled, Self.isCurrentCredential(key) else { return nil }
 
         // Clé écartée (absence mémorisée ou panne récente) : ne pas relancer la
         // boucle de réessais. Une miniature présente en mémoire ou sur disque
@@ -245,7 +258,7 @@ actor ThumbnailProvider {
             }
         }
 
-        guard Self.isCurrentCredential(key) else { return nil }
+        guard !Task.isCancelled, Self.isCurrentCredential(key) else { return nil }
         classifyFailure(key)
         return nil
     }
@@ -293,8 +306,7 @@ actor ThumbnailProvider {
                 fileId: fileId,
                 isTrashed: isTrashed
             )
-            guard inFlight[key] == nil,
-                  Self.memory.object(forKey: key.nsString) == nil,
+            guard Self.memory.object(forKey: key.nsString) == nil,
                   !hasDiskEntry(key)
             else { continue }
             // `Set` plutôt que `contains` sur le tableau : préparer 100
@@ -320,26 +332,31 @@ actor ThumbnailProvider {
         pendingPrefetchKeys.removeAll()
         prefetchTask?.cancel()
         prefetchTask = nil
+        prefetchRequestID = nil
     }
 
     private func schedulePrefetchWorker() {
         guard prefetchTask == nil else { return }
+        let requestID = UUID()
+        prefetchRequestID = requestID
         prefetchTask = Task { [weak self] in
             while let next = await self?.popNextPrefetchKey() {
                 guard !Task.isCancelled else { break }
                 _ = await self?.thumbnail(for: next)
             }
-            await self?.clearPrefetchTask()
+            await self?.clearPrefetchTask(requestID: requestID)
         }
     }
 
     private func popNextPrefetchKey() -> Key? {
-        guard !pendingPrefetchKeys.isEmpty else { return nil }
+        guard !Task.isCancelled, !pendingPrefetchKeys.isEmpty else { return nil }
         return pendingPrefetchKeys.removeFirst()
     }
 
-    private func clearPrefetchTask() {
+    private func clearPrefetchTask(requestID: UUID) {
+        guard prefetchRequestID == requestID else { return }
         prefetchTask = nil
+        prefetchRequestID = nil
         if !pendingPrefetchKeys.isEmpty {
             schedulePrefetchWorker()
         }
@@ -350,12 +367,12 @@ actor ThumbnailProvider {
     /// un défilement rapide, chaque décodage JPEG et chaque écriture fichier
     /// ne sérialisent plus les autres chargements derrière eux.
     private nonisolated func decodeAndStore(_ data: Data, key: Key) async -> UIImage? {
-        guard !data.isEmpty, Self.isCurrentCredential(key) else { return nil }
+        guard !Task.isCancelled, !data.isEmpty, Self.isCurrentCredential(key) else { return nil }
         // Vérifier le contenu avant de le placer dans le cache. Une page
         // d'erreur renvoyée à tort en 2xx ne doit jamais devenir une
         // absence de miniature persistante.
         guard let image = UIImage.decode(data) else { return nil }
-        guard Self.isCurrentCredential(key) else { return nil }
+        guard !Task.isCancelled, Self.isCurrentCredential(key) else { return nil }
         // Les données validées sont conservées sans ré-encodage CPU.
         disk.store(
             data: data,
@@ -390,6 +407,7 @@ actor ThumbnailProvider {
         } catch is CancellationError {
             return nil
         } catch {
+            guard !Task.isCancelled else { return nil }
             // L'échec est classé mais pas encore mémorisé : juste après un
             // upload, kDrive peut répondre 404 quelques secondes avant que la
             // miniature soit générée. Le classement ne devient un marqueur
@@ -429,6 +447,7 @@ actor ThumbnailProvider {
         pendingPrefetchKeys.removeAll()
         prefetchTask?.cancel()
         prefetchTask = nil
+        prefetchRequestID = nil
         failures.removeAll()
         lastFailures.removeAll()
         disk.purge()
