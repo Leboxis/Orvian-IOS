@@ -405,13 +405,21 @@ struct FavoritesView: View {
     }
 
     private var itemCountLabel: some View {
-        Text(itemCountText)
-            .font(.caption.weight(.medium))
-            .foregroundStyle(.secondary)
-            .padding(.horizontal, 10)
-            .padding(.vertical, 3.5)
-            .inlineChrome(Capsule())
-            .accessibilityLabel("\(itemCountText) dans \(title)")
+        Group {
+            if iPadLayout.isPad {
+                Text(itemCountText)
+                    .font(.caption.weight(.medium))
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 3.5)
+                    .inlineChrome(Capsule())
+            } else {
+                Text(itemCountText)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .accessibilityLabel("\(itemCountText) dans \(title)")
     }
 
     private var busyIndicator: some View {

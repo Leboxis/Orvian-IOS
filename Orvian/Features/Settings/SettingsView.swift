@@ -98,15 +98,28 @@ struct SettingsView: View {
 
     private var phoneNavigation: some View {
         NavigationStack(path: $path) {
-            List {
-                destinationsSection
-                aboutSection
+            VStack(spacing: 0) {
+                Text("Réglages")
+                    .font(.title2.weight(.semibold))
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .accessibilityAddTraits(.isHeader)
+                    .padding(.horizontal, DS.gridMargin)
+                    .padding(.top, 8)
+                    .padding(.bottom, 6)
+                List {
+                    destinationsSection
+                    aboutSection
+                }
+                .listStyle(.insetGrouped)
+                .contentMargins(.top, 12, for: .scrollContent)
             }
-            .listStyle(.insetGrouped)
+            .background(Color(uiColor: .systemGroupedBackground))
             .navigationTitle("Réglages")
-            .navigationBarTitleDisplayMode(.large)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar(.hidden, for: .navigationBar)
             .navigationDestination(for: SettingsRoute.self) { route in
                 destinationView(for: route)
+                    .toolbar(.visible, for: .navigationBar)
             }
             .safeAreaInset(edge: .bottom) {
                 Color.clear.frame(height: DS.contentBottomInset)
@@ -192,7 +205,7 @@ struct SettingsView: View {
             // Sur iPad, le titre de la colonne dit déjà « Réglages » et les
             // textes d'aide d'une barre latérale se lisent comme du contenu.
             if !iPadLayout.isPad {
-                Text("Réglages")
+                Text("Préférences")
             }
         } footer: {
             if !iPadLayout.isPad {
@@ -210,8 +223,24 @@ struct SettingsView: View {
                     .foregroundStyle(.secondary)
                     .monospacedDigit()
             }
+            if !iPadLayout.isPad {
+                NavigationLink {
+                    PerfView()
+                        .toolbar(.visible, for: .navigationBar)
+                } label: {
+                    Label("Mesures réseau", systemImage: "gauge.with.dots")
+                }
+                if let drive = session.selectedDrive {
+                    NavigationLink {
+                        ThumbnailInformationView(driveId: drive.id)
+                            .toolbar(.visible, for: .navigationBar)
+                    } label: {
+                        Label("Miniatures", systemImage: "photo.on.rectangle")
+                    }
+                }
+            }
         } header: {
-            Text("À propos")
+            Text(iPadLayout.isPad ? "À propos" : "Informations et diagnostics")
         } footer: {
             if !iPadLayout.isPad {
                 Text("Orvian conserve le token et le drive choisi uniquement sur cet appareil.")

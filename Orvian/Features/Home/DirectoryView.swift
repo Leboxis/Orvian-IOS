@@ -764,18 +764,36 @@ struct DirectoryView: View {
     }
 
     private var breadcrumbLabel: some View {
-        HStack(spacing: 5) {
-            Image(systemName: "folder.fill")
-                .font(.system(size: 10, weight: .medium))
-            Text((isBreadcrumbTruncated ? "…  ›  " : "") + displayedCrumbs.joined(separator: "  ›  "))
-                .lineLimit(1)
-                .truncationMode(.head)
+        Group {
+            if iPadLayout.isPad {
+                HStack(spacing: 5) {
+                    Image(systemName: "folder.fill")
+                        .font(.system(size: 10, weight: .medium))
+                    Text((isBreadcrumbTruncated ? "…  ›  " : "") + displayedCrumbs.joined(separator: "  ›  "))
+                        .lineLimit(1)
+                        .truncationMode(.head)
+                }
+                .font(.caption.weight(.medium))
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 3.5)
+                .inlineChrome(Capsule())
+            } else {
+                HStack(spacing: 5) {
+                    Text(directory.name)
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.primary)
+                        .lineLimit(dynamicTypeSize.isAccessibilitySize ? 4 : 2)
+                        .truncationMode(.middle)
+                    if onNavigateAncestor != nil && crumbs.count > 1 {
+                        Image(systemName: "chevron.down")
+                            .font(.caption2.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .accessibilityAddTraits(.isHeader)
+            }
         }
-        .font(.caption.weight(.medium))
-        .foregroundStyle(.secondary)
-        .padding(.horizontal, 10)
-        .padding(.vertical, 3.5)
-        .inlineChrome(Capsule())
         .accessibilityLabel("Chemin : " + crumbs.joined(separator: ", "))
     }
 
@@ -784,13 +802,21 @@ struct DirectoryView: View {
     /// nombre réellement visible ; « partiel » signale les pages restantes.
     private var itemCountLabel: some View {
         let text = itemCountText
-        return Text(text)
-            .font(.caption.weight(.medium))
-            .foregroundStyle(.secondary)
-            .padding(.horizontal, 10)
-            .padding(.vertical, 3.5)
-            .inlineChrome(Capsule())
-            .accessibilityLabel(usesVisibleItemCount ? text : "\(text) dans ce dossier")
+        return Group {
+            if iPadLayout.isPad {
+                Text(text)
+                    .font(.caption.weight(.medium))
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 3.5)
+                    .inlineChrome(Capsule())
+            } else {
+                Text(text)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .accessibilityLabel(usesVisibleItemCount ? text : "\(text) dans ce dossier")
     }
 
     private var usesVisibleItemCount: Bool {

@@ -34,22 +34,13 @@ struct ProfileView: View {
                 if iPadLayout.isPad {
                     padOverview
                 } else {
-                    List {
-                        Section {
-                            storageCard
-                        }
-                        recentUploadsSection
-                        trashSection
-                        aboutSection
-                    }
+                    phoneOverview
                 }
             }
             .safeAreaInset(edge: .bottom) {
                 Color.clear.frame(height: DS.contentBottomInset)
             }
             .navigationTitle("Profil")
-            // Le mode inline masque la barre sur un contenu qui défile : le
-            // grand titre reste, et le bloc ci-dessous prend l'axe du titre.
             .navigationBarTitleDisplayMode(.large)
         }
         .task(id: session.selectedDrive?.id) {
@@ -87,6 +78,29 @@ struct ProfileView: View {
             ProfileDriveStorageCard(session: session, drive: drive,
                                     refreshFailed: storageRefreshFailed)
         }
+    }
+
+    private var phoneOverview: some View {
+        VStack(spacing: 0) {
+            Text("Profil")
+                .font(.title2.weight(.semibold))
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .accessibilityAddTraits(.isHeader)
+                .padding(.horizontal, DS.gridMargin)
+                .padding(.top, 8)
+                .padding(.bottom, 6)
+            List {
+                Section {
+                    storageCard
+                }
+                recentUploadsSection
+                trashSection
+            }
+            .listStyle(.insetGrouped)
+            .contentMargins(.top, 12, for: .scrollContent)
+        }
+        .background(Color(uiColor: .systemGroupedBackground))
+        .toolbar(.hidden, for: .navigationBar)
     }
 
     private var padOverview: some View {
@@ -240,6 +254,7 @@ struct ProfileView: View {
                         source: RecentUploadsLoader.source,
                         router: router
                     )
+                    .toolbar(.visible, for: .navigationBar)
                 } label: {
                     HStack {
                         Text("Imports récents")
@@ -280,6 +295,7 @@ struct ProfileView: View {
             if let drive = session.selectedDrive {
                 NavigationLink {
                     TrashView(driveId: drive.id, router: router)
+                        .toolbar(.visible, for: .navigationBar)
                 } label: {
                     Label("Corbeille", systemImage: "trash")
                 }
@@ -288,31 +304,6 @@ struct ProfileView: View {
             Text("Stockage")
         } footer: {
             Text("Les fichiers supprimés restent dans la corbeille jusqu'à leur effacement définitif.")
-        }
-    }
-
-    private var aboutSection: some View {
-        Section {
-            HStack {
-                Label("Version", systemImage: "info.circle")
-                Spacer()
-                Text(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "—")
-                    .foregroundStyle(.secondary)
-            }
-            NavigationLink {
-                PerfView()
-            } label: {
-                Label("Mesures réseau", systemImage: "gauge.with.dots")
-            }
-            if let drive = session.selectedDrive {
-                NavigationLink(destination: ThumbnailInformationView(driveId: drive.id)) {
-                    Label("Miniatures", systemImage: "photo.on.rectangle")
-                }
-            }
-        } header: {
-            Text("À propos")
-        } footer: {
-            Text("Orvian vous permet de parcourir, organiser et consulter vos fichiers.")
         }
     }
 

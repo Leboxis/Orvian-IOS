@@ -53,6 +53,7 @@ struct FileCardView: View {
     @State private var thumbnail: UIImage?
     @State private var thumbnailLoaded = false
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @Environment(\.iPadLayout) private var iPadLayout
 
     private var kind: FileKind { file.fileKind }
 
@@ -123,6 +124,7 @@ struct FileCardView: View {
                     label: file.name,
                     value: accessibilityValue,
                     isSelected: selectionMode && isSelected,
+                    showsPressFeedback: !iPadLayout.isPad,
                     onTap: {
                         if selectionMode {
                             onToggleSelection?()
@@ -161,8 +163,10 @@ struct FileCardView: View {
                     Text(file.name).font(.body)
                         .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 2)
                         .truncationMode(.middle)
-                    Text(!showsListMetadata && showFileSizes && !file.isDirectory ? "\(kind.label) · \(subtitle)" : kind.label)
-                        .font(.caption).foregroundStyle(.secondary)
+                    if iPadLayout.isPad || !file.isDirectory {
+                        Text(!showsListMetadata && showFileSizes && !file.isDirectory ? "\(kind.label) · \(subtitle)" : kind.label)
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
                     let names = (file.categories ?? []).compactMap { categoriesById[$0.categoryId]?.name }
                     if !names.isEmpty {
                         Text(names.joined(separator: ", ")).font(.caption).foregroundStyle(.secondary)
@@ -193,7 +197,15 @@ struct FileCardView: View {
                     .truncationMode(.middle).foregroundStyle(.primary)
                     .frame(maxWidth: .infinity).accessibilityHidden(enabled)
                 }
-                HStack(spacing: 4) { Text(subtitle); categoryDots }
+                HStack(spacing: 4) {
+                    if iPadLayout.isPad || !file.isDirectory {
+                        Text(subtitle)
+                        categoryDots
+                    } else {
+                        // Réserve la même ligne que les médias, sans répéter « Dossier ».
+                        Text(" ").overlay { HStack(spacing: 4) { categoryDots } }
+                    }
+                }
                     .font(.caption2).foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity).accessibilityHidden(enabled)
             }
@@ -532,6 +544,7 @@ private struct CardInteraction: UIViewRepresentable {
     let label: String
     let value: String
     let isSelected: Bool
+    let showsPressFeedback: Bool
     let onTap: () -> Void
 
     func makeCoordinator() -> Coordinator {
@@ -551,6 +564,7 @@ private struct CardInteraction: UIViewRepresentable {
         uiView.onTap = { [weak coordinator = context.coordinator] in coordinator?.parent.onTap() }
         uiView.accessibilityLabel = label
         uiView.isEnabled = isEnabled
+        uiView.showsPressFeedback = showsPressFeedback
         uiView.accessibilityValue = value
         uiView.accessibilityTraits = isSelected ? [.button, .selected] : [.button]
         uiView.accessibilityCustomActions = (isEnabled ? menuItems : []).map { item in
@@ -562,6 +576,9 @@ private struct CardInteraction: UIViewRepresentable {
     /// menu contextuel sans aperçu. `UIContextMenuInteraction` gère les deux.
     final class InteractionView: UIButton {
         var onTap: (() -> Void)?
+        var showsPressFeedback = false {
+            didSet { updateHighlight() }
+        }
 
         override init(frame: CGRect) {
             super.init(frame: frame)
@@ -580,7 +597,13 @@ private struct CardInteraction: UIViewRepresentable {
         }
 
         override var isHighlighted: Bool {
-            didSet { backgroundColor = .clear }
+            didSet { updateHighlight() }
+        }
+
+        private func updateHighlight() {
+            layer.cornerRadius = showsPressFeedback ? DS.cardRadius : 0
+            backgroundColor = showsPressFeedback && isEnabled && isHighlighted
+                ? UIColor.label.withAlphaComponent(0.06) : .clear
         }
 
         @objc private func handleTap() {
@@ -603,6 +626,9 @@ private struct CardInteraction: UIViewRepresentable {
             configurationForMenuAtLocation location: CGPoint
         ) -> UIContextMenuConfiguration? {
             guard (interaction.view as? UIControl)?.isEnabled == true else { return nil }
+            if let view = interaction.view as? InteractionView, view.showsPressFeedback {
+                view.isHighlighted = false
+            }
             dismissal.begin()
             return UIContextMenuConfiguration(
                 identifier: nil,

@@ -179,15 +179,14 @@ struct TagsView: View {
                 .accessibilityAddTraits(.isHeader)
             HStack(spacing: 0) {
                 Button {
-                    withAnimation(Motion.animation(.snappy(duration: 0.25))) {
-                        layout = layout == .grid ? .list : .grid
-                    }
+                    layout = layout == .grid ? .list : .grid
                 } label: {
                     Image(systemName: layout == .grid ? "list.bullet" : "square.grid.2x2")
                         .frame(width: 44, height: 44)
                 }
                 .accessibilityLabel(layout == .grid ? "Afficher les tags en liste" : "Afficher les tags en grille")
                 crossButton
+                    .foregroundStyle(crossState.isActive ? Color.accentColor : .primary)
                 Button {
                     guard !crossState.isActive else { return }
                     crossState.isEditing = false
@@ -195,9 +194,11 @@ struct TagsView: View {
                 } label: {
                     Image(systemName: isReordering ? "checkmark.circle" : "arrow.up.arrow.down")
                         .frame(width: 44, height: 44)
+                        .foregroundStyle(isReordering ? Color.accentColor : .primary)
                         .background(isReordering ? Color.accentColor.opacity(0.12) : .clear, in: Capsule())
                 }
                 .accessibilityLabel(isReordering ? "Terminer le réarrangement" : "Réarranger les tags")
+                .accessibilityValue(isReordering ? "Réarrangement activé" : "Réarrangement désactivé")
                 .accessibilityAddTraits(isReordering ? .isSelected : [])
                 .disabled(crossState.isActive)
                 Button { showCreateSheet = true } label: {
@@ -208,7 +209,8 @@ struct TagsView: View {
             .frame(maxWidth: .infinity, alignment: .center)
         }
         .font(.body)
-        .buttonStyle(.plain)
+        .tint(.primary)
+        .buttonStyle(TagCataloguePressStyle())
         .padding(.horizontal, DS.gridMargin)
         .padding(.top, 8)
         .padding(.bottom, 6)
@@ -493,11 +495,11 @@ struct TagsView: View {
                         Button {
                             open(category)
                         } label: {
-                            TagGridCard(category: category, backgroundOpacity: 0.2,
-                                        isSelecting: crossState.isEditing,
-                                        isSelected: crossState.selectedIDs.contains(category.id))
+                            catalogueGridCard(for: category,
+                                              isSelecting: crossState.isEditing,
+                                              isSelected: crossState.selectedIDs.contains(category.id))
                         }
-                        .buttonStyle(.plain)
+                        .modifier(TagCataloguePressFeedback(isPhone: !iPadLayout.isPad))
                         .accessibilityAddTraits(crossState.selectedIDs.contains(category.id) ? .isSelected : [])
                         .contextMenu {
                             tagContextMenu(for: category)
@@ -545,7 +547,7 @@ struct TagsView: View {
                                         isSelecting: crossState.isEditing,
                                         isSelected: crossState.selectedIDs.contains(category.id))
                         }
-                        .buttonStyle(.plain)
+                        .buttonStyle(TagCataloguePressStyle())
                         .accessibilityAddTraits(crossState.selectedIDs.contains(category.id) ? .isSelected : [])
                         .contextMenu { tagContextMenu(for: category) }
                         .swipeActions(edge: .trailing, allowsFullSwipe: false) {
@@ -627,6 +629,18 @@ struct TagsView: View {
         }
     }
 
+    private func catalogueGridCard(for category: Category, isSelecting: Bool = false, isSelected: Bool = false) -> some View {
+        TagGridCard(category: category, backgroundOpacity: iPadLayout.isPad ? 0.2 : 1,
+                    isSelecting: isSelecting, isSelected: isSelected)
+            .background {
+                if !iPadLayout.isPad {
+                    // Keep the native surface beneath the translucent selection tint.
+                    RoundedRectangle(cornerRadius: 16, style: .continuous)
+                        .fill(Color(uiColor: .secondarySystemGroupedBackground))
+                }
+            }
+    }
+
     /// Cellule du mode réarrangement : même présentation que le mode courant
     /// (grille ou liste), bordure pour signaler le mode actif, et
     /// glisser-déposer natif (`onDrag`/`onDrop`) pour déplacer le tag.
@@ -636,7 +650,7 @@ struct TagsView: View {
     private func reorderCell(for category: Category, inSidebar: Bool = false) -> some View {
         Group {
             if layout == .grid && !inSidebar {
-                TagGridCard(category: category, backgroundOpacity: 0.2)
+                catalogueGridCard(for: category)
             } else {
                 CategoryRow(category: category, inSidebar: inSidebar)
             }
@@ -827,6 +841,28 @@ struct TagsView: View {
             get: { operationErrorMessage != nil },
             set: { if !$0 { operationErrorMessage = nil } }
         )
+    }
+}
+
+private struct TagCataloguePressStyle: ButtonStyle {
+    @Environment(\.isEnabled) private var isEnabled
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .opacity(!isEnabled ? 0.35 : configuration.isPressed ? 0.6 : 1)
+    }
+}
+
+private struct TagCataloguePressFeedback: ViewModifier {
+    let isPhone: Bool
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if isPhone {
+            content.buttonStyle(TagCataloguePressStyle())
+        } else {
+            content.buttonStyle(.plain)
+        }
     }
 }
 
