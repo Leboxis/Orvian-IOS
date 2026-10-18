@@ -68,8 +68,6 @@ extension Endpoint {
             query: [
                 URLQueryItem(name: "with", value: "is_favorite,categories,path"),
                 URLQueryItem(name: "limit", value: String(limit)),
-                URLQueryItem(name: "order_by[]", value: "last_modified_at"),
-                URLQueryItem(name: "order", value: "desc"),
             ] + (cursor.map { [URLQueryItem(name: "cursor", value: $0)] } ?? [])
         )
     }

@@ -161,6 +161,11 @@ struct ProfileView: View {
             NavigationLink(destination: PerfView()) {
                 LinkRowLabel(title: "Mesures réseau", systemImage: "gauge.with.dots")
             }
+            if let drive = session.selectedDrive {
+                NavigationLink(destination: ThumbnailInformationView(driveId: drive.id)) {
+                    LinkRowLabel(title: "Miniatures", systemImage: "photo.on.rectangle")
+                }
+            }
         }
         .padding(20)
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -267,6 +272,11 @@ struct ProfileView: View {
                 PerfView()
             } label: {
                 Label("Mesures réseau", systemImage: "gauge.with.dots")
+            }
+            if let drive = session.selectedDrive {
+                NavigationLink(destination: ThumbnailInformationView(driveId: drive.id)) {
+                    Label("Miniatures", systemImage: "photo.on.rectangle")
+                }
             }
         } header: {
             Text("À propos")

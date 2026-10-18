@@ -412,6 +412,18 @@ actor ThumbnailProvider {
 
     // MARK: - Maintenance
 
+    /// On-demand inspection stays off the UI thread and never downloads a
+    /// file. Recheck the session after the disk read before returning data.
+    func cachedInformation(driveId: Int) async -> [DiskImageCache.ThumbnailInformation] {
+        guard let credential = TokenStore.credentialFingerprint(), !Task.isCancelled else { return [] }
+        let disk = disk
+        let information = await Task.detached(priority: .userInitiated) {
+            disk.thumbnailInformation(credentialFingerprint: credential, driveId: driveId)
+        }.value
+        guard !Task.isCancelled, credential == TokenStore.credentialFingerprint() else { return [] }
+        return information
+    }
+
     func purgeDiskCache() {
         Self.memory.removeAllObjects()
         pendingPrefetchKeys.removeAll()

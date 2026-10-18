@@ -727,7 +727,7 @@ private struct CategoryRow: View {
             // liseré : encadrer la ligne d'une carte y doublait le relief.
             // Une liste ne pose qu'une hauteur minimale : c'est ce rembourrage
             // vertical qui règle l'air entre les lignes de la colonne.
-            row.padding(.vertical, 12).padding(.horizontal, isSelecting ? 10 : 0)
+            row.padding(.vertical, 12)
                 .background(isSelected ? Color.accentColor.opacity(0.08) : .clear,
                             in: RoundedRectangle(cornerRadius: 12, style: .continuous))
         } else {
@@ -766,18 +766,21 @@ private struct CategoryRow: View {
                 }
             }
             Spacer()
-            if isSelecting {
+            ZStack {
                 Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
                     .font(.body.weight(.semibold))
                     .foregroundStyle(isSelected ? Color.accentColor : .secondary)
-                    .accessibilityHidden(true)
-            } else if !inSidebar {
-                // Le chevron annonce une pile poussée : la sélection de la
-                // barre latérale n'en a pas.
-                Image(systemName: "chevron.right")
-                    .font(.footnote.weight(.semibold))
-                    .foregroundStyle(.tertiary)
+                    .opacity(isSelecting ? 1 : 0)
+                if !inSidebar && !isSelecting {
+                    // Le chevron annonce une pile poussée : la sélection de la
+                    // barre latérale n'en a pas.
+                    Image(systemName: "chevron.right")
+                        .font(.footnote.weight(.semibold))
+                        .foregroundStyle(.tertiary)
+                }
             }
+            .frame(width: 24)
+            .accessibilityHidden(true)
         }
         .contentShape(Rectangle())
     }

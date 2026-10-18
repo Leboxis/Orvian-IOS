@@ -43,6 +43,11 @@ private actor MembershipServer {
         let endpoint = Endpoint.intersectionFiles(driveId: 42, selection: selection, cursor: "next")
         assert(endpoint.query.first { $0.name == "category" }?.value == "1")
         assert(endpoint.query.first { $0.name == "cursor" }?.value == "next")
+        let recentPage = Endpoint.lastModified(driveId: 42, cursor: nil, limit: 60)
+        assert(recentPage.path == "/3/drive/42/files/last_modified")
+        assert(recentPage.query.first { $0.name == "limit" }?.value == "60")
+        assert(!recentPage.query.contains { $0.name == "order_by[]" || $0.name == "order" },
+               "The profile's default request must keep the endpoint's native recent order")
         let server = MembershipServer()
         let membership: @Sendable (TaggedItem) -> Set<Int>? = { $0.tags }
         let resolve: @Sendable (TaggedItem) async throws -> TaggedItem = { try await server.resolve($0) }

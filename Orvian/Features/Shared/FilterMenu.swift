@@ -114,72 +114,112 @@ struct FilterMenu: View {
     }
 
     private var padFilters: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 4 * menuScale) {
-                HStack {
-                    Text("Filtres").fontWeight(.semibold).accessibilityAddTraits(.isHeader)
-                    Spacer()
-                    Button { showsPadFilters = false } label: {
-                        Image(systemName: "xmark.circle.fill")
-                            .frame(minWidth: 44, minHeight: 44)
-                    }
-                    .accessibilityLabel("Fermer les filtres")
-                }
-                DisclosureGroup {
-                    ForEach(FileFilters.SortMode.allCases) { mode in
-                        padChoice(mode.title, symbol: mode.symbol, selected: filters.sort == mode) {
-                            filters.sort = mode
-                        }
-                    }
-                } label: {
-                    Label("Tri : \(filters.sort.title)", systemImage: filters.sort.symbol)
-                        .frame(minHeight: 44)
-                }
-                if filters.sort != .original {
-                    Divider()
-                    HStack {
-                        ForEach(FileFilters.Direction.allCases) { direction in
-                            padChoice(direction.title, symbol: direction.symbol, selected: filters.direction == direction) {
-                                filters.direction = direction
-                            }
-                        }
-                    }
-                }
-                Divider()
-                Text("Orientation vidéo").foregroundStyle(.secondary)
-                HStack {
-                    ForEach(FileFilters.Orientation.allCases) { orientation in
-                        padSymbol(orientation.title, symbol: orientation.symbol(selected: filters.orientation == orientation),
-                                  selected: filters.orientation == orientation) { select(orientation: orientation) }
-                    }
-                }
-                padChoice("Vidéos 4K et plus", symbol: "4k.tv", selected: filters.highResolutionVideosOnly) {
-                    highResolutionBinding.wrappedValue.toggle()
-                }
-                Divider()
-                Text("Afficher").foregroundStyle(.secondary)
-                HStack(spacing: 4 * menuScale) {
-                    ForEach(FileFilters.MediaFilter.allCases) { media in
-                        padSymbol(media.title, symbol: media.symbol(selected: filters.media == media),
-                                  selected: filters.media == media) { mediaBinding.wrappedValue = media }
-                    }
-                }
+        ViewThatFits(in: .vertical) {
+            padFilterContent
+            ScrollView { padFilterContent }
+                .scrollBounceBehavior(.basedOnSize)
+        }
+        .frame(width: min(260 * menuScale, max(280, iPadLayout.width - 32)))
+        .presentationCompactAdaptation(.popover)
+        .accessibilityIdentifier("browser.filter.panel")
+    }
+
+    private var padFilterContent: some View {
+        VStack(alignment: .leading, spacing: 4 * menuScale) {
+            HStack {
+                Text("Filtres").fontWeight(.semibold).accessibilityAddTraits(.isHeader)
+                Spacer()
                 if filters.isActive {
-                    Divider()
                     Button(role: .destructive) { filters = FileFilters() } label: {
-                        Label("Réinitialiser", systemImage: "arrow.counterclockwise")
-                            .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                        Image(systemName: "arrow.counterclockwise")
+                            .frame(width: 44, height: 44)
+                    }
+                    .accessibilityLabel("Réinitialiser les filtres")
+                }
+                Button { showsPadFilters = false } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .frame(minWidth: 44, minHeight: 44)
+                }
+                .accessibilityLabel("Fermer les filtres")
+            }
+            Text("Trier par").foregroundStyle(.secondary)
+            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 6), count: 3), spacing: 6) {
+                ForEach(FileFilters.SortMode.allCases) { mode in
+                    Button {
+                        filters.sort = mode
+                    } label: {
+                        VStack(spacing: 4) {
+                            Image(systemName: mode.symbol)
+                            Text(sortButtonTitle(mode))
+                                .font(.system(size: baseFontSize * menuScale * 0.8))
+                                .lineLimit(1).minimumScaleFactor(0.85)
+                        }
+                        .frame(maxWidth: .infinity, minHeight: 48)
+                        .padding(.vertical, 4)
+                        .background(filters.sort == mode ? Color.accentColor.opacity(0.12) : .clear,
+                                    in: RoundedRectangle(cornerRadius: 10))
+                        .contentShape(Rectangle())
+                    }
+                    .accessibilityLabel(mode.title)
+                    .accessibilityAddTraits(filters.sort == mode ? .isSelected : [])
+                }
+            }
+            if filters.sort != .original {
+                Divider()
+                HStack {
+                    ForEach(FileFilters.Direction.allCases) { direction in
+                        padChoice(direction.title, symbol: direction.symbol, selected: filters.direction == direction) {
+                            filters.direction = direction
+                        }
                     }
                 }
             }
-            .buttonStyle(.plain)
-            .font(.system(size: baseFontSize * menuScale))
-            .padding(10 * menuScale)
+            Divider()
+            Text("Orientation vidéo").foregroundStyle(.secondary)
+            HStack {
+                ForEach(FileFilters.Orientation.allCases) { orientation in
+                    padSymbol(orientation.title, symbol: orientation.symbol(selected: filters.orientation == orientation),
+                              selected: filters.orientation == orientation) { select(orientation: orientation) }
+                }
+            }
+            Button {
+                highResolutionBinding.wrappedValue.toggle()
+            } label: {
+                HStack(spacing: 8) {
+                    Label("Vidéos 4K et plus", systemImage: "4k.tv")
+                    if filters.highResolutionVideosOnly { Image(systemName: "checkmark") }
+                }
+                .frame(maxWidth: .infinity, minHeight: 44, alignment: .center)
+                .background(filters.highResolutionVideosOnly ? Color.accentColor.opacity(0.12) : .clear,
+                            in: RoundedRectangle(cornerRadius: 10))
+                .contentShape(Rectangle())
+            }
+            .accessibilityAddTraits(filters.highResolutionVideosOnly ? .isSelected : [])
+            Divider()
+            Text("Afficher").foregroundStyle(.secondary)
+            HStack(spacing: 4 * menuScale) {
+                ForEach(FileFilters.MediaFilter.allCases) { media in
+                    padSymbol(media.title, symbol: media.symbol(selected: filters.media == media),
+                              selected: filters.media == media) { mediaBinding.wrappedValue = media }
+                }
+            }
         }
-        .frame(width: min(260 * menuScale, max(280, iPadLayout.width - 32)),
-               height: min(520, 360 * menuScale))
-        .presentationCompactAdaptation(.popover)
-        .accessibilityIdentifier("browser.filter.panel")
+        .buttonStyle(.plain)
+        .font(.system(size: baseFontSize * menuScale))
+        .padding(.horizontal, 10 * menuScale)
+        .padding(.top, 6)
+        .padding(.bottom, 6)
+    }
+
+    private func sortButtonTitle(_ mode: FileFilters.SortMode) -> String {
+        switch mode {
+        case .original: return "Original"
+        case .modifiedDate: return "Modifié"
+        case .addedDate: return "Importé"
+        case .type: return "Type"
+        case .size: return "Taille"
+        case .duration: return "Durée"
+        }
     }
 
     private func padChoice(_ title: String, symbol: String, selected: Bool, action: @escaping () -> Void) -> some View {

@@ -1,11 +1,21 @@
 import UIKit
 import CryptoKit
+import ImageIO
 
 /// Cache disque des miniatures (`Library/Caches`), thread-safe avec éviction FIFO (Oldest-Written-First) en arrière-plan.
 ///
 /// L'éviction est déclenchée sur une limite choisie dans Réglages et purge
 /// les plus anciens fichiers jusqu'à 80 % de cette limite.
 final class DiskImageCache: @unchecked Sendable {
+    struct ThumbnailInformation: Identifiable, Sendable {
+        let fileId: Int
+        let isTrashed: Bool
+        let width: Int
+        let height: Int
+        let byteCount: Int
+        let cachedAt: Date
+        var id: String { "\(isTrashed ? "trash" : "normal")|\(fileId)" }
+    }
     private static let formatDirectory = "v2"
     private let directory: DiskDirectory
 
@@ -111,6 +121,32 @@ final class DiskImageCache: @unchecked Sendable {
         guard let data = try? Data(contentsOf: fileURL, options: .mappedIfSafe) else { return nil }
         guard !data.isEmpty, let image = UIImage(data: data) else { return nil }
         return image.preparingForDisplay() ?? image
+    }
+
+    /// Inspect the actual encoded thumbnails, without decoding their pixels,
+    /// contacting the server or exposing another account's cache entries.
+    func thumbnailInformation(credentialFingerprint: String, driveId: Int) -> [ThumbnailInformation] {
+        let roots = [false, true].map { isTrashed in
+            url(credentialFingerprint: credentialFingerprint, driveId: driveId, fileId: 0, isTrashed: isTrashed)
+                .deletingLastPathComponent().standardizedFileURL.path + "/"
+        }
+        let entries = directory.entries().filter { entry in
+            let path = entry.url.standardizedFileURL.path
+            return entry.url.pathExtension == "image" && roots.contains { path.hasPrefix($0) }
+        }.sorted { $0.date > $1.date }.prefix(100)
+        return entries.compactMap { entry in
+            guard let fileId = Int(entry.url.deletingPathExtension().lastPathComponent),
+                  let data = try? Data(contentsOf: entry.url, options: .mappedIfSafe),
+                  let source = CGImageSourceCreateWithData(data as CFData,
+                      [kCGImageSourceShouldCache: false] as CFDictionary),
+                  let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
+                  let width = properties[kCGImagePropertyPixelWidth] as? NSNumber,
+                  let height = properties[kCGImagePropertyPixelHeight] as? NSNumber,
+                  width.intValue > 0, height.intValue > 0 else { return nil }
+            return ThumbnailInformation(fileId: fileId,
+                isTrashed: entry.url.standardizedFileURL.path.hasPrefix(roots[1]),
+                width: width.intValue, height: height.intValue, byteCount: data.count, cachedAt: entry.date)
+        }
     }
 
     /// Retire un fichier en mettant à jour la taille estimée du cache.
