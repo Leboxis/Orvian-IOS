@@ -243,27 +243,21 @@ struct DirectoryView: View {
                         }
                     }
                 } else {
-                    ToolbarItem(placement: .topBarLeading) {
+                    ToolbarItemGroup(placement: .topBarLeading) {
                         FilterMenu(filters: $filters)
                             .accessibilityIdentifier("browser.filter")
-                    }
-                    if showsSearchBar {
-                        if #available(iOS 26.0, *) {
-                            ToolbarSpacer(.fixed, placement: .topBarLeading)
-                        }
-                        ToolbarItem(placement: .topBarLeading) {
+                        if showsSearchBar {
                             searchToggleButton
                                 .accessibilityIdentifier("browser.search")
                         }
                     }
-                    if #available(iOS 26.0, *) {
-                        ToolbarSpacer(.fixed, placement: .topBarLeading)
-                    }
                 }
 
-                ToolbarItem(placement: .topBarLeading) {
-                    addMenu
-                        .accessibilityLabel("Ajouter ou importer")
+                if iPadLayout.isPad {
+                    ToolbarItem(placement: .topBarLeading) {
+                        addMenu
+                            .accessibilityLabel("Ajouter ou importer")
+                    }
                 }
                 BrowserToolbar(canOpenRandom: !playableFiles.isEmpty,
                                canSelect: !visibleSelectionItems.isEmpty && !moveBusy && !addBusy,
@@ -273,6 +267,20 @@ struct DirectoryView: View {
         .safeAreaInset(edge: .bottom, spacing: 0) {
             if addBusy || moveBusy || deleteBusy {
                 busyIndicator
+            }
+        }
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            if !iPadLayout.isPad && !selectionMode {
+                HStack {
+                    Spacer()
+                    addMenu
+                        .frame(width: 52, height: 52)
+                        .floatingChrome(Circle())
+                        .accessibilityLabel("Ajouter ou importer")
+                }
+                .padding(.trailing, DS.gridMargin + 4)
+                // Le shell réserve déjà la barre et les transferts ; ne pas rétablir l'ancien décalage de 104 pt.
+                .padding(.bottom, DS.contentBottomInset)
             }
         }
         .background {

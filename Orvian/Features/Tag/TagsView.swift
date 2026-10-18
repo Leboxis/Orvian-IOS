@@ -119,9 +119,16 @@ struct TagsView: View {
 
     private var phoneNavigation: some View {
         NavigationStack(path: $path) {
-            root
-                .toolbar { categoryToolbar }
-                .navigationDestination(for: CrossRoute.self) { _ in intersectionResults }
+            Group {
+                if iPadLayout.isPad {
+                    root.toolbar { categoryToolbar }
+                } else {
+                    phoneCatalogue
+                }
+            }
+                .navigationDestination(for: CrossRoute.self) { _ in
+                    intersectionResults.modifier(TagDestinationNavigationBar(isPhone: !iPadLayout.isPad))
+                }
                 .navigationDestination(for: Category.self) { category in
                     CategoryFilesView(
                         category: category,
@@ -131,6 +138,7 @@ struct TagsView: View {
                             push(folder)
                         }
                     )
+                    .modifier(TagDestinationNavigationBar(isPhone: !iPadLayout.isPad))
                 }
                 .navigationDestination(for: DriveFile.self) { directory in
                     DirectoryView(
@@ -146,8 +154,65 @@ struct TagsView: View {
                             push(folder)
                         }
                     )
+                    .modifier(TagDestinationNavigationBar(isPhone: !iPadLayout.isPad))
                 }
         }
+    }
+
+    private var phoneCatalogue: some View {
+        VStack(spacing: 0) {
+            phoneCatalogueHeader
+            crossSummary
+            catalogueContent
+        }
+        .background(Color(uiColor: .systemGroupedBackground))
+        .toolbar(.hidden, for: .navigationBar)
+    }
+
+    private var phoneCatalogueHeader: some View {
+        // Same title, action order and icon language as the iPad header,
+        // without the sidebar toggle or a second navigation bar.
+        VStack(spacing: 6) {
+            Text(hasLoadedCategories ? "Tags (\(categories.count))" : "Tags")
+                .font(.title2.weight(.semibold))
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .accessibilityAddTraits(.isHeader)
+            HStack(spacing: 0) {
+                Button {
+                    withAnimation(Motion.animation(.snappy(duration: 0.25))) {
+                        layout = layout == .grid ? .list : .grid
+                    }
+                } label: {
+                    Image(systemName: layout == .grid ? "list.bullet" : "square.grid.2x2")
+                        .frame(width: 44, height: 44)
+                }
+                .accessibilityLabel(layout == .grid ? "Afficher les tags en liste" : "Afficher les tags en grille")
+                crossButton
+                Button {
+                    guard !crossState.isActive else { return }
+                    crossState.isEditing = false
+                    isReordering.toggle()
+                } label: {
+                    Image(systemName: isReordering ? "checkmark.circle" : "arrow.up.arrow.down")
+                        .frame(width: 44, height: 44)
+                        .background(isReordering ? Color.accentColor.opacity(0.12) : .clear, in: Capsule())
+                }
+                .accessibilityLabel(isReordering ? "Terminer le réarrangement" : "Réarranger les tags")
+                .accessibilityAddTraits(isReordering ? .isSelected : [])
+                .disabled(crossState.isActive)
+                Button { showCreateSheet = true } label: {
+                    Image(systemName: "plus").frame(width: 44, height: 44)
+                }
+                .accessibilityLabel("Nouveau tag")
+            }
+            .frame(maxWidth: .infinity, alignment: .center)
+        }
+        .font(.body)
+        .buttonStyle(.plain)
+        .padding(.horizontal, DS.gridMargin)
+        .padding(.top, 8)
+        .padding(.bottom, 6)
+        .fixedSize(horizontal: false, vertical: true)
     }
 
     @ToolbarContentBuilder
@@ -172,46 +237,6 @@ struct TagsView: View {
                 }
                 .accessibilityLabel(isReordering ? "Terminer le réarrangement" : "Réarranger les tags")
                 .disabled(crossState.isActive)
-                Button {
-                    showCreateSheet = true
-                } label: {
-                    Image(systemName: "plus")
-                }
-                .accessibilityLabel("Nouveau tag")
-            }
-        } else {
-            ToolbarItem(placement: .topBarTrailing) { crossButton }
-            if #available(iOS 26.0, *) {
-                ToolbarSpacer(.fixed, placement: .topBarTrailing)
-            }
-            ToolbarItem(placement: .topBarTrailing) {
-                Button {
-                    withAnimation(Motion.animation(.snappy(duration: 0.25))) {
-                        layout = layout == .grid ? .list : .grid
-                    }
-                } label: {
-                    Image(systemName: layout == .grid ? "list.bullet" : "square.grid.2x2")
-                }
-                .accessibilityLabel(layout == .grid ? "Afficher en liste" : "Afficher en grille")
-            }
-            if #available(iOS 26.0, *) {
-                ToolbarSpacer(.fixed, placement: .topBarTrailing)
-            }
-            ToolbarItem(placement: .topBarTrailing) {
-                Button {
-                    guard !crossState.isActive else { return }
-                    crossState.isEditing = false
-                    isReordering.toggle()
-                } label: {
-                    Image(systemName: "pencil")
-                }
-                .accessibilityLabel(isReordering ? "Terminer le réarrangement" : "Réarranger les tags")
-                .disabled(crossState.isActive)
-            }
-            if #available(iOS 26.0, *) {
-                ToolbarSpacer(.fixed, placement: .topBarTrailing)
-            }
-            ToolbarItem(placement: .topBarTrailing) {
                 Button {
                     showCreateSheet = true
                 } label: {
@@ -468,7 +493,7 @@ struct TagsView: View {
                         Button {
                             open(category)
                         } label: {
-                            TagGridCard(category: category, backgroundOpacity: iPadLayout.isPad ? 0.2 : 1,
+                            TagGridCard(category: category, backgroundOpacity: 0.2,
                                         isSelecting: crossState.isEditing,
                                         isSelected: crossState.selectedIDs.contains(category.id))
                         }
@@ -497,7 +522,62 @@ struct TagsView: View {
         Array(repeating: GridItem(.flexible(), spacing: DS.gridSpacing), count: dynamicTypeSize.isAccessibilitySize ? 1 : min(3, max(2, tagGridColumns)))
     }
 
+    @ViewBuilder
     private var list: some View {
+        if iPadLayout.isPad {
+            cardList
+        } else {
+            phoneList
+        }
+    }
+
+    private var phoneList: some View {
+        List {
+            ForEach(orderedCategories) { category in
+                Group {
+                    if isReordering {
+                        reorderCell(for: category, inSidebar: true)
+                    } else {
+                        Button {
+                            open(category)
+                        } label: {
+                            CategoryRow(category: category, inSidebar: true,
+                                        isSelecting: crossState.isEditing,
+                                        isSelected: crossState.selectedIDs.contains(category.id))
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityAddTraits(crossState.selectedIDs.contains(category.id) ? .isSelected : [])
+                        .contextMenu { tagContextMenu(for: category) }
+                        .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                            Button(role: .destructive) {
+                                tagToDelete = category
+                                showDeleteConfirm = true
+                            } label: {
+                                Label("Supprimer", systemImage: "trash")
+                            }
+                            Button {
+                                tagToRename = category
+                                renameText = category.name
+                                showRenameAlert = true
+                            } label: {
+                                Label("Renommer", systemImage: "pencil")
+                            }
+                            .tint(.orange)
+                        }
+                    }
+                }
+                .listRowInsets(EdgeInsets(top: 0, leading: DS.gridMargin, bottom: 0, trailing: DS.gridMargin))
+                .listRowSeparator(.hidden)
+                .listRowBackground(Color.clear)
+            }
+        }
+        .listStyle(.plain)
+        .scrollContentBackground(.hidden)
+        .background(Color(uiColor: .systemGroupedBackground))
+        .refreshable { await load(force: true) }
+    }
+
+    private var cardList: some View {
         ScrollView {
             LazyVStack(spacing: 10) {
                 ForEach(orderedCategories) { category in
@@ -556,7 +636,7 @@ struct TagsView: View {
     private func reorderCell(for category: Category, inSidebar: Bool = false) -> some View {
         Group {
             if layout == .grid && !inSidebar {
-                TagGridCard(category: category, backgroundOpacity: iPadLayout.isPad ? 0.2 : 1)
+                TagGridCard(category: category, backgroundOpacity: 0.2)
             } else {
                 CategoryRow(category: category, inSidebar: inSidebar)
             }
@@ -747,6 +827,20 @@ struct TagsView: View {
             get: { operationErrorMessage != nil },
             set: { if !$0 { operationErrorMessage = nil } }
         )
+    }
+}
+
+/// The phone catalogue owns its header; pushed browsers keep native back/actions.
+private struct TagDestinationNavigationBar: ViewModifier {
+    let isPhone: Bool
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if isPhone {
+            content.toolbar(.visible, for: .navigationBar)
+        } else {
+            content
+        }
     }
 }
 

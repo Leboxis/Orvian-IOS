@@ -27,24 +27,21 @@ struct BrowserToolbar: ToolbarContent {
                 .accessibilityIdentifier("browser.select")
             }
         } else {
-            ToolbarItem(placement: .topBarTrailing) {
+            ToolbarItemGroup(placement: .topBarTrailing) {
                 Button(action: onRandom) {
-                    Label("Ouvrir un fichier au hasard", systemImage: "dice")
-                        .frame(minWidth: 44, minHeight: 44)
+                    Image(systemName: "dice")
+                        .font(.system(size: 17, weight: .medium))
+                        .foregroundStyle(Color.accentColor)
+                        .frame(width: 32, height: 32)
+                        .contentShape(Rectangle())
                 }
-                .labelStyle(.iconOnly)
                 .disabled(!canOpenRandom)
+                .accessibilityLabel("Ouvrir un fichier au hasard")
                 .accessibilityIdentifier("browser.random")
-            }
-            if #available(iOS 26.0, *) {
-                ToolbarSpacer(.fixed, placement: .topBarTrailing)
-            }
-            ToolbarItem(placement: .topBarTrailing) {
+
                 Button(action: onSelect) {
                     Label("Sélectionner", systemImage: "checkmark.circle")
-                        .frame(minWidth: 44, minHeight: 44)
                 }
-                .labelStyle(.iconOnly)
                 .disabled(!canSelect)
                 .accessibilityIdentifier("browser.select")
             }

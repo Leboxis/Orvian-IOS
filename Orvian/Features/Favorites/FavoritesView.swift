@@ -251,14 +251,9 @@ struct FavoritesView: View {
                                 .accessibilityIdentifier("browser.search")
                         }
                     } else {
-                        ToolbarItem(placement: .topBarLeading) {
+                        ToolbarItemGroup(placement: .topBarLeading) {
                             FilterMenu(filters: $filters)
                                 .accessibilityIdentifier("browser.filter")
-                        }
-                        if #available(iOS 26.0, *) {
-                            ToolbarSpacer(.fixed, placement: .topBarLeading)
-                        }
-                        ToolbarItem(placement: .topBarLeading) {
                             searchToggleButton
                                 .accessibilityIdentifier("browser.search")
                         }
