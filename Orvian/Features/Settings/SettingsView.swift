@@ -5,8 +5,7 @@ import SwiftUI
 /// En haut, une carte de compte (avatar, drive, jauge de quota) qui ouvre
 /// « Compte et drive ». En dessous, les 5 espaces — Apparence · Médias et
 /// réseau · Stockage · Sécurité · Compte — chacun résumé d'un coup d'œil par
-/// son état réel, sans avoir à entrer. La recherche instantanée reste
-/// disponible : elle affiche directement le réglage cherché sans naviguer.
+/// son état réel, sans avoir à entrer.
 struct SettingsView: View {
     let session: SessionStore
     @Binding var path: NavigationPath
@@ -15,7 +14,6 @@ struct SettingsView: View {
     @Binding var columnVisibility: NavigationSplitViewVisibility
     @Environment(\.iPadLayout) private var iPadLayout
 
-    @State private var searchText = ""
     @State private var cacheSize: Int = 0
     @State private var showDrivePicker = false
     @State private var showSignOutConfirm = false
@@ -46,10 +44,6 @@ struct SettingsView: View {
     @State private var showActivateCode = false
     @State private var showChangeCode = false
     @State private var showDisableCode = false
-
-    private var isSearching: Bool {
-        !searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-    }
 
     var body: some View {
         Group {
@@ -114,16 +108,11 @@ struct SettingsView: View {
     private var phoneNavigation: some View {
         NavigationStack(path: $path) {
             List {
-                if isSearching {
-                    searchResultsSection
-                } else {
-                    accountHeaderSection
-                    destinationsSection
-                    aboutSection
-                }
+                accountHeaderSection
+                destinationsSection
+                aboutSection
             }
             .listStyle(.insetGrouped)
-            .searchable(text: $searchText, prompt: "Rechercher un réglage")
             .navigationTitle("Réglages")
             .navigationBarTitleDisplayMode(.large)
             .navigationDestination(for: SettingsRoute.self) { route in
@@ -163,11 +152,7 @@ struct SettingsView: View {
             .navigationSplitViewColumnWidth(min: 260, ideal: 280, max: 320)
         } detail: {
             Group {
-                if isSearching {
-                    List { searchResultsSection }
-                        .listStyle(.insetGrouped)
-                        .safeAreaInset(edge: .bottom) { Color.clear.frame(height: DS.contentBottomInset) }
-                } else if let selectedSpace {
+                if let selectedSpace {
                     destinationView(for: selectedSpace)
                 } else {
                     EmptyStateView(symbol: "slider.horizontal.3", title: "Réglages",
@@ -179,16 +164,11 @@ struct SettingsView: View {
             .background(Color(uiColor: .systemGroupedBackground))
         }
         .navigationSplitViewStyle(.balanced)
-        .searchable(text: $searchText, prompt: "Rechercher un réglage")
-        .onChange(of: selectedSpace) { _, selection in
-            if selection != nil { searchText = "" }
-        }
     }
 
     private func open(_ route: SettingsRoute) {
         if iPadLayout.isPad {
             selectedSpace = route
-            searchText = ""
         } else {
             path.append(route)
         }
@@ -363,95 +343,6 @@ struct SettingsView: View {
         isLockCodeEnabled ? "Verrouillage actif" : "Aucun code exigé"
     }
 
-    // MARK: - Recherche instantanée : le réglage répond directement
-
-    private func matches(_ haystacks: String...) -> Bool {
-        let q = searchText.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        guard !q.isEmpty else { return true }
-        return haystacks.joined(separator: " ").lowercased().contains(q)
-    }
-
-    private var searchResultsSection: some View {
-        Section {
-            if matches("poids taille afficher fichiers") {
-                Toggle("Afficher le poids des fichiers", isOn: $showFileSizes)
-            }
-            if matches("étoile favoris star") {
-                Toggle("Étoiles des favoris", isOn: $showFavoriteStars)
-            }
-            if matches("cartes ligne grille colonnes densité") {
-                Picker(iPadLayout.isPad ? "Densité des miniatures" : "Cartes par ligne", selection: gridColumnsBinding) {
-                    ForEach(2...(iPadLayout.isPad ? 7 : 3), id: \.self) { Text("\($0)").tag($0) }
-                }
-            }
-            if matches("tags colonnes") {
-                Picker(iPadLayout.isPad ? "Colonnes des tags sur iPhone" : "Colonnes des tags", selection: $tagGridColumns) {
-                    Text("2").tag(2); Text("3").tag(3)
-                }
-            }
-            if matches("dossiers premier tags tri") {
-                Toggle("Dossiers en premier (tags)", isOn: $foldersFirstInTags)
-            }
-            if matches("recherche loupe visible") {
-                Toggle("Recherche toujours visible", isOn: $alwaysShowSearch)
-            }
-            if matches("chemin breadcrumb fil ariane") {
-                Toggle("Afficher le chemin du dossier", isOn: $showBreadcrumb)
-            }
-            if matches("couleur dossier défaut") {
-                ColorPicker("Couleur des dossiers", selection: defaultFolderColorBinding, supportsOpacity: false)
-            }
-            if matches("favoris haut retour scroll") {
-                Toggle(iPadLayout.isPad ? "Retour en haut des favoris sur iPhone" : "Revenir en haut (favoris)", isOn: $favoritesReselectScrollToTop)
-            }
-            if matches("miniatures précharger photos") {
-                Toggle("Précharger les miniatures", isOn: $prefetchThumbnails)
-            }
-            if matches("vidéos précharger") {
-                Toggle("Précharger les vidéos", isOn: $prefetchVideoURLs)
-            }
-            if matches("wifi wi-fi données mobiles") {
-                Toggle("Wi-Fi uniquement", isOn: $prefetchOnWiFiOnly)
-            }
-            if matches("cache limite stockage mo go") {
-                Picker("Limite du cache", selection: $thumbnailCacheLimitMB) {
-                    Text("250 Mo").tag(250); Text("500 Mo").tag(500)
-                    Text("1 Go").tag(1_024); Text("Sans limite").tag(0)
-                }
-            }
-            if matches("cache reseau réseau requetes api") {
-                Picker("Cache réseau", selection: $networkCacheLimitMB) {
-                    Text("25 Mo").tag(25); Text("50 Mo").tag(50)
-                    Text("100 Mo").tag(100); Text("250 Mo").tag(250)
-                    Text("Désactivé sur disque").tag(0)
-                }
-            }
-            if matches("vider cache effacer") {
-                Button("Vider le cache", role: .destructive) { purgeCache() }
-            }
-            if matches("haptique vibration confort") {
-                Toggle("Retours haptiques", isOn: $hapticFeedbackEnabled)
-            }
-            if matches("réseau diagnostic requêtes suivi perf") {
-                Toggle("Suivi des requêtes réseau", isOn: $networkPerfEnabled)
-            }
-            if matches("code verrouillage sécurité lock face id") {
-                Button(isLockCodeEnabled ? "Gérer le code…" : "Activer le code…") {
-                    open(.security)
-                }
-            }
-            if matches("compte token déconnecter drive changer") {
-                Button("Ouvrir Compte et drive…") {
-                    open(.account)
-                }
-            }
-        } header: {
-            Text("Résultats")
-        } footer: {
-            Text("Tapez « cache », « code », « grille »… le réglage s'affiche ici sans ouvrir d'écran.")
-        }
-    }
-
     // MARK: - Destinations
 
     @ViewBuilder
@@ -481,6 +372,7 @@ struct SettingsView: View {
             StorageSpace(
                 cacheSize: cacheSize,
                 limitMB: $thumbnailCacheLimitMB,
+                networkLimitMB: $networkCacheLimitMB,
                 onPurge: purgeCache
             )
         case .security:
@@ -744,6 +636,7 @@ private struct StorageSpace: View {
     @Environment(\.iPadLayout) private var iPadLayout
     let cacheSize: Int
     @Binding var limitMB: Int
+    @Binding var networkLimitMB: Int
     let onPurge: () -> Void
 
     var body: some View {
@@ -771,6 +664,14 @@ private struct StorageSpace: View {
                     Text("500 Mo").tag(500)
                     Text("1 Go").tag(1_024)
                     Text("Sans limite").tag(0)
+                }
+            }
+
+            Section("Cache réseau") {
+                Picker("Cache réseau", selection: $networkLimitMB) {
+                    Text("25 Mo").tag(25); Text("50 Mo").tag(50)
+                    Text("100 Mo").tag(100); Text("250 Mo").tag(250)
+                    Text("Désactivé sur disque").tag(0)
                 }
             }
 

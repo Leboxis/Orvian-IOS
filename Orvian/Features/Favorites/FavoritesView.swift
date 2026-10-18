@@ -15,6 +15,7 @@ struct FavoritesView: View {
     @AppStorage("foldersFirstInTags") private var foldersFirstInTags = true
 
     @State private var searchText = ""
+    @State private var searchDismissed = false
     @State private var searchRevealed = false
     @FocusState private var searchFocused: Bool
     @AppStorage("alwaysShowSearch") private var alwaysShowSearch = false
@@ -61,7 +62,7 @@ struct FavoritesView: View {
     }
 
     private var searchBarVisible: Bool {
-        alwaysShowSearch || searchFocused || isSearching || searchRevealed
+        !searchDismissed && (alwaysShowSearch || searchFocused || isSearching || searchRevealed)
     }
 
     private var visibleSelectionItems: [DriveFile] {
@@ -163,6 +164,7 @@ struct FavoritesView: View {
                     )
                 },
                 onResetFilters: { searchText = ""; filters = FileFilters() },
+                onBackgroundTap: searchBarVisible ? dismissSearch : nil,
                 searchText: searchText,
                 filters: filters,
                 allowsPullToRefresh: true,
@@ -184,7 +186,7 @@ struct FavoritesView: View {
                         .padding(.horizontal, 16)
                         .frame(maxWidth: .infinity)
 
-                        if searchBarVisible {
+                        if searchBarVisible && !iPadLayout.isPad {
                             searchBar
                                 .transition(.move(edge: .top).combined(with: .opacity))
                         }
@@ -213,7 +215,7 @@ struct FavoritesView: View {
                     }
 
                     ToolbarItemGroup(placement: .topBarTrailing) {
-                        Menu {
+                        SelectionActionLayout {
                         Button {
                             toggleAll()
                         } label: {
@@ -244,8 +246,6 @@ struct FavoritesView: View {
                         }
                         .disabled(actionableSelectedIDs.isEmpty || deleteBusy)
                         .accessibilityLabel("Supprimer")
-                        } label: {
-                            Label("Actions de sélection", systemImage: "ellipsis.circle")
                         }
                     }
                 } else {
@@ -258,9 +258,8 @@ struct FavoritesView: View {
                     }
 
                     ToolbarItem(placement: .principal) {
-                        Text(title)
-                            .font(.headline)
-                            .lineLimit(1)
+                        if iPadLayout.isPad && searchBarVisible { searchBar }
+                        else { Text(title).font(.headline).lineLimit(1) }
                     }
 
                     BrowserToolbar(canOpenRandom: !playableFiles.isEmpty,
@@ -275,7 +274,7 @@ struct FavoritesView: View {
             }
             .background {
                 BrowserKeyboardCommands(isEditingText: searchFocused, canSelect: !visibleSelectionItems.isEmpty,
-                    search: { searchRevealed = true; searchFocused = true },
+                    search: { searchDismissed = false; searchRevealed = true; searchFocused = true },
                     cancel: { if selectionMode { endSelection() }; searchFocused = false; searchRevealed = false },
                     selectAll: { if !selectionMode { startSelection() }; selectedIDs = visibleSelectionIDs })
             }
@@ -285,7 +284,7 @@ struct FavoritesView: View {
                     itemCount: request.files.count,
                     excludedDirectoryIDs: Set(request.files.filter(\.isDirectory).map(\.id)),
                     unavailableDestinationIDs: unavailableDestinationIDs(for: request.files),
-                    parentDirectory: nil,
+                    files: request.files, initialDirectory: nil,
                     onSelect: { destination in
                         pendingMove = nil
                         Task { await move(request.files, to: destination) }
@@ -368,18 +367,20 @@ struct FavoritesView: View {
         .padding(.horizontal, DS.gridMargin)
     }
 
+    private func dismissSearch() {
+        searchFocused = false
+        searchRevealed = false
+        searchDismissed = true
+    }
+
     private var searchToggleButton: some View {
         Button {
-            if searchFocused || searchBarVisible {
-                searchFocused = false
-                if !alwaysShowSearch {
-                    searchRevealed = false
-                }
+            if searchBarVisible {
+                dismissSearch()
             } else {
+                searchDismissed = false
                 searchRevealed = true
-                DispatchQueue.main.async {
-                    searchFocused = true
-                }
+                DispatchQueue.main.async { searchFocused = true }
             }
         } label: {
             Image(systemName: searchBarVisible ? "magnifyingglass.circle.fill" : "magnifyingglass")

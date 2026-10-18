@@ -8,75 +8,126 @@ struct MoveDestinationPicker: View {
     let itemCount: Int
     let excludedDirectoryIDs: Set<Int>
     let unavailableDestinationIDs: Set<Int>
-    let parentDirectory: DriveFile?
     let onSelect: (DriveFile) -> Void
 
     @Environment(\.dismiss) private var dismiss
-    @State private var path: [DriveFile] = []
+    @State private var model: MoveDestinationModel
+    @State private var showCreateFolder = false
+    @State private var folderName = ""
+    @State private var operation: Task<Void, Never>?
 
-    private let root = DriveFile.root(name: "Racine du drive")
-
-    var body: some View {
-        NavigationStack(path: $path) {
-            destinationLevel(root)
-                .navigationDestination(for: DriveFile.self) { folder in
-                    destinationLevel(folder)
-                }
-        }
+    init(driveId: Int, itemCount: Int, excludedDirectoryIDs: Set<Int>,
+         unavailableDestinationIDs: Set<Int>, files: [DriveFile], initialDirectory: DriveFile?,
+         onSelect: @escaping (DriveFile) -> Void) {
+        self.driveId = driveId
+        self.itemCount = itemCount
+        self.excludedDirectoryIDs = excludedDirectoryIDs
+        self.unavailableDestinationIDs = unavailableDestinationIDs
+        self.onSelect = onSelect
+        _model = State(initialValue: MoveDestinationModel(driveId: driveId, files: files, initialDirectory: initialDirectory))
     }
 
-    private func destinationLevel(_ directory: DriveFile) -> some View {
-        DestinationFolderLevel(
-            directory: directory,
-            driveId: driveId,
-            itemCount: itemCount,
-            excludedDirectoryIDs: excludedDirectoryIDs,
-            isCurrentDestinationUnavailable: unavailableDestinationIDs.contains(directory.id),
-            parentDirectory: directory.id == root.id ? parentDirectory : nil,
-            onOpen: { path.append($0) },
-            onSelect: onSelect
-        )
-        .navigationTitle(directory.name)
-        .navigationBarTitleDisplayMode(.inline)
-        .toolbar {
-            ToolbarItem(placement: .topBarLeading) {
-                Button("Annuler") { dismiss() }
+    var body: some View {
+        NavigationStack {
+            Group {
+                if let directory = model.directory {
+                    if excludedDirectoryIDs.contains(directory.id) {
+                        ContentUnavailableView("Destination indisponible", systemImage: "folder.badge.questionmark",
+                            description: Text("Remontez au dossier parent pour sortir des éléments à déplacer."))
+                    } else {
+                        DestinationFolderLevel(directory: directory, driveId: driveId,
+                            excludedDirectoryIDs: excludedDirectoryIDs, reloadRevision: model.reloadRevision,
+                            onOpen: model.open)
+                            .id(directory.id)
+                            .disabled(model.isBusy)
+                    }
+                } else if model.isBusy {
+                    ProgressView("Chargement du dossier d’origine…")
+                } else {
+                    ContentUnavailableView {
+                        Label("Dossier d’origine indisponible", systemImage: "folder.badge.questionmark")
+                    } description: {
+                        Text("Réessayez de charger le dossier contenant les éléments.")
+                    } actions: {
+                        Button("Réessayer") { operation = Task { await model.loadStart() } }
+                    }
+                }
+            }
+            .navigationTitle(model.directory?.name ?? "Déplacer")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItemGroup(placement: .topBarLeading) {
+                    roundButton("Annuler", symbol: "xmark") { dismiss() }
+                    roundButton("Dossier parent", symbol: "arrow.up") {
+                        operation = Task { await model.goUp() }
+                    }
+                    .disabled(!model.canGoUp || model.isBusy)
+                }
+                ToolbarItemGroup(placement: .topBarTrailing) {
+                    roundButton("Nouveau dossier", symbol: "folder.badge.plus") { showCreateFolder = true }
+                        .disabled(model.directory == nil || model.isBusy || excludedDirectoryIDs.contains(model.directory?.id ?? -1))
+                    roundButton("Déplacer \(itemCount) élément\(itemCount > 1 ? "s" : "") ici", symbol: "arrow.right") {
+                        operation = Task {
+                            if let destination = await model.confirmedDestination() { onSelect(destination) }
+                        }
+                    }
+                    .disabled(model.isBusy || model.directory == nil
+                        || unavailableDestinationIDs.contains(model.directory?.id ?? -1)
+                        || excludedDirectoryIDs.contains(model.directory?.id ?? -1))
+                }
             }
         }
+        .task { await model.loadStart() }
+        .onDisappear { operation?.cancel() }
+        .alert("Nouveau dossier", isPresented: $showCreateFolder) {
+            TextField("Nom du dossier", text: $folderName)
+            Button("Créer") {
+                let name = folderName
+                operation = Task { if await model.createFolder(name: name) { folderName = "" } }
+            }
+            .disabled(folderName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            Button("Annuler", role: .cancel) {}
+        }
+        .alert("Action impossible", isPresented: Binding(get: { model.error != nil }, set: { if !$0 { model.error = nil } })) {
+            Button("OK", role: .cancel) {}
+        } message: { Text(model.error ?? "") }
+    }
+
+    private func roundButton(_ title: String, symbol: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: symbol).frame(width: 44, height: 44)
+                .background(Color.accentColor.opacity(0.1), in: Circle())
+                .contentShape(Circle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(title)
     }
 }
 
 private struct DestinationFolderLevel: View {
     let directory: DriveFile
     let driveId: Int
-    let itemCount: Int
     let excludedDirectoryIDs: Set<Int>
-    let isCurrentDestinationUnavailable: Bool
-    let parentDirectory: DriveFile?
+    let reloadRevision: Int
     let onOpen: (DriveFile) -> Void
-    let onSelect: (DriveFile) -> Void
 
     @State private var viewModel: FileGridViewModel
+    @State private var handledReloadRevision: Int
     @AppStorage("defaultFolderColor") private var defaultFolderColor = "#4285F5"
 
     init(
         directory: DriveFile,
         driveId: Int,
-        itemCount: Int,
         excludedDirectoryIDs: Set<Int>,
-        isCurrentDestinationUnavailable: Bool,
-        parentDirectory: DriveFile?,
-        onOpen: @escaping (DriveFile) -> Void,
-        onSelect: @escaping (DriveFile) -> Void
+        reloadRevision: Int,
+        onOpen: @escaping (DriveFile) -> Void
     ) {
         self.directory = directory
         self.driveId = driveId
-        self.itemCount = itemCount
         self.excludedDirectoryIDs = excludedDirectoryIDs
-        self.isCurrentDestinationUnavailable = isCurrentDestinationUnavailable
-        self.parentDirectory = parentDirectory
+        self.reloadRevision = reloadRevision
         self.onOpen = onOpen
-        self.onSelect = onSelect
+        _handledReloadRevision = State(initialValue: reloadRevision)
         _viewModel = State(initialValue: FileGridViewModel(source: .directory(directory.id), driveId: driveId))
     }
 
@@ -88,30 +139,6 @@ private struct DestinationFolderLevel: View {
 
     var body: some View {
         List {
-            Section {
-                Button {
-                    onSelect(directory)
-                } label: {
-                    Label(
-                        isCurrentDestinationUnavailable ? "Déjà dans ce dossier" : selectTitle,
-                        systemImage: isCurrentDestinationUnavailable ? "checkmark.circle" : "folder.badge.plus"
-                    )
-                    .frame(maxWidth: .infinity, alignment: .center)
-                    .fontWeight(.semibold)
-                }
-                .disabled(isCurrentDestinationUnavailable)
-            }
-
-            if let parentDirectory {
-                Section {
-                    Button {
-                        onOpen(parentDirectory)
-                    } label: {
-                        Label("Accéder au dossier parent", systemImage: "arrow.up.folder")
-                    }
-                }
-            }
-
             Section("Sous-dossiers") {
                 if viewModel.isInitialLoading {
                     HStack {
@@ -166,10 +193,13 @@ private struct DestinationFolderLevel: View {
             }
         }
         .refreshable { await viewModel.reload(forceNetwork: true) }
-        .task { await viewModel.loadIfNeeded() }
+        .task(id: reloadRevision) {
+            if handledReloadRevision == reloadRevision { await viewModel.loadIfNeeded() }
+            else {
+                handledReloadRevision = reloadRevision
+                await viewModel.reload(forceNetwork: true)
+            }
+        }
     }
 
-    private var selectTitle: String {
-        "Déplacer \(itemCount) élément\(itemCount > 1 ? "s" : "") ici"
-    }
 }

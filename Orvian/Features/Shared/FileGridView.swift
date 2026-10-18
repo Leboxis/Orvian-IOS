@@ -19,6 +19,7 @@ struct FileGridView: View {
 
     var onResetFilters: (() -> Void)? = nil
     var onEmptyAction: (() -> Void)? = nil
+    var onBackgroundTap: (() -> Void)? = nil
 
     /// Filtre client des éléments affichés (barre de recherche de l'Accueil).
     var searchText: String = ""
@@ -75,6 +76,7 @@ struct FileGridView: View {
     @Environment(\.iPadLayout) private var iPadLayout
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @State private var containerWidth: CGFloat = 0
+    @State private var containerHeight: CGFloat = 0
     // Measure the window-level layout, not the grid after the inspector has
     // taken its width: using that width would alternate inspector and sheet.
     private var usesDetailsInspector: Bool {
@@ -391,13 +393,21 @@ struct FileGridView: View {
                 // L'iPhone garde sa borne ; l'iPad adapte les colonnes à la largeur du panneau.
                 .frame(maxWidth: iPadLayout.isPad ? .infinity : DS.maxContentWidth)
                 .frame(maxWidth: .infinity)
+                .frame(minHeight: containerHeight, alignment: .top)
+                .background {
+                    // This is a sibling behind the cards, not a gesture on
+                    // their ancestor: opening/selecting a card stays intact.
+                    Color.clear.contentShape(Rectangle())
+                        .onTapGesture { onBackgroundTap?() }
+                }
             }
             // Le rebond permanent permet le pull-to-refresh même quand le
             // dossier est trop court pour défiler.
             .scrollBounceBehavior(.always, axes: .vertical)
             .scrollIndicators(.hidden)
-            .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { width in
-                containerWidth = width
+            .onGeometryChange(for: CGSize.self) { $0.size } action: { size in
+                containerWidth = size.width
+                containerHeight = size.height
             }
             .onChange(of: scrollToTopRequest) { oldValue, newValue in
                 guard oldValue != newValue else { return }

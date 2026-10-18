@@ -169,6 +169,7 @@ struct TagsView: View {
                 Image(systemName: "pencil")
             }
             .accessibilityLabel(isReordering ? "Terminer le réarrangement" : "Réarranger les tags")
+            .disabled(iPadLayout.isPad && crossState.isActive)
             Button {
                 showCreateSheet = true
             } label: {
@@ -219,17 +220,29 @@ struct TagsView: View {
         Button {
             isReordering = false
             padNavigation.folders = []
-            crossState.isEditing.toggle()
+            if iPadLayout.isPad {
+                let wasActive = crossState.isActive
+                crossState.toggleMode()
+                if !wasActive { padNavigation.select(nil) }
+                if wasActive && !usesTagColumns { path = NavigationPath(); trail = [] }
+            } else {
+                crossState.isEditing.toggle()
+            }
         } label: {
-            Image(systemName: crossState.isEditing ? "checkmark.circle" : "line.3.horizontal.decrease.circle")
+            Image(systemName: !iPadLayout.isPad && crossState.isEditing ? "checkmark.circle" : "line.3.horizontal.decrease.circle")
                 .frame(minWidth: 44, minHeight: 44)
         }
-        .accessibilityLabel(crossState.isEditing ? "Terminer la sélection des tags" : "Croiser plusieurs tags")
+        .accessibilityLabel(iPadLayout.isPad
+            ? (crossState.isActive ? "Arrêter le croisement des tags" : "Croiser plusieurs tags")
+            : (crossState.isEditing ? "Terminer la sélection des tags" : "Croiser plusieurs tags"))
+        .accessibilityIdentifier("tags.cross")
         .tint(crossState.isActive ? .accentColor : .primary)
     }
 
     @ViewBuilder private var crossSummary: some View {
-        if crossState.isActive {
+        if crossState.isActive && iPadLayout.isPad && !usesTagColumns {
+            NavigationLink("Résultats", value: CrossRoute.results)
+        } else if crossState.isActive && !iPadLayout.isPad {
             VStack {
                 crossControls
                 if !usesTagColumns { NavigationLink("Résultats", value: CrossRoute.results) }
@@ -238,7 +251,7 @@ struct TagsView: View {
     }
 
     @ViewBuilder private var crossControls: some View {
-        if crossState.isActive {
+        if crossState.isActive && !iPadLayout.isPad {
             VStack(alignment: .leading, spacing: 8) {
                 Text(crossState.selectedIDs.isEmpty ? "Choisissez les tags à croiser" : "Tous les tags sélectionnés")
                     .font(.subheadline.weight(.semibold))
@@ -278,6 +291,11 @@ struct TagsView: View {
                 crossControls
             }
         }
+        .toolbar {
+            if iPadLayout.isPad && !usesTagColumns {
+                ToolbarItem(placement: .topBarLeading) { crossButton }
+            }
+        }
     }
 
     private var categorySelection: Binding<Int?> {
@@ -307,6 +325,7 @@ struct TagsView: View {
                         .frame(width: 44, height: 44)
                 }
                 .accessibilityLabel(isReordering ? "Terminer le réarrangement" : "Réarranger les tags")
+                .disabled(crossState.isActive)
                 Button { showCreateSheet = true } label: {
                     Image(systemName: "plus").frame(width: 44, height: 44)
                 }
@@ -321,11 +340,9 @@ struct TagsView: View {
                     ForEach(orderedCategories) { category in
                         if crossState.isEditing {
                             Button { crossState.toggle(category.id) } label: {
-                                HStack {
-                                    CategoryRow(category: category, inSidebar: true)
-                                    Image(systemName: crossState.selectedIDs.contains(category.id) ? "checkmark.circle.fill" : "circle")
-                                }
+                                CategoryRow(category: category, inSidebar: true)
                             }
+                            .listRowBackground(crossState.selectedIDs.contains(category.id) ? Color.accentColor.opacity(0.18) : Color.clear)
                             .accessibilityAddTraits(crossState.selectedIDs.contains(category.id) ? .isSelected : [])
                         } else if isReordering {
                             reorderCell(for: category, inSidebar: true)
@@ -406,8 +423,14 @@ struct TagsView: View {
                             open(category)
                         } label: {
                             TagGridCard(category: category)
+                                .overlay {
+                                    RoundedRectangle(cornerRadius: 16).fill(tagSelectionBackground(category).opacity(0.18))
+                                        .allowsHitTesting(false)
+                                    RoundedRectangle(cornerRadius: 16).strokeBorder(tagSelectionBackground(category), lineWidth: 3)
+                                        .allowsHitTesting(false)
+                                }
                                 .overlay(alignment: .topTrailing) {
-                                    if crossState.isEditing {
+                                    if crossState.isEditing && !iPadLayout.isPad {
                                         Image(systemName: crossState.selectedIDs.contains(category.id) ? "checkmark.circle.fill" : "circle")
                                             .padding(6).foregroundStyle(Color.accentColor)
                                     }
@@ -448,8 +471,12 @@ struct TagsView: View {
                             open(category)
                         } label: {
                             CategoryRow(category: category)
+                                .overlay {
+                                    RoundedRectangle(cornerRadius: 16).fill(tagSelectionBackground(category).opacity(0.18))
+                                        .allowsHitTesting(false)
+                                }
                                 .overlay(alignment: .trailing) {
-                                    if crossState.isEditing {
+                                    if crossState.isEditing && !iPadLayout.isPad {
                                         Image(systemName: crossState.selectedIDs.contains(category.id) ? "checkmark.circle.fill" : "circle")
                                             .foregroundStyle(Color.accentColor)
                                     }
@@ -489,6 +516,11 @@ struct TagsView: View {
         .refreshable {
             await load(force: true)
         }
+    }
+
+    private func tagSelectionBackground(_ category: Category) -> Color {
+        iPadLayout.isPad && crossState.isActive && crossState.selectedIDs.contains(category.id)
+            ? .accentColor : .clear
     }
 
     /// Cellule du mode réarrangement : même présentation que le mode courant

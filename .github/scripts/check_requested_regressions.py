@@ -81,6 +81,7 @@ final class ViewerRouter {
         members = [block(source, marker) for marker in [
             '    private var visibleSelectionItems:',
             '    private var playableFiles:', '    private func openRandomFile()',
+            '    private var searchBarVisible:', '    private func dismissSearch()',
         ]]
         classes.append('@MainActor final class ' + name + ''' {
     var viewModel = FileGridViewModel()
@@ -88,6 +89,10 @@ final class ViewerRouter {
     var filters = FileFilters()
     var searchText = ""
     var searchFocused = true
+    var searchDismissed = false
+    var searchRevealed = false
+    var alwaysShowSearch = false
+    var isSearching: Bool { !searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
     let router = ViewerRouter()
     var foldersFirstInTags = true
 ''' + '\n'.join(members) + '''
@@ -118,6 +123,15 @@ final class ViewerRouter {
         searchText = "changed"
         openRandomFile()
         precondition(router.opened == nil)
+        searchFocused = true
+        precondition(searchBarVisible)
+        dismissSearch()
+        precondition(!searchBarVisible && !searchFocused && searchText == "changed",
+                     "Dismissing search must hide the field without changing its result population")
+        alwaysShowSearch = true
+        precondition(!searchBarVisible, "An explicit background tap overrides the display preference")
+        searchDismissed = false
+        precondition(searchBarVisible, "The search button can reveal the retained query again")
     }
 }
 ''')
