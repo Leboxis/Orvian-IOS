@@ -212,13 +212,16 @@ final class BrowserPresentationTests: XCTestCase {
         // local button frame with the header's global frame. The full bar's
         // background bounds can extend below the centered controls.
         func commandFrame() -> CGRect? {
-            descendants(window).compactMap { $0 as? UINavigationBar }
-                .flatMap { descendants($0) }
-                .first {
-                    ($0.accessibilityIdentifier == "fixture.select" || $0.accessibilityLabel == "Sélectionner")
-                        && !$0.isHidden && $0.alpha > 0 && $0.bounds.height > 0
+            for case let bar as UINavigationBar in descendants(window) {
+                for view in descendants(bar) {
+                    let isCommand = view.accessibilityIdentifier == "fixture.select"
+                        || view.accessibilityLabel == "Sélectionner"
+                    if isCommand && !view.isHidden && view.alpha > 0 && view.bounds.height > 0 {
+                        return view.convert(view.bounds, to: window)
+                    }
                 }
-                .map { $0.convert($0.bounds, to: window) }
+            }
+            return nil
         }
         try await waitUntil {
             frames.title.width > 0 && frames.header.height > 0
