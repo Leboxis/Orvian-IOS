@@ -486,9 +486,9 @@ actor APIClient {
 /// toute la durée du processus.
 private let uploadSession: URLSession = {
     let configuration = URLSessionConfiguration.default
-    // Autant de connexions que d'envois simultanés (`UploadManager`), ni plus
-    // ni moins : une tâche supplémentaire attendrait une connexion libre.
-    configuration.httpMaximumConnectionsPerHost = 4
+    // Six fichiers, jusqu'à quatre segments chacun. Les permis du manager
+    // et la fenêtre de segments bornent les requêtes, même en HTTP/2.
+    configuration.httpMaximumConnectionsPerHost = 24
     configuration.urlCache = nil
     configuration.requestCachePolicy = .reloadIgnoringLocalCacheData
     return URLSession(

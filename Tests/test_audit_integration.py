@@ -30,8 +30,20 @@ class AuditIntegrationChecks(unittest.TestCase):
 
     def test_all_upload_jobs_share_permits(self):
         manager = self.source('Orvian/Core/Upload/UploadManager.swift')
-        self.assertIn('private let uploadPermits = AsyncPermitPool(capacity: 4)', manager)
+        self.assertIn('private static let maxConcurrentUploads = 6', manager)
+        self.assertIn('private let uploadPermits = AsyncPermitPool(capacity: UploadManager.maxConcurrentUploads)', manager)
         self.assertEqual(manager.count('try await self.uploadPermits.acquire()'), 3)
+
+    def test_chunk_pipeline_is_awaited_before_push(self):
+        upload = self.source('Orvian/Core/API/KDriveService+Upload.swift')
+        self.assertIn('static let chunkSize = 32 * 1_024 * 1_024', upload)
+        self.assertIn('static let maxConcurrentChunks = 4', upload)
+        session = upload[upload.index('    private func uploadFileInChunks('):]
+        self.assertLess(session.index('try await UploadChunkPipeline.send('),
+                        session.index('finishRequested = true'))
+        client = self.source('Orvian/Core/API/APIClient.swift')
+        transfer_session = client[client.index('private let uploadSession: URLSession'):]
+        self.assertIn('configuration.httpMaximumConnectionsPerHost = 24', transfer_session)
 
     def test_publication_is_serialized(self):
         workflow = self.source('.github/workflows/build.yml')

@@ -4,7 +4,7 @@ import Foundation
 /// Un morceau prêt à l'envoi : son fichier temporaire (sans charger le morceau
 /// entier en RAM), sa taille et son empreinte SHA-256 calculée pendant
 /// l'écriture.
-struct ChunkPayload {
+struct ChunkPayload: Sendable {
     let url: URL
     let size: Int
     let sha256: String
@@ -65,13 +65,70 @@ private actor UploadChunkReader {
     }
 }
 
+/// Fenêtre glissante : au plus quatre fichiers de segments sur disque/en vol.
+/// Le retour confirme tous les segments ; le push final peut alors commencer.
+private enum UploadChunkPipeline {
+    static let chunkSize = 32 * 1_024 * 1_024
+    static let maxConcurrentChunks = 4
+
+    static func send(
+        reader: UploadChunkReader,
+        totalChunks: Int,
+        upload: @escaping @Sendable (Int, ChunkPayload) async throws -> Void
+    ) async throws {
+        try await withThrowingTaskGroup(of: Void.self) { group in
+            do {
+                for number in 1...totalChunks {
+                    if number > maxConcurrentChunks { try await group.next() }
+                    try Task.checkCancellation()
+                    guard let chunk = try await reader.next(maxLength: chunkSize) else {
+                        throw CocoaError(.fileReadCorruptFile)
+                    }
+                    group.addTask {
+                        // Le même fichier reste disponible durant les réessais.
+                        defer { try? FileManager.default.removeItem(at: chunk.url) }
+                        try Task.checkCancellation()
+                        try await upload(number, chunk)
+                    }
+                }
+                while let _ = try await group.next() {}
+                try Task.checkCancellation()
+            } catch {
+                group.cancelAll()
+                throw error
+            }
+        }
+    }
+}
+
+/// Les callbacks URLSession sont synchrones et peuvent venir de plusieurs
+/// segments. Le verrou protège les octets cumulés, y compris lors d'un réessai.
+private final class UploadChunkProgress: @unchecked Sendable {
+    private let lock = NSLock()
+    private let totalSize: Int
+    private var bytesByChunk: [Int: Double] = [:]
+    private var sentBytes = 0.0
+
+    init(totalSize: Int) { self.totalSize = totalSize }
+
+    func update(number: Int, size: Int, fraction: Double) -> Double {
+        lock.lock()
+        defer { lock.unlock() }
+        let previous = bytesByChunk[number] ?? 0
+        let current = max(previous, Double(size) * min(max(fraction, 0), 1))
+        bytesByChunk[number] = current
+        sentBytes += current - previous
+        return min(sentBytes / Double(max(totalSize, 1)), 1)
+    }
+}
+
 /// Création de dossiers, upload simple et upload par sessions.
 extension KDriveService {
     /// Infomaniak recommande une session à partir de 100 Mo. Une petite marge
     /// évite qu'un fichier proche de la limite soit refusé par un intermédiaire.
     private static let directUploadLimit = 95 * 1_024 * 1_024
     private static let directUploadMaximumAttempts = 3
-    private static let uploadChunkSize = 20 * 1_024 * 1_024
+    private static let uploadChunkSize = UploadChunkPipeline.chunkSize
     private static let uploadChunkMaximumAttempts = 3
 
     private struct StartUploadSessionRequest: Encodable {
@@ -211,7 +268,8 @@ extension KDriveService {
     }
 
     /// Les fichiers d'au moins 95 Mo suivent le protocole de session recommandé
-    /// par Infomaniak. Chaque morceau est confirmé avant le suivant.
+    /// par Infomaniak. Quatre segments de 32 Mio au plus partent en parallèle,
+    /// puis la session est finalisée après confirmation de tous les segments.
     private func uploadFileInChunks(
         driveId: Int,
         directoryId: Int,
@@ -250,16 +308,8 @@ extension KDriveService {
         var finishRequested = false
         do {
             let reader = try UploadChunkReader(url: fileURL)
-            for number in 1...totalChunks {
-                try Task.checkCancellation()
-                guard let chunk = try await reader.next(maxLength: Self.uploadChunkSize) else {
-                    // Fin de fichier avant le nombre de morceaux attendu.
-                    throw APIError.invalidResponse
-                }
-                // Le morceau vit dans un fichier temporaire : supprimé à la
-                // sortie de l'itération (succès, échec ou annulation). Un
-                // réessai du même numéro relit ce même fichier.
-                defer { try? FileManager.default.removeItem(at: chunk.url) }
+            let chunkProgress = UploadChunkProgress(totalSize: totalSize)
+            try await UploadChunkPipeline.send(reader: reader, totalChunks: totalChunks) { number, chunk in
                 let chunkURL = try Self.chunkURL(
                     from: uploadURL,
                     driveId: driveId,
@@ -269,16 +319,20 @@ extension KDriveService {
                     hash: chunk.sha256
                 )
 
-                try await uploadChunk(
+                try await self.uploadChunk(
                     to: chunkURL,
                     payload: chunk,
                     number: number,
-                    totalChunks: totalChunks,
                     originatingCredential: credential.fingerprint,
-                    progress: progress
+                    progress: { fraction in
+                        // Réserver le dernier pourcent à la confirmation du push.
+                        progress(0.99 * chunkProgress.update(number: number, size: chunk.size, fraction: fraction))
+                    }
                 )
+                progress(0.99 * chunkProgress.update(number: number, size: chunk.size, fraction: 1))
             }
 
+            try Task.checkCancellation()
             finishRequested = true
             let finished = try await api.postDecoded(
                 DataResponse<FinishedUpload>.self,
@@ -313,7 +367,6 @@ extension KDriveService {
         to url: URL,
         payload: ChunkPayload,
         number: Int,
-        totalChunks: Int,
         originatingCredential: String,
         progress: @escaping @Sendable (Double) -> Void
     ) async throws {
@@ -329,10 +382,7 @@ extension KDriveService {
                     fileURL: payload.url,
                     contentType: "application/octet-stream",
                     originatingCredential: originatingCredential,
-                    progress: { chunkProgress in
-                        let completedChunks = Double(number - 1)
-                        progress((completedChunks + chunkProgress) / Double(totalChunks))
-                    }
+                    progress: progress
                 )
                 let response = try JSONDecoder.api.decode(DataResponse<UploadChunk>.self, from: responseData)
                 guard response.result == nil || response.result == "success" || response.result == "asynchronous",

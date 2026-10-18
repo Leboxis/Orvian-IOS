@@ -198,8 +198,8 @@ final class UploadManager {
     /// L'API kDrive traite chaque upload de manière indépendante (session
     /// dédiée aux gros fichiers), plusieurs fichiers peuvent donc partir en
     /// parallèle sans verrou côté serveur.
-    private static let maxConcurrentUploads = 4
-    private let uploadPermits = AsyncPermitPool(capacity: 4)
+    private static let maxConcurrentUploads = 6
+    private let uploadPermits = AsyncPermitPool(capacity: UploadManager.maxConcurrentUploads)
 
     private init() {}
 
