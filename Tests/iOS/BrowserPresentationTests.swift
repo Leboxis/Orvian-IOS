@@ -188,6 +188,7 @@ final class BrowserPresentationTests: XCTestCase {
                     ToolbarItem(placement: .topBarTrailing) {
                         Button("Sélectionner", systemImage: "checkmark.circle") {}
                             .labelStyle(.iconOnly).frame(width: 44, height: 44)
+                            .accessibilityIdentifier("fixture.select")
                     }
                 }
                 .navigationBarTitleDisplayMode(.inline)
@@ -207,20 +208,25 @@ final class BrowserPresentationTests: XCTestCase {
         }
         host.view.layoutIfNeeded()
         // A native bar button has its own SwiftUI hosting coordinate space.
-        // Convert UIKit's bar to the window instead of comparing that local
-        // button frame with the header's global frame.
-        func toolbarFrame() -> CGRect? {
+        // Convert UIKit's command to the window instead of comparing that
+        // local button frame with the header's global frame. The full bar's
+        // background bounds can extend below the centered controls.
+        func commandFrame() -> CGRect? {
             descendants(window).compactMap { $0 as? UINavigationBar }
-                .first { !$0.isHidden && $0.alpha > 0 && $0.bounds.height > 0 }
+                .flatMap { descendants($0) }
+                .first {
+                    ($0.accessibilityIdentifier == "fixture.select" || $0.accessibilityLabel == "Sélectionner")
+                        && !$0.isHidden && $0.alpha > 0 && $0.bounds.height > 0
+                }
                 .map { $0.convert($0.bounds, to: window) }
         }
         try await waitUntil {
             frames.title.width > 0 && frames.header.height > 0
-                && frames.cards.height > 0 && toolbarFrame() != nil
+                && frames.cards.height > 0 && commandFrame() != nil
         }
         XCTAssertEqual(frames.title.width, 228, accuracy: 0.5)
-        let toolbar = try XCTUnwrap(toolbarFrame())
-        XCTAssertEqual(frames.header.midY, toolbar.midY, accuracy: 2,
+        let command = try XCTUnwrap(commandFrame())
+        XCTAssertEqual(frames.header.midY, command.midY, accuracy: 2,
                        "The summary must share the system toolbar's vertical center, not add a content row")
         XCTAssertGreaterThanOrEqual(frames.cards.minY, frames.header.maxY)
     }
