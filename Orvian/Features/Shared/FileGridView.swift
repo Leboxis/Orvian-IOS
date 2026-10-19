@@ -404,6 +404,8 @@ struct FileGridView: View {
             // dossier est trop court pour défiler.
             .scrollBounceBehavior(.always, axes: .vertical)
             .scrollIndicators(.hidden)
+            // The phone header already separates and clips the scrolling cards.
+            .scrollEdgeEffectHidden(!iPadLayout.isPad, for: .top)
             .onGeometryChange(for: CGSize.self) { $0.size } action: { size in
                 containerWidth = size.width
                 containerHeight = size.height

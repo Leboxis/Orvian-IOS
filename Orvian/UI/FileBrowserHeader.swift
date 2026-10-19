@@ -48,12 +48,17 @@ struct FileBrowserHeader<Header: View, Search: View>: ViewModifier {
                         }
                         summary
                     }
-                    .padding(.vertical, 8)
-                    .background(Color(uiColor: .systemGroupedBackground))
+                    .padding(.top, 2)
+                    .padding(.bottom, 4)
                 }
                 content
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .clipped()
+            }
+            .background {
+                // Every pushed browser paints the same surface beneath the native bar.
+                Color(uiColor: .systemGroupedBackground)
+                    .ignoresSafeArea(.container, edges: [.top, .bottom])
             }
             .animation(Motion.animation(.snappy(duration: 0.3)), value: searchPresented)
         }
