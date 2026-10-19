@@ -315,8 +315,8 @@ struct FileCardView: View {
     private var selectionBadge: some View {
         Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
             .font(.system(size: 20, weight: .medium))
-            .foregroundStyle(isSelected ? Color.accentColor : .white)
-            .shadow(color: .black.opacity(isSelected ? 0 : 0.35), radius: 3, y: 1)
+            .foregroundStyle(isSelected ? Color.accentColor : (presentation == .list ? .secondary : .white))
+            .shadow(color: .black.opacity(isSelected || presentation == .list ? 0 : 0.35), radius: 3, y: 1)
             .padding(5)
             .allowsHitTesting(false)
             .accessibilityHidden(true)

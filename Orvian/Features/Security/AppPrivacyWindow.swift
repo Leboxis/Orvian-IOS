@@ -201,6 +201,14 @@ struct AppPrivacyWindow: UIViewRepresentable {
                 return
             }
             guard state.requiresLock(snapshot) || snapshot.phase != .active else { hide(); return }
+            let appearance = AppAppearance(rawValue: UserDefaults.standard.string(forKey: AppAppearance.storageKey) ?? "") ?? .system
+            let interfaceStyle: UIUserInterfaceStyle
+            switch appearance {
+            case .system: interfaceStyle = .unspecified
+            case .light: interfaceStyle = .light
+            case .dark: interfaceStyle = .dark
+            }
+            shield?.overrideUserInterfaceStyle = interfaceStyle
             guard shield == nil else { return }
             previousAccessibilityHidden = owner.accessibilityElementsHidden
             owner.accessibilityElementsHidden = true
@@ -208,6 +216,7 @@ struct AppPrivacyWindow: UIViewRepresentable {
             host.view.backgroundColor = .systemGroupedBackground
             host.view.accessibilityViewIsModal = true
             let window = UIWindow(windowScene: scene)
+            window.overrideUserInterfaceStyle = interfaceStyle
             window.windowLevel = .alert + 1
             window.rootViewController = host
             shield = window

@@ -17,6 +17,7 @@ struct TagsView: View {
     /// Visibilité de la colonne de gauche (bouton de masquage de l'en-tête).
     @Binding var columnVisibility: NavigationSplitViewVisibility
     @Binding var crossState: TagIntersectionState
+    @Environment(\.colorScheme) private var colorScheme
     @Environment(\.iPadLayout) private var iPadLayout
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @Environment(\.phoneBottomChromeHeight) private var phoneBottomChromeHeight
@@ -627,11 +628,11 @@ struct TagsView: View {
     }
 
     private func catalogueGridCard(for category: Category, isSelecting: Bool = false, isSelected: Bool = false) -> some View {
-        TagGridCard(category: category, backgroundOpacity: iPadLayout.isPad ? 0.2 : 1,
+        TagGridCard(category: category, backgroundOpacity: iPadLayout.isPad && colorScheme == .dark ? 0.2 : 1,
                     isSelecting: isSelecting, isSelected: isSelected,
                     showsSelectionIndicator: iPadLayout.isPad)
             .background {
-                if !iPadLayout.isPad {
+                if !iPadLayout.isPad || colorScheme == .light {
                     // Keep the native surface beneath the translucent selection tint.
                     RoundedRectangle(cornerRadius: 16, style: .continuous)
                         .fill(Color(uiColor: .secondarySystemGroupedBackground))

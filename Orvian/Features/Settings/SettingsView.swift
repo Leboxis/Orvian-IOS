@@ -396,6 +396,7 @@ private struct HubIcon: View {
 
 private struct AppearanceSpace: View {
     @Environment(\.iPadLayout) private var iPadLayout
+    @AppStorage(AppAppearance.storageKey) private var appearance: AppAppearance = .system
     @AppStorage("iPadTabBarAtBottom") private var iPadTabBarAtBottom = false
     @AppStorage("padFilterMenuScale") private var padFilterMenuScale = 1.2
     @Binding var showFileSizes: Bool
@@ -411,6 +412,17 @@ private struct AppearanceSpace: View {
 
     var body: some View {
         List {
+            Section {
+                Picker("Apparence", selection: $appearance) {
+                    ForEach(AppAppearance.allCases) { option in
+                        Text(option.title).tag(option)
+                    }
+                }
+            } header: {
+                Text("Thème")
+            } footer: {
+                Text("Système suit l’apparence de l’appareil. Le choix est conservé sur cet appareil, sur iPhone comme sur iPad.")
+            }
             if iPadLayout.isPad {
                 Section {
                     Toggle("Barre d’onglets en bas", isOn: $iPadTabBarAtBottom)

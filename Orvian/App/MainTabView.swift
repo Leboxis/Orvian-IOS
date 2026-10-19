@@ -72,6 +72,7 @@ struct MainTabView: View {
         }
         .fullScreenCover(item: $shell.router.mediaContext) { context in
             MediaPagerView(context: context)
+                .preferredColorScheme(.dark)
         }
         .fullScreenCover(item: $shell.router.textFile) { file in
             TextFileViewer(file: file, driveId: drive.id)

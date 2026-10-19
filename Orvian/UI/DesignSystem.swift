@@ -5,6 +5,29 @@ extension EnvironmentValues {
     @Entry var fileBrowserScope = FileBrowserScope.home
 }
 
+enum AppAppearance: String, CaseIterable, Identifiable {
+    case system, light, dark
+
+    static let storageKey = "appAppearance"
+    var id: Self { self }
+
+    var title: String {
+        switch self {
+        case .system: "Système"
+        case .light: "Clair"
+        case .dark: "Sombre"
+        }
+    }
+
+    var colorScheme: ColorScheme? {
+        switch self {
+        case .system: nil
+        case .light: .light
+        case .dark: .dark
+        }
+    }
+}
+
 /// Constantes de design partagées.
 ///
 /// Le chrome flottant (barre d'onglets, pastilles de transfert, bouton

@@ -457,7 +457,7 @@ private struct ProfileThumbnailCard: View {
                         if file.isVideo {
                             Image(systemName: "play.fill")
                                 .font(.system(size: 11, weight: .bold))
-                                .foregroundStyle(.white)
+                                .foregroundStyle(.primary)
                                 .padding(6)
                                 .background(.ultraThinMaterial, in: Circle())
                         }
