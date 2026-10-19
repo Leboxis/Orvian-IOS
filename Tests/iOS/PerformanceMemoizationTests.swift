@@ -5,49 +5,79 @@ import XCTest
 /// fichiers (lu plusieurs fois par carte et deux fois par comparaison de tri)
 /// et les réglages de tri/filtres relus à chaque reconstruction de vue.
 final class PerformanceMemoizationTests: XCTestCase {
+    /// L'initialiseur membre de `DriveFile` est synthétisé : ses paramètres
+    /// n'ont pas de valeur par défaut, d'où ce raccourci lisible dans les tests.
+    private func makeFile(
+        id: Int,
+        name: String = "fichier",
+        type: String = "file",
+        mimeType: String? = nil,
+        extensionType: String? = nil
+    ) -> DriveFile {
+        DriveFile(
+            id: id,
+            name: name,
+            type: type,
+            size: nil,
+            mimeType: mimeType,
+            extensionType: extensionType,
+            fileExtension: nil,
+            isFavorite: nil,
+            parentId: nil,
+            path: nil,
+            color: nil,
+            categories: nil,
+            addedAt: nil,
+            lastModifiedAt: nil,
+            updatedAt: nil
+        )
+    }
+
     func testFileKindIsMemoizedAndInvalidatedByItsInputs() {
-        let file = DriveFile(id: 4_242, name: "photo.jpg", type: "file",
+        let photo = makeFile(id: 4_242, name: "photo.jpg",
                              mimeType: "image/jpeg", extensionType: "image")
-        XCTAssertEqual(file.fileKind, .image)
+        XCTAssertEqual(photo.fileKind, FileKind.image)
 
         // Même identifiant, contenu différent : le cache doit suivre.
-        let renamed = DriveFile(id: 4_242, name: "clip.mov", type: "file",
-                                mimeType: "video/quicktime", extensionType: "video")
-        XCTAssertEqual(renamed.fileKind, .video, "A newer version of the same file must not reuse the old kind")
+        let clip = makeFile(id: 4_242, name: "clip.mov",
+                            mimeType: "video/quicktime", extensionType: "video")
+        XCTAssertEqual(clip.fileKind, FileKind.video,
+                       "A newer version of the same file must not reuse the old kind")
 
         // Un GIF reste une image même si l'API annonce autre chose.
-        let gif = DriveFile(id: 4_243, name: "animation", type: "file",
-                            mimeType: "image/gif", extensionType: "unknown")
-        XCTAssertTrue(gif.isGIF)
-        XCTAssertEqual(gif.fileKind, .image)
+        let animation = makeFile(id: 4_243, name: "animation",
+                                 mimeType: "image/gif", extensionType: "unknown")
+        XCTAssertTrue(animation.isGIF)
+        XCTAssertEqual(animation.fileKind, FileKind.image)
 
         // Les dossiers ne passent jamais par le type de fichier.
-        let folder = DriveFile(id: 4_244, name: "Dossier", type: "dir")
-        XCTAssertEqual(folder.fileKind, .folder)
+        let folder = makeFile(id: 4_244, name: "Dossier", type: "dir")
+        XCTAssertEqual(folder.fileKind, FileKind.folder)
         XCTAssertFalse(folder.isGIF)
     }
 
     func testFileKindMatchesTheUncachedRule() {
         for extensionType in [nil, "image", "video", "unknown", "pdf"] as [String?] {
             for mime in [nil, "image/gif", "video/mp4", "text/plain"] as [String?] {
-                let file = DriveFile(id: 7, name: "fichier.gif", type: "file",
-                                     mimeType: mime, extensionType: extensionType)
+                let candidate = makeFile(id: 7, name: "fichier.gif",
+                                         mimeType: mime, extensionType: extensionType)
                 let expected = FileKind.compute(
                     extensionType: extensionType,
                     mimeType: mime,
-                    fileName: file.name,
-                    fileExtension: file.fileExtension,
-                    isDirectory: file.isDirectory
+                    fileName: candidate.name,
+                    fileExtension: candidate.fileExtension,
+                    isDirectory: candidate.isDirectory
                 )
-                XCTAssertEqual(file.fileKind, expected)
+                XCTAssertEqual(candidate.fileKind, expected)
             }
         }
     }
 
     @MainActor
     func testFiltersStoreMemoizesTheDecodedValue() {
-        let defaults = UserDefaults(suiteName: "orvian.filters.memoization")!
-        defaults.removePersistentDomain(forName: "orvian.filters.memoization")
+        let suite = "orvian.filters.memoization"
+        let defaults = UserDefaults(suiteName: suite)!
+        defaults.removePersistentDomain(forName: suite)
         FileFiltersStore.clearCache()
 
         var filters = FileFilters()
@@ -73,6 +103,6 @@ final class PerformanceMemoizationTests: XCTestCase {
         XCTAssertEqual(FileFiltersStore.load(scope: .tag, defaults: defaults), FileFilters())
 
         FileFiltersStore.clearCache()
-        defaults.removePersistentDomain(forName: "orvian.filters.memoization")
+        defaults.removePersistentDomain(forName: suite)
     }
 }
