@@ -54,9 +54,11 @@ struct HomeTab: View {
                 router: router,
                 isActive: isSelected,
                 showsSearchBar: true,
-                onNavigateAncestor: { depth in path = Array(path.prefix(depth)) },
+                onNavigateAncestor: { depth in
+                    Motion.withoutNavigationAnimation { path = Array(path.prefix(depth)) }
+                },
                 onOpenFolder: { folder in
-                    path.append(folder)
+                    Motion.withoutNavigationAnimation { path.append(folder) }
                 }
             )
             .id(root.id)
@@ -70,9 +72,11 @@ struct HomeTab: View {
                     router: router,
                     isActive: isSelected,
                     showsSearchBar: true,
-                    onNavigateAncestor: { depth in path = Array(path.prefix(depth)) },
+                    onNavigateAncestor: { depth in
+                        Motion.withoutNavigationAnimation { path = Array(path.prefix(depth)) }
+                    },
                     onOpenFolder: { folder in
-                        path.append(folder)
+                        Motion.withoutNavigationAnimation { path.append(folder) }
                     }
                 )
             }

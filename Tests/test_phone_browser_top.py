@@ -38,6 +38,25 @@ class PhoneBrowserTopTests(unittest.TestCase):
                 self.assertIn('.navigationTitle("")', source)
                 self.assertIn(".navigationBarTitleDisplayMode(.inline)", source)
 
+    def test_folder_changes_freeze_the_system_buttons(self):
+        # `disablesAnimations` ne couvre que l'arbre SwiftUI : sans ce gel,
+        # les boutons fixes de la barre se fondent encore à chaque ouverture
+        # de dossier et à chaque retour.
+        expected = {"Orvian/Features/Home/HomeTab.swift": 4,
+                    "Orvian/Features/Favorites/FavoritesView.swift": 3,
+                    "Orvian/Features/Tag/TagsView.swift": 2}
+        for path, count in expected.items():
+            with self.subTest(path=path):
+                source = read(path)
+                self.assertGreaterEqual(source.count("Motion.withoutNavigationAnimation"), count)
+
+        motion = read("Orvian/UI/Motion.swift")
+        freeze = motion[motion.index("static func withoutNavigationAnimation"):]
+        self.assertIn("UIView.setAnimationsEnabled(false)", freeze)
+        self.assertIn("UIView.setAnimationsEnabled(true)", freeze)
+        self.assertIn("UIDevice.current.userInterfaceIdiom != .pad", freeze)
+        self.assertIn("transaction.disablesAnimations = true", freeze)
+
 
 if __name__ == "__main__":
     unittest.main()

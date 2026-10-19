@@ -153,7 +153,9 @@ struct TagsView: View {
                         router: router,
                         onNavigateAncestor: { depth in
                             let retained = depth + 1
-                            if path.count > retained { path.removeLast(path.count - retained) }
+                            if path.count > retained {
+                                Motion.withoutNavigationAnimation { path.removeLast(path.count - retained) }
+                            }
                         },
                         onOpenFolder: { folder in
                             push(folder)
@@ -755,9 +757,12 @@ struct TagsView: View {
         trail.append(category.name)
     }
 
+    @MainActor
     private func push(_ folder: DriveFile) {
-        path.append(folder)
-        trail.append(folder.name)
+        Motion.withoutNavigationAnimation {
+            path.append(folder)
+            trail.append(folder.name)
+        }
     }
 
     private func loadIfNeeded() async {

@@ -154,7 +154,11 @@ struct FavoritesView: View {
                 viewModel: viewModel,
                 onOpenDirectory: { folder in
                     searchFocused = false
-                    if let onOpenFolder { onOpenFolder(folder) } else { path.append(folder) }
+                    if let onOpenFolder {
+                        onOpenFolder(folder)
+                    } else {
+                        Motion.withoutNavigationAnimation { path.append(folder) }
+                    }
                 },
                 onOpenFile: { file, siblings in
                     searchFocused = false
@@ -359,9 +363,11 @@ struct FavoritesView: View {
                     driveId: viewModel.driveId,
                     crumbs: crumbs,
                     router: router,
-                    onNavigateAncestor: { depth in path = Array(path.prefix(depth)) },
+                    onNavigateAncestor: { depth in
+                        Motion.withoutNavigationAnimation { path = Array(path.prefix(depth)) }
+                    },
                     onOpenFolder: { folder in
-                        path.append(folder)
+                        Motion.withoutNavigationAnimation { path.append(folder) }
                     }
                 )
             }
