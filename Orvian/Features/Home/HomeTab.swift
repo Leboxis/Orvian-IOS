@@ -77,6 +77,7 @@ struct HomeTab: View {
                 )
             }
         }
+        .transaction { $0.disablesAnimations = true }
         .task(id: driveId) {
             await revalidateStartDirectory()
         }

@@ -144,6 +144,7 @@ struct FavoritesView: View {
                 NavigationStack(path: $path) {
                     browser.navigationDestination(for: DriveFile.self) { folderDestination($0) }
                 }
+                .transaction { $0.disablesAnimations = true }
             } else { browser }
         }
     }

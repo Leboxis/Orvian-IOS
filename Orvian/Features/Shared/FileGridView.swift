@@ -477,7 +477,11 @@ struct FileGridView: View {
     @ViewBuilder
     private var content: some View {
         if viewModel.isInitialLoading {
-            skeleton
+            if case .directory = viewModel.source {
+                EmptyView()
+            } else {
+                skeleton
+            }
         } else if let message = viewModel.errorMessage, viewModel.items.isEmpty {
             errorState(message)
         } else if viewModel.items.isEmpty && (viewModel.hasMore || viewModel.isLoadingMore) {

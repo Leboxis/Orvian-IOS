@@ -176,8 +176,10 @@ struct DirectoryView: View {
                             .lineLimit(dynamicTypeSize.isAccessibilitySize ? 4 : 2)
                             .accessibilityAddTraits(.isHeader)
                     }
-                    itemCountLabel
-                        .fixedSize(horizontal: true, vertical: false)
+                    if !activeViewModel.isInitialLoading {
+                        itemCountLabel
+                            .fixedSize(horizontal: true, vertical: false)
+                    }
                 }
                 .padding(.horizontal, 16)
             }

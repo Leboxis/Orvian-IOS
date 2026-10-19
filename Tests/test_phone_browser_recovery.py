@@ -33,6 +33,20 @@ class PhoneBrowserRecoveryChecks(unittest.TestCase):
                 self.assertIn('"Masquer le clavier"', text)
                 self.assertIn('accessibilityLabel("Effacer la recherche")', text)
 
+    def test_folder_navigation_has_no_slide_or_placeholder_grid(self):
+        for path, count in [("Orvian/Features/Home/HomeTab.swift", 1),
+                            ("Orvian/Features/Favorites/FavoritesView.swift", 1),
+                            ("Orvian/Features/Tag/TagsView.swift", 2)]:
+            with self.subTest(path=path):
+                self.assertEqual(source(path).count(".transaction { $0.disablesAnimations = true }"), count)
+        grid = source("Orvian/Features/Shared/FileGridView.swift")
+        loading = grid[grid.index("if viewModel.isInitialLoading {"):grid.index("} else if let message", grid.index("if viewModel.isInitialLoading {"))]
+        self.assertIn("if case .directory = viewModel.source", loading)
+        self.assertIn("EmptyView()", loading)
+        self.assertNotIn("ProgressView", loading)
+        header = source("Orvian/Features/Home/DirectoryView.swift")
+        self.assertIn("if !activeViewModel.isInitialLoading {\n                        itemCountLabel", header)
+
     def test_folder_keeps_identity_when_path_is_hidden(self):
         text = source("Orvian/Features/Home/DirectoryView.swift")
         header = text[text.index(".modifier(FileBrowserHeader"):text.index("        .toolbar {")]

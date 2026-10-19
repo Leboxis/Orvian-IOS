@@ -162,6 +162,7 @@ struct TagsView: View {
                     .modifier(TagDestinationNavigationBar(isPhone: !iPadLayout.isPad))
                 }
         }
+        .transaction { $0.disablesAnimations = true }
     }
 
     private var phoneCatalogue: some View {
@@ -315,6 +316,7 @@ struct TagsView: View {
                                   onOpenFolder: { padNavigation.folders.append($0) })
                 }
             }
+            .transaction { $0.disablesAnimations = true }
         }
         .navigationSplitViewStyle(.balanced)
     }
