@@ -50,6 +50,7 @@ struct VideoPlayerView: View {
     @Environment(\.layoutDirection) private var layoutDirection
     @Environment(\.accessibilityVoiceOverEnabled) private var voiceOverEnabled
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @Environment(\.verticalSizeClass) private var verticalSizeClass
     @Environment(\.scenePhase) private var scenePhase
     @State private var player: AVPlayer?
     @State private var poster: UIImage?
@@ -354,7 +355,7 @@ struct VideoPlayerView: View {
                     .transition(.opacity)
             }
         }
-        .buttonStyle(.plain)
+        .buttonStyle(PhonePlaybackButtonStyle())
         .confirmationDialog("Vitesse de lecture", isPresented: $showPhoneSpeedPicker, titleVisibility: .visible) {
             ForEach(SpeedOption.allCases) { option in
                 Button(option.title) { setPlaybackRate(option.rate) }
@@ -365,67 +366,81 @@ struct VideoPlayerView: View {
     }
 
     private var phoneTopBar: some View {
-        HStack(spacing: 4) {
+        HStack(spacing: 8) {
             if let direction = skipFeedback {
                 Text(direction == .forward ? "+10 s" : "−10 s")
-                    .font(.body.weight(.medium))
-                    .foregroundStyle(.white)
-                    .frame(maxWidth: .infinity, minHeight: 44)
+                    .font(.footnote.weight(.medium))
+                    .foregroundStyle(.white.opacity(0.7))
+                    .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
                     .accessibilityHidden(true)
             } else {
-                MediaTitlePill(name: file.name)
+                MediaTitlePill(name: file.name, isSubtle: true)
             }
-            tagMenu
-            favoriteButton
+            HStack(spacing: 0) {
+                tagMenu
+                favoriteButton
+            }
+            .background(.white.opacity(0.06), in: Capsule())
             closeButton
         }
-        .padding(.horizontal, 8)
-        .padding(.vertical, 2)
+        .padding(.horizontal, 16)
+        .padding(.vertical, verticalSizeClass == .compact ? 0 : 8)
     }
 
     private var phoneBottomBar: some View {
-        VStack(spacing: 0) {
-            if dynamicTypeSize.isAccessibilitySize {
-                timeControls
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 24) {
+                phoneTimeline.frame(minWidth: 180)
                 phoneTransportButtons
-            } else {
-                ViewThatFits(in: .horizontal) {
-                    HStack(spacing: 12) {
-                        timeControls.frame(minWidth: 160)
-                        phoneTransportButtons
-                    }
-                    VStack(spacing: 0) {
-                        timeControls
-                        phoneTransportButtons
-                    }
-                }
+            }
+            VStack(spacing: 4) {
+                phoneTimeline
+                phoneTransportButtons
             }
         }
-        .padding(.horizontal, 12)
-        .padding(.bottom, 4)
+        .padding(.horizontal, 16)
+        .padding(.vertical, verticalSizeClass == .compact ? 4 : 12)
+        .background(Color(uiColor: .secondarySystemBackground), in: RoundedRectangle(cornerRadius: 28, style: .continuous))
+        .environment(\.colorScheme, .dark)
+        .frame(maxWidth: dynamicTypeSize.isAccessibilitySize ? .infinity : 560)
+        .padding(.horizontal, 16)
+        .padding(.vertical, verticalSizeClass == .compact ? 4 : 12)
+        .frame(maxWidth: .infinity)
     }
 
-    private var phoneTransportButtons: some View {
-        HStack(spacing: 4) {
-            muteButton
-            Spacer(minLength: 0)
-            phoneSkipButton(forward: false)
-            playButton
-            phoneSkipButton(forward: true)
-            Spacer(minLength: 0)
+    private var phoneTimeline: some View {
+        let layout = dynamicTypeSize.isAccessibilitySize && verticalSizeClass != .compact
+            ? AnyLayout(VStackLayout(spacing: 0))
+            : AnyLayout(HStackLayout(spacing: 12))
+        return layout {
+            timeControls
             Button {
                 showPhoneSpeedPicker = true
             } label: {
                 Text(currentSpeedTitle)
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(.white)
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(.white.opacity(0.85))
                     .frame(width: 44, height: 44)
-                    .contentShape(Rectangle())
+                    .background(.white.opacity(0.06), in: Capsule())
             }
             .accessibilityLabel("Vitesse de lecture")
             .accessibilityValue(currentSpeedTitle)
+        }
+    }
+
+    private var phoneTransportButtons: some View {
+        HStack(spacing: 0) {
+            muteButton
+            Spacer(minLength: 0)
+            HStack(spacing: 8) {
+                phoneSkipButton(forward: false)
+                playButton
+                phoneSkipButton(forward: true)
+            }
+            Spacer(minLength: 0)
             AirPlayButton()
                 .frame(width: 44, height: 44)
+                .opacity(0.7)
         }
     }
 
@@ -662,7 +677,7 @@ struct VideoPlayerView: View {
     private var timeControls: some View {
         TransportTimeView(
             clock: clock,
-            fullWidthTimeline: isPhone && dynamicTypeSize.isAccessibilitySize,
+            fullWidthTimeline: isPhone,
             isScrubbing: isScrubbing,
             isSeeking: isSeeking,
             timeFormatter: { timeText($0) },
@@ -739,10 +754,10 @@ struct VideoPlayerView: View {
             togglePlay()
         } label: {
             Image(systemName: transport.wantsPlayback ? "pause.fill" : "play.fill")
-                .font(.system(size: 17, weight: .semibold))
-                .foregroundStyle(isPhone ? .black : .white)
-                .frame(width: 44, height: 44)
-                .background(.white.opacity(isPhone ? 1 : 0.12), in: Circle())
+                .font(.system(size: isPhone ? 20 : 17, weight: .semibold))
+                .foregroundStyle(.white)
+                .frame(width: isPhone ? 56 : 44, height: isPhone ? 56 : 44)
+                .background(.white.opacity(isPhone ? 0.14 : 0.12), in: Circle())
         }
         .disabled(player == nil || !isActive)
         .accessibilityLabel(transport.wantsPlayback ? "Pause" : "Lecture")
@@ -752,7 +767,8 @@ struct VideoPlayerView: View {
     private var favoriteButton: some View {
         MediaFavoriteButton(
             isFavorite: isFavorite,
-            isDisabled: isFavoriteMutationInProgress
+            isDisabled: isFavoriteMutationInProgress,
+            isSubtle: isPhone
         ) {
             Task { await toggleFavorite() }
         }
@@ -766,9 +782,9 @@ struct VideoPlayerView: View {
         } label: {
             Image(systemName: isMuted ? "speaker.slash.fill" : "speaker.wave.2.fill")
                 .font(.system(size: 16, weight: .medium))
-                .foregroundStyle(.white)
+                .foregroundStyle(.white.opacity(isPhone ? 0.7 : 1))
                 .frame(width: 44, height: 44)
-                .background(.black.opacity(0.75), in: Circle())
+                .background(.black.opacity(isPhone ? 0 : 0.75), in: Circle())
         }
         .accessibilityLabel(isMuted ? "Réactiver le son" : "Couper le son")
     }
@@ -779,9 +795,9 @@ struct VideoPlayerView: View {
         } label: {
             Image(systemName: "xmark")
                 .font(.system(size: 15, weight: .semibold))
-                .foregroundStyle(.white)
+                .foregroundStyle(.white.opacity(isPhone ? 0.85 : 1))
                 .frame(width: 44, height: 44)
-                .background(.black.opacity(0.75), in: Circle())
+                .background(isPhone ? Color.white.opacity(0.06) : Color.black.opacity(0.75), in: Circle())
         }
         .accessibilityLabel("Fermer")
         .disabled(!isActive)
@@ -827,7 +843,7 @@ struct VideoPlayerView: View {
     /// l'onglet Tag, couleurs visibles, tri par usage). Le Menu natif était
     /// écrasé par UIKit : pastilles de couleur perdues, liste peu maniable.
     private var tagMenu: some View {
-        MediaTagButton {
+        MediaTagButton(isSubtle: isPhone) {
             let shouldResume = transport.wantsPlayback
             pausePlayback()
             resumePlaybackAfterTags = shouldResume
@@ -1472,14 +1488,19 @@ struct VideoPlayerView: View {
         )
     }
 }
-/// Barre de temps du lecteur : position courante, glissière et durée.
-///
-/// Vue séparée volontairement : elle est la **seule** à lire l'horloge de
-/// transport (`PlaybackClock`). L'observateur périodique d'AVPlayer écrit la
-/// position quatre fois par seconde pendant la lecture ; avec ces valeurs dans
-/// le `@State` du lecteur, chaque tick reconstruisait toute la page (barre du
-/// haut, boutons, zone vidéo et couche `AVPlayerLayer`). Ici, seuls les deux
-/// compteurs et la glissière se rafraîchissent.
+
+private struct PhonePlaybackButtonStyle: ButtonStyle {
+    @Environment(\.isEnabled) private var isEnabled
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .opacity(isEnabled ? (configuration.isPressed ? 0.6 : 1) : 0.35)
+            .animation(Motion.animation(.easeOut(duration: 0.12)), value: configuration.isPressed)
+    }
+}
+
+/// Seuls les compteurs et la glissière observent l’horloge à 4 Hz,
+/// sans reconstruire le lecteur ni sa console à chaque tick.
 private struct TransportTimeView: View {
     let clock: PlaybackClock
     let fullWidthTimeline: Bool
@@ -1500,12 +1521,12 @@ private struct TransportTimeView: View {
     var body: some View {
         if fullWidthTimeline {
             VStack(spacing: 0) {
+                scrubber
                 HStack {
                     currentTimeLabel
                     Spacer(minLength: 8)
                     durationLabel
                 }
-                scrubber
             }
         } else {
             HStack(spacing: 8) {
@@ -1532,6 +1553,7 @@ private struct TransportTimeView: View {
             duration: clock.duration,
             bufferedEnd: clock.bufferedEnd,
             isScrubbing: isScrubbing,
+            isRefined: fullWidthTimeline,
             timeFormatter: timeFormatter,
             onDragStarted: onDragStarted,
             onDragChanged: onDragChanged,

@@ -7,6 +7,7 @@ import UIKit
 /// recopiés dans chaque vue, vivent ici.
 struct MediaTitlePill: View {
     let name: String
+    var isSubtle = false
     @State private var copied = false
     @State private var resetTask: Task<Void, Never>?
 
@@ -22,16 +23,16 @@ struct MediaTitlePill: View {
                         .font(.footnote.weight(.medium))
                 } else {
                     Text(name)
-                        .font(.body.weight(.medium))
+                        .font(isSubtle ? .footnote.weight(.medium) : .body.weight(.medium))
                         .lineLimit(1)
                         .truncationMode(.middle)
                 }
             }
-            .foregroundStyle(.white)
-            .padding(.horizontal, 14)
+            .foregroundStyle(.white.opacity(isSubtle ? 0.7 : 1))
+            .padding(.horizontal, isSubtle ? 0 : 14)
             .frame(minHeight: 44)
-            .frame(maxWidth: .infinity)
-            .background(.black.opacity(0.75), in: Capsule())
+            .frame(maxWidth: .infinity, alignment: isSubtle ? .leading : .center)
+            .background(.black.opacity(isSubtle ? 0 : 0.75), in: Capsule())
             .contentShape(Capsule())
         }
         .buttonStyle(.plain)
@@ -64,15 +65,16 @@ struct MediaTitlePill: View {
 struct MediaFavoriteButton: View {
     let isFavorite: Bool
     var isDisabled: Bool = false
+    var isSubtle = false
     let action: () -> Void
 
     var body: some View {
         Button(action: action) {
             Image(systemName: isFavorite ? "star.fill" : "star")
                 .font(.system(size: 16, weight: .medium))
-                .foregroundStyle(isFavorite ? .yellow : .white)
+                .foregroundStyle(isFavorite ? Color.yellow : .white.opacity(isSubtle ? 0.7 : 1))
                 .frame(width: 44, height: 44)
-                .background(.black.opacity(0.75), in: Circle())
+                .background(.black.opacity(isSubtle ? 0 : 0.75), in: Circle())
         }
         .disabled(isDisabled)
         .accessibilityLabel(isFavorite ? "Retirer des favoris" : "Ajouter aux favoris")
@@ -82,15 +84,16 @@ struct MediaFavoriteButton: View {
 /// Bouton d'ouverture de l'éditeur de tags, apparence identique dans la
 /// visionneuse d'images et le lecteur vidéo.
 struct MediaTagButton: View {
+    var isSubtle = false
     let action: () -> Void
 
     var body: some View {
         Button(action: action) {
             Image(systemName: "tag")
                 .font(.system(size: 16, weight: .medium))
-                .foregroundStyle(.white)
+                .foregroundStyle(.white.opacity(isSubtle ? 0.7 : 1))
                 .frame(width: 44, height: 44)
-                .background(.black.opacity(0.75), in: Circle())
+                .background(.black.opacity(isSubtle ? 0 : 0.75), in: Circle())
         }
         .accessibilityLabel("Appliquer un tag")
     }

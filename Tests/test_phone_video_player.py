@@ -59,7 +59,37 @@ class PhoneVideoPlayerTests(unittest.TestCase):
         self.assertIn("phoneSkipButton(forward: true)", bar)
         self.assertIn(".frame(width: 44, height: 44)", bar)
         self.assertIn(".accessibilityLabel(forward ?", bar)
-        self.assertIn("fullWidthTimeline: isPhone && dynamicTypeSize.isAccessibilitySize", PLAYER)
+        self.assertIn("fullWidthTimeline: isPhone,", PLAYER)
+
+    def test_phone_has_one_bounded_console_and_symmetric_transport(self):
+        console = section("    private var phoneBottomBar:", "    private var phoneTimeline:")
+        self.assertIn(".secondarySystemBackground", console)
+        self.assertIn("RoundedRectangle(cornerRadius: 28", console)
+        self.assertIn(".frame(maxWidth: dynamicTypeSize.isAccessibilitySize ? .infinity : 560)", console)
+        self.assertEqual(console.count("verticalSizeClass == .compact ? 4 : 12"), 2)
+        self.assertIn(".padding(.horizontal, 16)", console)
+        controls = section("    private var phoneTransportButtons:", "    private func phoneSkipButton(")
+        self.assertEqual(controls.count("Spacer(minLength: 0)"), 2)
+        order = ["muteButton", "phoneSkipButton(forward: false)", "playButton",
+                 "phoneSkipButton(forward: true)", "AirPlayButton()"]
+        indices = [controls.index(item) for item in order]
+        self.assertEqual(indices, sorted(indices))
+        self.assertNotIn("showPhoneSpeedPicker", controls)
+        self.assertIn("AnyLayout(VStackLayout(spacing: 0))", PLAYER)
+        self.assertIn(".buttonStyle(PhonePlaybackButtonStyle())", PLAYER)
+
+    def test_shared_chrome_and_scrubber_polish_are_opt_in(self):
+        chrome = (ROOT / "Orvian/UI/MediaChrome.swift").read_text(encoding="utf-8")
+        self.assertEqual(chrome.count("var isSubtle = false"), 3)
+        self.assertIn("MediaTitlePill(name: file.name, isSubtle: true)", PLAYER)
+        self.assertIn("MediaTagButton(isSubtle: isPhone)", PLAYER)
+        self.assertIn("isSubtle: isPhone", PLAYER)
+        scrubber = (ROOT / "Orvian/Features/Viewer/ScrubberBar.swift").read_text(encoding="utf-8")
+        self.assertIn("var isRefined = false", scrubber)
+        self.assertIn("isRefined ? (isScrubbing ? 8 : 3) : (isScrubbing ? 14 : 7)", scrubber)
+        self.assertIn(".frame(height: 46)", scrubber)
+        self.assertIn("isRefined: fullWidthTimeline", PLAYER)
+        self.assertIn(".accessibilityAdjustableAction", scrubber)
 
     def test_auto_hide_rechecks_interaction_after_its_delay(self):
         policy = section("    private var phoneControlsMayAutoHide:", "    private func toggleControls()")

@@ -13,6 +13,7 @@ struct ScrubberBar: View {
     /// Fin de la plage bufferisée (secondes depuis le début).
     let bufferedEnd: Double
     let isScrubbing: Bool
+    var isRefined = false
     let timeFormatter: (Double) -> String
     let onDragStarted: () -> Void
     let onDragChanged: (Double) -> Void
@@ -73,16 +74,16 @@ struct ScrubberBar: View {
 
     @ViewBuilder
     private func track(width: CGFloat) -> some View {
-        let barHeight: CGFloat = isScrubbing ? 14 : 7
-        let thumbSize: CGFloat = isScrubbing ? 22 : 13
+        let barHeight: CGFloat = isRefined ? (isScrubbing ? 8 : 3) : (isScrubbing ? 14 : 7)
+        let thumbSize: CGFloat = isRefined ? (isScrubbing ? 18 : 8) : (isScrubbing ? 22 : 13)
         let positionRatio = clampedRatio(position, duration: duration)
         let bufferedRatio = clampedRatio(bufferedEnd, duration: duration)
         ZStack(alignment: .leading) {
             Capsule()
-                .fill(.white.opacity(0.22))
+                .fill(.white.opacity(isRefined ? 0.4 : 0.22))
                 .frame(width: width, height: barHeight)
             Capsule()
-                .fill(.white.opacity(0.42))
+                .fill(.white.opacity(isRefined ? 0.6 : 0.42))
                 .frame(width: max(width * bufferedRatio, barHeight), height: barHeight)
             Capsule()
                 .fill(.white)
