@@ -236,14 +236,17 @@ struct VideoPlayerView: View {
                 hideControlsTask?.cancel()
                 pendingToggleTask?.cancel()
                 pendingToggleTask = nil
-                // La position est mémorisée avant la destruction : au retour,
-                // la lecture reprend au même endroit (le seek de reprise est
-                // déjà géré par `startPlayback(at:)`).
+                // Position et intention mémorisées avant la destruction : au
+                // retour, `.task(id:)` recharge l'asset et `startPlayback(at:)`
+                // reprend au même endroit, en lecture si elle était en cours
+                // (même comportement qu'avant, quand le lecteur survivait).
+                let wasPlaying = transport.wantsPlayback
                 if let time = playerTime { transport.rememberRecoveryPosition(time) }
                 pausePlayback()
                 cancelPendingSeek()
                 _ = transport.endScrub()
                 teardown(preservingPlaybackIntent: true)
+                if wasPlaying { transport.play() }
                 loadGeneration &+= 1
             }
         }
