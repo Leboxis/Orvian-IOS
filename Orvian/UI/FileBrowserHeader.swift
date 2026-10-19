@@ -58,6 +58,8 @@ struct FileBrowserHeader<Header: View, Search: View>: ViewModifier {
                             search().transition(.opacity)
                         }
                         header()
+                            // Keep root summaries and ancestor menus the same height.
+                            .frame(minHeight: 44)
                             .background(.regularMaterial, in: Capsule())
                             .accessibilityIdentifier("browser.summary")
                     }

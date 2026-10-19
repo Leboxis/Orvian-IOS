@@ -763,7 +763,7 @@ struct DirectoryView: View {
     private var breadcrumb: some View {
         Group {
             if let onNavigateAncestor, crumbs.count > 1 {
-                Menu {
+                let menu = Menu {
                     ForEach(Array(crumbs.dropLast().enumerated()), id: \.offset) { index, name in
                         Button(name) { searchFocused = false; onNavigateAncestor(index) }
                     }
@@ -772,6 +772,15 @@ struct DirectoryView: View {
                         .frame(minHeight: iPadLayout.isPad ? 22 : 44)
                 }
                 .accessibilityHint("Revenir à un dossier parent")
+
+                if iPadLayout.isPad {
+                    menu
+                } else {
+                    menu
+                        .buttonStyle(.plain)
+                        .tint(.primary)
+                        .menuIndicator(.hidden)
+                }
             } else {
                 breadcrumbLabel
             }
