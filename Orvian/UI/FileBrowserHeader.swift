@@ -1,9 +1,15 @@
 import SwiftUI
 
-/// Search takes the centered toolbar slot on iPad and pushes the summary into
-/// a reserved row. On iPhone both rows live above the scrolling cards.
+extension EnvironmentValues {
+    @Entry var phoneBrowserHeaderHeight: CGFloat = 0
+    @Entry var phoneBrowserBottomInset: CGFloat = 0
+}
+
+/// Search takes the centered toolbar slot on iPad. On iPhone the compact
+/// header floats above the cards without cutting off their scrolling viewport.
 struct FileBrowserHeader<Header: View, Search: View>: ViewModifier {
     @Environment(\.iPadLayout) private var layout
+    @State private var phoneHeaderHeight: CGFloat = 0
     var isVisible = true
     var searchPresented = false
     @ViewBuilder var search: () -> Search
@@ -38,25 +44,32 @@ struct FileBrowserHeader<Header: View, Search: View>: ViewModifier {
             }
             .animation(Motion.animation(.snappy(duration: 0.3)), value: searchPresented)
         } else {
-            // The breadcrumb/search row owns layout space instead of covering
-            // the scroll view's top edge with an opaque safe-area overlay.
-            VStack(spacing: 0) {
+            GeometryReader { geometry in
+                content
+                    .environment(\.phoneBrowserHeaderHeight, isVisible ? phoneHeaderHeight : 0)
+                    // The expanded scroll viewport must retain clearance at its content's end.
+                    .environment(\.phoneBrowserBottomInset, geometry.safeAreaInsets.bottom)
+                    .ignoresSafeArea(.container, edges: .bottom)
+            }
+            .overlay(alignment: .top) {
                 if isVisible {
                     VStack(spacing: 8) {
                         if searchPresented {
                             search().transition(.opacity)
                         }
-                        summary
+                        header()
+                            .background(.regularMaterial, in: Capsule())
+                            .accessibilityIdentifier("browser.summary")
                     }
+                    .frame(maxWidth: 600)
                     .padding(.top, 2)
                     .padding(.bottom, 4)
+                    .onGeometryChange(for: CGFloat.self) { $0.size.height } action: {
+                        phoneHeaderHeight = $0
+                    }
                 }
-                content
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .clipped()
             }
             .background {
-                // Every pushed browser paints the same surface beneath the native bar.
                 Color(uiColor: .systemGroupedBackground)
                     .ignoresSafeArea(.container, edges: [.top, .bottom])
             }

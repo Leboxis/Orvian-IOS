@@ -77,6 +77,8 @@ struct FileGridView: View {
     }
     @Environment(\.iPadLayout) private var iPadLayout
     @Environment(\.phoneBottomChromeHeight) private var phoneBottomChromeHeight
+    @Environment(\.phoneBrowserHeaderHeight) private var phoneBrowserHeaderHeight
+    @Environment(\.phoneBrowserBottomInset) private var phoneBrowserBottomInset
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @State private var containerWidth: CGFloat = 0
     @State private var containerHeight: CGFloat = 0
@@ -386,9 +388,9 @@ struct FileGridView: View {
                     content
                 }
                 .padding(.horizontal, gridLayout.horizontalInset(base: DS.gridMargin))
-                .padding(.top, 6 + contentTopInset)
+                .padding(.top, 6 + contentTopInset + (iPadLayout.isPad ? 0 : phoneBrowserHeaderHeight))
                 // Reserve floating controls in the content, never by cropping the viewport.
-                .padding(.bottom, DS.contentBottomInset + (iPadLayout.isPad ? 0 : phoneBottomChromeHeight + contentBottomInset))
+                .padding(.bottom, DS.contentBottomInset + (iPadLayout.isPad ? 0 : phoneBottomChromeHeight + contentBottomInset + phoneBrowserBottomInset))
                 // L'iPhone garde sa borne ; l'iPad adapte les colonnes à la largeur du panneau.
                 .frame(maxWidth: iPadLayout.isPad ? .infinity : DS.maxContentWidth)
                 .frame(maxWidth: .infinity)
@@ -404,7 +406,7 @@ struct FileGridView: View {
             // dossier est trop court pour défiler.
             .scrollBounceBehavior(.always, axes: .vertical)
             .scrollIndicators(.hidden)
-            // The phone header already separates and clips the scrolling cards.
+            // The phone summary floats above an uninterrupted scrolling viewport.
             .scrollEdgeEffectHidden(!iPadLayout.isPad, for: .top)
             .onGeometryChange(for: CGSize.self) { $0.size } action: { size in
                 containerWidth = size.width
