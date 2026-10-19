@@ -51,11 +51,13 @@ final class FileCardAccessibilityTests: XCTestCase {
         XCTAssertTrue(button.accessibilityTraits.contains(.button))
         XCTAssertGreaterThanOrEqual(button.bounds.width, 44)
         XCTAssertGreaterThanOrEqual(button.bounds.height, 44)
-        button.isHighlighted = true
-        XCTAssertEqual(button.backgroundColor, .clear, "A long press must not gray the card")
-        button.isHighlighted = false
         let interaction = try XCTUnwrap(button.interactions.compactMap { $0 as? UIContextMenuInteraction }.first)
+        // L'appui long ouvre le menu : la carte ne doit jamais rester grisée.
+        // Sur iPhone un retour visuel s'affiche à l'appui et l'ouverture du
+        // menu doit l'effacer ; sur iPad il n'y a pas de retour du tout.
+        button.isHighlighted = true
         let configuration = try XCTUnwrap(interaction.delegate?.contextMenuInteraction(interaction, configurationForMenuAtLocation: .zero))
+        XCTAssertEqual(button.backgroundColor, .clear, "A long press must not gray the card")
         let preview = try XCTUnwrap(interaction.delegate?.contextMenuInteraction?(interaction, previewForHighlightingMenuWithConfiguration: configuration))
         XCTAssertEqual(preview.parameters.backgroundColor, .clear)
         XCTAssertTrue(preview.parameters.shadowPath?.isEmpty == true, "The native preview must not outline the whole card")
