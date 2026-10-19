@@ -1,24 +1,8 @@
 import SwiftUI
 
-/// Bouton et options de filtres partagés par toutes les grilles de fichiers.
-///
-/// Un `Menu` natif plutôt qu'un `popover` personnalisé : le popover ancré
-/// dans la barre de navigation s'est révélé capricieux (ouverture aléatoire
-/// au tap, fermeture au tap extérieur inopérante, probablement aggravée par
-/// la présentation imbriquée du tri). Le menu système s'ouvre à chaque tap
-/// et se referme au tap en dehors, sans état de présentation à gérer.
-///
-/// Les sélecteurs d'orientation et de type de média tiennent sur une seule
-/// ligne de logos compacte. L'orientation (3 logos : portrait, paysage,
-/// carré) utilise un `ControlGroup` en style `.compactMenu` : le style
-/// `.menu` par défaut ne range que trois logos avec de larges marges
-/// verticales, et tronque tout logo supplémentaire. Le type de média
-/// (5 logos : tout, vidéos, images, dossiers, autres) dépasse la limite de
-/// quatre du `ControlGroup` : il utilise donc un `Picker` en style
-/// `.palette`, qui reste compact et défile horizontalement si la place
-/// manque. Un tap sur un logo d'orientation ne referme pas le menu, pour
-/// ajuster plusieurs critères d'affilée ; le libellé reste lu par VoiceOver
-/// et la sélection se voit à la variante pleine du symbole.
+/// Panneau de filtres partagé par les grilles iPhone et iPad, sans sous-menu.
+/// Le popover reste ouvert pour ajuster plusieurs critères ; son contenu
+/// défile lorsque la hauteur disponible ne suffit pas.
 struct FilterMenu: View {
     @Binding var filters: FileFilters
     @Environment(\.iPadLayout) private var iPadLayout
@@ -26,87 +10,15 @@ struct FilterMenu: View {
     @ScaledMetric(relativeTo: .body) private var baseFontSize = 14
     @State private var showsPadFilters = false
 
-    private var menuScale: CGFloat { CGFloat(min(1.5, max(1.1, padFilterMenuScale))) }
-
-    var body: some View {
-        if iPadLayout.isPad {
-            Button { showsPadFilters.toggle() } label: { filterIcon }
-                .popover(isPresented: $showsPadFilters) { padFilters }
-                .accessibilityLabel("Filtres")
-                .accessibilityHint("Trier et filtrer la liste")
-        } else {
-            phoneMenu
-        }
+    private var menuScale: CGFloat {
+        iPadLayout.isPad ? CGFloat(min(1.5, max(1.1, padFilterMenuScale))) : 1.1
     }
 
-    // Le menu système décrit ci-dessus reste utilisé sur iPhone. Sur iPad,
-    // un panneau sans sous-menu permet d'agrandir aussi les zones tactiles.
-    private var phoneMenu: some View {
-        Menu {
-            Picker("Trier par", selection: $filters.sort) {
-                ForEach(FileFilters.SortMode.allCases) { mode in
-                    Label(mode.title, systemImage: mode.symbol)
-                        .tag(mode)
-                }
-            }
-
-            if filters.sort != .original {
-                Picker("Ordre", selection: $filters.direction) {
-                    ForEach(FileFilters.Direction.allCases) { direction in
-                        Label(direction.title, systemImage: direction.symbol)
-                            .tag(direction)
-                    }
-                }
-            }
-
-            Section("Orientation vidéo") {
-                ControlGroup {
-                    ForEach(FileFilters.Orientation.allCases) { orientation in
-                        Button {
-                            select(orientation: orientation)
-                        } label: {
-                            Image(systemName: orientation.symbol(selected: filters.orientation == orientation))
-                        }
-                        .accessibilityLabel(orientation.title)
-                        .accessibilityAddTraits(filters.orientation == orientation ? .isSelected : [])
-                        .menuActionDismissBehavior(.disabled)
-                    }
-                }
-                .controlGroupStyle(.compactMenu)
-                Toggle(isOn: highResolutionBinding) {
-                    Label("Vidéos 4K et plus", systemImage: "4k.tv")
-                }
-            }
-
-            Section("Afficher") {
-                // Le libellé visible est masqué : l'en-tête de section
-                // « Afficher » donne déjà le contexte, et un second intitulé
-                // ajouterait une rangée vide au-dessus des logos.
-                Picker(selection: mediaBinding) {
-                    ForEach(FileFilters.MediaFilter.allCases) { media in
-                        Label(media.title, systemImage: media.symbol(selected: filters.media == media))
-                            .tag(media)
-                    }
-                } label: {
-                    EmptyView()
-                }
-                .pickerStyle(.palette)
-                .accessibilityLabel("Type de média")
-            }
-
-            if filters.isActive {
-                Divider()
-                Button(role: .destructive) {
-                    filters = FileFilters()
-                } label: {
-                    Label("Réinitialiser", systemImage: "arrow.counterclockwise")
-                }
-            }
-        } label: {
-            filterIcon
-        }
-        .accessibilityLabel("Filtres")
-        .accessibilityHint("Trier et filtrer la liste")
+    var body: some View {
+        Button { showsPadFilters.toggle() } label: { filterIcon }
+            .popover(isPresented: $showsPadFilters) { padFilters }
+            .accessibilityLabel("Filtres")
+            .accessibilityHint("Trier et filtrer la liste")
     }
 
     private var filterIcon: some View {

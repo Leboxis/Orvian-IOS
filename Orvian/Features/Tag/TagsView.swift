@@ -171,7 +171,7 @@ struct TagsView: View {
         }
         .background {
             Color(uiColor: .systemGroupedBackground)
-                .ignoresSafeArea(edges: .bottom)
+                .ignoresSafeArea(.container, edges: [.top, .bottom])
         }
         .toolbar(.hidden, for: .navigationBar)
     }
@@ -199,7 +199,7 @@ struct TagsView: View {
                 }
                 .accessibilityLabel(layout == .grid ? "Afficher les tags en liste" : "Afficher les tags en grille")
                 crossButton
-                    .foregroundStyle(crossState.isActive ? Color.accentColor : .secondary)
+                    .foregroundStyle(crossState.isActive ? Color.accentColor : .primary)
                 Button {
                     guard !crossState.isActive else { return }
                     crossState.isEditing = false
@@ -207,7 +207,7 @@ struct TagsView: View {
                 } label: {
                     Image(systemName: isReordering ? "checkmark.circle" : "arrow.up.arrow.down")
                         .frame(width: 44, height: 44)
-                        .foregroundStyle(isReordering ? Color.accentColor : .secondary)
+                        .foregroundStyle(isReordering ? Color.accentColor : .primary)
                         .background(isReordering ? Color.accentColor.opacity(0.12) : .clear, in: Capsule())
                 }
                 .accessibilityLabel(isReordering ? "Terminer le réarrangement" : "Réarranger les tags")
@@ -220,7 +220,6 @@ struct TagsView: View {
                 .accessibilityLabel("Nouveau tag")
             }
             .frame(maxWidth: .infinity, alignment: .center)
-            .foregroundStyle(.secondary)
         }
         .font(.title2.weight(.medium))
         .tint(.primary)

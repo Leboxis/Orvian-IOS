@@ -28,13 +28,21 @@ class FilterMenuChecks(unittest.TestCase):
     def test_full_reset_remains_available(self):
         self.assertIn("if filters.isActive", self.menu)
         self.assertIn("filters = FileFilters()", self.menu)
-        self.assertIn('Label("Réinitialiser"', self.menu)
+        self.assertIn('.accessibilityLabel("Réinitialiser les filtres")', self.menu)
 
     def test_other_filters_remain(self):
-        for marker in ["$filters.sort", "$filters.direction", "FileFilters.Orientation.allCases",
-                       ".controlGroupStyle(.compactMenu)", "highResolutionBinding",
-                       "FileFilters.MediaFilter.allCases", "mediaBinding"]:
+        for marker in ["filters.sort = mode", "filters.direction = direction", "FileFilters.Orientation.allCases",
+                       "highResolutionBinding", "FileFilters.MediaFilter.allCases", "mediaBinding"]:
             self.assertIn(marker, self.menu)
+
+    def test_phone_reuses_pad_panel_without_submenus(self):
+        body = self.menu.split("var body: some View {", 1)[1].split("private var filterIcon", 1)[0]
+        self.assertIn(".popover(isPresented: $showsPadFilters) { padFilters }", body)
+        self.assertNotIn("if iPadLayout.isPad", body)
+        self.assertNotIn("phoneMenu", self.menu)
+        self.assertIn("count: 3", self.menu)
+        self.assertIn(".presentationCompactAdaptation(.popover)", self.menu)
+        self.assertIn("ScrollView { padFilterContent }", self.menu)
 
 
 if __name__ == "__main__":

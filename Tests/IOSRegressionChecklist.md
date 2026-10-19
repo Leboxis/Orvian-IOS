@@ -275,13 +275,13 @@ nombre de négociations TLS évitées ni gain de durée n'est garanti sans mesur
 - Import d'une vidéo : le poster apparaît dans la fenêtre de réessais (~60 s)
   même si kDrive répond 404 les premières secondes ; aucune absence n'est
   mémorisée avant la fin de la fenêtre.
-- Menu de filtres (Accueil, Favoris, corbeille, dossier, tag) : les
-  orientations (portrait/paysage/carré) tiennent sur une seule ligne de logos
-  (`ControlGroup` `.compactMenu`), idem pour Tout/Vidéos/Images/Dossiers/Autres
-  (`Picker` `.palette`, défilement horizontal si étroit). L'option active se
-  voit à la variante pleine du symbole ; un tap sur une orientation ne referme
-  pas le menu, tap extérieur pour fermer. VoiceOver lit le nom de chaque logo
-  et l'état sélectionné.
+- Panneau de filtres (Accueil, Favoris, corbeille, dossier, tag), iPhone et
+  iPad : même disposition sans sous-menus, tris sur trois colonnes puis ordre,
+  orientation, 4K+ et types de médias en rangées. Les choix actifs sont teintés ;
+  un tap ne referme pas le panneau. Vérifier ouverture répétée, fermeture par
+  la croix et tap extérieur, défilement sur petit écran et Dynamic Type agrandi.
+  La zone tactile de chaque choix reste d'au moins 44 points. VoiceOver lit le
+  nom de chaque logo et l'état sélectionné.
 - « Fichiers uniquement » : masque les dossiers, y compris dans une recherche
   ou un tri ; le compteur d'éléments passe en « visibles » ; désactiver
   l'option (ou Réinitialiser) rend les dossiers. Vérifier qu'un filtre actif ne
