@@ -651,7 +651,9 @@ private struct TextFileTextView: UIViewRepresentable {
         }
 
         func textViewDidChange(_ textView: UITextView) {
-            let updated = textView.text
+            // `UITextView.text` est `String!` : l'annotation explicite évite
+            // d'inférer `String?` et de propager un optionnel dans le Binding.
+            let updated: String = textView.text ?? ""
             appliedText = updated
             parent.text = updated
         }
@@ -667,7 +669,7 @@ private struct TextFileTextView: UIViewRepresentable {
                   !request.text.isEmpty else { return }
 
             textView.insertText("\n\(request.text)\n")
-            let updated = textView.text
+            let updated: String = textView.text ?? ""
             appliedText = updated
             parent.text = updated
             textView.scrollRangeToVisible(textView.selectedRange)
