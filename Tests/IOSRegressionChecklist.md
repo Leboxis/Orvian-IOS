@@ -249,6 +249,14 @@ nombre de négociations TLS évitées ni gain de durée n'est garanti sans mesur
 - Vidéo : VoiceOver conserve les contrôles ; la progression annonce la durée
   et s’ajuste par dix secondes. Passer à la vidéo suivante conserve le muet.
   Sans VoiceOver, masquer/afficher conserve une progression exacte et AirPlay.
+- Lecteur vidéo iPhone : ouvrir le sélecteur AirPlay, le Centre de contrôle puis
+  le Centre de notifications pendant la lecture. Aucun voile clair ni fond blanc
+  ne doit couvrir l'image ; les contrôles restent au-dessus de la vidéo et
+  répondent. Passer ensuite en arrière-plan : l'aperçu du sélecteur d'apps est
+  bien masqué. Sans code configuré, l'inactivité seule ne déclenche aucun voile.
+- Vidéo iPhone : en portrait puis en paysage, l'image occupe toute la largeur et
+  toute la hauteur disponibles, y compris en 16/9 et en portrait ; les barres
+  flottantes ne lui retirent aucune place et se masquent au bout de 2,5 s.
 - Fenêtre iPad étroite : le titre reste dans la largeur de la fenêtre.
 - Ancienne installation : choix de préchargement conservé. Préférence absente :
   préchargement limité au Wi-Fi, lecture explicite toujours disponible en mobile.
@@ -297,9 +305,11 @@ requêtes, la fenêtre glissante, les générations de purge, le décodage, la
 capacité et l’expiration des URLs. `OrvianTests` (dont `PrivacyWindowTests`)
 reste jouable en local via Xcode sur simulateur : protection d’une
 présentation plein écran et disposition compacte du pavé, avec captures
-clair/sombre dans le résultat XCTest. La publication sur `main` n'exécute plus
-ces tests (durée des runs) ; ils restent disponibles via `checks.yml` sur les
-pull requests et en local.
+clair/sombre dans le résultat XCTest. `PrivacyWindowTests` vérifie aussi que
+l'inactivité transitoire (AirPlay, Centre de contrôle) ne lève aucun voile sans
+code configuré, alors que l'arrière-plan le lève toujours. La publication sur
+`main` n'exécute plus ces tests (durée des runs) ; ils restent disponibles via
+`checks.yml` sur les pull requests et en local.
 
 ## Dossiers larges
 

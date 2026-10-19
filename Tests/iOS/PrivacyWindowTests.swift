@@ -144,7 +144,11 @@ final class PrivacyWindowTests: XCTestCase {
         XCTAssertTrue(owner.accessibilityElementsHidden)
     }
 
-    func testPrivacyShieldSurvivesInactiveRendersAndBackgroundWithoutPIN() throws {
+    func testShieldCoversBackgroundButNotTransientInactivityWithoutPIN() throws {
+        // AirPlay, le Centre de contrôle et le Centre de notifications rendent
+        // la scène inactive sans quitter l'app : aucun voile ne doit couvrir la
+        // vidéo. Le masque reste réservé à l'arrière-plan, instant où le
+        // système capture l'aperçu du sélecteur d'applications.
         let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
         let original = scene.keyWindow
         let owner = UIWindow(windowScene: scene)
@@ -159,16 +163,43 @@ final class PrivacyWindowTests: XCTestCase {
         }
         coordinator.attach(to: owner)
         privacy.transition(to: .inactive)
-        let shield = try XCTUnwrap(scene.keyWindow)
-        XCTAssertTrue(shield !== owner && shield.windowLevel > .alert)
+        XCTAssertNil(scene.windows.first { !$0.isHidden && $0.windowLevel > .alert && $0 !== owner },
+                     "Transient inactivity must not raise the shield")
+        XCTAssertFalse(owner.accessibilityElementsHidden)
         coordinator.attach(to: owner) // SwiftUI peut rendre plusieurs fois en phase inactive.
-        XCTAssertFalse(shield.isHidden)
+        XCTAssertNil(scene.windows.first { !$0.isHidden && $0.windowLevel > .alert && $0 !== owner })
+
         privacy.transition(to: .background)
-        XCTAssertFalse(shield.isHidden)
+        let shield = try XCTUnwrap(scene.windows.first { !$0.isHidden && $0.windowLevel > .alert && $0 !== owner })
         XCTAssertTrue(owner.accessibilityElementsHidden)
+        XCTAssertTrue(scene.keyWindow === shield)
+
         privacy.transition(to: .active)
         XCTAssertTrue(shield.isHidden)
         XCTAssertTrue(owner.isKeyWindow)
+        XCTAssertFalse(owner.accessibilityElementsHidden)
+    }
+
+    func testInactivityLeavesLockedContentBehindTheShield() throws {
+        // Avec un code configuré, le voile reste en place pendant l'inactivité :
+        // il protège le contenu, pas seulement l'aperçu du sélecteur.
+        let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+        let original = scene.keyWindow
+        let owner = UIWindow(windowScene: scene)
+        owner.rootViewController = UIViewController()
+        owner.makeKeyAndVisible()
+        let privacy = AppPrivacyState(isLockConfigured: { true })
+        let coordinator = AppPrivacyWindow.Coordinator(state: privacy)
+        defer {
+            coordinator.stop()
+            owner.isHidden = true
+            original?.makeKey()
+        }
+        coordinator.attach(to: owner)
+        privacy.transition(to: .inactive)
+        let shield = try XCTUnwrap(scene.windows.first { !$0.isHidden && $0.windowLevel > .alert && $0 !== owner })
+        XCTAssertTrue(owner.accessibilityElementsHidden)
+        XCTAssertTrue(shield === scene.keyWindow)
     }
 
     func testShieldCoversPresentedMediaAndPreservesContent() async throws {

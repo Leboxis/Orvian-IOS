@@ -200,7 +200,15 @@ struct AppPrivacyWindow: UIViewRepresentable {
                 hide()
                 return
             }
-            guard state.requiresLock(snapshot) || snapshot.phase != .active else { hide(); return }
+            // Le voile ne suit que l'arrière-plan (et le verrou), jamais la
+            // simple inactivité : ouvrir le sélecteur AirPlay, le Centre de
+            // contrôle ou le Centre de notifications rend la scène inactive
+            // sans quitter l'app. Le voile apparaissait alors en plein écran
+            // — blanc depuis l'ajout du thème clair — par-dessus la vidéo.
+            // Apple recommande d'ailleurs de préparer l'aperçu du sélecteur
+            // d'apps à l'entrée en arrière-plan, avant la capture du système
+            // (Technical Q&A QA1838).
+            guard state.requiresLock(snapshot) || snapshot.phase == .background else { hide(); return }
             let appearance = AppAppearance(rawValue: UserDefaults.standard.string(forKey: AppAppearance.storageKey) ?? "") ?? .system
             let interfaceStyle: UIUserInterfaceStyle
             switch appearance {

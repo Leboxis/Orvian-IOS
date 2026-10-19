@@ -22,23 +22,41 @@ class PhoneVideoPlayerTests(unittest.TestCase):
         self.assertIn("if isPhone {\n                phonePlayer", body)
         self.assertIn("} else {\n                tabletPlayer", body)
 
-    def test_video_is_a_stable_sibling_between_real_chrome_regions(self):
+    def test_video_fills_the_page_under_floating_chrome(self):
         phone = section("    private var phonePlayer:", "    private var phoneTopBar:")
-        self.assertIn("VStack(spacing: 0)", phone)
-        self.assertLess(phone.index("phoneTopBar"), phone.index("            videoArea"))
-        self.assertLess(phone.index("            videoArea"), phone.index("phoneBottomBar"))
-        # Neither opacity-only hidden controls nor a reserved black rail:
-        # conditional sibling bars release their layout space when hidden.
-        self.assertEqual(phone.count("if showControls {"), 2)
-        self.assertNotIn(".overlay", phone)
+        # La vidéo est la seule région de mise en page : titre et console
+        # flottent par-dessus. En frères empilés, ils reprendraient une bande
+        # de la hauteur (et, en paysage, de la largeur) à la vidéo.
+        self.assertNotIn("VStack(spacing: 0)", phone)
+        self.assertIn(".overlay(alignment: .top)", phone)
+        self.assertIn(".overlay(alignment: .bottom)", phone)
+        self.assertIn(".overlay(alignment: .center)", phone)
+        self.assertLess(phone.index("videoArea"), phone.index("phoneTopBar"))
+        self.assertLess(phone.index("videoArea"), phone.index("phoneBottomChrome"))
+        self.assertIn(".frame(maxWidth: .infinity, maxHeight: .infinity)", phone)
+        self.assertIn(".clipped()", phone)
         self.assertNotIn("hiddenControlGestureRegions", phone)
         self.assertNotIn("ignoresSafeArea", phone)
         self.assertNotIn(".id(", phone)
-        self.assertEqual(phone.count(".simultaneousGesture(controlRegionGesture)"), 3)
-        surface = phone.split("            videoArea", 1)[1].split("            if player == nil", 1)[0]
-        self.assertIn(".frame(maxWidth: .infinity, maxHeight: .infinity)", surface)
-        self.assertNotIn(".padding", surface)
-        self.assertNotIn(".aspectRatio", surface)
+        self.assertNotIn(".aspectRatio", phone)
+        self.assertEqual(phone.count(".simultaneousGesture(controlRegionGesture)"), 2)
+        # Chaque barre reste conditionnelle : masquée, elle ne laisse aucune
+        # zone réservée devant la vidéo.
+        self.assertIn("if showControls {", phone)
+        bottom = section("    private var phoneBottomChrome:", "    private var phoneBottomBar:")
+        self.assertIn("if showControls {", bottom)
+        self.assertIn("phoneBottomBar", bottom)
+        self.assertIn(".simultaneousGesture(controlRegionGesture)", bottom)
+        # L'indicateur de tampon ne doit pas avaler le double-tap ±10 s.
+        self.assertIn(".allowsHitTesting(false)", phone)
+
+    def test_floating_console_keeps_its_contrast(self):
+        # Le fond sombre de la console la détache de l'image qu'elle recouvre
+        # désormais, y compris en apparence claire.
+        console = section("    private var phoneBottomBar:", "    private var phoneSpeedButton:")
+        self.assertIn(".background(Color(uiColor: .secondarySystemBackground)", console)
+        self.assertIn(".environment(\\.colorScheme, .dark)", console)
+        self.assertIn(".frame(maxWidth: dynamicTypeSize.isAccessibilitySize ? .infinity : 560)", console)
 
     def test_tablet_keeps_its_existing_controls_and_gestures(self):
         tablet = section("    private var tabletPlayer:", "    // MARK: - Gestion")

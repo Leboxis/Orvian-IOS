@@ -32,9 +32,9 @@ private final class PlaybackClock {
     var scrubValue: Double = 0
 }
 
-/// Lecteur vidéo personnalisé. Sur iPhone, titre et transport réservent
-/// leur espace hors image ; masqués, ils libèrent toute la zone disponible.
-/// Le chrome iPad conserve sa disposition historique.
+/// Lecteur vidéo personnalisé. Sur iPhone, l'image occupe toute la page et
+/// le chrome (titre, transport) flotte par-dessus ; le chrome iPad conserve
+/// sa disposition historique.
 struct VideoPlayerView: View {
     let file: DriveFile
     let driveId: Int
@@ -305,56 +305,76 @@ struct VideoPlayerView: View {
         }
     }
 
-    // MARK: - Lecteur iPhone : trois régions sans superposition
+    // MARK: - Lecteur iPhone : l'image occupe toute la page
 
+    /// L'image prend toute la largeur et toute la hauteur disponibles ; le
+    /// titre et la console flottent par-dessus. Ils étaient auparavant des
+    /// frères empilés : leur hauteur était retirée à l'image, et en paysage
+    /// la vidéo ne remplissait plus la largeur de l'écran.
     private var phonePlayer: some View {
-        VStack(spacing: 0) {
-            if showControls {
-                phoneTopBar
-                    .fixedSize(horizontal: false, vertical: true)
-                    .contentShape(Rectangle())
-                    .simultaneousGesture(controlRegionGesture)
+        videoArea
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .clipped()
+            .contentShape(Rectangle())
+            .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { videoAreaWidth = $0 }
+            .onTapGesture(count: 1, coordinateSpace: .local) { location in
+                handleVideoTap(at: location)
+            }
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(Text("Vidéo : \(file.name)"))
+            .accessibilityAction(named: Text("Afficher les commandes")) {
+                showControls = true
+                scheduleControlsAutoHide()
+            }
+            .accessibilityAction(named: Text("Reculer de 10 secondes")) { skipTime(by: -10) }
+            .accessibilityAction(named: Text("Avancer de 10 secondes")) { skipTime(by: 10) }
+            .overlay(alignment: .top) {
+                if showControls {
+                    phoneTopBar
+                        .fixedSize(horizontal: false, vertical: true)
+                        .contentShape(Rectangle())
+                        .simultaneousGesture(controlRegionGesture)
+                        // Dégradé discret : le titre et les boutons restent
+                        // lisibles sur une image claire, sans ajouter de
+                        // panneau opaque au-dessus de la vidéo. Il déborde
+                        // sous la barre pour s'éteindre en douceur.
+                        .background {
+                            LinearGradient(
+                                colors: [.black.opacity(0.55), .black.opacity(0)],
+                                startPoint: .top,
+                                endPoint: .bottom
+                            )
+                            .padding(.bottom, -28)
+                        }
+                        .transition(.opacity)
+                }
+            }
+            .overlay(alignment: .bottom) {
+                phoneBottomChrome
                     .transition(.opacity)
             }
-
-            videoArea
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .clipped()
-                .contentShape(Rectangle())
-                .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { videoAreaWidth = $0 }
-                .onTapGesture(count: 1, coordinateSpace: .local) { location in
-                    handleVideoTap(at: location)
+            .overlay(alignment: .center) {
+                if player == nil {
+                    preparing
+                        .fixedSize(horizontal: false, vertical: true)
+                        // Même verrou de pager qu'avant sur les commandes :
+                        // un geste commencé sur « Réessayer » ne fait pas
+                        // défiler la page voisine.
+                        .simultaneousGesture(controlRegionGesture)
+                } else if isBuffering {
+                    ProgressView("Chargement…")
+                        .font(.footnote)
+                        .tint(.white)
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 8)
+                        .background(.black.opacity(0.55), in: Capsule())
+                        // L'indicateur ne doit pas intercepter le double-tap
+                        // ±10 s qui le recouvre au centre de l'image.
+                        .allowsHitTesting(false)
                 }
-                .accessibilityElement(children: .ignore)
-                .accessibilityLabel(Text("Vidéo : \(file.name)"))
-                .accessibilityAction(named: Text("Afficher les commandes")) {
-                    showControls = true
-                    scheduleControlsAutoHide()
-                }
-                .accessibilityAction(named: Text("Reculer de 10 secondes")) { skipTime(by: -10) }
-                .accessibilityAction(named: Text("Avancer de 10 secondes")) { skipTime(by: 10) }
-
-            if player == nil {
-                preparing
-                    .fixedSize(horizontal: false, vertical: true)
-                    .simultaneousGesture(controlRegionGesture)
-            } else if isBuffering {
-                ProgressView("Chargement…")
-                    .font(.footnote)
-                    .tint(.white)
-                    .foregroundStyle(.white)
-                    .padding(.vertical, 8)
             }
-
-            if showControls {
-                phoneBottomBar
-                    .fixedSize(horizontal: false, vertical: true)
-                    .contentShape(Rectangle())
-                    .simultaneousGesture(controlRegionGesture)
-                    .transition(.opacity)
-            }
-        }
-        .buttonStyle(PhonePlaybackButtonStyle())
+            .buttonStyle(PhonePlaybackButtonStyle())
         .confirmationDialog("Vitesse de lecture", isPresented: $showPhoneSpeedPicker, titleVisibility: .visible) {
             ForEach(SpeedOption.allCases) { option in
                 Button(option.title) { setPlaybackRate(option.rate) }
@@ -386,6 +406,20 @@ struct VideoPlayerView: View {
             closeButton
         }
         .padding(.horizontal, 16)
+        .padding(.vertical, 8)
+    }
+
+    /// Console flottante du bas : masquée, elle libère la vidéo au lieu de
+    /// laisser une zone réservée. Son fond sombre la détache de l'image,
+    /// quelle que soit la luminosité de la scène filmée.
+    @ViewBuilder
+    private var phoneBottomChrome: some View {
+        if showControls {
+            phoneBottomBar
+                .fixedSize(horizontal: false, vertical: true)
+                .contentShape(Rectangle())
+                .simultaneousGesture(controlRegionGesture)
+        }
     }
 
     private var phoneBottomBar: some View {
