@@ -149,6 +149,10 @@ struct DirectoryView: View {
         )
         .navigationTitle("")
         .navigationBarTitleDisplayMode(.inline)
+        // iPhone : la barre opaque blanche tranchait avec le contenu groupe
+        // (bandeau + liseret marques d'un cadre rouge en capture). Elle adopte
+        // la surface du navigateur ; l'iPad garde la barre native.
+        .toolbarBackground(iPadLayout.isPad ? .automatic : .hidden, for: .navigationBar)
         .modifier(FileDropTarget(
             isEnabled: isEnabled && isActive && isActiveTab && !selectionMode && !addBusy && !moveBusy,
             onFiles: { urls in

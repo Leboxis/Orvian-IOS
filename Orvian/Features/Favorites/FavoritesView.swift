@@ -181,6 +181,9 @@ struct FavoritesView: View {
             .id(viewModel.source)
             .navigationTitle("")
             .navigationBarTitleDisplayMode(.inline)
+            // Meme unification que l'onglet Accueil : pas de bandeau blanc
+            // iPhone au-dessus du contenu groupe ; iPad inchange.
+            .toolbarBackground(iPadLayout.isPad ? .automatic : .hidden, for: .navigationBar)
             .modifier(FileBrowserHeader(isVisible: !selectionMode, searchPresented: !selectionMode && searchBarVisible, search: { searchBar }) {
                 if !selectionMode {
                     HStack(spacing: 6) {
