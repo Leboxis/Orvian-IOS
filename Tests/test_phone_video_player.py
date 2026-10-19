@@ -35,6 +35,10 @@ class PhoneVideoPlayerTests(unittest.TestCase):
         self.assertNotIn("ignoresSafeArea", phone)
         self.assertNotIn(".id(", phone)
         self.assertEqual(phone.count(".simultaneousGesture(controlRegionGesture)"), 3)
+        surface = phone.split("            videoArea", 1)[1].split("            if player == nil", 1)[0]
+        self.assertIn(".frame(maxWidth: .infinity, maxHeight: .infinity)", surface)
+        self.assertNotIn(".padding", surface)
+        self.assertNotIn(".aspectRatio", surface)
 
     def test_tablet_keeps_its_existing_controls_and_gestures(self):
         tablet = section("    private var tabletPlayer:", "    // MARK: - Gestion")
@@ -51,32 +55,45 @@ class PhoneVideoPlayerTests(unittest.TestCase):
         self.assertIn("if isBuffering, !isPhone", video)
         self.assertIn("player == nil, !isPhone", video)
 
-    def test_transport_reflows_without_shrinking_touch_targets(self):
+    def test_compact_transport_keeps_full_width_timeline_and_touch_targets(self):
         bar = section("    private var phoneBottomBar:", "    private var tabletPlayer:")
-        self.assertIn("ViewThatFits(in: .horizontal)", bar)
-        self.assertIn("dynamicTypeSize.isAccessibilitySize", bar)
         self.assertIn("phoneSkipButton(forward: false)", bar)
         self.assertIn("phoneSkipButton(forward: true)", bar)
         self.assertIn(".frame(width: 44, height: 44)", bar)
         self.assertIn(".accessibilityLabel(forward ?", bar)
         self.assertIn("fullWidthTimeline: isPhone,", PLAYER)
+        console = section("    private var phoneBottomBar:", "    private var phoneSpeedButton:")
+        self.assertIn("VStack(spacing: 0)", console)
+        self.assertLess(console.index("timeControls"), console.index("phoneTransportButtons"))
+        self.assertNotIn("HStack", console)
+        self.assertNotIn("phoneSpeedButton", console)
+        timeline = PLAYER.split("private struct TransportTimeView:", 1)[1]
+        self.assertIn("if dynamicTypeSize > .large", timeline)
+        self.assertIn("scrubber.overlay(alignment: .bottom)", timeline)
+        self.assertIn("timeLabels.allowsHitTesting(false)", timeline)
 
-    def test_phone_has_one_bounded_console_and_symmetric_transport(self):
-        console = section("    private var phoneBottomBar:", "    private var phoneTimeline:")
+    def test_phone_console_is_compact_and_transport_stays_symmetric(self):
+        console = section("    private var phoneBottomBar:", "    private var phoneSpeedButton:")
         self.assertIn(".secondarySystemBackground", console)
-        self.assertIn("RoundedRectangle(cornerRadius: 28", console)
+        self.assertIn("RoundedRectangle(cornerRadius: 24", console)
         self.assertIn(".frame(maxWidth: dynamicTypeSize.isAccessibilitySize ? .infinity : 560)", console)
-        self.assertEqual(console.count("verticalSizeClass == .compact ? 4 : 12"), 2)
+        self.assertEqual(console.count(".padding(.vertical, 4)"), 2)
         self.assertIn(".padding(.horizontal, 16)", console)
         controls = section("    private var phoneTransportButtons:", "    private func phoneSkipButton(")
         self.assertEqual(controls.count("Spacer(minLength: 0)"), 2)
         order = ["muteButton", "phoneSkipButton(forward: false)", "playButton",
-                 "phoneSkipButton(forward: true)", "AirPlayButton()"]
+                 "phoneSkipButton(forward: true)", "phoneSpeedButton"]
         indices = [controls.index(item) for item in order]
         self.assertEqual(indices, sorted(indices))
-        self.assertNotIn("showPhoneSpeedPicker", controls)
-        self.assertIn("AnyLayout(VStackLayout(spacing: 0))", PLAYER)
+        play = section("    private var playButton:", "    private var favoriteButton:")
+        self.assertIn(".frame(width: 44, height: 44)", play)
         self.assertIn(".buttonStyle(PhonePlaybackButtonStyle())", PLAYER)
+
+    def test_airplay_is_only_in_the_phone_header_not_the_console(self):
+        header = section("    private var phoneTopBar:", "    private var phoneBottomBar:")
+        console = section("    private var phoneBottomBar:", "    private var tabletPlayer:")
+        self.assertIn("AirPlayButton()", header)
+        self.assertNotIn("AirPlayButton()", console)
 
     def test_shared_chrome_and_scrubber_polish_are_opt_in(self):
         chrome = (ROOT / "Orvian/UI/MediaChrome.swift").read_text(encoding="utf-8")

@@ -74,6 +74,12 @@ extension Endpoint {
         Endpoint(path: "/3/drive/\(driveId)/files/\(directoryId)/count")
     }
 
+    /// Total des fichiers du dossier et de tous ses descendants, calculé côté serveur.
+    static func directorySize(driveId: Int, directoryId: Int) -> Endpoint {
+        Endpoint(path: "/2/drive/\(driveId)/files/\(directoryId)/sizes",
+                 query: [URLQueryItem(name: "depth", value: "unlimited")])
+    }
+
     /// Fichiers récemment modifiés / uploadés (/3/drive/{id}/files/last_modified).
     static func lastModified(driveId: Int, cursor: String?, limit: Int = 60) -> Endpoint {
         Endpoint(

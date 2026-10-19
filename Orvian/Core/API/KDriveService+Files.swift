@@ -189,6 +189,20 @@ extension KDriveService {
         return file
     }
 
+    /// Le `size` d’une entrée de liste n’est pas le total récursif du dossier.
+    func directorySize(driveId: Int, directoryId: Int, credentialFingerprint: String) async throws -> Int {
+        try Task.checkCancellation()
+        guard credentialFingerprint == TokenStore.credentialFingerprint() else { throw CancellationError() }
+        let response = try await api.get(DataResponse<DirectorySize>.self,
+                                         .directorySize(driveId: driveId, directoryId: directoryId),
+                                         cachePolicy: .reloadIgnoringLocalCacheData,
+                                         originatingCredential: credentialFingerprint)
+        try Task.checkCancellation()
+        guard credentialFingerprint == TokenStore.credentialFingerprint() else { throw CancellationError() }
+        guard let size = response.data?.size else { throw APIError.invalidResponse }
+        return size
+    }
+
     /// Nombre total d'éléments d'un dossier (fichiers + dossiers), via
     /// l'endpoint `count` dédié : les listes paginées n'exposent pas de total.
     func directoryCount(driveId: Int, directoryId: Int) async throws -> Int {

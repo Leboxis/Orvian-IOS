@@ -22,7 +22,7 @@ struct FileDetailSheet: View {
             driveId: driveId, fileId: file.id, isTrashed: isTrashed)
     }
     private var hasFacts: Bool {
-        current.addedAt != nil || current.lastModifiedAt != nil || current.updatedAt != nil
+        current.isDirectory || current.addedAt != nil || current.lastModifiedAt != nil || current.updatedAt != nil
             || pixelSize != nil || videoInfo != nil || model.infoError != nil
     }
 
@@ -113,6 +113,7 @@ struct FileDetailSheet: View {
             VStack(alignment: .leading, spacing: 12) {
                 sectionTitle("Informations")
                 if model.isLoading && !hasFacts { ProgressView("Actualisation…") }
+                if current.isDirectory { folderSizeRow }
                 if let date = current.addedAt { dateRow("Ajouté", date) }
                 if let date = current.lastModifiedAt { dateRow("Contenu modifié", date) }
                 if let date = current.updatedAt, date != current.lastModifiedAt { dateRow("Mis à jour", date) }
@@ -133,6 +134,23 @@ struct FileDetailSheet: View {
             .padding(16)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(Color(uiColor: .secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: DS.cardRadius))
+        }
+    }
+
+    private var folderSizeRow: some View {
+        detailRow("Poids total") {
+            if isTrashed {
+                Text("Non communiqué pour la corbeille").foregroundStyle(.secondary)
+            } else if model.file?.id != file.id || model.isLoadingFolderSize {
+                ProgressView("Chargement…")
+            } else if let size = model.folderSize {
+                Text(ByteFormatter.string(fromBytes: size)).textSelection(.enabled)
+                Text("Sous-dossiers inclus, hors versions").font(.caption).foregroundStyle(.secondary)
+            } else if let error = model.folderSizeError {
+                recovery(error)
+            } else {
+                Text("Non communiqué").foregroundStyle(.secondary)
+            }
         }
     }
 

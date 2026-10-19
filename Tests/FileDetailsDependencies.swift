@@ -7,6 +7,8 @@ struct DriveFile: Equatable {
     var name: String = "Known name"
     var path: String?
     var categories: [FileCategory]?
+    var size: Int?
+    var isDirectory = false
 }
 @MainActor enum TokenStore {
     static var value: String? = "a"
@@ -36,6 +38,20 @@ struct DriveFile: Equatable {
     func finish(_ index: Int, file: DriveFile) { pending[index]!.resume(returning: file); pending[index] = nil }
     func fail(_ index: Int) { pending[index]!.resume(throwing: URLError(.notConnectedToInternet)); pending[index] = nil }
 }
+@MainActor final class FolderSizeServer {
+    static let shared = FolderSizeServer()
+    var pending: [CheckedContinuation<Int, Error>?] = []
+    var credentials: [String] = []
+    func request(credential: String) async throws -> Int {
+        credentials.append(credential)
+        return try await withCheckedThrowingContinuation { pending.append($0) }
+    }
+    func finish(_ index: Int, size: Int) { pending[index]!.resume(returning: size); pending[index] = nil }
+    func fail(_ index: Int) { pending[index]!.resume(throwing: URLError(.notConnectedToInternet)); pending[index] = nil }
+}
 struct KDriveService {
     func fileInfo(driveId: Int, fileId: Int) async throws -> DriveFile { try await DetailsServer.shared.request() }
+    func directorySize(driveId: Int, directoryId: Int, credentialFingerprint: String) async throws -> Int {
+        try await FolderSizeServer.shared.request(credential: credentialFingerprint)
+    }
 }

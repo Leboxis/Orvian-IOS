@@ -78,6 +78,68 @@ import Foundation
         server.finish(8, file: DriveFile(id: 11, path: "/new-account", categories: []))
         await newAccount.value
         precondition(model.file?.path == "/new-account", "Prepared details must remain scoped to the account")
-        print("Details cache, concurrent loading, obsolete responses, account isolation and partial errors checks passed")
+        let sizes = FolderSizeServer.shared
+        let folder = DriveFile(id: 20, path: "/folder", categories: [], size: 0, isDirectory: true)
+        let folderLoad = Task { await model.loadIfNeeded(file: folder, driveId: 42, isTrashed: false) }
+        while sizes.pending.count < 1 { await Task.yield() }
+        precondition(model.folderSize == nil && model.isLoadingFolderSize,
+                     "A listing size of zero is not an empty folder")
+        precondition(server.pending.count == 9, "Known path/tags must not prevent the independent size GET")
+        sizes.finish(0, size: 5_000_000_000)
+        await folderLoad.value
+        precondition(model.folderSize == 5_000_000_000 && model.folderSizeError == nil && !model.isLoadingFolderSize)
+        await model.loadIfNeeded(file: folder, driveId: 42, isTrashed: false)
+        precondition(sizes.pending.count == 1, "Reopening recent details must reuse the verified total")
+
+        let emptyLoad = Task { await model.load(file: folder, driveId: 42, isTrashed: false) }
+        while sizes.pending.count < 2 { await Task.yield() }
+        sizes.finish(1, size: 0)
+        await emptyLoad.value
+        precondition(model.folderSize == 0, "Only the dedicated API can confirm zero bytes")
+
+        let sizeFailure = Task { await model.load(file: folder, driveId: 42, isTrashed: false) }
+        while sizes.pending.count < 3 { await Task.yield() }
+        sizes.fail(2)
+        await sizeFailure.value
+        precondition(model.folderSize == nil && model.folderSizeError != nil && model.infoError == nil)
+        let retrySize = Task { await model.loadIfNeeded(file: folder, driveId: 42, isTrashed: false) }
+        while sizes.pending.count < 4 { await Task.yield() }
+        sizes.finish(3, size: 12)
+        await retrySize.value
+        precondition(model.folderSize == 12, "An error must not be cached as a successful total")
+
+        let staleSize = Task { await model.load(file: folder, driveId: 42, isTrashed: false) }
+        while sizes.pending.count < 5 { await Task.yield() }
+        await model.load(file: known, driveId: 42, isTrashed: false)
+        sizes.finish(4, size: 999)
+        await staleSize.value
+        precondition(model.file?.id == known.id && model.folderSize == nil, "Obsolete totals must not leak to another file")
+
+        let previousCredential = TokenStore.value
+        let switchedSize = Task { await model.load(file: folder, driveId: 42, isTrashed: false) }
+        while sizes.pending.count < 6 { await Task.yield() }
+        precondition(sizes.credentials.last == TokenStore.value)
+        TokenStore.value = "another-account"
+        sizes.finish(5, size: 888)
+        await switchedSize.value
+        precondition(model.folderSize == nil && model.folderSizeError == nil, "A previous account’s total must be ignored")
+
+        TokenStore.value = previousCredential
+        let returnedAccount = Task { await model.loadIfNeeded(file: folder, driveId: 42, isTrashed: false) }
+        while sizes.pending.count < 7 { await Task.yield() }
+        sizes.finish(6, size: 13)
+        await returnedAccount.value
+        precondition(model.folderSize == 13, "Discarded account responses must not count as cached success")
+
+        let cancelledSize = Task { await model.load(file: folder, driveId: 42, isTrashed: false) }
+        while sizes.pending.count < 8 { await Task.yield() }
+        cancelledSize.cancel()
+        sizes.finish(7, size: 777)
+        await cancelledSize.value
+        precondition(model.folderSize == nil && model.folderSizeError == nil && !model.isLoadingFolderSize)
+        await model.load(file: folder, driveId: 42, isTrashed: true)
+        precondition(sizes.pending.count == 8 && model.folderSize == nil && !model.isLoadingFolderSize,
+                     "The live sizes endpoint must not be used for trash")
+        print("Details cache, concurrent loading, folder totals, cancellation, account isolation and partial errors checks passed")
     }
 }

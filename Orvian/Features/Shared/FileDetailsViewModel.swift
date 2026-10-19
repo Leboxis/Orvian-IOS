@@ -9,6 +9,9 @@ final class FileDetailsViewModel {
     private(set) var isLoadingTags = false
     private(set) var infoError: String?
     private(set) var tagsError: String?
+    private(set) var folderSize: Int?
+    private(set) var isLoadingFolderSize = false
+    private(set) var folderSizeError: String?
     private var generation = 0
     private let service = KDriveService()
     private struct Request: Equatable {
@@ -43,6 +46,9 @@ final class FileDetailsViewModel {
         categories = (file.categories ?? []).compactMap { knownCategories[$0.categoryId] }
         infoError = nil
         tagsError = nil
+        folderSize = nil
+        folderSizeError = nil
+        isLoadingFolderSize = file.isDirectory && !isTrashed
         isLoading = true
         isLoadingTags = file.categories == nil
             || (!(file.categories?.isEmpty ?? true) && !CategoryLibrary.shared.hasLoaded(for: driveId))
@@ -50,27 +56,47 @@ final class FileDetailsViewModel {
             if generation == request {
                 isLoading = false
                 isLoadingTags = false
-                if Task.isCancelled { self.request = nil }
-                else if infoError == nil && tagsError == nil { loadedAt = Date() }
+                isLoadingFolderSize = false
+                if Task.isCancelled || credential != TokenStore.credentialFingerprint() { self.request = nil }
+                else if infoError == nil && tagsError == nil && folderSizeError == nil { loadedAt = Date() }
             }
         }
-        func isCurrent() -> Bool {
+        let isCurrent: @MainActor @Sendable () -> Bool = { [self] in
             !Task.isCancelled && generation == request && credential == TokenStore.credentialFingerprint()
         }
-        guard credential != nil else { tagsError = "Tags indisponibles hors connexion au compte."; return }
+        guard let credential else {
+            tagsError = "Tags indisponibles hors connexion au compte."
+            if file.isDirectory { folderSizeError = "Poids indisponible hors connexion au compte." }
+            return
+        }
         guard !isTrashed else { return }
         // Independent requests: a missing path must not hold back known tags,
         // and a slow tag library must not hold back the file's facts.
         async let info: Void = loadInfo(file: file, driveId: driveId, isCurrent: isCurrent)
         async let tags: Void = loadCategories(driveId: driveId, isCurrent: isCurrent)
-        _ = await (info, tags)
+        async let size: Void = loadFolderSize(file: file, driveId: driveId, credential: credential, isCurrent: isCurrent)
+        _ = await (info, tags, size)
         guard isCurrent() else { return }
         if self.file?.categories == nil && tagsError == nil {
             tagsError = "Impossible de vérifier les tags de cet élément."
         }
     }
 
-    private func loadInfo(file: DriveFile, driveId: Int, isCurrent: () -> Bool) async {
+    private func loadFolderSize(file: DriveFile, driveId: Int, credential: String, isCurrent: @MainActor @Sendable () -> Bool) async {
+        guard file.isDirectory else { return }
+        defer { if isCurrent() { isLoadingFolderSize = false } }
+        do {
+            let size = try await service.directorySize(driveId: driveId, directoryId: file.id,
+                                                       credentialFingerprint: credential)
+            guard isCurrent() else { return }
+            folderSize = size
+        } catch {
+            guard isCurrent() else { return }
+            folderSizeError = "Poids du dossier indisponible : \(error.localizedDescription)"
+        }
+    }
+
+    private func loadInfo(file: DriveFile, driveId: Int, isCurrent: @MainActor @Sendable () -> Bool) async {
         guard file.path == nil || file.categories == nil else { return }
         do {
             let fresh = try await service.fileInfo(driveId: driveId, fileId: file.id)
@@ -83,7 +109,7 @@ final class FileDetailsViewModel {
         }
     }
 
-    private func loadCategories(driveId: Int, isCurrent: () -> Bool) async {
+    private func loadCategories(driveId: Int, isCurrent: @MainActor @Sendable () -> Bool) async {
         if file?.categories?.isEmpty == true && file?.path != nil { return }
         do {
             try await CategoryLibrary.shared.requireLoaded(for: driveId)

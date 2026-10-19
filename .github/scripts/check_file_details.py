@@ -9,3 +9,7 @@ with tempfile.TemporaryDirectory() as temporary:
     paths = ["Tests/FileDetailsDependencies.swift", "Orvian/Features/Shared/FileDetailsViewModel.swift", "Tests/FileDetailsChecks.swift"]
     subprocess.run(["swiftc", "-swift-version", "5", *[str(ROOT / p) for p in paths], "-o", str(executable)], check=True, timeout=60)
     subprocess.run([str(executable)], check=True, timeout=60)
+    executable = Path(temporary) / "directory-size.exe"
+    paths = ["Orvian/Models/DriveModels.swift", "Tests/DirectorySizeChecks.swift"]
+    subprocess.run(["swiftc", "-swift-version", "5", *[str(ROOT / p) for p in paths], "-o", str(executable)], check=True, timeout=60)
+    subprocess.run([str(executable)], check=True, timeout=60)
