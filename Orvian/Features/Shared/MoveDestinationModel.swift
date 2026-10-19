@@ -129,7 +129,13 @@ final class MoveDestinationModel {
     @discardableResult
     func createFolder(name: String) async -> Bool {
         let name = name.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard let directory, !name.isEmpty, !isBusy else { return false }
+        guard let directory, !isBusy else { return false }
+        // Un nom vide doit être signalé : sans message, l'alerte se ferme et
+        // l'utilisateur croit que le dossier a été créé.
+        guard !name.isEmpty else {
+            error = "Le nom du dossier ne peut pas être vide."
+            return false
+        }
         isBusy = true; error = nil
         defer { isBusy = false }
         do {

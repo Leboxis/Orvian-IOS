@@ -10,12 +10,18 @@ def source(path):
 
 
 class PhoneBrowserRecoveryChecks(unittest.TestCase):
-    def test_file_names_wrap_in_both_presentations(self):
+    def test_file_names_have_bounded_lines_in_both_presentations(self):
         text = source("Orvian/Features/Shared/FileCardView.swift")
         content = text[text.index("@ViewBuilder private var cardContent:"):text.index("private var thumbnailArea:")]
         list_name = content[content.index("Text(file.name)"):content.index("Text(!showsListMetadata")]
         self.assertIn(".lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 2)", list_name)
-        self.assertIn(".lineLimit(dynamicTypeSize.isAccessibilitySize ? 4 : 2, reservesSpace: true)", content)
+        # La grille iPhone affiche une seule ligne réservée (design validé), la
+        # grille iPad deux lignes — quatre en taille d'accessibilité. Les deux
+        # formes réserve leur hauteur pour que les cartes restent alignées.
+        self.assertIn(
+            ".lineLimit(iPadLayout.isPad ? (dynamicTypeSize.isAccessibilitySize ? 4 : 2) : 1, reservesSpace: true)",
+            content,
+        )
         self.assertNotIn(".clipped()", content)
 
     def test_active_query_cannot_be_hidden_by_dismissal(self):

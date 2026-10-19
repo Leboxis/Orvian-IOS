@@ -7,7 +7,7 @@ struct FavoritesView: View {
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @State private var mutationCredentialFingerprint = TokenStore.credentialFingerprint()
     @State private var viewModel: FileGridViewModel
-    @State private var filters = FileFilters()
+    @State private var filters: FileFilters
     private let router: ViewerRouter
     @Binding var path: [DriveFile]
     let scrollToTopRequest: Int
@@ -46,8 +46,25 @@ struct FavoritesView: View {
         self.title = title
         self.ownsNavigation = ownsNavigation
         self.onOpenFolder = onOpenFolder
-        _viewModel = State(initialValue: FileGridViewModel(source: source, driveId: driveId))
+        let model = FileGridViewModel(source: source, driveId: driveId)
+        let restored = FileFiltersStore.load(scope: FavoritesView.scope(for: source))
+        // Le tri restauré doit être connu du vue-modèle avant le premier
+        // chargement, sinon le serveur renvoie l'ordre d'origine alors que le
+        // menu affiche déjà le tri mémorisé.
+        model.applySort(restored)
+        _filters = State(initialValue: restored)
+        _viewModel = State(initialValue: model)
     }
+
+    /// Les fichiers d'un tag utilisent le même réglage que l'onglet Tags.
+    private static func scope(for source: FileSource) -> FileBrowserScope {
+        switch source {
+        case .category, .intersection: return .tag
+        default: return .favorites
+        }
+    }
+
+    private var filtersScope: FileBrowserScope { Self.scope(for: viewModel.source) }
 
     private struct MoveRequest: Identifiable {
         let id = UUID()
@@ -341,7 +358,10 @@ struct FavoritesView: View {
                 if selectionMode { endSelection() }
                 updateIntersectionSearch()
             }
-            .onChange(of: filters) { _, _ in if selectionMode { endSelection() } }
+            .onChange(of: filters) { _, newFilters in
+                FileFiltersStore.save(newFilters, scope: filtersScope)
+                if selectionMode { endSelection() }
+            }
             .onChange(of: viewModel.itemsRevision) { _, _ in selectedIDs.formIntersection(visibleSelectionIDs) }
             .onDisappear { searchFocused = false }
     }
@@ -363,6 +383,7 @@ struct FavoritesView: View {
                     driveId: viewModel.driveId,
                     crumbs: crumbs,
                     router: router,
+                    filtersScope: filtersScope,
                     onNavigateAncestor: { depth in
                         Motion.withoutNavigationAnimation { path = Array(path.prefix(depth)) }
                     },

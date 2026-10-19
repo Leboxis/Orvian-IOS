@@ -54,7 +54,9 @@ class IPadNavigationWiringChecks(unittest.TestCase):
         main = self.source("Orvian/App/MainTabView.swift")
         self.assertIn("private var phoneNavigation:", main)
         body = main[main.index("    var body:"):main.index("    private var phoneNavigation:")]
-        self.assertEqual(body.count(".fullScreenCover("), 2)
+        # Trois présentations plein écran : pager média, éditeur de texte et
+        # aperçu de document (QuickLook).
+        self.assertEqual(body.count(".fullScreenCover("), 3)
         self.assertEqual(body.count(".sheet("), 1)
         self.assertIn(".tint(.accentColor)", body)
         self.assertIn("shell.markVisited(targetTab)", main)
@@ -109,12 +111,13 @@ class IPadNavigationWiringChecks(unittest.TestCase):
 
     def test_bar_order_matches_native_tabs_and_retains_accessible_text(self):
         bar = self.source("Orvian/UI/FloatingTabBar.swift")
-        self.assertIn("@Environment(\\.iPadLayout)", bar)
-        self.assertIn("iPadLayout.isPad ? [.settings, .tag, .home, .favorites, .profile]", bar)
-        self.assertIn(": [.settings, .tag, .home, .favorites]", bar)
+        # L'ordre protégé reste Réglages — Tags — Accueil — Favoris — Profil
+        # sur les deux plateformes ; la barre lit une seule liste groupée et
+        # n'a plus besoin de distinguer iPad et iPhone pour l'ordre.
+        self.assertIn("[.settings, .tag, .home, .favorites, .profile]", bar)
         self.assertIn("ForEach(AppTab.presentationOrder)", bar)
         self.assertNotIn("dynamicTypeSize < .accessibility1", bar)
-        self.assertIn("if !iPadLayout.isPad {", bar)
+        self.assertIn("if dynamicTypeSize.isAccessibilitySize {", bar)
 
     def test_profile_preserves_phone_preview_without_an_extra_pad_fetch(self):
         profile = self.source("Orvian/Features/Profile/ProfileView.swift")

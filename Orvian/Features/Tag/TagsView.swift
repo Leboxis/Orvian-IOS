@@ -151,6 +151,7 @@ struct TagsView: View {
                         driveId: driveId,
                         crumbs: trail,
                         router: router,
+                        filtersScope: .tag,
                         onNavigateAncestor: { depth in
                             let retained = depth + 1
                             if path.count > retained {
@@ -312,6 +313,7 @@ struct TagsView: View {
                     let names = index.map { Array(padNavigation.folders[...$0].map(\.name)) } ?? [directory.name]
                     DirectoryView(directory: directory, driveId: driveId,
                                    crumbs: [crossState.isActive ? "Croisement de tags" : (selectedCategory?.name ?? "Tags")] + names, router: router,
+                                   filtersScope: .tag,
                                    onNavigateAncestor: { depth in
                                        padNavigation.folders = Array(padNavigation.folders.prefix(depth))
                                    },

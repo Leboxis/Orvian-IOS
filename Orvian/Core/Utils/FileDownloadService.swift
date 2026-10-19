@@ -122,7 +122,8 @@ final class FileDownloadService: ObservableObject {
                 from: remoteURL,
                 driveId: driveId,
                 fileId: file.id,
-                mayRefreshURL: true
+                mayRefreshURL: true,
+                retriesRemaining: Self.transientRetryCount
             )
             temporaryURLToClean = tempURL
             try Task.checkCancellation()
@@ -163,13 +164,30 @@ final class FileDownloadService: ObservableObject {
         from remoteURL: URL,
         driveId: Int,
         fileId: Int,
-        mayRefreshURL: Bool
+        mayRefreshURL: Bool,
+        retriesRemaining: Int = 0
     ) async throws -> URL {
         guard remoteURL.scheme?.lowercased() == "https", remoteURL.host != nil else {
             throw FileDownloadError.invalidURL
         }
 
-        let (temporaryURL, response) = try await downloadWithProgress(from: remoteURL)
+        let (temporaryURL, response): (URL, URLResponse)
+        do {
+            (temporaryURL, response) = try await downloadWithProgress(from: remoteURL)
+        } catch {
+            // Coupure réseau en plein transfert : une seule nouvelle tentative,
+            // sans quoi la bannière restait figée sur un pourcentage mort
+            // jusqu'à l'expiration de la session (7 jours par défaut).
+            guard retriesRemaining > 0, Self.isTransient(error), !Task.isCancelled else { throw error }
+            try await Task.sleep(for: .seconds(1))
+            return try await download(
+                from: remoteURL,
+                driveId: driveId,
+                fileId: fileId,
+                mayRefreshURL: mayRefreshURL,
+                retriesRemaining: retriesRemaining - 1
+            )
+        }
         guard let http = response as? HTTPURLResponse else {
             try? FileManager.default.removeItem(at: temporaryURL)
             throw FileDownloadError.invalidResponse
@@ -184,12 +202,43 @@ final class FileDownloadService: ObservableObject {
                     from: freshURL,
                     driveId: driveId,
                     fileId: fileId,
-                    mayRefreshURL: false
+                    mayRefreshURL: false,
+                    retriesRemaining: retriesRemaining
+                )
+            }
+            // Un 5xx est transitoire : le serveur peut répondre correctement
+            // juste après.
+            if retriesRemaining > 0, (500..<600).contains(http.statusCode) {
+                try await Task.sleep(for: .seconds(1))
+                return try await download(
+                    from: remoteURL,
+                    driveId: driveId,
+                    fileId: fileId,
+                    mayRefreshURL: mayRefreshURL,
+                    retriesRemaining: retriesRemaining - 1
                 )
             }
             throw FileDownloadError.http(status: http.statusCode)
         }
         return temporaryURL
+    }
+
+    /// Une seule reprise pour les coupures transitoires.
+    private static let transientRetryCount = 1
+
+    private static func isTransient(_ error: Error) -> Bool {
+        if let urlError = error as? URLError {
+            switch urlError.code {
+            case .timedOut, .networkConnectionLost, .notConnectedToInternet,
+                 .cannotConnectToHost, .cannotFindHost, .dnsLookupFailed,
+                 .resourceUnavailable, .internationalRoamingOff,
+                 .callIsActive, .dataNotAllowed:
+                return true
+            default:
+                return false
+            }
+        }
+        return false
     }
 
     /// Téléchargement délégué : la progression réelle remonte via le délégué
@@ -208,7 +257,13 @@ final class FileDownloadService: ObservableObject {
         })
         let delegateQueue = OperationQueue()
         delegateQueue.maxConcurrentOperationCount = 1
-        let session = URLSession(configuration: .default, delegate: delegate, delegateQueue: delegateQueue)
+        let configuration = URLSessionConfiguration.default
+        // Sans plafond explicite, la session hérite des 7 jours du système :
+        // un transfert au débit effondré laissait la bannière bloquée
+        // indéfiniment. 30 minutes couvrent largement une grosse vidéo, et
+        // l'inactivité reste bornée par `timeoutIntervalForRequest`.
+        configuration.timeoutIntervalForResource = 30 * 60
+        let session = URLSession(configuration: configuration, delegate: delegate, delegateQueue: delegateQueue)
         defer { session.finishTasksAndInvalidate() }
 
         let downloadTask = session.downloadTask(with: remoteURL)

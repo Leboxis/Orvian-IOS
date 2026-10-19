@@ -30,8 +30,16 @@ enum BoundedDataLoader {
         func urlSession(_ session: URLSession, dataTask: URLSessionDataTask,
                         didReceive response: URLResponse,
                         completionHandler: @escaping (URLSession.ResponseDisposition) -> Void) {
-            guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+            guard let http = response as? HTTPURLResponse else {
                 completion.finish(.failure(LoadError.invalidResponse))
+                completionHandler(.cancel)
+                return
+            }
+            // Le statut est conservé : l'appelant peut ainsi distinguer un
+            // lien signé expiré (401/403/404/410) d'une vraie panne réseau,
+            // et redemander une URL avant d'abandonner.
+            guard (200..<300).contains(http.statusCode) else {
+                completion.finish(.failure(LoadError.http(status: http.statusCode)))
                 completionHandler(.cancel)
                 return
             }
@@ -59,10 +67,13 @@ enum BoundedDataLoader {
     }
 
     enum LoadError: LocalizedError {
-        case invalidResponse, tooLarge(Int)
+        case invalidResponse
+        case http(status: Int)
+        case tooLarge(Int)
         var errorDescription: String? {
             switch self {
             case .invalidResponse: return "Le serveur n’a pas pu fournir ce document."
+            case let .http(status): return "Le serveur a refusé ce document (HTTP \(status))."
             case let .tooLarge(limit): return "Ce document dépasse la limite de \(limit / 1_024 / 1_024) Mio."
             }
         }

@@ -14,13 +14,17 @@ thumbnails = source("Orvian/Core/Cache/ThumbnailProvider.swift")
 ledger = source("Orvian/Core/Cache/ThumbnailFailureLedger.swift")
 cards = source("Orvian/Features/Shared/FileCardView.swift")
 grid = source("Orvian/Features/Shared/FileGridView.swift")
+# `refreshCount: false` a été déplacé du corps de la grille vers le vue-modèle
+# (rechargement de tri et réouverture) : l'assertion porte désormais sur le
+# fichier qui contient réellement l'appel, sinon elle échouait toujours.
+model = source("Orvian/Features/Shared/FileGridViewModel.swift")
 metadata = source("Orvian/Core/Media/MediaMetadataStore.swift")
 
 assert "SharedRequests<String, ImageResult>()" in hires
 assert "AsyncThrottler(maxConcurrent: 1)" in hires
 assert "shouldRetry: shouldRetryThumbnail" in cards
 assert "guard shouldRetry else" in thumbnails
-assert "refreshCount: false" in grid
+assert "refreshCount: false" in model
 assert "guard oldServerSort != nil || newServerSort != nil" in grid
 assert metadata.index("try? await Task.sleep(for: .seconds(1))") < metadata.index("let snapshot = self.entries")
 load_start = metadata.index("private func ensurePersistenceLoaded() async")

@@ -1,9 +1,13 @@
 name: Checks
 
-# Les vérifications lentes ne bloquent pas la publication d'une IPA sur main :
-# elles s'exécutent sur les pull requests.
+# Les vérifications tournent sur les pull requests et aussi sur chaque push
+# vers main : le dépôt est utilisé en direct sur main, sans PR, donc un
+# déclencheur « pull_request » seul ne lançait jamais rien. Elles restent
+# séparées du workflow de publication, qui ne dépend pas de leur résultat.
 on:
   pull_request:
+    branches: [main]
+  push:
     branches: [main]
   workflow_dispatch:
 
@@ -41,6 +45,15 @@ jobs:
       - name: Check security, transfers and metadata isolation
         run: python3 .github/scripts/check_ios_regressions.py
 
+      # Ces quatre scripts compilent du vrai code de production avec des
+      # doublures : ils vivaient dans le dépôt sans être lancés par personne.
+      - name: Check grid mutations, tag apply and recent sharing
+        run: |
+          python3 .github/scripts/check_grid_mutation_regressions.py
+          python3 .github/scripts/check_tag_apply_regressions.py
+          python3 .github/scripts/check_recent_sharing.py
+          python3 .github/scripts/check_requested_regressions.py
+
       - name: Check audit regressions
         run: |
           python3 -m unittest discover -s Tests -p 'test_audit_integration.py'
@@ -49,6 +62,10 @@ jobs:
           python3 -m unittest discover -s Tests -p 'test_recent_sharing.py'
           python3 -m unittest discover -s Tests -p 'test_ui_cleanup.py'
           python3 -m unittest discover -s Tests -p 'test_ipad_navigation.py'
+          python3 -m unittest discover -s Tests -p 'test_phone_bottom_chrome.py'
+          python3 -m unittest discover -s Tests -p 'test_phone_browser_top.py'
+          python3 -m unittest discover -s Tests -p 'test_phone_browser_recovery.py'
+          python3 -m unittest discover -s Tests -p 'test_phone_tag_recovery.py'
           python3 .github/scripts/check_audit_regressions.py
           python3 .github/scripts/check_adaptive_ui.py
           python3 .github/scripts/check_file_details.py

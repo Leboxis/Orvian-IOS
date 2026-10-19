@@ -16,6 +16,11 @@ struct OrvianApp: App {
                 .task {
                     await session.bootstrap()
                 }
+                .task {
+                    // Copies jetables d'une session précédente : import
+                    // annulé, upload échoué, app tuée pendant un partage.
+                    await TemporaryFileSweeper.sweep()
+                }
         }
     }
 }

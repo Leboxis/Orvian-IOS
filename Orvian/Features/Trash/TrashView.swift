@@ -13,6 +13,9 @@ struct TrashView: View {
     /// Fichier tapé hors mode sélection : restauration ou suppression définitive.
     @State private var tappedFile: DriveFile?
     @State private var showFileActions = false
+    /// Suppression définitive d'un seul fichier, après confirmation explicite.
+    /// Elle était auparavant déclenchée directement par le bouton du menu.
+    @State private var pendingPermanentDelete: DriveFile?
 
     init(driveId: Int, router: ViewerRouter) {
         self.driveId = driveId
@@ -107,12 +110,34 @@ struct TrashView: View {
                     Task { await restoreAndOpen(file) }
                 }
                 Button("Supprimer définitivement", role: .destructive) {
-                    Task { await viewModel.permanentlyDelete(file) }
+                    pendingPermanentDelete = file
                 }
             }
             Button("Annuler", role: .cancel) {}
         } message: {
             Text("La restauration remet le fichier à son emplacement d'origine (ou à la racine du drive).")
+        }
+        // Confirmation de la suppression définitive d'un seul fichier. Posée
+        // sur un nœud distinct : deux boîtes de dialogue de même nature
+        // chaînées sur la même vue ne s'affichent pas toutes les deux.
+        .background {
+            Color.clear
+                .confirmationDialog(
+                    "Supprimer définitivement ?",
+                    isPresented: Binding(
+                        get: { pendingPermanentDelete != nil },
+                        set: { if !$0 { pendingPermanentDelete = nil } }
+                    ),
+                    titleVisibility: .visible,
+                    presenting: pendingPermanentDelete
+                ) { file in
+                    Button("Supprimer définitivement", role: .destructive) {
+                        Task { await viewModel.permanentlyDelete(file) }
+                    }
+                    Button("Annuler", role: .cancel) {}
+                } message: { file in
+                    Text("« \(file.name) » sera définitivement effacé du drive. Cette action est irréversible.")
+                }
         }
     }
 

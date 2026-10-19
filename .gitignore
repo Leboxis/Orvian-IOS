@@ -18,4 +18,13 @@ xcuserdata/
 # ZCode local
 .zcode/
 
+# Dossiers temporaires laissés par les vérifications et les outils locaux.
+# Ils ne contiennent aucun fichier source et cassaient `git status`.
+.tmpcheck/
+.tmpcheck2/
+.freebuff/
+.workbuddy-ai/
+.model-tools/
+model-cache/
+
 __pycache__/

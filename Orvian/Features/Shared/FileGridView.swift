@@ -103,6 +103,10 @@ struct FileGridView: View {
     @State private var pendingPrefetch: PrefetchRequest?
     @State private var paginationTask: Task<Void, Never>?
     @State private var paginationRequestID: UUID?
+    /// Vrai quand une demande de pagination a été refusée parce qu'un
+    /// rechargement était en cours : elle est rejouée une seule fois à la fin
+    /// de ce rechargement.
+    @State private var paginationReplayPending = false
     @State private var sortReloadTask: Task<Void, Never>?
     @State private var mutationReloadTask: Task<Void, Never>?
     @State private var videoMetadataResolutionCount = 0
@@ -136,13 +140,15 @@ struct FileGridView: View {
             }
             // Un déclencheur de pagination avalé pendant un rechargement ne
             // se répète pas tout seul (`onAppear` déjà consommé pour ces
-            // cartes) : relancer une fois le rechargement terminé, sinon la
+            // cartes) : le rejouer une fois le rechargement terminé, sinon la
             // grille reste figée sur sa première page sans erreur visible.
-            // Sans effet quand `hasMore` est faux.
+            // Le rejeu est conditionné à une demande réellement perdue : sinon
+            // chaque rechargement (y compris celui d'une mutation) relançait
+            // la page suivante dans le dos de l'utilisateur.
             .onChange(of: viewModel.isReloading) { oldValue, newValue in
-                if oldValue, !newValue {
-                    requestMoreFiles()
-                }
+                guard oldValue, !newValue, paginationReplayPending else { return }
+                paginationReplayPending = false
+                requestMoreFiles()
             }
             // Un changement de tri (dates, type, poids) relit le serveur avec
             // l'ordre demandé : la pagination entière respecte alors le tri,
@@ -602,6 +608,14 @@ struct FileGridView: View {
 
     private func requestMoreFiles() {
         guard paginationTask == nil else { return }
+        // Un rechargement en cours fait sortir `loadMoreIfNeeded` sans rien
+        // charger : la demande serait perdue, on la mémorise pour la rejouer
+        // une fois le rechargement terminé.
+        if viewModel.isReloading {
+            paginationReplayPending = true
+            return
+        }
+        paginationReplayPending = false
         let requestID = UUID()
         paginationRequestID = requestID
         paginationTask = Task {
@@ -871,7 +885,7 @@ struct FileGridView: View {
             Text(message)
         } actions: {
             Button("Réessayer") {
-                Task { await viewModel.reload() }
+                Task { await viewModel.reload(forceNetwork: true) }
             }
             .buttonStyle(.borderedProminent)
         }

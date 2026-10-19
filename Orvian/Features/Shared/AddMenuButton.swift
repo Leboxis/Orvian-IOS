@@ -71,7 +71,12 @@ struct AddMenuButton: View {
             TextField("Nom du dossier", text: $folderName)
             Button("Créer") {
                 let name = folderName.trimmingCharacters(in: .whitespacesAndNewlines)
-                guard !name.isEmpty else { return }
+                // Un nom vide doit produire un message : sans cela l'alerte
+                // se ferme et rien ne se passe, sans explication.
+                guard !name.isEmpty else {
+                    errorMessage = "Le nom du dossier ne peut pas être vide."
+                    return
+                }
                 Task { await createFolder(named: name) }
             }
             Button("Annuler", role: .cancel) {}

@@ -37,6 +37,10 @@ struct ApplyTagsSheet: View {
     @State private var isLoading = true
     @State private var busy = false
     @State private var errorMessage: String?
+    /// Échec du chargement de la bibliothèque de tags, distinct d'un drive
+    /// sans tag : sans cette distinction, une panne réseau s'affichait comme
+    /// « Aucun tag » et laissait croire que les tags avaient disparu.
+    @State private var loadError: String?
 
     @State private var mutationCredentialFingerprint = TokenStore.credentialFingerprint()
     private var isCurrentMutationSession: Bool {
@@ -57,6 +61,14 @@ struct ApplyTagsSheet: View {
                 if isLoading {
                     ProgressView("Chargement des tags…")
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else if let loadError {
+                    ContentUnavailableView {
+                        Label("Tags indisponibles", systemImage: "wifi.exclamationmark")
+                    } description: {
+                        Text(loadError)
+                    } actions: {
+                        Button("Réessayer") { Task { await load() } }
+                    }
                 } else if categories.isEmpty {
                     ContentUnavailableView {
                         Label("Aucun tag", systemImage: "tag")
@@ -221,9 +233,20 @@ struct ApplyTagsSheet: View {
 
     private func load() async {
         isLoading = true
+        loadError = nil
         defer { isLoading = false }
-        await CategoryLibrary.shared.ensureLoaded(for: driveId)
-        categories = Array(CategoryLibrary.shared.categories(for: driveId).values)
+        do {
+            // `requireLoaded` distingue « aucun tag sur ce drive » (liste
+            // vide) d'un échec de chargement : `ensureLoaded` avalait
+            // l'erreur et la feuille annonçait « Aucun tag ».
+            try await CategoryLibrary.shared.requireLoaded(for: driveId)
+            categories = Array(CategoryLibrary.shared.categories(for: driveId).values)
+        } catch is CancellationError {
+            return
+        } catch {
+            categories = []
+            loadError = "Impossible de charger les tags : \(error.localizedDescription)"
+        }
     }
 
     private func apply() async {

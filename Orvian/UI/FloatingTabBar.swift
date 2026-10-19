@@ -9,7 +9,6 @@ struct FloatingTabBar: View {
     var onReselect: ((AppTab) -> Void)? = nil
     @AppStorage("hapticFeedbackEnabled") private var hapticFeedbackEnabled = true
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
-    @Environment(\.iPadLayout) private var iPadLayout
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @Namespace private var selectionAnimation
 

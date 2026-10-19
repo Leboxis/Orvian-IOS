@@ -57,6 +57,9 @@ struct DirectoryView: View {
     @AppStorage("searchRestrictedToFolder") private var searchRestrictedToFolder = false
     @FocusState private var searchFocused: Bool
     @State private var showImportPicker = false
+    /// Onglet dont ce dossier mémorise le tri et les filtres. Les dossiers
+    /// ouverts depuis les Favoris ou les Tags gardent leur propre réglage.
+    private let filtersScope: FileBrowserScope
 
     private let router: ViewerRouter
     private let onOpenFolder: (DriveFile) -> Void
@@ -86,6 +89,7 @@ struct DirectoryView: View {
         router: ViewerRouter,
         isActive: Bool = true,
         showsSearchBar: Bool = true,
+        filtersScope: FileBrowserScope = .home,
         onNavigateAncestor: ((Int) -> Void)? = nil,
         onOpenFolder: @escaping (DriveFile) -> Void
     ) {
@@ -95,9 +99,17 @@ struct DirectoryView: View {
         self.router = router
         self.isActive = isActive
         self.showsSearchBar = showsSearchBar
+        self.filtersScope = filtersScope
         self.onOpenFolder = onOpenFolder
         self.onNavigateAncestor = onNavigateAncestor
-        _viewModel = State(initialValue: FileGridViewModel(source: .directory(directory.id), driveId: driveId))
+        let model = FileGridViewModel(source: .directory(directory.id), driveId: driveId)
+        let restored = FileFiltersStore.load(scope: filtersScope)
+        // Le tri restauré doit être connu du vue-modèle avant le premier
+        // chargement : sinon le serveur renvoie l'ordre d'origine alors que
+        // le menu affiche déjà le tri mémorisé.
+        model.applySort(restored)
+        _filters = State(initialValue: restored)
+        _viewModel = State(initialValue: model)
     }
 
     private var isSearching: Bool {
@@ -354,7 +366,10 @@ struct DirectoryView: View {
         .onChange(of: searchText) { _, _ in
             if selectionMode { endSelection() }
         }
-        .onChange(of: filters) { _, _ in if selectionMode { endSelection() } }
+        .onChange(of: filters) { _, newFilters in
+            FileFiltersStore.save(newFilters, scope: filtersScope)
+            if selectionMode { endSelection() }
+        }
         .onChange(of: activeViewModel.itemsRevision) { _, _ in selectedIDs.formIntersection(Set(visibleSelectionItems.map(\.id))) }
         .onChange(of: isActive) { _, active in
             if !active {
@@ -363,6 +378,10 @@ struct DirectoryView: View {
         }
         .task(id: DirectoryActivationKey(isActive: isActive, phase: scenePhase)) {
             guard isActive, scenePhase == .active else { return }
+            // Le tri et les filtres sont mémorisés par onglet : le vue-modèle
+            // neuf doit partir du tri restauré, sinon l'écran affichait le tri
+            // choisi mais recevait la liste dans l'ordre d'origine.
+            viewModel.applySort(filters)
             await viewModel.loadIfNeeded()
         }
         .task(id: SearchTaskKey(query: searchText, restricted: searchRestrictedToFolder)) {

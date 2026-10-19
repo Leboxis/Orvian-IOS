@@ -81,11 +81,13 @@ struct MoveDestinationPicker: View {
         .onDisappear { operation?.cancel() }
         .alert("Nouveau dossier", isPresented: $showCreateFolder) {
             TextField("Nom du dossier", text: $folderName)
+            // Pas de `.disabled` ici : SwiftUI l'ignore sur un bouton
+            // d'alerte, et la validation silencieuse faisait disparaître la
+            // saisie sans créer de dossier. Le modèle signale le nom vide.
             Button("Créer") {
                 let name = folderName
                 operation = Task { if await model.createFolder(name: name) { folderName = "" } }
             }
-            .disabled(folderName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             Button("Annuler", role: .cancel) {}
         }
         .alert("Action impossible", isPresented: Binding(get: { model.error != nil }, set: { if !$0 { model.error = nil } })) {

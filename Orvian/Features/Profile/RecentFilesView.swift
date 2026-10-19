@@ -9,7 +9,7 @@ struct RecentFilesView: View {
     let router: ViewerRouter
 
     @State private var viewModel: FileGridViewModel
-    @State private var filters = FileFilters()
+    @State private var filters: FileFilters
     @State private var path: [DriveFile] = []
 
     init(driveId: Int, title: String, source: FileSource, router: ViewerRouter) {
@@ -25,7 +25,11 @@ struct RecentFilesView: View {
         }
         self.source = sharedSource
         self.router = router
-        _viewModel = State(initialValue: FileGridViewModel(source: sharedSource, driveId: driveId))
+        let model = FileGridViewModel(source: sharedSource, driveId: driveId)
+        let restored = FileFiltersStore.load(scope: .home)
+        model.applySort(restored)
+        _filters = State(initialValue: restored)
+        _viewModel = State(initialValue: model)
     }
 
     var body: some View {
@@ -47,6 +51,9 @@ struct RecentFilesView: View {
         )
         .navigationTitle(title)
         .navigationBarTitleDisplayMode(.inline)
+        .onChange(of: filters) { _, newFilters in
+            FileFiltersStore.save(newFilters, scope: .home)
+        }
         .toolbar {
             ToolbarItemGroup(placement: .topBarTrailing) {
                 FilterMenu(filters: $filters)

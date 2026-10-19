@@ -77,6 +77,9 @@ struct MainTabView: View {
         .fullScreenCover(item: $shell.router.textFile) { file in
             TextFileViewer(file: file, driveId: drive.id)
         }
+        .fullScreenCover(item: $shell.router.documentPreview) { file in
+            DocumentPreviewScreen(driveId: drive.id, file: file)
+        }
     }
 
     @ViewBuilder

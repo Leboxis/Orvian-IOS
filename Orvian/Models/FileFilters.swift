@@ -1,9 +1,13 @@
 import Foundation
 
 /// Options de tri et de filtrage de la grille de fichiers.
-struct FileFilters: Equatable, Hashable {
+///
+/// `Codable` : le tri et les filtres choisis sont mémorisés par onglet
+/// (`FileFiltersStore`) au lieu de repartir des valeurs par défaut à chaque
+/// remontage de la vue.
+struct FileFilters: Equatable, Hashable, Codable {
     /// Ordre de tri.
-    enum SortMode: String, CaseIterable, Identifiable {
+    enum SortMode: String, CaseIterable, Identifiable, Codable {
         case original, modifiedDate, addedDate, type, size, duration
 
         var id: String { rawValue }
@@ -32,7 +36,7 @@ struct FileFilters: Equatable, Hashable {
     }
 
     /// Sens du tri (croissant / décroissant).
-    enum Direction: String, CaseIterable, Identifiable {
+    enum Direction: String, CaseIterable, Identifiable, Codable {
         case ascending, descending
 
         var id: String { rawValue }
@@ -96,7 +100,7 @@ struct FileFilters: Equatable, Hashable {
     }
 
     /// Type de média affiché.
-    enum MediaFilter: String, CaseIterable, Identifiable {
+    enum MediaFilter: String, CaseIterable, Identifiable, Codable {
         case all, videos, images, folders, other
 
         var id: String { rawValue }

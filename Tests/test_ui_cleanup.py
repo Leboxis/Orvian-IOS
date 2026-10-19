@@ -56,9 +56,13 @@ class UICleanupChecks(unittest.TestCase):
         self.assertIn("await RecentUploadsLoader.shared.refresh(", reload)
         self.assertIn("page = (snapshot.items, snapshot.cursor, snapshot.hasMore, snapshot.fetchedAt)", reload)
         self.assertIn("fetchedAt = page.fetchedAt", reload)
-        self.assertIn('let newOrder = source == RecentUploadsLoader.source && newOrderBy.isEmpty ? "asc"', reload)
-        self.assertIn('order = source == RecentUploadsLoader.source && orderBy.isEmpty ? "asc"', vm)
-        self.assertIn('let newDirection = source == RecentUploadsLoader.source && newOrder.isEmpty ? "asc"', vm)
+        # Le sens « asc » reste la clé canonique du loader récent : un tri
+        # serveur vide ne doit pas laisser le sens choisi par l'utilisateur,
+        # sinon le curseur et les pages du loader ne correspondent plus.
+        self.assertIn('let newOrder = newOrderBy.isEmpty ? "asc" : sortedBy.serverOrder', reload)
+        self.assertIn('if source == RecentUploadsLoader.source, orderBy.isEmpty {', reload)
+        self.assertIn('order = "asc"', reload)
+        self.assertIn('let newDirection = newOrder.isEmpty ? "asc" : filters.serverOrder', vm)
         self.assertIn("memorySnapshot = RecentUploadsLoader.shared.cachedMemorySnapshot(driveId: driveId)", vm)
         self.assertIn("head.fetchedAt > fetchedAt", vm)
         more = vm[vm.index("    func loadMoreIfNeeded()"):vm.index("    /// Écrit (ou réécrit)")]

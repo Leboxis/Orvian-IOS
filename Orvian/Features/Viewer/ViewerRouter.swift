@@ -43,6 +43,9 @@ struct MediaViewerContext: Identifiable {
 final class ViewerRouter {
     var mediaContext: MediaViewerContext?
     var textFile: DriveFile?
+    /// Document ouvert dans l'aperçu natif (QuickLook) : PDF, Office,
+    /// archives, audio. `nil` pour les images, vidéos et textes.
+    var documentPreview: DriveFile?
 
     let driveId: Int
 
@@ -54,6 +57,7 @@ final class ViewerRouter {
     func dismissAll() {
         mediaContext = nil
         textFile = nil
+        documentPreview = nil
     }
 
     func open(
@@ -79,11 +83,10 @@ final class ViewerRouter {
         } else if file.isPlainText {
             textFile = file
         } else if !file.isDirectory {
-            // Repli : les .txt sans extension visible n'ont aucune métadonnée
-            // exploitable (l'API ne renvoie ni extension ni MIME fiable). La
-            // visionneuse de texte télécharge le contenu, détecte le binaire
-            // et affiche une erreur claire si le fichier n'est pas du texte.
-            textFile = file
+            // Tout le reste (PDF, Word, Excel, archives, audio) passe par
+            // QuickLook : l'éditeur de texte refusait ces fichiers binaires,
+            // qui étaient donc inouvrables depuis l'app.
+            documentPreview = file
         }
     }
 }

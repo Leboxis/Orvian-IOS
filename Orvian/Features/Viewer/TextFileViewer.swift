@@ -376,6 +376,26 @@ struct TextFileViewer: View {
     /// courir un risque de forte pression mémoire, notamment dans LiveContainer.
     private static let maximumEditableBytes = 5 * 1_024 * 1_024
 
+    /// Télécharge le document en une tentative, puis une seconde avec une URL
+    /// signée fraîche si le serveur a refusé le lien mémorisé. Les liens
+    /// temporaires kDrive expirent au bout de 55 minutes : sans cette reprise,
+    /// rouvrir un fichier texte après une longue session affichait un échec
+    /// alors qu'un simple renouvellement d'URL suffisait.
+    private static func documentData(driveId: Int, file: DriveFile) async throws -> Data {
+        guard let url = await MediaURLCache.shared.url(driveId: driveId, fileId: file.id) else {
+            throw TextFileViewerError.missingTemporaryURL
+        }
+        do {
+            return try await BoundedDataLoader.load(from: url, maximumBytes: maximumEditableBytes)
+        } catch let error as BoundedDataLoader.LoadError {
+            guard case let .http(status) = error,
+                  [401, 403, 404, 410].contains(status),
+                  let freshURL = await MediaURLCache.shared.freshURL(driveId: driveId, fileId: file.id)
+            else { throw error }
+            return try await BoundedDataLoader.load(from: freshURL, maximumBytes: maximumEditableBytes)
+        }
+    }
+
     private func load() async {
         isLoading = true
         defer { isLoading = false }
@@ -383,10 +403,7 @@ struct TextFileViewer: View {
             if let size = file.size, size > Self.maximumEditableBytes {
                 throw TextFileViewerError.tooLarge(maximumBytes: Self.maximumEditableBytes)
             }
-            guard let url = await MediaURLCache.shared.url(driveId: driveId, fileId: file.id) else {
-                throw TextFileViewerError.missingTemporaryURL
-            }
-            let data = try await BoundedDataLoader.load(from: url, maximumBytes: Self.maximumEditableBytes)
+            let data = try await Self.documentData(driveId: driveId, file: file)
             let decoded = try await Task.detached(priority: .userInitiated) {
                 try TextFileContent.decode(data)
             }.value
