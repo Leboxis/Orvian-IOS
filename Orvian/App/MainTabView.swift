@@ -100,6 +100,12 @@ struct MainTabView: View {
                         .onGeometryChange(for: CGFloat.self) { $0.size.height } action: {
                             phoneBottomChromeHeight = $0
                         }
+                        // La mesure ci-dessus exclut la safe area : le contenu
+                        // reserve deja phoneBrowserBottomInset une seule fois.
+                        // Sans cette remontee, la pillule chevauchait la home
+                        // indicator et une bande du drive restait visible
+                        // autour/sous elle, par-dessus le contenu et sous la barre.
+                        .safeAreaPadding(.bottom, 0)
                 }
         }
     }

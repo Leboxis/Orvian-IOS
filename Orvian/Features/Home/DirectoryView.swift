@@ -296,6 +296,10 @@ struct DirectoryView: View {
                     bottomControlsHeight = $0
                 }
                 .padding(.bottom, phoneBottomChromeHeight)
+                // Au-dessus du chrome mesure, puis au-dessus de la home
+                // indicator : le bouton « + » ne chevauche ni la pillule ni
+                // la safe area, et ne laisse pas de bande voilee en bas.
+                .safeAreaPadding(.bottom, 0)
             }
         }
         .background {

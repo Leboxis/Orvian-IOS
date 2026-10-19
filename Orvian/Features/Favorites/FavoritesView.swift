@@ -291,6 +291,9 @@ struct FavoritesView: View {
                         bottomControlsHeight = $0
                     }
                     .padding(.bottom, phoneBottomChromeHeight)
+                    // Meme ancrage que l'onglet Accueil : au-dessus du chrome
+                    // mesure, puis au-dessus de la home indicator.
+                    .safeAreaPadding(.bottom, 0)
                 }
             }
             .background {
