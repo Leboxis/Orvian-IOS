@@ -406,8 +406,8 @@ struct FileGridView: View {
             // dossier est trop court pour défiler.
             .scrollBounceBehavior(.always, axes: .vertical)
             .scrollIndicators(.hidden)
-            // The phone summary floats above an uninterrupted scrolling viewport.
-            .scrollEdgeEffectHidden(!iPadLayout.isPad, for: .top)
+            // The floating phone header needs a soft transition beneath the native toolbar.
+            .scrollEdgeEffectStyle(iPadLayout.isPad ? nil : .soft, for: .top)
             .onGeometryChange(for: CGSize.self) { $0.size } action: { size in
                 containerWidth = size.width
                 containerHeight = size.height

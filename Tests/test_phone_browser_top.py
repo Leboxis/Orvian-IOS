@@ -1,25 +1,13 @@
-"""Boucle de feedback pour la « ligne » du haut sur iPhone.
+"""Source contracts for the floating iPhone browser header.
 
-Symptome (capture annotee) : un bandeau blanc pleine largeur entre la barre
-d'outils systeme (blanche, opaque) et le contenu groupe du drive, avec le
-liseret bas de la barre qui tranche. Le gris en dessous se lit comme un
-filtre pose de cette ligne jusqu'en bas de l'app.
-
-Invariant attendu (iPhone uniquement, sans toucher l'ordre protege des
-onglets ni les boutons Hasard/Selectionner, qui restent dans la toolbar) :
-les navigateurs de fichiers au titre vide (Accueil/dossiers, Favoris/tags)
-fondent le fond de leur barre de navigation sur iPhone pour retrouver la
-surface groupee continue ; l'iPad garde le comportement natif.
+These checks cannot prove the rendered transition on a device. Keep the
+native toolbar and a soft top scroll edge instead of the old hidden edge
+policy that belonged to the clipped header layout.
 """
 from pathlib import Path
-import re
 import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
-
-PHONE_BAR = re.compile(
-    r"\.toolbarBackground\([^)]*iPadLayout\.isPad[^)]*\.hidden[^)]*for: \.navigationBar[^)]*\)"
-)
 
 
 def read(path):
@@ -27,14 +15,20 @@ def read(path):
 
 
 class PhoneBrowserTopTests(unittest.TestCase):
-    def test_phone_browsers_melt_the_bar_into_grouped_content(self):
+    def test_phone_grid_uses_soft_native_transition(self):
+        source = read("Orvian/Features/Shared/FileGridView.swift")
+        self.assertIn(
+            ".scrollEdgeEffectStyle(iPadLayout.isPad ? nil : .soft, for: .top)",
+            source)
+        self.assertNotIn(".scrollEdgeEffectHidden(", source)
+
+    def test_browsers_keep_native_toolbar_background(self):
         for path in ["Orvian/Features/Home/DirectoryView.swift",
                      "Orvian/Features/Favorites/FavoritesView.swift"]:
             with self.subTest(path=path):
-                self.assertRegex(
-                    read(path), PHONE_BAR,
-                    f"{path} : la barre de navigation iPhone doit adopter "
-                    "le fond du contenu groupe (iPad inchange)")
+                source = read(path)
+                self.assertNotIn(".toolbarBackground(", source)
+                self.assertNotIn(".toolbarBackgroundVisibility(", source)
 
     def test_browsers_keep_an_empty_inline_title(self):
         for path in ["Orvian/Features/Home/DirectoryView.swift",

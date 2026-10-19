@@ -149,10 +149,6 @@ struct DirectoryView: View {
         )
         .navigationTitle("")
         .navigationBarTitleDisplayMode(.inline)
-        // iPhone : la barre opaque blanche tranchait avec le contenu groupe
-        // (bandeau + liseret marques d'un cadre rouge en capture). Elle adopte
-        // la surface du navigateur ; l'iPad garde la barre native.
-        .toolbarBackground(iPadLayout.isPad ? .automatic : .hidden, for: .navigationBar)
         .modifier(FileDropTarget(
             isEnabled: isEnabled && isActive && isActiveTab && !selectionMode && !addBusy && !moveBusy,
             onFiles: { urls in
@@ -300,10 +296,6 @@ struct DirectoryView: View {
                     bottomControlsHeight = $0
                 }
                 .padding(.bottom, phoneBottomChromeHeight)
-                // Au-dessus du chrome mesure, puis au-dessus de la home
-                // indicator : le bouton « + » ne chevauche ni la pillule ni
-                // la safe area, et ne laisse pas de bande voilee en bas.
-                .safeAreaPadding(.bottom, 0)
             }
         }
         .background {

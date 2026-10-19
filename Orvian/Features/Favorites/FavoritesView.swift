@@ -181,9 +181,6 @@ struct FavoritesView: View {
             .id(viewModel.source)
             .navigationTitle("")
             .navigationBarTitleDisplayMode(.inline)
-            // Meme unification que l'onglet Accueil : pas de bandeau blanc
-            // iPhone au-dessus du contenu groupe ; iPad inchange.
-            .toolbarBackground(iPadLayout.isPad ? .automatic : .hidden, for: .navigationBar)
             .modifier(FileBrowserHeader(isVisible: !selectionMode, searchPresented: !selectionMode && searchBarVisible, search: { searchBar }) {
                 if !selectionMode {
                     HStack(spacing: 6) {
@@ -294,9 +291,6 @@ struct FavoritesView: View {
                         bottomControlsHeight = $0
                     }
                     .padding(.bottom, phoneBottomChromeHeight)
-                    // Meme ancrage que l'onglet Accueil : au-dessus du chrome
-                    // mesure, puis au-dessus de la home indicator.
-                    .safeAreaPadding(.bottom, 0)
                 }
             }
             .background {
