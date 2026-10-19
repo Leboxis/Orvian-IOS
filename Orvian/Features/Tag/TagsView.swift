@@ -19,6 +19,7 @@ struct TagsView: View {
     @Binding var crossState: TagIntersectionState
     @Environment(\.iPadLayout) private var iPadLayout
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @Environment(\.phoneBottomChromeHeight) private var phoneBottomChromeHeight
 
     @State private var categories: [Category] = []
     @State private var orderedCategories: [Category] = []
@@ -36,6 +37,9 @@ struct TagsView: View {
     }
     private var usesTagColumns: Bool { iPadLayout.isPad && iPadLayout.width >= 700 && !dynamicTypeSize.isAccessibilitySize }
     private enum CrossRoute: Hashable { case results }
+    private var isSelectingTags: Bool {
+        crossState.isEditing || (!iPadLayout.isPad && crossState.isActive)
+    }
     /// Nombre de colonnes de la grille, partagé avec l'éditeur de tags.
     @AppStorage("tagGridColumns") private var tagGridColumns = 2
     @State private var showCreateSheet = false
@@ -162,7 +166,6 @@ struct TagsView: View {
     private var phoneCatalogue: some View {
         VStack(spacing: 0) {
             phoneCatalogueHeader
-            crossSummary
             catalogueContent
         }
         .background(Color(uiColor: .systemGroupedBackground))
@@ -173,10 +176,16 @@ struct TagsView: View {
         // Same title, action order and icon language as the iPad header,
         // without the sidebar toggle or a second navigation bar.
         VStack(spacing: 6) {
-            Text(hasLoadedCategories ? "Tags (\(categories.count))" : "Tags")
-                .font(.title2.weight(.semibold))
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .accessibilityAddTraits(.isHeader)
+            ViewThatFits(in: .horizontal) {
+                HStack {
+                    phoneCatalogueTitle
+                    if crossState.isActive { phoneResultsButton }
+                }
+                VStack(alignment: .leading, spacing: 0) {
+                    phoneCatalogueTitle
+                    if crossState.isActive { phoneResultsButton }
+                }
+            }
             HStack(spacing: 0) {
                 Button {
                     layout = layout == .grid ? .list : .grid
@@ -208,13 +217,37 @@ struct TagsView: View {
             }
             .frame(maxWidth: .infinity, alignment: .center)
         }
-        .font(.body)
+        .font(.title2.weight(.medium))
         .tint(.primary)
         .buttonStyle(TagCataloguePressStyle())
         .padding(.horizontal, DS.gridMargin)
         .padding(.top, 8)
         .padding(.bottom, 6)
         .fixedSize(horizontal: false, vertical: true)
+    }
+
+    private var phoneCatalogueTitle: some View {
+        Text(hasLoadedCategories ? "Tags (\(categories.count))" : "Tags")
+            .font(.title2.weight(.semibold))
+            .fixedSize(horizontal: false, vertical: true)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .accessibilityAddTraits(.isHeader)
+    }
+
+    private var phoneResultsButton: some View {
+        Button {
+            path.append(CrossRoute.results)
+            trail.append("Croisement de tags")
+        } label: {
+            Text("Résultats (\(crossState.selectedIDs.count))")
+                .font(.body.weight(.semibold))
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(minHeight: 44)
+        }
+        .foregroundStyle(Color.accentColor)
+        .disabled(crossState.selectedIDs.isEmpty)
+        .accessibilityLabel("Voir le croisement de \(crossState.selectedIDs.count) tags")
+        .accessibilityHint("Le bouton Retour permet de modifier les tags sélectionnés.")
     }
 
     @ToolbarContentBuilder
@@ -308,6 +341,7 @@ struct TagsView: View {
             : (crossState.isActive ? "Désactiver la sélection multiple des tags" : "Activer la sélection multiple des tags"))
         .accessibilityIdentifier("tags.cross")
         .accessibilityValue(crossState.isActive ? "Sélection multiple activée" : "Sélection multiple désactivée")
+        .accessibilityHint(!iPadLayout.isPad && crossState.isActive ? "Désactive le croisement et efface les tags sélectionnés." : "")
         .accessibilityAddTraits(crossState.isActive ? .isSelected : [])
         .tint(crossState.isActive ? .accentColor : .primary)
     }
@@ -315,40 +349,6 @@ struct TagsView: View {
     @ViewBuilder private var crossSummary: some View {
         if crossState.isActive && iPadLayout.isPad && !usesTagColumns {
             NavigationLink("Résultats", value: CrossRoute.results)
-        } else if crossState.isActive && !iPadLayout.isPad {
-            VStack {
-                crossControls
-                if !usesTagColumns { NavigationLink("Résultats", value: CrossRoute.results) }
-            }
-        }
-    }
-
-    @ViewBuilder private var crossControls: some View {
-        if crossState.isActive && !iPadLayout.isPad {
-            VStack(alignment: .leading, spacing: 8) {
-                Text(crossState.selectedIDs.isEmpty ? "Choisissez les tags à croiser" : "\(crossState.selectedIDs.count) tag\(crossState.selectedIDs.count > 1 ? "s" : "") sélectionné\(crossState.selectedIDs.count > 1 ? "s" : "")")
-                    .font(.subheadline.weight(.semibold))
-                HStack {
-                    Button(crossState.isEditing ? "Terminer" : "Modifier") {
-                        let wasEditing = crossState.isEditing
-                        isReordering = false
-                        crossState.isEditing.toggle()
-                        if !usesTagColumns {
-                            path = NavigationPath(); trail = []
-                            if wasEditing && !crossState.selectedIDs.isEmpty {
-                                path.append(CrossRoute.results); trail = ["Croisement de tags"]
-                            }
-                        }
-                    }
-                    Button("Effacer") {
-                        crossState.clear()
-                        if !usesTagColumns { path = NavigationPath(); trail = [] }
-                    }
-                }
-                .buttonStyle(.bordered)
-            }
-            .padding(12)
-            .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
 
@@ -358,11 +358,6 @@ struct TagsView: View {
                             onOpenFolder: { folder in
             if usesTagColumns { padNavigation.folders.append(folder) } else { push(folder) }
         })
-        .safeAreaInset(edge: .top) {
-            if !usesTagColumns {
-                crossControls
-            }
-        }
         .toolbar {
             if iPadLayout.isPad && !usesTagColumns {
                 ToolbarItem(placement: .topBarLeading) { crossButton }
@@ -496,7 +491,7 @@ struct TagsView: View {
                             open(category)
                         } label: {
                             catalogueGridCard(for: category,
-                                              isSelecting: crossState.isEditing,
+                                              isSelecting: isSelectingTags,
                                               isSelected: crossState.selectedIDs.contains(category.id))
                         }
                         .modifier(TagCataloguePressFeedback(isPhone: !iPadLayout.isPad))
@@ -509,7 +504,7 @@ struct TagsView: View {
             }
             .padding(.horizontal, DS.gridMargin)
             .padding(.top, 6)
-            .padding(.bottom, DS.contentBottomInset)
+            .padding(.bottom, DS.contentBottomInset + (iPadLayout.isPad ? 0 : phoneBottomChromeHeight))
             // Bloc centré et borné en largeur : sur iPad, deux colonnes
             // étirées sur 1 000 pt rendaient les cartes illisibles.
             .frame(maxWidth: DS.maxContentWidth)
@@ -544,8 +539,9 @@ struct TagsView: View {
                             open(category)
                         } label: {
                             CategoryRow(category: category, inSidebar: true,
-                                        isSelecting: crossState.isEditing,
-                                        isSelected: crossState.selectedIDs.contains(category.id))
+                                        isSelecting: isSelectingTags,
+                                        isSelected: crossState.selectedIDs.contains(category.id),
+                                        showsSelectionIndicator: false)
                         }
                         .buttonStyle(TagCataloguePressStyle())
                         .accessibilityAddTraits(crossState.selectedIDs.contains(category.id) ? .isSelected : [])
@@ -574,6 +570,7 @@ struct TagsView: View {
             }
         }
         .listStyle(.plain)
+        .contentMargins(.bottom, DS.contentBottomInset + phoneBottomChromeHeight, for: .scrollContent)
         .scrollContentBackground(.hidden)
         .background(Color(uiColor: .systemGroupedBackground))
         .refreshable { await load(force: true) }
@@ -631,7 +628,8 @@ struct TagsView: View {
 
     private func catalogueGridCard(for category: Category, isSelecting: Bool = false, isSelected: Bool = false) -> some View {
         TagGridCard(category: category, backgroundOpacity: iPadLayout.isPad ? 0.2 : 1,
-                    isSelecting: isSelecting, isSelected: isSelected)
+                    isSelecting: isSelecting, isSelected: isSelected,
+                    showsSelectionIndicator: iPadLayout.isPad)
             .background {
                 if !iPadLayout.isPad {
                     // Keep the native surface beneath the translucent selection tint.
@@ -743,7 +741,7 @@ struct TagsView: View {
     }
 
     private func open(_ category: Category) {
-        if crossState.isEditing { crossState.toggle(category.id); return }
+        if isSelectingTags { crossState.toggle(category.id); return }
         crossState.clear()
         if usesTagColumns { padNavigation.select(category.id); return }
         path.append(category)
@@ -889,6 +887,7 @@ private struct CategoryRow: View {
     var inSidebar = false
     var isSelecting = false
     var isSelected = false
+    var showsSelectionIndicator = true
 
     private var tint: Color {
         Color(hex: category.color) ?? .accentColor
@@ -903,6 +902,12 @@ private struct CategoryRow: View {
             row.padding(.vertical, 12)
                 .background(isSelected ? Color.accentColor.opacity(0.08) : .clear,
                             in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .overlay {
+                    if !showsSelectionIndicator && isSelected {
+                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                            .strokeBorder(Color.accentColor.opacity(0.65), lineWidth: 1.5)
+                    }
+                }
         } else {
             row
                 .padding(12)
@@ -940,21 +945,23 @@ private struct CategoryRow: View {
                 }
             }
             Spacer()
-            ZStack {
-                Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
-                    .font(.body.weight(.semibold))
-                    .foregroundStyle(isSelected ? Color.accentColor : .secondary)
-                    .opacity(isSelecting ? 1 : 0)
-                if !inSidebar && !isSelecting {
-                    // Le chevron annonce une pile poussée : la sélection de la
-                    // barre latérale n'en a pas.
-                    Image(systemName: "chevron.right")
-                        .font(.footnote.weight(.semibold))
-                        .foregroundStyle(.tertiary)
+            if showsSelectionIndicator {
+                ZStack {
+                    Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
+                        .font(.body.weight(.semibold))
+                        .foregroundStyle(isSelected ? Color.accentColor : .secondary)
+                        .opacity(isSelecting ? 1 : 0)
+                    if !inSidebar && !isSelecting {
+                        // Le chevron annonce une pile poussée : la sélection de la
+                        // barre latérale n'en a pas.
+                        Image(systemName: "chevron.right")
+                            .font(.footnote.weight(.semibold))
+                            .foregroundStyle(.tertiary)
+                    }
                 }
+                .frame(width: 24)
+                .accessibilityHidden(true)
             }
-            .frame(width: 24)
-            .accessibilityHidden(true)
         }
         .contentShape(Rectangle())
     }
@@ -972,6 +979,7 @@ struct TagGridCard: View {
     var backgroundOpacity: Double = 1
     var isSelecting = false
     var isSelected = false
+    var showsSelectionIndicator = true
 
     private var tint: Color {
         Color(hex: category.color) ?? .accentColor
@@ -1014,7 +1022,7 @@ struct TagGridCard: View {
         // chaque image du défilement, le liseré suffit à détacher la carte.
         .shadow(color: DS.inlineShadow.opacity(backgroundOpacity), radius: DS.inlineShadowRadius, x: 0, y: DS.inlineShadowY)
         .overlay(alignment: .topTrailing) {
-            if isSelecting {
+            if isSelecting && showsSelectionIndicator {
                 Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(isSelected ? Color.accentColor : .secondary)

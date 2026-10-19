@@ -12,6 +12,8 @@ struct DirectoryView: View {
     let isActive: Bool
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.iPadLayout) private var iPadLayout
+    @Environment(\.phoneBottomChromeHeight) private var phoneBottomChromeHeight
+    @State private var bottomControlsHeight: CGFloat = 0
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @Environment(\.isActiveTab) private var isActiveTab
     @Environment(\.isEnabled) private var isEnabled
@@ -138,6 +140,7 @@ struct DirectoryView: View {
             onBackgroundTap: searchBarPresented ? dismissSearch : nil,
             searchText: searchText,
             filters: filters,
+            contentBottomInset: bottomControlsHeight,
             allowsPullToRefresh: true,
             selectionMode: selectionMode,
             selectedIDs: selectedIDs,
@@ -265,22 +268,32 @@ struct DirectoryView: View {
             }
         }
         .safeAreaInset(edge: .bottom, spacing: 0) {
-            if addBusy || moveBusy || deleteBusy {
+            if iPadLayout.isPad && (addBusy || moveBusy || deleteBusy) {
                 busyIndicator
             }
         }
-        .safeAreaInset(edge: .bottom, spacing: 0) {
-            if !iPadLayout.isPad && !selectionMode {
-                HStack {
-                    Spacer()
-                    addMenu
-                        .frame(width: 52, height: 52)
-                        .floatingChrome(Circle())
-                        .accessibilityLabel("Ajouter ou importer")
+        .overlay(alignment: .bottom) {
+            if !iPadLayout.isPad {
+                VStack(spacing: 0) {
+                    if addBusy || moveBusy || deleteBusy {
+                        busyIndicator
+                    }
+                    if !selectionMode {
+                        HStack {
+                            Spacer()
+                            addMenu
+                                .frame(width: 52, height: 52)
+                                .floatingChrome(Circle())
+                                .accessibilityLabel("Ajouter ou importer")
+                        }
+                        .padding(.trailing, DS.gridMargin + 4)
+                        .padding(.bottom, DS.contentBottomInset)
+                    }
                 }
-                .padding(.trailing, DS.gridMargin + 4)
-                // Le shell réserve déjà la barre et les transferts ; ne pas rétablir l'ancien décalage de 104 pt.
-                .padding(.bottom, DS.contentBottomInset)
+                .onGeometryChange(for: CGFloat.self) { $0.size.height } action: {
+                    bottomControlsHeight = $0
+                }
+                .padding(.bottom, phoneBottomChromeHeight)
             }
         }
         .background {

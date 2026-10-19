@@ -2,6 +2,8 @@ import SwiftUI
 
 struct FavoritesView: View {
     @Environment(\.iPadLayout) private var iPadLayout
+    @Environment(\.phoneBottomChromeHeight) private var phoneBottomChromeHeight
+    @State private var bottomControlsHeight: CGFloat = 0
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @State private var mutationCredentialFingerprint = TokenStore.credentialFingerprint()
     @State private var viewModel: FileGridViewModel
@@ -167,6 +169,7 @@ struct FavoritesView: View {
                 onBackgroundTap: searchBarVisible ? dismissSearch : nil,
                 searchText: searchText,
                 filters: filters,
+                contentBottomInset: bottomControlsHeight,
                 allowsPullToRefresh: true,
                 selectionMode: selectionMode,
                 selectedIDs: selectedIDs,
@@ -271,8 +274,21 @@ struct FavoritesView: View {
                 }
             }
             .safeAreaInset(edge: .bottom, spacing: 0) {
-                if moveBusy || deleteBusy {
+                if iPadLayout.isPad && (moveBusy || deleteBusy) {
                     busyIndicator
+                }
+            }
+            .overlay(alignment: .bottom) {
+                if !iPadLayout.isPad {
+                    VStack(spacing: 0) {
+                        if moveBusy || deleteBusy {
+                            busyIndicator
+                        }
+                    }
+                    .onGeometryChange(for: CGFloat.self) { $0.size.height } action: {
+                        bottomControlsHeight = $0
+                    }
+                    .padding(.bottom, phoneBottomChromeHeight)
                 }
             }
             .background {

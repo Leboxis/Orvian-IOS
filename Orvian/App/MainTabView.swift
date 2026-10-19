@@ -1,5 +1,9 @@
 import SwiftUI
 
+extension EnvironmentValues {
+    @Entry var phoneBottomChromeHeight: CGFloat = 0
+}
+
 /// Conteneur des 5 onglets + barre flottante + visionneuses plein écran + suivi d'upload.
 ///
 /// Barre, de gauche à droite : Réglages · Tag · Accueil · Favoris · Profil.
@@ -22,6 +26,7 @@ struct MainTabView: View {
     @AppStorage("iPadTabBarAtBottom") private var iPadTabBarAtBottom = false
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @State private var iPadWidth: CGFloat = 0
+    @State private var phoneBottomChromeHeight: CGFloat = 0
 
     private let uploadManager = UploadManager.shared
 
@@ -81,15 +86,16 @@ struct MainTabView: View {
                 bottomNavigationChrome
             }
         } else {
-            // Give every NavigationStack a genuinely smaller viewport. An inset
-            // outside the stacks can be lost by their scroll views/destinations.
-            VStack(spacing: 0) {
-                tabs
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .clipped()
-                bottomNavigationChrome
-                    .padding(.top, 8)
-            }
+            // Keep the scroll viewport behind the glass; reserve reachability in content instead.
+            tabs
+                .environment(\.phoneBottomChromeHeight, phoneBottomChromeHeight)
+                .overlay(alignment: .bottom) {
+                    bottomNavigationChrome
+                        .padding(.top, 8)
+                        .onGeometryChange(for: CGFloat.self) { $0.size.height } action: {
+                            phoneBottomChromeHeight = $0
+                        }
+                }
         }
     }
 
@@ -192,6 +198,10 @@ struct MainTabView: View {
         }
     }
 
+    private func phonePaneReservesChrome(_ tab: AppTab) -> Bool {
+        UIDevice.current.userInterfaceIdiom != .pad && (tab == .settings || tab == .profile)
+    }
+
     @ViewBuilder
     private func tabPane(_ target: AppTab, @ViewBuilder content: () -> some View) -> some View {
         // Accueil, Favoris et Tag restent montés une fois visités (données et
@@ -201,6 +211,8 @@ struct MainTabView: View {
         // d'un onglet conservé jamais ouvert.
         if target == shell.tab || (target.isKeptAlive && shell.visitedTabs.contains(target)) {
             content()
+                .safeAreaPadding(.bottom, phonePaneReservesChrome(target) ? phoneBottomChromeHeight : 0)
+                .environment(\.phoneBottomChromeHeight, phonePaneReservesChrome(target) ? 0 : phoneBottomChromeHeight)
                 .environment(\.isActiveTab, shell.tab == target)
                 .opacity(shell.tab == target ? 1 : 0)
                 .allowsHitTesting(shell.tab == target)

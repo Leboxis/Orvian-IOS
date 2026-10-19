@@ -193,9 +193,10 @@ struct FileCardView: View {
                 CardNameLayout {
                     Text(file.name)
                     .font(.footnote)
-                    .lineLimit(dynamicTypeSize.isAccessibilitySize ? 4 : 2, reservesSpace: true)
+                    .lineLimit(iPadLayout.isPad ? (dynamicTypeSize.isAccessibilitySize ? 4 : 2) : 1, reservesSpace: true)
+                    .multilineTextAlignment(iPadLayout.isPad ? .leading : .center)
                     .truncationMode(.middle).foregroundStyle(.primary)
-                    .frame(maxWidth: .infinity).accessibilityHidden(enabled)
+                    .frame(maxWidth: .infinity, alignment: .center).accessibilityHidden(enabled)
                 }
                 HStack(spacing: 4) {
                     if iPadLayout.isPad || !file.isDirectory {

@@ -30,6 +30,8 @@ struct FileGridView: View {
     /// Décalage ajouté en haut du contenu (barre de recherche flottante) pour
     /// que la première rangée ne soit jamais masquée.
     var contentTopInset: CGFloat = 0
+    /// Clearance inside the scroll content for screen-owned floating controls.
+    var contentBottomInset: CGFloat = 0
 
     /// Pull-to-refresh, actif sur tous les écrans (Accueil, Favoris, Corbeille).
     var allowsPullToRefresh = true
@@ -74,6 +76,7 @@ struct FileGridView: View {
         }
     }
     @Environment(\.iPadLayout) private var iPadLayout
+    @Environment(\.phoneBottomChromeHeight) private var phoneBottomChromeHeight
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @State private var containerWidth: CGFloat = 0
     @State private var containerHeight: CGFloat = 0
@@ -381,9 +384,8 @@ struct FileGridView: View {
                 }
                 .padding(.horizontal, gridLayout.horizontalInset(base: DS.gridMargin))
                 .padding(.top, 6 + contentTopInset)
-                // iPhone : barre flottante à réserver. iPad : la barre est en
-                // haut, seule la pastille de transfert flotte en bas.
-                .padding(.bottom, DS.contentBottomInset)
+                // Reserve floating controls in the content, never by cropping the viewport.
+                .padding(.bottom, DS.contentBottomInset + (iPadLayout.isPad ? 0 : phoneBottomChromeHeight + contentBottomInset))
                 // L'iPhone garde sa borne ; l'iPad adapte les colonnes à la largeur du panneau.
                 .frame(maxWidth: iPadLayout.isPad ? .infinity : DS.maxContentWidth)
                 .frame(maxWidth: .infinity)
