@@ -26,6 +26,9 @@ jobs:
       - name: Check performance regressions
         run: python3 .github/scripts/check_performance_regressions.py
 
+      - name: Check media startup without rendering
+        run: python3 .github/scripts/check_media_startup.py
+
       - name: Check iPad media scheduling without rendering
         run: python3 .github/scripts/check_ipad_performance.py
 

@@ -22,7 +22,7 @@ final class VideoAssetCache {
     private var prefetchTasks: [Key: Task<Void, Never>] = [:]
     private var refreshRequired: Set<Key> = []
 
-    private init() {}
+    init() {}
 
     /// Obtient une URL signée et prépare l'asset pour AVPlayer. La validation
     /// de la lisibilité est laissée à AVPlayer afin qu'un contrôle préalable
@@ -43,6 +43,13 @@ final class VideoAssetCache {
               url.scheme?.lowercased() == "https",
               url.host != nil
         else { return nil }
+
+        // La résolution d'URL suspend le MainActor : le préchargement et le
+        // lecteur peuvent se réveiller ensemble. Réutiliser le premier asset
+        // publié conserve les propriétés déjà chargées par AVFoundation.
+        if let asset = assets[key], asset.url == url, !refreshRequired.contains(key) {
+            return asset
+        }
 
         // Pas d'option « durée précise » : elle force un parsing complet des
         // tables de samples avant la première frame, uniquement pour servir le
@@ -68,7 +75,9 @@ final class VideoAssetCache {
                             throw PlaybackPreparationError.notPlayable
                         }
                     } catch {
-                        if key == self.makeKey(driveId: driveId, fileId: fileId) {
+                        if !Task.isCancelled,
+                           self.assets[key] === asset,
+                           key == self.makeKey(driveId: driveId, fileId: fileId) {
                             self.invalidate(driveId: driveId, fileId: fileId)
                         }
                     }

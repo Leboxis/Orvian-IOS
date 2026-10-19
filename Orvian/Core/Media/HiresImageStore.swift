@@ -15,9 +15,8 @@ import ImageIO
 ///   photo et ne conservait donc presque rien pour les pages voisines.
 /// - `fullResolutionImage` reste disponible pour le zoom, à la demande
 ///   seulement, sous sa propre clé de cache.
-/// - Un régulateur borne la concurrence (un décodage à la fois) pour ne jamais
-///   saturer le réseau ni la mémoire lorsque plusieurs pages du pager
-///   demandent leur image en même temps.
+/// - Deux transferts au maximum se chevauchent, avec un seul décodage à la
+///   fois pour borner le pic de mémoire des pages voisines.
 actor HiresImageStore {
     static let shared = HiresImageStore()
 
@@ -33,8 +32,9 @@ actor HiresImageStore {
         var pixelSize: CGSize? = nil
     }
     private let requests = SharedRequests<String, ImageResult>()
-    /// Une image pleine résolution au plus en vol : au-delà, les demandes
-    /// patientent dans une file asynchrone sans bloquer aucun thread.
+    /// Les transferts peuvent se chevaucher sans multiplier les décodages.
+    private let downloads = AsyncThrottler(maxConcurrent: 2)
+    /// Une seule décompression en vol, y compris lors d'un zoom.
     private let throttler = AsyncThrottler(maxConcurrent: 1)
 
     init() {
@@ -91,7 +91,7 @@ actor HiresImageStore {
             return cached
         }
         do {
-            let result = try await requests.value(for: taskKey) { [throttler] in
+            let result = try await requests.value(for: taskKey) { [throttler, downloads] in
                 try Task.checkCancellation()
                 guard let url = await MediaURLCache.shared.url(driveId: driveId, fileId: fileId) else {
                     return ImageResult(image: nil)
@@ -99,7 +99,8 @@ actor HiresImageStore {
                 return await Self.downloadDecode(
                     url: url,
                     maximumPixelSize: maximumPixelSize,
-                    throttler: throttler
+                    throttler: throttler,
+                    downloads: downloads
                 )
             }
             guard !Task.isCancelled, credential == TokenStore.credentialFingerprint(), let image = result.image else { return nil }
@@ -112,7 +113,7 @@ actor HiresImageStore {
     }
 
     /// Téléchargement vers un fichier temporaire puis décodage par ImageIO à la
-    /// taille demandée. Téléchargement **et** décodage partagent le régulateur :
+    /// taille demandée. Le réseau a deux places, le décodage une seule :
     /// deux décompressions simultanées (page courante + page suivante du pager)
     /// formaient un pic mémoire d'environ 400 Mo pour du 48 Mpx, auquel
     /// s'ajoutaient les images déjà en cache. Un seul décodage à la fois borne
@@ -122,20 +123,21 @@ actor HiresImageStore {
     nonisolated private static func downloadDecode(
         url: URL,
         maximumPixelSize: CGFloat?,
-        throttler: AsyncThrottler
+        throttler: AsyncThrottler,
+        downloads: AsyncThrottler
     ) async -> ImageResult {
         struct DownloadRejected: Error {}
         do {
+            let (downloadedURL, response) = try await downloads.withPermit {
+                try Task.checkCancellation()
+                return try await URLSession.shared.download(from: url)
+            }
+            defer { try? FileManager.default.removeItem(at: downloadedURL) }
+            try Task.checkCancellation()
+            guard let http = response as? HTTPURLResponse,
+                  (200..<300).contains(http.statusCode) else { throw DownloadRejected() }
             let result: ImageResult = try await throttler.withPermit {
                 try Task.checkCancellation()
-                let (downloadedURL, response) = try await URLSession.shared.download(from: url)
-                guard let http = response as? HTTPURLResponse,
-                      (200..<300).contains(http.statusCode)
-                else {
-                    try? FileManager.default.removeItem(at: downloadedURL)
-                    throw DownloadRejected()
-                }
-                defer { try? FileManager.default.removeItem(at: downloadedURL) }
                 return ImageResult(image: Self.decode(fromFile: downloadedURL, maximumPixelSize: maximumPixelSize),
                                    pixelSize: Self.originalPixelSize(fromFile: downloadedURL))
             }

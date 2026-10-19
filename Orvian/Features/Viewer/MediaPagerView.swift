@@ -10,6 +10,7 @@ struct MediaPagerView: View {
 
     @Environment(\.dismiss) private var dismiss
     @AppStorage("prefetchOnWiFiOnly") private var prefetchOnWiFiOnly = true
+    @AppStorage("prefetchVideoURLs") private var prefetchVideoURLs = true
     /// Média affiché : identifié par son ID (et non par un index) pour rester
     /// stable quand la liste se réordonne ou s'allonge pendant la pagination.
     @State private var selectedFileID: Int
@@ -94,7 +95,7 @@ struct MediaPagerView: View {
                         file: file,
                         driveId: context.driveId,
                         isActive: selectedFileID == file.id,
-                        hiresRequested: preloadIDs.contains(file.id),
+                        hiresRequested: preloadIDs.contains(file.id) && (!file.isVideo || prefetchVideoURLs),
                         onImageZoomChanged: { isZoomed in
                             setImageZoomed(isZoomed, fileID: file.id)
                         },
@@ -512,6 +513,12 @@ private struct MediaPagerPage: View {
                     isActive: isActive,
                     onControlsInteractionChanged: onVideoControlsInteractionChanged
                 )
+                .task(id: hiresRequested) {
+                    // Même fenêtre N+1 et même préférence réseau que les
+                    // photos. La page active lance directement sa lecture.
+                    guard hiresRequested, !isActive else { return }
+                    await VideoAssetCache.shared.prefetch(driveId: driveId, fileIds: [file.id])
+                }
             } else {
                 // Défensif : le pager ne contient que des images et des vidéos.
                 VStack(spacing: 12) {
