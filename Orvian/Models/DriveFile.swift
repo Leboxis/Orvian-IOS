@@ -33,12 +33,22 @@ struct DriveFile: Codable, Identifiable, Hashable, Sendable {
     var updatedAt: Double?
 
     var isDirectory: Bool { type == "dir" }
+
+    /// Type fonctionnel mémoïsé, calculé une seule fois par version du fichier.
+    ///
+    /// `fileKind` était recalculé à chaque lecture : `isGIF` (extension du nom,
+    /// champ `extension` et parsing du MIME), puis `extension_type`, puis le
+    /// MIME, puis l'extension — avec des `lowercased()` à chaque étage. Une
+    /// seule carte de la grille le lisait cinq à six fois par rendu
+    /// (`tint`, `subtitle`, `symbolName`, comparaison `.folder`, `isVideo`),
+    /// et le tri « Type » l'appelait deux fois **par comparaison**, donc
+    /// O(n log n) fois. Le cache est invalidé par les propriétés dont il dépend.
+    private static let kindCache = FileKindCache()
+
     var isImage: Bool { fileKind == .image }
     var isGIF: Bool {
-        guard !isDirectory else { return false }
-        return (name as NSString).pathExtension.lowercased() == "gif"
-            || fileExtension?.lowercased() == "gif"
-            || mimeType?.split(separator: ";").first?.trimmingCharacters(in: .whitespaces).lowercased() == "image/gif"
+        FileKind.isGIF(fileName: name, fileExtension: fileExtension,
+                       mimeType: mimeType, isDirectory: isDirectory)
     }
     var isVideo: Bool { fileKind == .video }
 
@@ -52,9 +62,18 @@ struct DriveFile: Codable, Identifiable, Hashable, Sendable {
         return false
     }
 
+    /// Propriété calculée : la valeur est mémorisée hors de la structure, qui
+    /// reste un type valeur `Hashable` et `Sendable` (aucun état stocké ajouté).
     var fileKind: FileKind {
-        if isGIF { return .image }
-        return FileKind(extensionType: extensionType, mimeType: mimeType, fileName: name, isDirectory: isDirectory)
+        Self.kindCache.kind(
+            for: id,
+            name: name,
+            type: type,
+            extensionType: extensionType,
+            mimeType: mimeType,
+            fileExtension: fileExtension,
+            isDirectory: isDirectory
+        )
     }
 
     /// Nom replié (minuscules, sans diacritiques) pour la recherche locale.
@@ -223,6 +242,77 @@ struct TemporaryURL: Decodable {
 
     enum CodingKeys: String, CodingKey {
         case temporaryUrl = "temporary_url"
+    }
+}
+
+/// Cache du type fonctionnel, indexé par fichier **et** par les propriétés
+/// dont dépend le calcul.
+///
+/// Un identifiant seul ne suffit pas : le même `id` peut changer de nom, de
+/// type ou de MIME (renommage optimiste, `apply(mutation)`, réponse serveur
+/// plus fraîche). La signature comparée couvre donc exactement les entrées de
+/// `FileKind.init` ; une valeur différente recalcule et remplace l'entrée.
+/// `NSCache` est thread-safe et borné, comme le cache de noms repliés.
+private final class FileKindCache: @unchecked Sendable {
+    private struct Entry {
+        let signature: Signature
+        let kind: FileKind
+    }
+
+    private struct Signature: Equatable {
+        let name: String
+        let type: String
+        let extensionType: String?
+        let mimeType: String?
+        let fileExtension: String?
+        let isDirectory: Bool
+    }
+
+    private let cache: NSCache<NSNumber, EntryBox> = {
+        let cache = NSCache<NSNumber, EntryBox>()
+        // Une grille affichée dépasse rarement quelques milliers de cartes ;
+        // le tri et les passes de filtrage réutilisent ensuite ces entrées.
+        cache.countLimit = 8_000
+        return cache
+    }()
+
+    /// `NSCache` n'accepte que des classes : une petite boîte immuable évite
+    /// d'allouer un objet par lecture.
+    private final class EntryBox {
+        let entry: Entry
+        init(_ entry: Entry) { self.entry = entry }
+    }
+
+    func kind(
+        for id: Int,
+        name: String,
+        type: String,
+        extensionType: String?,
+        mimeType: String?,
+        fileExtension: String?,
+        isDirectory: Bool
+    ) -> FileKind {
+        let signature = Signature(
+            name: name,
+            type: type,
+            extensionType: extensionType,
+            mimeType: mimeType,
+            fileExtension: fileExtension,
+            isDirectory: isDirectory
+        )
+        let key = NSNumber(value: id)
+        if let cached = cache.object(forKey: key), cached.entry.signature == signature {
+            return cached.entry.kind
+        }
+        let kind = FileKind.compute(
+            extensionType: extensionType,
+            mimeType: mimeType,
+            fileName: name,
+            fileExtension: fileExtension,
+            isDirectory: isDirectory
+        )
+        cache.setObject(EntryBox(Entry(signature: signature, kind: kind)), forKey: key)
+        return kind
     }
 }
 

@@ -509,6 +509,7 @@ private struct TextFileTextView: UIViewRepresentable {
         ]
         textView.delegate = context.coordinator
         textView.text = text
+        context.coordinator.appliedText = text
         configureMode(textView)
         applySearchHighlights(to: textView, coordinator: context.coordinator)
         return textView
@@ -518,7 +519,12 @@ private struct TextFileTextView: UIViewRepresentable {
         context.coordinator.parent = self
 
         let modeChanged = textView.isEditable != isEditing
-        let textChanged = textView.text != text
+        // Comparer au texte déjà appliqué, jamais à `textView.text` : ce getter
+        // reconstruit toute la chaîne depuis le `NSTextStorage` (allocation et
+        // copie O(n), sur des fichiers de plusieurs mégaoctets) et il était lu
+        // deux fois par mise à jour SwiftUI, y compris pour une alerte ou un
+        // simple changement d'état sans rapport avec le document.
+        let textChanged = context.coordinator.appliedText != text
         let offset = textView.contentOffset
         let selection = textView.selectedRange
 
@@ -527,6 +533,7 @@ private struct TextFileTextView: UIViewRepresentable {
             // surlignages) : la prochaine passe doit donc tout redessiner.
             context.coordinator.highlightedCount = 0
             textView.text = text
+            context.coordinator.appliedText = text
         }
         // `textView.text = ...` rase les attributs `.link` : reposer les liens
         // après chaque changement de texte, pas seulement au changement de mode.
@@ -535,7 +542,8 @@ private struct TextFileTextView: UIViewRepresentable {
         }
 
         if textChanged || modeChanged {
-            let textLength = (textView.text as NSString).length
+            // Longueur lue sur le stockage (O(1)), sans recopier le document.
+            let textLength = textView.textStorage.length
             let location = min(selection.location, textLength)
             let length = min(selection.length, textLength - location)
             textView.selectedRange = NSRange(location: location, length: length)
@@ -629,14 +637,23 @@ private struct TextFileTextView: UIViewRepresentable {
         /// Nombre de surlignages posés lors de la dernière passe : il décide
         /// si le retrait des attributs doit balayer à nouveau le document.
         var highlightedCount = 0
+        /// Dernière chaîne écrite dans la vue (ou reçue d'elle).
+        ///
+        /// Sert de référence à `updateUIView` : lire `textView.text` pour
+        /// savoir si le document a changé recopiait toute la chaîne depuis le
+        /// `NSTextStorage` à chaque passe, même sans modification.
+        var appliedText: String
 
         init(parent: TextFileTextView) {
             self.parent = parent
             lastPasteRequestID = parent.pasteRequest?.id
+            appliedText = parent.text
         }
 
         func textViewDidChange(_ textView: UITextView) {
-            parent.text = textView.text
+            let updated = textView.text
+            appliedText = updated
+            parent.text = updated
         }
 
         func paste(_ request: TextPasteRequest, into textView: UITextView) {
@@ -650,7 +667,9 @@ private struct TextFileTextView: UIViewRepresentable {
                   !request.text.isEmpty else { return }
 
             textView.insertText("\n\(request.text)\n")
-            parent.text = textView.text
+            let updated = textView.text
+            appliedText = updated
+            parent.text = updated
             textView.scrollRangeToVisible(textView.selectedRange)
         }
 

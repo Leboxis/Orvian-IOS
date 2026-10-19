@@ -225,13 +225,25 @@ struct VideoPlayerView: View {
                 scheduleControlsAutoHide(delay: 2.5)
                 // `.task(id:)` est l'unique point de reprise de la page.
             } else {
-                // Page quittée : la lecture s'arrête, le lecteur reste prêt.
+                // Page quittée : la lecture s'arrête **et le lecteur est
+                // libéré**. Le pager déclare toutes ses pages : sans ce
+                // démontage, chaque vidéo visitée conservait son AVPlayer, son
+                // item avec 30 s de tampon, son observateur périodique, ses
+                // deux KVO, ses abonnements de notifications et la session
+                // audio — la mémoire ne redescendait plus de la session.
+                // L'intention de lecture est préservée : au retour, `.task(id:)`
+                // recharge l'asset (déjà en cache) et reprend la lecture.
                 hideControlsTask?.cancel()
                 pendingToggleTask?.cancel()
                 pendingToggleTask = nil
+                // La position est mémorisée avant la destruction : au retour,
+                // la lecture reprend au même endroit (le seek de reprise est
+                // déjà géré par `startPlayback(at:)`).
+                if let time = playerTime { transport.rememberRecoveryPosition(time) }
                 pausePlayback()
                 cancelPendingSeek()
                 _ = transport.endScrub()
+                teardown(preservingPlaybackIntent: true)
                 loadGeneration &+= 1
             }
         }
@@ -258,16 +270,20 @@ struct VideoPlayerView: View {
         .onChange(of: isTouchingControls) { _, isTouching in
             onControlsInteractionChanged(isTouching)
         }
+        // Les notifications audio sont globales : chaque page du pager y est
+        // abonnée. Une page inactive n'a rien à mettre en pause (son lecteur
+        // est démonté) — sans cette garde, un simple débranchement de casque
+        // réveillait N pages et réécrivait N fois l'état de transport.
         .onReceive(NotificationCenter.default.publisher(for: AVAudioSession.routeChangeNotification)) { notification in
             let rawReason = notification.userInfo?[AVAudioSessionRouteChangeReasonKey] as? UInt
-            guard !isDisappeared,
+            guard isActive, !isDisappeared,
                   rawReason == AVAudioSession.RouteChangeReason.oldDeviceUnavailable.rawValue else { return }
             // Également actif pendant une récupération, quand player est nil.
             pausePlayback()
         }
         .onReceive(NotificationCenter.default.publisher(for: AVAudioSession.interruptionNotification)) { notification in
             let rawType = notification.userInfo?[AVAudioSessionInterruptionTypeKey] as? UInt
-            guard !isDisappeared,
+            guard isActive, !isDisappeared,
                   rawType == AVAudioSession.InterruptionType.began.rawValue else { return }
             pausePlayback()
         }

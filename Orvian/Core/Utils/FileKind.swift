@@ -31,6 +31,41 @@ enum FileKind: String, CaseIterable {
         self = FileKind.fromFileName(fileName)
     }
 
+    /// Calcule le type d'un fichier, GIF animé compris.
+    ///
+    /// Règle unique partagée par `DriveFile.fileKind` (qui la mémoïse) et par
+    /// les tests : un GIF doit rester `.image` quel que soit
+    /// l'`extension_type` renvoyé par l'API.
+    static func compute(
+        extensionType: String?,
+        mimeType: String?,
+        fileName: String,
+        fileExtension: String?,
+        isDirectory: Bool
+    ) -> FileKind {
+        if isGIF(fileName: fileName, fileExtension: fileExtension,
+                 mimeType: mimeType, isDirectory: isDirectory) {
+            return .image
+        }
+        return FileKind(extensionType: extensionType, mimeType: mimeType,
+                        fileName: fileName, isDirectory: isDirectory)
+    }
+
+    /// Vrai pour un GIF, quel que soit le champ qui le révèle (nom, extension
+    /// serveur ou MIME avec paramètres).
+    static func isGIF(
+        fileName: String,
+        fileExtension: String?,
+        mimeType: String?,
+        isDirectory: Bool
+    ) -> Bool {
+        guard !isDirectory else { return false }
+        return (fileName as NSString).pathExtension.lowercased() == "gif"
+            || fileExtension?.lowercased() == "gif"
+            || mimeType?.split(separator: ";").first?
+                .trimmingCharacters(in: .whitespaces).lowercased() == "image/gif"
+    }
+
     /// Traduit l'`extension_type` de l'API ; nil si inconnu ou non exploitable.
     private static func fromExtensionType(_ raw: String?) -> FileKind? {
         guard let raw else { return nil }

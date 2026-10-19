@@ -22,6 +22,7 @@ xcuserdata/
 # Ils ne contiennent aucun fichier source et cassaient `git status`.
 .tmpcheck/
 .tmpcheck2/
+.tmp-checks/
 .freebuff/
 .workbuddy-ai/
 .model-tools/

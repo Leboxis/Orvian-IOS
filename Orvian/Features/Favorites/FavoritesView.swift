@@ -29,6 +29,8 @@ struct FavoritesView: View {
     @State private var moveBusy = false
     @State private var deleteBusy = false
     @State private var showDeleteConfirm = false
+    /// Temporisation de la saisie quand la source est un croisement de tags.
+    @State private var intersectionSearchTask: Task<Void, Never>?
 
     init(
         driveId: Int,
@@ -356,14 +358,39 @@ struct FavoritesView: View {
             }
             .onChange(of: searchText) { _, _ in
                 if selectionMode { endSelection() }
-                updateIntersectionSearch()
+                scheduleIntersectionSearch()
             }
             .onChange(of: filters) { _, newFilters in
                 FileFiltersStore.save(newFilters, scope: filtersScope)
                 if selectionMode { endSelection() }
             }
             .onChange(of: viewModel.itemsRevision) { _, _ in selectedIDs.formIntersection(visibleSelectionIDs) }
-            .onDisappear { searchFocused = false }
+            .onDisappear {
+                searchFocused = false
+                intersectionSearchTask?.cancel()
+                intersectionSearchTask = nil
+            }
+    }
+
+    /// Regroupe la frappe avant de relire le serveur.
+    ///
+    /// Un croisement de tags n'a pas de recherche locale : chaque nouveau texte
+    /// crée une source et un vue-modèle, donc une requête. Sans temporisation,
+    /// « vacances » déclenchait six modèles et six GET, chacun détruisant la
+    /// grille (identité `.id(viewModel.source)`) et sa position de défilement.
+    /// Le délai est le même que la recherche de l'onglet Accueil (300 ms).
+    private func scheduleIntersectionSearch() {
+        intersectionSearchTask?.cancel()
+        guard case .intersection = viewModel.source else { return }
+        intersectionSearchTask = Task {
+            do {
+                try await Task.sleep(for: .milliseconds(300))
+            } catch {
+                return
+            }
+            guard !Task.isCancelled else { return }
+            updateIntersectionSearch()
+        }
     }
 
     private func updateIntersectionSearch() {

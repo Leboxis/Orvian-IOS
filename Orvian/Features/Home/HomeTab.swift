@@ -18,16 +18,25 @@ struct HomeTab: View {
     @State private var startDirectoryIsFresh = false
     private let service = KDriveService()
 
-    private var cacheKey: String { "home_start_dir_locked_\(driveId)" }
+    private var cacheKey: String { Self.cacheKey(for: driveId) }
 
+    private static func cacheKey(for driveId: Int) -> String {
+        "home_start_dir_locked_\(driveId)"
+    }
+
+    /// L'init d'une vue est réévalué à chaque reconstruction de sa valeur par
+    /// le parent, même quand SwiftUI jette le résultat. Il ne décode donc plus
+    /// le JSON du dossier de démarrage : `cachedStartDirectory` rend la valeur
+    /// déjà décodée (une lecture de dictionnaire, la donnée brute servant de
+    /// garde), ce qui évite un `JSONDecoder` par changement d'onglet sans
+    /// introduire l'écran d'attente d'une résolution asynchrone.
     init(driveId: Int, router: ViewerRouter, isSelected: Bool, path: Binding<[DriveFile]>) {
         self.driveId = driveId
         self.router = router
         self.isSelected = isSelected
         self._path = path
 
-        if let data = UserDefaults.standard.data(forKey: cacheKey),
-           let cached = try? JSONDecoder().decode(DriveFile.self, from: data) {
+        if let cached = Self.cachedStartDirectory(forKey: Self.cacheKey(for: driveId)) {
             _startDirectory = State(initialValue: cached)
         }
     }
@@ -153,8 +162,7 @@ struct HomeTab: View {
         var resolved: DriveFile?
         var fromNetwork = false
 
-        if let data = defaults.data(forKey: cacheKey),
-           let cached = try? JSONDecoder().decode(DriveFile.self, from: data) {
+        if let cached = Self.cachedStartDirectory(forKey: cacheKey) {
             resolved = cached
         }
 
@@ -188,4 +196,31 @@ struct HomeTab: View {
         // repris par une future version.
         defaults.removeObject(forKey: "home_start_dir_n_plus_1_\(driveId)")
     }
+
+    /// Dossier de démarrage déjà décodé, relu sans `JSONDecoder`.
+    ///
+    /// Le cache est indexé par clé et validé par la donnée brute : une entrée
+    /// écrite par une autre version de l'app (ou effacée) est décodée à
+    /// nouveau au lieu d'être servie périmée.
+    private static func cachedStartDirectory(forKey key: String) -> DriveFile? {
+        guard let data = UserDefaults.standard.data(forKey: key) else { return nil }
+        startDirectoryCacheLock.lock()
+        let cached = startDirectoryCache[key]
+        startDirectoryCacheLock.unlock()
+        if let cached, cached.data == data { return cached.file }
+
+        guard let decoded = try? JSONDecoder().decode(DriveFile.self, from: data) else { return nil }
+        startDirectoryCacheLock.lock()
+        startDirectoryCache[key] = CachedStartDirectory(data: data, file: decoded)
+        startDirectoryCacheLock.unlock()
+        return decoded
+    }
+
+    private struct CachedStartDirectory {
+        let data: Data
+        let file: DriveFile
+    }
+
+    private static let startDirectoryCacheLock = NSLock()
+    nonisolated(unsafe) private static var startDirectoryCache: [String: CachedStartDirectory] = [:]
 }

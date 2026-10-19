@@ -18,6 +18,10 @@ struct MediaPagerView: View {
     /// suivantes chargées depuis la vue-modèle d'origine. La liste reste la
     /// source de vérité de la sélection et de la pagination.
     @State private var settled: [DriveFile]
+    /// Version de `settled`, comparée en O(1) par `PagerPages` : une égalité
+    /// de tableaux sur des milliers de médias serait payée à chaque frame du
+    /// geste de fermeture.
+    @State private var settledRevision = 0
     /// Position de chaque média dans `settled`.
     ///
     /// Le pager cherchait l'index de la sélection (`firstIndex(where:)`), puis
@@ -82,36 +86,33 @@ struct MediaPagerView: View {
         ZStack {
             Color.black.ignoresSafeArea()
 
-            TabView(selection: $selectedFileID) {
-                // Toutes les pages sont déclarées : une fenêtre (page courante
-                // ± voisines) a été tentée ici puis retirée, car le `TabView`
-                // en style page supporte mal qu'on ajoute/retire ses enfants
-                // pendant la transition — sauts et pages perdues au swipe.
-                // Le coût lourd est déjà borné autrement : seule la page active
-                // charge sa vidéo (`isActive`), seules la page courante et la
-                // suivante demandent la haute résolution (`hiresRequested`).
-                ForEach(settled) { file in
-                    MediaPagerPage(
-                        file: file,
-                        driveId: context.driveId,
-                        isActive: selectedFileID == file.id,
-                        hiresRequested: preloadIDs.contains(file.id) && (!file.isVideo || prefetchVideoURLs),
-                        onImageZoomChanged: { isZoomed in
-                            setImageZoomed(isZoomed, fileID: file.id)
-                        },
-                        onVideoControlsInteractionChanged: { isInteracting in
-                            setVideoControlsInteracting(isInteracting, fileID: file.id)
-                        }
-                    )
-                    .tag(file.id)
+            // Les pages vivent dans une sous-vue `Equatable` : le déplacement
+            // vertical de fermeture (`dismissOffset`, écrit à chaque frame du
+            // doigt) réévalue ce corps, mais la comparaison O(1) de la
+            // sous-vue coupe la reconstruction du `ForEach`. Avant, chaque
+            // frame du geste recréait N `MediaPagerPage` — un coût qui
+            // grandissait avec la longueur de la liste, pour un simple
+            // décalage de tout le pager.
+            PagerPages(
+                selectedFileID: $selectedFileID,
+                files: settled,
+                listRevision: settledRevision,
+                driveId: context.driveId,
+                preloadIDs: preloadIDs,
+                prefetchVideoURLs: prefetchVideoURLs,
+                scrollDisabled: !controlInteractionFileIDs.isEmpty,
+                onImageZoomChanged: { isZoomed, fileID in
+                    setImageZoomed(isZoomed, fileID: fileID)
+                },
+                onVideoControlsInteractionChanged: { isInteracting, fileID in
+                    setVideoControlsInteracting(isInteracting, fileID: fileID)
                 }
-            }
-            .tabViewStyle(.page(indexDisplayMode: .never))
-            .scrollDisabled(!controlInteractionFileIDs.isEmpty)
+            )
+            .equatable()
             .offset(y: dismissOffset * 0.55)
             .opacity(1 - min(0.55, abs(dismissOffset) / 700))
-            // Le geste vit sur le TabView lui-même : il peut ainsi reconnaître
-            // le vertical sans priver son pager interne du swipe horizontal.
+            // Le geste vit sur le pager lui-même : il peut ainsi reconnaître
+            // le vertical sans priver son `TabView` interne du swipe horizontal.
             .simultaneousGesture(imageDismissGesture)
 
             if settled.isEmpty {
@@ -195,6 +196,7 @@ struct MediaPagerView: View {
         // Afficher l'attente ou l'état vide avec fermeture, jamais d'anciens
         // fichiers qui ne figurent plus dans la sélection.
         settled = media
+        settledRevision &+= 1
         indexByFileID = Self.indexMap(media)
         let ids = Set(media.map(\.id))
         zoomedImageIDs.formIntersection(ids)
@@ -480,6 +482,67 @@ struct MediaPagerView: View {
             }
             favoriteErrorMessage = "Impossible de modifier le favori : \((error as? APIError)?.errorDescription ?? error.localizedDescription)"
         }
+    }
+}
+
+/// Pages du pager, isolées du geste de fermeture.
+///
+/// `dismissOffset` change à chaque frame du doigt ; il est lu par le corps de
+/// `MediaPagerView`, donc ce sous-arbre est réévalué à chaque frame lui aussi.
+/// La conformité `Equatable` rend cette réévaluation O(1) : SwiftUI compare les
+/// entrées et coupe la reconstruction du `ForEach` (et des N `MediaPagerPage`)
+/// quand rien de ce qui les dessine n'a changé.
+///
+/// `listRevision` est incrémenté à chaque remplacement de la liste : comparer
+/// les identifiants évite de retenir un tableau de milliers d'éléments dans
+/// une égalité appelée à chaque frame de geste.
+private struct PagerPages: View, Equatable {
+    @Binding var selectedFileID: Int
+    let files: [DriveFile]
+    let listRevision: Int
+    let driveId: Int
+    let preloadIDs: Set<Int>
+    let prefetchVideoURLs: Bool
+    let scrollDisabled: Bool
+    let onImageZoomChanged: (_ isZoomed: Bool, _ fileID: Int) -> Void
+    let onVideoControlsInteractionChanged: (_ isInteracting: Bool, _ fileID: Int) -> Void
+
+    static func == (lhs: PagerPages, rhs: PagerPages) -> Bool {
+        lhs.selectedFileID == rhs.selectedFileID
+            && lhs.listRevision == rhs.listRevision
+            && lhs.driveId == rhs.driveId
+            && lhs.preloadIDs == rhs.preloadIDs
+            && lhs.prefetchVideoURLs == rhs.prefetchVideoURLs
+            && lhs.scrollDisabled == rhs.scrollDisabled
+    }
+
+    var body: some View {
+        TabView(selection: $selectedFileID) {
+            // Toutes les pages sont déclarées : une fenêtre (page courante
+            // ± voisines) a été tentée ici puis retirée, car le `TabView`
+            // en style page supporte mal qu'on ajoute/retire ses enfants
+            // pendant la transition — sauts et pages perdues au swipe.
+            // Le coût lourd est borné autrement : seule la page active
+            // charge sa vidéo (`isActive`), seules la page courante et la
+            // suivante demandent la haute résolution (`hiresRequested`).
+            ForEach(files) { file in
+                MediaPagerPage(
+                    file: file,
+                    driveId: driveId,
+                    isActive: selectedFileID == file.id,
+                    hiresRequested: preloadIDs.contains(file.id) && (!file.isVideo || prefetchVideoURLs),
+                    onImageZoomChanged: { isZoomed in
+                        onImageZoomChanged(isZoomed, file.id)
+                    },
+                    onVideoControlsInteractionChanged: { isInteracting in
+                        onVideoControlsInteractionChanged(isInteracting, file.id)
+                    }
+                )
+                .tag(file.id)
+            }
+        }
+        .tabViewStyle(.page(indexDisplayMode: .never))
+        .scrollDisabled(scrollDisabled)
     }
 }
 
