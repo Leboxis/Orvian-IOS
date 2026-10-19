@@ -20,6 +20,19 @@ struct Endpoint {
         copy.query.append(URLQueryItem(name: "order", value: order))
         return copy
     }
+
+    /// Search has a distinct contract; never apply the browsing order_by[] syntax.
+    func searchOrdering(_ orderBy: [String], order: String) -> Endpoint {
+        guard orderBy.count == 1, let field = orderBy.first,
+              ["last_modified_at", "relevance"].contains(field) else { return self }
+        var copy = self
+        copy.query.removeAll {
+            $0.name == "order_by" || $0.name == "order_by[]" || $0.name == "order" || $0.name.hasPrefix("order_for[")
+        }
+        copy.query.append(URLQueryItem(name: "order_by", value: field))
+        copy.query.append(URLQueryItem(name: "order_for[\(field)]", value: order == "asc" ? "asc" : "desc"))
+        return copy
+    }
 }
 
 // MARK: - Endpoints kDrive utilisés par l'app
@@ -120,9 +133,10 @@ extension Endpoint {
     }
 
     static func intersectionFiles(driveId: Int, selection: TagIntersection, cursor: String?) -> Endpoint {
-        // Reuse the proven single-tag query. AND is verified against each
-        // item's categories, independently of the server's multi-tag grammar.
-        categoryFiles(driveId: driveId, categoryId: selection.ids.first ?? 0, cursor: cursor)
+        var endpoint = search(driveId: driveId, query: selection.query, directoryId: nil, cursor: cursor)
+        // URLQueryItem encodes the AND operator inside the single category value.
+        endpoint.query.append(URLQueryItem(name: "category", value: selection.categoryExpression))
+        return endpoint
     }
 
     /// Recherche récursive de fichiers dans un dossier (ou tout le drive) et ses sous-dossiers.

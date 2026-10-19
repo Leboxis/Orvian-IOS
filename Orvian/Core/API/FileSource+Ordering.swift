@@ -29,12 +29,11 @@ extension FileSource {
         switch self {
         case .directory, .favorites, .trash:
             return Self.browsableOrderingFields
-        case .recents, .category, .search, .intersection:
-            // Cascade `recents` (last_modified → recents → activities →
-            // search) : seule la date de modification est traduite par les
-            // alias de chaque étage. `category` et `search` n'acceptent que
-            // `last_modified_at`, avec alias `updated_at`.
+        case .recents:
+            // Seule la date est commune à tous les endpoints de la cascade.
             return ["updated_at", "last_modified_at"]
+        case .category, .search, .intersection:
+            return ["updated_at", "last_modified_at", "relevance"]
         }
     }
 
@@ -42,7 +41,9 @@ extension FileSource {
     /// mots-clés en local les masquerait (`localizedStandardContains` est
     /// plus strict que les règles de pertinence de l'API).
     var isServerFiltered: Bool {
-        if case .search = self { return true }
-        return false
+        switch self {
+        case .search, .intersection: return true
+        default: return false
+        }
     }
 }

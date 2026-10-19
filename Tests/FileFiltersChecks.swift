@@ -25,10 +25,11 @@ struct FileFiltersChecks {
     static func checkOrderingCapabilities() {
         for source in [FileSource.search(query: "a", directoryId: nil),
                        FileSource.category(1),
-                       FileSource.recents()] {
-            precondition(source.supportedServerOrdering == ["updated_at", "last_modified_at"],
-                         "\(source) n'accepte que la date de modification")
+                       FileSource.intersection(TagIntersection([1, 3]))] {
+            precondition(source.supportedServerOrdering == ["updated_at", "last_modified_at", "relevance"],
+                         "\(source) accepte date et pertinence")
         }
+        precondition(FileSource.recents().supportedServerOrdering == ["updated_at", "last_modified_at"])
         for source in [FileSource.directory(1), .favorites, .trash] {
             for field in ["updated_at", "added_at", "type", "size"] {
                 precondition(source.supportedServerOrdering.contains(field),
@@ -39,7 +40,9 @@ struct FileFiltersChecks {
         precondition(FileSource.search(query: "q", directoryId: nil).isServerFiltered,
                      "La recherche serveur est déjà filtrée : relancer les mots-clés en local la masquerait")
         precondition(!FileSource.category(1).isServerFiltered,
-                     "Les tags reposent sur un filtrage local, pas sur les règles de pertinence")
+                     "La recherche dans un tag simple reste locale")
+        precondition(FileSource.intersection(TagIntersection([1, 3], query: "vacances")).isServerFiltered,
+                     "L'intersection et son texte sont déjà filtrés par le serveur")
     }
 
     // MARK: - Tri local conditionnel
@@ -60,7 +63,8 @@ struct FileFiltersChecks {
         // endpoints de recherche et de tags, donc aussi honoré côté serveur.
         let dated = [file(1, "b", updatedAt: 100), file(2, "a", updatedAt: 300), file(3, "c", updatedAt: 200)]
         let byDate = FileFilters(sort: .modifiedDate, direction: .descending)
-        for source in [FileSource.search(query: "q", directoryId: nil), FileSource.category(1)] {
+        for source in [FileSource.search(query: "q", directoryId: nil), FileSource.category(1),
+                       FileSource.intersection(TagIntersection([1, 3], query: "q"))] {
             let result = byDate.visible(dated, searchText: "", metadata: .init(), source: source)
             precondition(result.map(\.id) == [1, 2, 3],
                          "L'alias updated_at est honoré par \(source) : pas de tri local")
@@ -76,6 +80,7 @@ struct FileFiltersChecks {
 
         for source in [FileSource.search(query: "q", directoryId: nil),
                        FileSource.category(1),
+                       FileSource.intersection(TagIntersection([1, 3], query: "q")),
                        FileSource.recents()] {
             let result = filters.visible(items, searchText: "", metadata: .init(), source: source)
             precondition(result.map(\.id) == [2, 3, 1],

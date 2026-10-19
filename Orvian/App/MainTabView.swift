@@ -89,6 +89,10 @@ struct MainTabView: View {
         } else {
             // Keep the scroll viewport behind the glass; reserve reachability in content instead.
             tabs
+                .background {
+                    Color(uiColor: .systemGroupedBackground)
+                        .ignoresSafeArea(edges: .bottom)
+                }
                 .environment(\.phoneBottomChromeHeight, phoneBottomChromeHeight)
                 .overlay(alignment: .bottom) {
                     bottomNavigationChrome

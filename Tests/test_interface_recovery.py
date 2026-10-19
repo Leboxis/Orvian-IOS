@@ -16,16 +16,20 @@ class InterfaceRecoveryChecks(unittest.TestCase):
         self.assertIn('Label("Sélectionner"', toolbar)
         self.assertIn('Label("Ouvrir un fichier au hasard"', toolbar)
 
-    def test_intersection_is_local_and_preserves_pagination_and_credentials(self):
+    def test_intersection_uses_native_and_with_query_pagination_and_credentials(self):
         endpoint = source("Orvian/Core/API/Endpoints.swift")
         query = endpoint[endpoint.index("    static func intersectionFiles("):endpoint.index("    /// Recherche récursive")]
-        self.assertIn("categoryFiles(", query)
-        self.assertNotIn("selection.query", query)
+        self.assertIn("selection.query", query)
+        self.assertIn("cursor: cursor", query)
+        self.assertIn('URLQueryItem(name: "category", value: selection.categoryExpression)', query)
+        selection = source("Orvian/Models/TagIntersection.swift")
+        self.assertIn('joined(separator: "&")', selection)
         service = source("Orvian/Core/API/KDriveService+Files.swift")
         intersection = service[service.index("case let .intersection"):service.index("case let .directory")]
-        self.assertIn("selection.filterPage", intersection)
-        self.assertIn("cursor: page.cursor, hasMore: page.hasMore", intersection)
-        self.assertEqual(intersection.count("originatingCredential: credential"), 2)
+        self.assertNotIn("selection.filterPage", intersection)
+        self.assertIn("CursorPage<DriveFile>.self", intersection)
+        self.assertEqual(intersection.count("originatingCredential: credential"), 1)
+        self.assertIn("credential == TokenStore.credentialFingerprint()", intersection)
 
     def test_compact_tag_navigation_uses_the_visible_stack(self):
         tags = source("Orvian/Features/Tag/TagsView.swift")

@@ -26,30 +26,18 @@ extension KDriveService {
         switch source {
         case let .intersection(selection):
             guard !selection.ids.isEmpty else { throw APIError.invalidResponse }
+            guard selection.categoryExpression.count <= 200 else { throw TagIntersectionError.expressionTooLong }
             guard let credential = TokenStore.credentialFingerprint() else { throw CancellationError() }
-            let query = safeOrdering(.intersectionFiles(driveId: driveId, selection: selection, cursor: cursor),
-                                     requested: orderBy, order: order, allowed: ["last_modified_at"],
-                                     aliases: ["updated_at": "last_modified_at"])
+            let query = safeOrdering(
+                .intersectionFiles(driveId: driveId, selection: selection, cursor: cursor),
+                requested: orderBy, order: order, allowed: ["last_modified_at", "relevance"],
+                aliases: ["updated_at": "last_modified_at"]
+            )
             let page = try await api.get(CursorPage<DriveFile>.self, query,
                                          cachePolicy: cachePolicy, originatingCredential: credential)
-            let client = api
-            let matching = try await selection.filterPage(page.data ?? [], membership: { file in
-                guard let categories = file.categories, categories.allSatisfy({ $0.categoryId >= 0 }) else { return nil }
-                return Set(categories.map(\.categoryId))
-            }, resolve: { file in
-                try Task.checkCancellation()
-                guard credential == TokenStore.credentialFingerprint() else { throw CancellationError() }
-                let info = try await client.get(DataResponse<DriveFile>.self,
-                                             .fileInfo(driveId: driveId, fileId: file.id),
-                                             cachePolicy: cachePolicy, originatingCredential: credential)
-                guard let fresh = info.data, fresh.categories != nil else { throw TagIntersectionError.missingMembership }
-                var resolved = file
-                resolved.categories = fresh.categories
-                return resolved
-            })
+            try Task.checkCancellation()
             guard credential == TokenStore.credentialFingerprint() else { throw CancellationError() }
-            // An empty filtered page still carries the server's next cursor.
-            return CursorPage(result: page.result, data: matching, cursor: page.cursor, hasMore: page.hasMore)
+            return page
         case let .directory(directoryId):
             endpoint = safeOrdering(
                 .directoryContent(driveId: driveId, directoryId: directoryId, cursor: cursor),
@@ -128,7 +116,7 @@ extension KDriveService {
                             .search(driveId: driveId, query: "", directoryId: nil, cursor: cursor, limit: limit),
                             requested: orderBy,
                             order: order,
-                            allowed: ["last_modified_at"],
+                            allowed: ["last_modified_at", "relevance"],
                             aliases: ["updated_at": "last_modified_at"]
                         )
                     }
@@ -139,7 +127,7 @@ extension KDriveService {
                 .categoryFiles(driveId: driveId, categoryId: categoryId, cursor: cursor),
                 requested: orderBy,
                 order: order,
-                allowed: ["last_modified_at"],
+                allowed: ["last_modified_at", "relevance"],
                 aliases: ["updated_at": "last_modified_at"]
             )
         case .trash:
@@ -154,7 +142,7 @@ extension KDriveService {
                 .search(driveId: driveId, query: query, directoryId: directoryId, cursor: cursor),
                 requested: orderBy,
                 order: order,
-                allowed: ["last_modified_at"],
+                allowed: ["last_modified_at", "relevance"],
                 aliases: ["updated_at": "last_modified_at"]
             )
         }
@@ -184,6 +172,9 @@ extension KDriveService {
             return allowed.contains(field) ? field : nil
         }
         guard resolved.count == requested.count else { return endpoint }
+        if endpoint.path.hasSuffix("/files/search") {
+            return endpoint.searchOrdering(resolved, order: order)
+        }
         return endpoint.ordering(resolved, order: order)
     }
 

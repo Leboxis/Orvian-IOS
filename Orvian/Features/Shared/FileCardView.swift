@@ -288,8 +288,8 @@ struct FileCardView: View {
         }
     }
 
-    /// Étoile de favori posée directement sur la miniature, sans pastille ni
-    /// contour : une ombre portée suffit à la détacher des fonds clairs.
+    /// Sur iPhone, l’étoile repose sur la miniature sans disque ; son ombre
+    /// conserve le contraste et la cible tactile reste de 44 points.
     @ViewBuilder
     private var favoriteBadge: some View {
         if file.isFavorite == true {
@@ -301,7 +301,7 @@ struct FileCardView: View {
                     .foregroundStyle(.yellow)
                     .shadow(color: .black.opacity(0.55), radius: 2, x: 0, y: 1)
                     .frame(width: 24, height: 24)
-                    .background(.black.opacity(0.75), in: Circle())
+                    .background(iPadLayout.isPad ? Color.black.opacity(0.75) : .clear, in: Circle())
                     .frame(width: 44, height: 44)
                     .contentShape(Rectangle())
             }

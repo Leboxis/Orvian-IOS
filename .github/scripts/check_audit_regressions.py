@@ -33,7 +33,10 @@ with tempfile.TemporaryDirectory() as temporary:
     grid = temp / "GridLoading.swift"
     grid.write_text('''import Foundation
 struct DriveFile { let id: Int }
-enum FileSource: Equatable { case directory(Int), recents }
+enum FileSource: Equatable {
+    case directory(Int), recents
+    var supportedServerOrdering: Set<String> { ["updated_at", "last_modified_at", "added_at", "type", "size"] }
+}
 struct FileFilters {
     var serverOrderBy: [String]? { nil }
     var serverOrder: String { "asc" }

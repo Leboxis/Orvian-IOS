@@ -55,9 +55,11 @@ final class DirectoryListStore {
         case let .recents(limit):
             return "\(credential)|\(driveId)|rec|\(limit)|\(ordering)"
         case let .category(categoryId):
-            return "\(credential)|\(driveId)|cat|\(categoryId)|\(ordering)"
+            return "\(credential)|\(driveId)|cat-v2|\(categoryId)|\(ordering)"
         case let .intersection(selection):
-            return "\(credential)|\(driveId)|and-v2|\(selection.ids.map(String.init).joined(separator: ","))|\(ordering)"
+            guard selection.query.isEmpty else { return nil }
+            // Old cursors belonged to one tag, not to the native AND predicate.
+            return "\(credential)|\(driveId)|and-v3|\(selection.ids.map(String.init).joined(separator: ","))|\(ordering)"
         case .trash:
             return "\(credential)|\(driveId)|trash|\(ordering)"
         case .search:

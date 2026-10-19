@@ -124,7 +124,10 @@ struct FileGridView: View {
 
     var body: some View {
         scrollContent
-            .background(Color(uiColor: .systemGroupedBackground))
+            .background {
+                Color(uiColor: .systemGroupedBackground)
+                    .ignoresSafeArea(.container, edges: iPadLayout.isPad ? [] : .bottom)
+            }
             .task(id: viewModel.source) {
                 await viewModel.loadIfNeeded()
             }
@@ -152,7 +155,7 @@ struct FileGridView: View {
                             || (newServerSort != nil && oldFilters.direction != newFilters.direction) else { return }
                     sortReloadTask?.cancel()
                     sortReloadTask = Task {
-                        await viewModel.reload(sortedBy: newFilters, forceNetwork: true, refreshCount: false)
+                        await viewModel.syncSort(with: newFilters)
                     }
                 }
             }

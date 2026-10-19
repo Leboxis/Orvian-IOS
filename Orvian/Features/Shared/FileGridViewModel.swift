@@ -189,6 +189,18 @@ final class FileGridViewModel {
     /// relancés à chaque bascule d'onglet.
     func loadIfNeeded() async {
         guard !isInitialLoading, !isReloading else { return }
+        if !loadedOnce, case let .intersection(selection) = source, !selection.query.isEmpty {
+            let generation = dataGeneration
+            isInitialLoading = true
+            do { try await Task.sleep(for: .milliseconds(250)) }
+            catch {
+                if dataGeneration == generation { isInitialLoading = false }
+                return
+            }
+            guard dataGeneration == generation else { return }
+            isInitialLoading = false
+            guard isCurrentSession else { return }
+        }
         // L'écriture de l'instantané est différée : la vider d'abord, sinon
         // une grille qui remonte pourrait lire une entrée antérieure à la
         // dernière mutation confirmée.
@@ -310,8 +322,8 @@ final class FileGridViewModel {
     /// résultats dans l'ordre de pertinence, le tri local étant lui aussi
     /// ignoré au profit d'un serveur censé avoir trié.
     func applySort(_ filters: FileFilters) {
-        orderBy = filters.serverOrderBy ?? []
-        order = source == RecentUploadsLoader.source && orderBy.isEmpty ? "asc" : filters.serverOrder
+        orderBy = (filters.serverOrderBy ?? []).filter { source.supportedServerOrdering.contains($0) }
+        order = orderBy.isEmpty ? "asc" : filters.serverOrder
     }
 
     /// Realigne le tri sur l'état du menu de filtres, en rechargeant seulement
@@ -321,10 +333,10 @@ final class FileGridViewModel {
     /// ancien ordre une fois la recherche effacée, alors que le menu affiche
     /// encore le tri choisi.
     func syncSort(with filters: FileFilters) async {
-        let newOrder = filters.serverOrderBy ?? []
-        let newDirection = source == RecentUploadsLoader.source && newOrder.isEmpty ? "asc" : filters.serverOrder
+        let newOrder = (filters.serverOrderBy ?? []).filter { source.supportedServerOrdering.contains($0) }
+        let newDirection = newOrder.isEmpty ? "asc" : filters.serverOrder
         guard orderBy != newOrder || order != newDirection else { return }
-        guard loadedOnce else {
+        guard loadedOnce || isReloading || isInitialLoading else {
             // Rien à recharger : le prochargement partira du bon ordre.
             applySort(filters)
             return
@@ -347,8 +359,8 @@ final class FileGridViewModel {
             // Un tri serveur (dates, type, poids) remplace l'ordre par défaut
             // ; les tris restants (durée, médias, orientation) sont locaux et
             // n'exigent aucune relecture ordonnée.
-            let newOrderBy = sortedBy.serverOrderBy ?? []
-            let newOrder = source == RecentUploadsLoader.source && newOrderBy.isEmpty ? "asc" : sortedBy.serverOrder
+            let newOrderBy = (sortedBy.serverOrderBy ?? []).filter { source.supportedServerOrdering.contains($0) }
+            let newOrder = newOrderBy.isEmpty ? "asc" : sortedBy.serverOrder
             if orderBy != newOrderBy || order != newOrder {
                 orderingNeedsReload = true
                 cursor = nil
@@ -533,11 +545,13 @@ final class FileGridViewModel {
     }
 
     private func filterItemsIfNeeded(_ raw: [DriveFile]) -> [DriveFile] {
+        var seen: Set<Int> = []
+        let unique = raw.filter { seen.insert($0.id).inserted }
         switch source {
         case .recents:
-            return raw.filter { !$0.isDirectory }
+            return unique.filter { !$0.isDirectory }
         default:
-            return raw
+            return unique
         }
     }
 
@@ -797,6 +811,7 @@ final class FileGridViewModel {
                 // Un renommage peut ajouter ou retirer un résultat de recherche ;
                 // seul le serveur peut recalculer cette appartenance.
                 if case .search = source { return true }
+                if case let .intersection(selection) = source, !selection.query.isEmpty { return true }
                 return false
             case let .color(_, fileId, color):
                 if let index = items.firstIndex(where: { $0.id == fileId }) {
@@ -873,8 +888,8 @@ final class FileGridViewModel {
                 var categories = items[index].categories ?? []
                 categories.removeAll { $0.categoryId == category.id }
                 if applied { categories.append(FileCategory(categoryId: category.id)) }
+                // The native AND result is authoritative; list metadata may be incomplete.
                 items[index].categories = categories
-                if !selection.matches(Set(categories.map(\.categoryId))) { items.remove(at: index) }
             }
             return selection.ids.contains(category.id)
         }

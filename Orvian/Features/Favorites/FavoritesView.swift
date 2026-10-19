@@ -177,6 +177,7 @@ struct FavoritesView: View {
                 onMove: { prepareMove(files: [$0]) },
                 scrollToTopRequest: scrollToTopRequest
             )
+            .id(viewModel.source)
             .navigationTitle("")
             .navigationBarTitleDisplayMode(.inline)
             .modifier(FileBrowserHeader(isVisible: !selectionMode, searchPresented: !selectionMode && searchBarVisible, search: { searchBar }) {
@@ -333,10 +334,20 @@ struct FavoritesView: View {
             }
             .onChange(of: searchText) { _, _ in
                 if selectionMode { endSelection() }
+                updateIntersectionSearch()
             }
             .onChange(of: filters) { _, _ in if selectionMode { endSelection() } }
             .onChange(of: viewModel.itemsRevision) { _, _ in selectedIDs.formIntersection(visibleSelectionIDs) }
             .onDisappear { searchFocused = false }
+    }
+
+    private func updateIntersectionSearch() {
+        guard case let .intersection(selection) = viewModel.source else { return }
+        let next = TagIntersection(Set(selection.ids), query: searchText)
+        guard next != selection else { return }
+        let model = FileGridViewModel(source: .intersection(next), driveId: viewModel.driveId)
+        model.applySort(filters)
+        viewModel = model
     }
 
     private func folderDestination(_ directory: DriveFile) -> some View {

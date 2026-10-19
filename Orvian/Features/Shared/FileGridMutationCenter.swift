@@ -154,6 +154,7 @@ final class FileGridMutationCenter {
             return categories.contains(where: { $0.categoryId == category.id }) == applied
 
         case let .rename(_, fileId, name):
+            if case let .intersection(selection) = source, !selection.query.isEmpty { return false }
             guard let file = items.first(where: { $0.id == fileId }) else { return true }
             return file.name == name
 

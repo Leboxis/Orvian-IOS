@@ -169,7 +169,10 @@ struct TagsView: View {
             phoneCatalogueHeader
             catalogueContent
         }
-        .background(Color(uiColor: .systemGroupedBackground))
+        .background {
+            Color(uiColor: .systemGroupedBackground)
+                .ignoresSafeArea(edges: .bottom)
+        }
         .toolbar(.hidden, for: .navigationBar)
     }
 
@@ -196,7 +199,7 @@ struct TagsView: View {
                 }
                 .accessibilityLabel(layout == .grid ? "Afficher les tags en liste" : "Afficher les tags en grille")
                 crossButton
-                    .foregroundStyle(crossState.isActive ? Color.accentColor : .primary)
+                    .foregroundStyle(crossState.isActive ? Color.accentColor : .secondary)
                 Button {
                     guard !crossState.isActive else { return }
                     crossState.isEditing = false
@@ -204,7 +207,7 @@ struct TagsView: View {
                 } label: {
                     Image(systemName: isReordering ? "checkmark.circle" : "arrow.up.arrow.down")
                         .frame(width: 44, height: 44)
-                        .foregroundStyle(isReordering ? Color.accentColor : .primary)
+                        .foregroundStyle(isReordering ? Color.accentColor : .secondary)
                         .background(isReordering ? Color.accentColor.opacity(0.12) : .clear, in: Capsule())
                 }
                 .accessibilityLabel(isReordering ? "Terminer le réarrangement" : "Réarranger les tags")
@@ -217,6 +220,7 @@ struct TagsView: View {
                 .accessibilityLabel("Nouveau tag")
             }
             .frame(maxWidth: .infinity, alignment: .center)
+            .foregroundStyle(.secondary)
         }
         .font(.title2.weight(.medium))
         .tint(.primary)
@@ -628,7 +632,8 @@ struct TagsView: View {
     }
 
     private func catalogueGridCard(for category: Category, isSelecting: Bool = false, isSelected: Bool = false) -> some View {
-        TagGridCard(category: category, backgroundOpacity: iPadLayout.isPad && colorScheme == .dark ? 0.2 : 1,
+        TagGridCard(category: category, verticalPadding: iPadLayout.isPad ? 12 : 10,
+                    backgroundOpacity: iPadLayout.isPad && colorScheme == .dark ? 0.2 : 1,
                     isSelecting: isSelecting, isSelected: isSelected,
                     showsSelectionIndicator: iPadLayout.isPad)
             .background {
@@ -977,6 +982,7 @@ struct TagGridCard: View {
     /// Variante resserrée des éditeurs de tags : icône et textes réduits,
     /// compteur d'usage masqué, pour en afficher davantage à l'écran.
     var compact = false
+    var verticalPadding: CGFloat = 12
     var backgroundOpacity: Double = 1
     var isSelecting = false
     var isSelected = false
@@ -1011,7 +1017,7 @@ struct TagGridCard: View {
             }
         }
         .frame(maxWidth: .infinity)
-        .padding(.vertical, compact ? 8 : 12)
+        .padding(.vertical, compact ? 8 : verticalPadding)
         .background((isSelected ? Color.accentColor : Color(uiColor: .secondarySystemGroupedBackground))
             .opacity(isSelected ? 0.08 : backgroundOpacity), in: RoundedRectangle(cornerRadius: compact ? 12 : 16, style: .continuous))
         .overlay {

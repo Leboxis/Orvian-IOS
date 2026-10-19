@@ -1,100 +1,73 @@
 import Foundation
 
-private struct TaggedItem: Sendable, Equatable {
-    let id: Int
-    var isDirectory = false
-    var tags: Set<Int>?
-}
-
-private actor MembershipServer {
-    var active = 0
-    var maximum = 0
-    var calls = 0
-    var account = "a"
-    func switchAccount() { account = "b" }
-    func counts() -> (Int, Int) { (calls, maximum) }
-    func resolve(_ file: TaggedItem) async throws -> TaggedItem {
-        guard account == "a" else { throw CancellationError() }
-        active += 1; calls += 1; maximum = max(maximum, active)
-        defer { active -= 1 }
-        try await Task.sleep(for: .milliseconds(20))
-        guard account == "a" else { throw CancellationError() }
-        if file.id == -1 { throw URLError(.notConnectedToInternet) }
-        if file.id == -2 { return file }
-        var resolved = file; resolved.tags = [1, 3]
-        return resolved
-    }
-}
-
 @main struct TagIntersectionChecks {
-    static func main() async throws {
+    static func main() {
         let selection = TagIntersection([3, 1, 3])
         assert(selection.ids == [1, 3])
+        assert(selection.categoryExpression == "1&3")
         assert(selection.matches([1, 2, 3]))
         assert(!selection.matches([1]))
         assert(!TagIntersection([]).matches([1, 3]))
+
         var state = TagIntersectionState()
         state.toggle(1); state.toggle(3)
-        assert(state.isEditing && state.selectedIDs == [1, 3], "Checkmarks update the live query immediately")
+        assert(state.isEditing && state.selectedIDs == [1, 3])
         state.finish()
         assert(!state.isEditing && state.selectedIDs == [1, 3])
         state.clear()
         assert(state.selectedIDs.isEmpty)
-        let endpoint = Endpoint.intersectionFiles(driveId: 42, selection: selection, cursor: "next")
-        assert(endpoint.query.first { $0.name == "category" }?.value == "1")
-        assert(endpoint.query.first { $0.name == "cursor" }?.value == "next")
+
+        let searched = TagIntersection([3, 1], query: "  vacances été\n")
+        assert(searched.query == "vacances été")
+        assert(searched == TagIntersection([1, 3], query: "vacances été"))
+        assert(searched != selection, "Text belongs to the source identity, not to a second local filter")
+        assert(TagIntersection([1, 3], query: "  \n") == selection)
+
+        let first = Endpoint.intersectionFiles(driveId: 42, selection: searched, cursor: nil)
+        let next = Endpoint.intersectionFiles(driveId: 42, selection: searched, cursor: "next&cursor")
+        assert(first.path == "/3/drive/42/files/search")
+        assert(next.query.filter { $0.name == "category" }.map(\.value) == ["1&3"])
+        assert(next.query.first { $0.name == "query" }?.value == "vacances été")
+        assert(next.query.first { $0.name == "cursor" }?.value == "next&cursor")
+        assert(next.query.first { $0.name == "depth" }?.value == "unlimited")
+        assert(next.query.filter { $0.name != "cursor" } == first.query)
+        assert(!next.query.contains { $0.name == "query_scope" || $0.name == "category[]" })
+        let categoriesOnly = Endpoint.intersectionFiles(driveId: 42, selection: selection, cursor: nil)
+        assert(!categoriesOnly.query.contains { $0.name == "query" })
+
+        var components = URLComponents(string: "https://api.infomaniak.com")!
+        components.path = next.path
+        components.queryItems = next.query
+        assert(components.percentEncodedQuery?.contains("category=1%263") == true)
+        assert(URLComponents(url: components.url!, resolvingAgainstBaseURL: false)?.queryItems == next.query,
+               "AND and cursor ampersands stay inside their values")
+
+        for field in ["last_modified_at", "relevance"] {
+            for direction in ["asc", "desc"] {
+                let sorted = next.searchOrdering([field], order: direction)
+                assert(sorted.query.first { $0.name == "order_by" }?.value == field)
+                assert(sorted.query.first { $0.name == "order_for[\(field)]" }?.value == direction)
+                assert(!sorted.query.contains { $0.name == "order_by[]" || $0.name == "order" })
+                assert(sorted.query.first { $0.name == "cursor" }?.value == "next&cursor")
+            }
+        }
+        for unsupported in [[], ["size"], ["updated_at"], ["relevance", "last_modified_at"]] as [[String]] {
+            assert(next.searchOrdering(unsupported, order: "desc").query == next.query)
+        }
+        let replaced = next.searchOrdering(["relevance"], order: "desc")
+            .searchOrdering(["last_modified_at"], order: "asc")
+        assert(replaced.query.filter { $0.name == "order_by" }.count == 1)
+        assert(!replaced.query.contains { $0.name == "order_for[relevance]" })
+
         let recentPage = Endpoint.lastModified(driveId: 42, cursor: nil, limit: 60)
         assert(recentPage.path == "/3/drive/42/files/last_modified")
         assert(recentPage.query.first { $0.name == "limit" }?.value == "60")
         assert(!recentPage.query.contains { $0.name == "order_by[]" || $0.name == "order" },
-               "The profile's default request must keep the endpoint's native recent order")
-        let server = MembershipServer()
-        let membership: @Sendable (TaggedItem) -> Set<Int>? = { $0.tags }
-        let resolve: @Sendable (TaggedItem) async throws -> TaggedItem = { try await server.resolve($0) }
-        let known = [TaggedItem(id: 1, tags: [1, 3]), TaggedItem(id: 2, tags: [1]),
-                     TaggedItem(id: 3, isDirectory: true, tags: [1, 3]),
-                     TaggedItem(id: 4, tags: [])]
-        let empty = try await TagIntersection([]).filterPage(known, membership: membership, resolve: resolve)
-        assert(empty.isEmpty)
-        let single = try await TagIntersection([1]).filterPage(known, membership: membership, resolve: resolve)
-        assert(single.map(\.id) == [1, 2, 3])
-        let matching = try await selection.filterPage(known, membership: membership, resolve: resolve)
-        assert(matching.map(\.id) == [1, 3], "Directories match only their own tags; children don't inherit membership")
-        let knownCounts = await server.counts()
-        assert(knownCounts.0 == 0, "Known memberships must not launch per-row requests")
-        let missing = (10..<22).map { TaggedItem(id: $0) }
-        let completed = try await selection.filterPage(missing, membership: membership, resolve: resolve)
-        assert(completed.map(\.id) == Array(10..<22), "Concurrent resolution preserves page ordering")
-        let counts = await server.counts()
-        assert(counts.0 == 12 && counts.1 <= 4)
-        // A first filtered page can be empty while later pages contain results.
-        let firstPage = try await selection.filterPage([known[1]], membership: membership, resolve: resolve)
-        let nextPage = try await selection.filterPage([known[2]], membership: membership, resolve: resolve)
-        assert(firstPage.isEmpty && nextPage.map(\.id) == [3])
-        do {
-            _ = try await selection.filterPage([TaggedItem(id: -1)], membership: membership, resolve: resolve)
-            fatalError("A metadata network error must not become an empty result")
-        } catch is URLError {}
-        do {
-            _ = try await selection.filterPage([TaggedItem(id: -2)], membership: membership, resolve: resolve)
-            fatalError("A missing membership must remain an error")
-        } catch is TagIntersectionError {}
-        let cancellationServer = MembershipServer()
-        let obsolete = Task {
-            try await selection.filterPage(missing, membership: membership, resolve: { try await cancellationServer.resolve($0) })
-        }
-        while await cancellationServer.counts().0 == 0 { await Task.yield() }
-        obsolete.cancel()
-        do { _ = try await obsolete.value; fatalError("Cancelled query published results") }
-        catch is CancellationError {}
-        let accountServer = MembershipServer()
-        let changed = Task {
-            try await selection.filterPage(missing, membership: membership, resolve: { try await accountServer.resolve($0) })
-        }
-        while await accountServer.counts().0 == 0 { await Task.yield() }
-        await accountServer.switchAccount()
-        do { _ = try await changed.value; fatalError("Old-account query published results") }
-        catch is CancellationError {}
-        print("Live intersection, own membership, bounded resolution, empty pages, errors, cancellation and accounts passed")
+               "The profile keeps the endpoint's native recent order")
+        let folder = Endpoint.directoryContent(driveId: 42, directoryId: 7, cursor: nil)
+            .ordering(["size"], order: "desc")
+        assert(folder.query.first { $0.name == "order_by[]" }?.value == "size")
+        assert(folder.query.first { $0.name == "order" }?.value == "desc")
+        print("Native category AND, query identity, encoding, cursor and endpoint-specific ordering checks passed")
     }
 }
