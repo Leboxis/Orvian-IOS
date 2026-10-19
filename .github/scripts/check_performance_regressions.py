@@ -25,7 +25,13 @@ assert "AsyncThrottler(maxConcurrent: 1)" in hires
 assert "shouldRetry: shouldRetryThumbnail" in cards
 assert "guard shouldRetry else" in thumbnails
 assert "refreshCount: false" in model
-assert "guard oldServerSort != nil || newServerSort != nil" in grid
+# Le déclencheur de rechargement porte désormais sur une règle unique
+# (`requiresServerReload`) qui couvre le tri *et* le filtre média délégué au
+# serveur : l'assertion vérifie la règle, plus la forme historique du `guard`.
+assert "newFilters.requiresServerReload(from: oldFilters, source: viewModel.source)" in grid
+assert "func requiresServerReload(from old: FileFilters, source: FileSource?) -> Bool" in source(
+    "Orvian/Models/FileFilters.swift"
+)
 assert metadata.index("try? await Task.sleep(for: .seconds(1))") < metadata.index("let snapshot = self.entries")
 load_start = metadata.index("private func ensurePersistenceLoaded() async")
 load_end = metadata.index("private func scheduleSave()", load_start)

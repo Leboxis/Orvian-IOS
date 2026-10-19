@@ -14,6 +14,7 @@ struct FileFiltersChecks {
         checkOriginalAndDurationSorts()
         checkDirectionAndTieBreak()
         checkSearchThenSort()
+        checkServerMediaTypes()
         print("FileFilters ordering, search and source gating checks passed")
     }
 
@@ -183,6 +184,66 @@ struct FileFiltersChecks {
         let empty = filters.visible(items, searchText: "introuvable",
                                     metadata: .init(), source: source)
         precondition(empty.isEmpty, "Une recherche sans correspondance doit rester vide")
+    }
+
+    // MARK: - Filtre média serveur
+
+    /// Le filtre média ne part au serveur que sur les endpoints qui
+    /// documentent `types[]`, et seulement pour une sélection exprimable.
+    /// Partout ailleurs il reste local, sans quoi l'app croirait le serveur
+    /// avoir filtré alors qu'il ignore le paramètre.
+    static func checkServerMediaTypes() {
+        let search = FileSource.search(query: "q", directoryId: nil)
+        let directory = FileSource.directory(1)
+
+        precondition(FileFilters(media: .videos).serverMediaTypes == ["video"])
+        precondition(FileFilters(media: .images).serverMediaTypes == ["image"])
+        precondition(FileFilters(media: .folders).serverMediaTypes == ["dir"])
+        precondition(FileFilters(media: .all).serverMediaTypes == nil,
+                     "« Tout » ne filtre rien : aucun type ne doit partir")
+        precondition(FileFilters(media: .other).serverMediaTypes == nil,
+                     "« Autres » est une négation que l'API ne sait pas représenter")
+
+        precondition(FileFilters(media: .videos).serverHandlesMedia(search))
+        precondition(FileFilters(media: .videos).serverHandlesMedia(FileSource.category(3)))
+        precondition(FileFilters(media: .videos).serverHandlesMedia(
+            FileSource.intersection(TagIntersection([1, 2]))))
+        precondition(!FileFilters(media: .videos).serverHandlesMedia(directory),
+                     "Un dossier n'expose pas types[] : le filtre doit rester local")
+        precondition(!FileFilters(media: .videos).serverHandlesMedia(nil))
+        precondition(!FileFilters(media: .all).serverHandlesMedia(search),
+                     "Sans type exprimable, rien n'est délégué au serveur")
+
+        // Le filtre local reste appliqué : il est idempotent quand le serveur
+        // a bien filtré, et il protège d'une API qui ignorerait `types[]`.
+        let videos = [file(1, "clip.mp4", extensionType: "video"),
+                      file(2, "photo.jpg", extensionType: "image")]
+        let delegated = FileFilters(media: .videos)
+            .visible(videos, searchText: "", metadata: .init(), source: search)
+        precondition(delegated.map(\.id) == [1],
+                     "Filtre délégué : le prédicat reste vérifié localement, obtenu \(delegated.map(\.id))")
+
+        // Sur une source locale, le prédicat s'applique réellement.
+        let local = FileFilters(media: .videos)
+            .visible(videos, searchText: "", metadata: .init(), source: directory)
+        precondition(local.map(\.id) == [1],
+                     "Filtre local attendu pour un dossier, obtenu \(local.map(\.id))")
+
+        // Un changement de filtre média serveur impose une relecture ; un
+        // changement purement local n'en impose aucune.
+        precondition(FileFilters(media: .videos).requiresServerReload(
+            from: FileFilters(media: .all), source: search))
+        precondition(!FileFilters(media: .videos).requiresServerReload(
+            from: FileFilters(media: .all), source: directory),
+            "Un dossier filtre en local : aucun rechargement réseau")
+        precondition(!FileFilters(media: .videos).requiresServerReload(
+            from: FileFilters(media: .images), source: directory))
+        precondition(FileFilters(media: .images).requiresServerReload(
+            from: FileFilters(media: .videos), source: search),
+            "Deux types serveur différents ne décrivent pas le même ensemble")
+        precondition(!FileFilters(media: .videos).requiresServerReload(
+            from: FileFilters(media: .videos), source: search),
+            "Un filtre inchangé ne relit rien")
     }
 
     // MARK: - Fixtures

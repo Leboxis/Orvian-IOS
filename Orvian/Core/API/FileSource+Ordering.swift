@@ -46,4 +46,19 @@ extension FileSource {
         default: return false
         }
     }
+
+    /// Vrai quand l'endpoint de cette source accepte `types[]`, qui permet de
+    /// laisser le serveur appliquer le filtre média (images, vidéos, dossiers).
+    ///
+    /// Seul `/files/search` le documente : les listes (dossier, favoris,
+    /// récents, corbeille) n'exposent que `type`, réservé au type structurel
+    /// `dir`/`file`, pas aux types de contenu. Ces sources gardent donc leur
+    /// filtrage local, et la pagination y reste une pagination de candidats
+    /// filtrés localement — un comportement honnête, pas un tri global.
+    var supportsServerMediaTypes: Bool {
+        switch self {
+        case .search, .intersection, .category: return true
+        default: return false
+        }
+    }
 }

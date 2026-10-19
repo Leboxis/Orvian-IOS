@@ -14,7 +14,8 @@ extension KDriveService {
         cursor: String?,
         orderBy: [String]? = nil,
         order: String = "asc",
-        forceNetwork: Bool = false
+        forceNetwork: Bool = false,
+        types: [String] = []
     ) async throws -> CursorPage<DriveFile> {
         // `forceNetwork` : pull-to-refresh, changement de tri et rafraîchissements
         // post-mutation exigent l'état courant du serveur. Sinon, la réponse
@@ -22,6 +23,10 @@ extension KDriveService {
         let cachePolicy: URLRequest.CachePolicy = forceNetwork
             ? .reloadIgnoringLocalCacheData
             : .useProtocolCachePolicy
+        // Le filtre média ne s'applique qu'aux endpoints qui documentent
+        // `types[]` : sur les listes, la valeur serait ignorée en silence et
+        // l'app croirait à tort que le serveur a filtré.
+        let serverTypes = source.supportsServerMediaTypes ? types : []
         let endpoint: Endpoint
         switch source {
         case let .intersection(selection):
@@ -29,7 +34,7 @@ extension KDriveService {
             guard selection.categoryExpression.count <= 200 else { throw TagIntersectionError.expressionTooLong }
             guard let credential = TokenStore.credentialFingerprint() else { throw CancellationError() }
             let query = safeOrdering(
-                .intersectionFiles(driveId: driveId, selection: selection, cursor: cursor),
+                .intersectionFiles(driveId: driveId, selection: selection, cursor: cursor, types: serverTypes),
                 requested: orderBy, order: order, allowed: ["last_modified_at", "relevance"],
                 aliases: ["updated_at": "last_modified_at"]
             )
@@ -124,7 +129,7 @@ extension KDriveService {
             }
         case let .category(categoryId):
             endpoint = safeOrdering(
-                .categoryFiles(driveId: driveId, categoryId: categoryId, cursor: cursor),
+                .categoryFiles(driveId: driveId, categoryId: categoryId, cursor: cursor, types: serverTypes),
                 requested: orderBy,
                 order: order,
                 allowed: ["last_modified_at", "relevance"],
@@ -139,7 +144,8 @@ extension KDriveService {
             )
         case let .search(query, directoryId):
             endpoint = safeOrdering(
-                .search(driveId: driveId, query: query, directoryId: directoryId, cursor: cursor),
+                .search(driveId: driveId, query: query, directoryId: directoryId,
+                        cursor: cursor, types: serverTypes),
                 requested: orderBy,
                 order: order,
                 allowed: ["last_modified_at", "relevance"],

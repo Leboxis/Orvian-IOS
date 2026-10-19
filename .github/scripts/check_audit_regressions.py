@@ -40,6 +40,10 @@ enum FileSource: Equatable {
 struct FileFilters {
     var serverOrderBy: [String]? { nil }
     var serverOrder: String { "asc" }
+    /// Miroir de la production : le filtre média ne part au serveur que sur
+    /// les endpoints qui documentent `types[]`.
+    var serverMediaTypes: [String]? { nil }
+    func serverHandlesMedia(_ source: FileSource?) -> Bool { false }
 }
 enum TokenStore {
     static var value = "account-a"
@@ -60,7 +64,7 @@ struct Page {
 }
 struct KDriveService {
     func page(_ source: FileSource, driveId: Int, cursor: String?, orderBy: [String]?,
-              order: String, forceNetwork: Bool) async throws -> Page { Page() }
+              order: String, forceNetwork: Bool, types: [String] = []) async throws -> Page { Page() }
     func directoryCount(driveId: Int, directoryId: Int) async throws -> Int {
         await CountServer.shared.count()
     }
@@ -89,6 +93,7 @@ struct RecentSnapshot {
     var itemsRevision = 0
     var orderBy: [String] = []
     var order = "asc"
+    var mediaTypes: [String] = []
     var cursor: String?
     var dataGeneration = 0
     var confirmedMutationGeneration = 0

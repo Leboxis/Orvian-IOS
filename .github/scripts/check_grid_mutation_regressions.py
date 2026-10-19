@@ -34,6 +34,7 @@ def grid_source():
     var orderingNeedsReload = false
     var orderBy: [String] = []
     var order = "asc"
+    var mediaTypes: [String] = []
     var cursor: String?
     var hasMore = false
     var isLoadingMore = false

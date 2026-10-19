@@ -154,6 +154,34 @@ struct FileFilters: Equatable, Hashable, Codable {
     /// réapparaissent dès que l'option est désactivée).
     var filesOnly = false
 
+    /// Types kDrive (`types[]`) qui expriment le filtre média côté serveur.
+    ///
+    /// `nil` quand la sélection n'est pas exprimable : « Tout » ne filtre
+    /// rien, et « Autres » est une négation (tout sauf images, vidéos et
+    /// dossiers) que l'API ne sait pas représenter. Ces deux cas, ainsi que
+    /// `filesOnly`, restent donc filtrés localement.
+    ///
+    /// L'API n'accepte `types[]` que sur `/files/search` : c'est
+    /// `FileSource.supportsServerMediaTypes` qui décide si ces valeurs
+    /// peuvent réellement partir dans la requête.
+    var serverMediaTypes: [String]? {
+        switch media {
+        case .all: return nil
+        case .videos: return ["video"]
+        case .images: return ["image"]
+        case .folders: return ["dir"]
+        case .other: return nil
+        }
+    }
+
+    /// Vrai quand le serveur a déjà appliqué le filtre média de cette source.
+    /// Les deux conditions doivent tenir ensemble : l'endpoint accepte
+    /// `types[]`, et la sélection est exprimable.
+    nonisolated func serverHandlesMedia(_ source: FileSource?) -> Bool {
+        guard let source, source.supportsServerMediaTypes else { return false }
+        return serverMediaTypes != nil
+    }
+
     /// Tris exprimables par l'API kDrive (`order_by[]`) : les appliquer côté
     /// serveur garantit que la pagination entière respecte le tri, pas
     /// seulement les éléments déjà chargés. `nil` pour les tris restant
@@ -175,6 +203,19 @@ struct FileFilters: Equatable, Hashable, Codable {
     /// Vrai dès qu'un tri ou un filtre diffère du comportement par défaut.
     var isActive: Bool {
         sort != .original || orientation != nil || highResolutionVideosOnly || media != .all || filesOnly
+    }
+
+    /// Vrai quand un critère que le serveur sait appliquer a changé : le filtre
+    /// média (endpoint compatible et sélection exprimable) ou le tri. Un
+    /// changement de ces critères impose de repartir de la première page, car
+    /// les pages déjà chargées ne les respectent pas.
+    nonisolated func requiresServerReload(from old: FileFilters, source: FileSource?) -> Bool {
+        if old.sort != sort || old.direction != direction {
+            // Un tri purement local (durée) ne justifie aucune relecture.
+            if old.serverOrderBy != nil || serverOrderBy != nil { return true }
+        }
+        return old.serverHandlesMedia(source) != serverHandlesMedia(source)
+            || (serverHandlesMedia(source) && old.media != media)
     }
 
     /// Applique les filtres (média, orientation et définition vidéo, recherche)
@@ -205,6 +246,11 @@ struct FileFilters: Equatable, Hashable, Codable {
     ) -> [DriveFile] {
         var result = items
 
+        // Le filtre local reste appliqué même quand le serveur a reçu
+        // `types[]` : il est idempotent quand le serveur a bien filtré, et il
+        // évite d'afficher des résultats non filtrés si l'API ignorait le
+        // paramètre. La délégation au serveur sert à *obtenir* les bons
+        // éléments au fil de la pagination, pas à se dispenser de vérifier.
         switch media {
         case .all: break
         case .videos: result = result.filter(\.isVideo)

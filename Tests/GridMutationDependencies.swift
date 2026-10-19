@@ -24,6 +24,13 @@ enum FileSource: Equatable {
 struct FileFilters {
     var serverOrderBy: [String]? = nil
     var serverOrder: String = "asc"
+    var serverMediaTypes: [String]? = nil
+    /// Miroir de la production : le filtre média ne part au serveur que sur
+    /// les endpoints qui documentent `types[]`.
+    func serverHandlesMedia(_ source: FileSource?) -> Bool {
+        guard let source, source.supportsServerMediaTypes, serverMediaTypes != nil else { return false }
+        return true
+    }
 }
 enum TokenStore {
     static var value: String? = "account-a"
@@ -40,7 +47,7 @@ struct Page {
     var counts: [CheckedContinuation<Int, Error>] = []
     var writes: [CheckedContinuation<Void, Error>] = []
     var recentLoads = 0
-    var requestedPages: [(cursor: String?, orderBy: [String]?, order: String)] = []
+    var requestedPages: [(cursor: String?, orderBy: [String]?, order: String, types: [String])] = []
     func page() async throws -> Page {
         try await withCheckedThrowingContinuation { pages.append($0) }
     }
@@ -61,8 +68,8 @@ struct Page {
 enum FakeFailure: Error { case failed }
 @MainActor struct KDriveService {
     func page(_ source: FileSource, driveId: Int, cursor: String?, orderBy: [String]?,
-              order: String, forceNetwork: Bool = false) async throws -> Page {
-        CallbackServer.shared.requestedPages.append((cursor, orderBy, order))
+              order: String, forceNetwork: Bool = false, types: [String] = []) async throws -> Page {
+        CallbackServer.shared.requestedPages.append((cursor, orderBy, order, types))
         return try await CallbackServer.shared.page()
     }
     func directoryCount(driveId: Int, directoryId: Int) async throws -> Int {

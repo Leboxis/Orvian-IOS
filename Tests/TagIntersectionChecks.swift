@@ -35,6 +35,25 @@ import Foundation
         let categoriesOnly = Endpoint.intersectionFiles(driveId: 42, selection: selection, cursor: nil)
         assert(!categoriesOnly.query.contains { $0.name == "query" })
 
+        // Le filtre média part en `types[]`, dans la même requête que
+        // l'intersection : aucune route supplémentaire.
+        let typed = Endpoint.intersectionFiles(driveId: 42, selection: searched,
+                                               cursor: nil, types: ["video"])
+        assert(typed.query.filter { $0.name == "types[]" }.map(\.value) == ["video"])
+        assert(typed.query.first { $0.name == "category" }?.value == "1&3")
+        assert(typed.query.first { $0.name == "query" }?.value == "vacances été")
+        let untyped = Endpoint.intersectionFiles(driveId: 42, selection: searched, cursor: nil)
+        assert(!untyped.query.contains { $0.name == "types[]" },
+               "Sans type demandé, la requête reste identique à celle d'avant")
+
+        // Les deux types structurellement différents d'un filtre média ne
+        // doivent pas fusionner en une seule valeur.
+        let bothTypes = Endpoint.search(driveId: 42, query: "q", directoryId: nil,
+                                        cursor: nil, types: ["image", "video"])
+        assert(bothTypes.query.filter { $0.name == "types[]" }.map(\.value) == ["image", "video"])
+        assert(Endpoint.categoryFiles(driveId: 42, categoryId: 9, cursor: nil, types: ["dir"])
+            .query.filter { $0.name == "types[]" }.map(\.value) == ["dir"])
+
         var components = URLComponents(string: "https://api.infomaniak.com")!
         components.path = next.path
         components.queryItems = next.query

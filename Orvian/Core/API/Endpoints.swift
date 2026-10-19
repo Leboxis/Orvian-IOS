@@ -126,7 +126,13 @@ extension Endpoint {
 
     /// Fichiers d'une catégorie (recherche par catégorie, récursive).
     /// NB : le endpoint search n'accepte pas `order_by[]=name` — tri par pertinence.
-    static func categoryFiles(driveId: Int, categoryId: Int, cursor: String?, limit: Int = 60) -> Endpoint {
+    static func categoryFiles(
+        driveId: Int,
+        categoryId: Int,
+        cursor: String?,
+        limit: Int = 60,
+        types: [String] = []
+    ) -> Endpoint {
         Endpoint(
             path: "/3/drive/\(driveId)/files/search",
             query: [
@@ -134,19 +140,36 @@ extension Endpoint {
                 URLQueryItem(name: "limit", value: String(limit)),
                 URLQueryItem(name: "category", value: String(categoryId)),
                 URLQueryItem(name: "depth", value: "unlimited"),
-            ] + (cursor.map { [URLQueryItem(name: "cursor", value: $0)] } ?? [])
+            ] + Endpoint.array("types", types) + (cursor.map { [URLQueryItem(name: "cursor", value: $0)] } ?? [])
         )
     }
 
-    static func intersectionFiles(driveId: Int, selection: TagIntersection, cursor: String?) -> Endpoint {
-        var endpoint = search(driveId: driveId, query: selection.query, directoryId: nil, cursor: cursor)
+    static func intersectionFiles(
+        driveId: Int,
+        selection: TagIntersection,
+        cursor: String?,
+        types: [String] = []
+    ) -> Endpoint {
+        var endpoint = search(driveId: driveId, query: selection.query, directoryId: nil,
+                              cursor: cursor, types: types)
         // URLQueryItem encodes the AND operator inside the single category value.
         endpoint.query.append(URLQueryItem(name: "category", value: selection.categoryExpression))
         return endpoint
     }
 
     /// Recherche récursive de fichiers dans un dossier (ou tout le drive) et ses sous-dossiers.
-    static func search(driveId: Int, query: String, directoryId: Int?, cursor: String?, limit: Int = 60) -> Endpoint {
+    ///
+    /// `types` laisse le serveur restreindre la nature des résultats
+    /// (`image`, `video`, `dir`…). Sans valeur, la requête reste identique à
+    /// celle d'avant : aucun paramètre n'est ajouté.
+    static func search(
+        driveId: Int,
+        query: String,
+        directoryId: Int?,
+        cursor: String?,
+        limit: Int = 60,
+        types: [String] = []
+    ) -> Endpoint {
         var queryItems: [URLQueryItem] = [
             URLQueryItem(name: "with", value: "is_favorite,categories,path"),
             URLQueryItem(name: "limit", value: String(limit)),
@@ -156,6 +179,7 @@ extension Endpoint {
         if !trimmed.isEmpty {
             queryItems.append(URLQueryItem(name: "query", value: trimmed))
         }
+        queryItems.append(contentsOf: Endpoint.array("types", types))
         if let directoryId {
             queryItems.append(URLQueryItem(name: "directory_id", value: String(directoryId)))
         }

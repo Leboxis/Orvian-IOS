@@ -257,6 +257,12 @@ nombre de négociations TLS évitées ni gain de durée n'est garanti sans mesur
 - Vidéo iPhone : en portrait puis en paysage, l'image occupe toute la largeur et
   toute la hauteur disponibles, y compris en 16/9 et en portrait ; les barres
   flottantes ne lui retirent aucune place et se masquent au bout de 2,5 s.
+- Recherche et tags : choisir « Vidéos », « Images » ou « Dossiers » dans les
+  filtres. Sur la recherche et les tags, la liste doit se recharger depuis la
+  première page et ne montrer que ce type, y compris après un long défilement ;
+  revenir à « Tout » recharge à nouveau. Dans un dossier, les Favoris, les
+  récents et la corbeille, le même filtre reste local (aucune attente réseau)
+  et doit donner le même résultat visible.
 - Fenêtre iPad étroite : le titre reste dans la largeur de la fenêtre.
 - Ancienne installation : choix de préchargement conservé. Préférence absente :
   préchargement limité au Wi-Fi, lecture explicite toujours disponible en mobile.

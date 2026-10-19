@@ -92,6 +92,11 @@ final class FileGridViewModel {
     /// pagination continue dans le même ordre que la première page.
     private var orderBy: [String] = []
     private var order = "asc"
+    /// Types kDrive (`types[]`) déjà appliqués par le serveur pour la liste
+    /// courante. Conservés comme le tri : chaque page suivante doit demander
+    /// exactement le même filtre, sinon la pagination mélangerait deux
+    /// ensembles de résultats.
+    private var mediaTypes: [String] = []
     /// Empêche deux taps rapides de lancer des valeurs favorites opposées en
     /// parallèle pour le même fichier.
     private var favoriteMutationsInFlight: Set<Int> = []
@@ -246,7 +251,8 @@ final class FileGridViewModel {
                 source: source,
                 driveId: driveId,
                 orderBy: orderBy,
-                order: order
+                order: order,
+                types: mediaTypes
             )
         }
         // Une lecture disque n'empêche pas SwiftUI de rendre l'écran.
@@ -255,7 +261,8 @@ final class FileGridViewModel {
         let diskSnapshot: DirectoryListSnapshot?
         if memorySnapshot == nil {
             diskSnapshot = await DirectoryListStore.shared.diskSnapshot(
-                source: source, driveId: driveId, orderBy: orderBy, order: order
+                source: source, driveId: driveId, orderBy: orderBy, order: order,
+                types: mediaTypes
             )
         } else {
             diskSnapshot = nil
@@ -324,18 +331,24 @@ final class FileGridViewModel {
     func applySort(_ filters: FileFilters) {
         orderBy = (filters.serverOrderBy ?? []).filter { source.supportedServerOrdering.contains($0) }
         order = orderBy.isEmpty ? "asc" : filters.serverOrder
+        mediaTypes = filters.serverHandlesMedia(source) ? (filters.serverMediaTypes ?? []) : []
     }
 
-    /// Realigne le tri sur l'état du menu de filtres, en rechargeant seulement
-    /// si l'ordre serveur a réellement changé. La grille ne recharge que le
-    /// vue-modèle qu'elle affiche : un tri modifié pendant la recherche ne
-    /// parvenait donc jamais au vue-modèle du dossier, qui repartait de son
-    /// ancien ordre une fois la recherche effacée, alors que le menu affiche
-    /// encore le tri choisi.
+    /// Realigne le tri et le filtre média sur l'état du menu de filtres, en
+    /// rechargeant seulement si l'un des deux a réellement changé côté serveur.
+    /// La grille ne recharge que le vue-modèle qu'elle affiche : un tri modifié
+    /// pendant la recherche ne parvenait donc jamais au vue-modèle du dossier,
+    /// qui repartait de son ancien ordre une fois la recherche effacée, alors
+    /// que le menu affiche encore le tri choisi.
+    ///
+    /// Même raison pour le filtre média : « Vidéos » envoyé au serveur change
+    /// l'ensemble des résultats, pas seulement leur présentation. Continuer à
+    /// paginer l'ancien ensemble donnerait des pages incohérentes.
     func syncSort(with filters: FileFilters) async {
         let newOrder = (filters.serverOrderBy ?? []).filter { source.supportedServerOrdering.contains($0) }
         let newDirection = newOrder.isEmpty ? "asc" : filters.serverOrder
-        guard orderBy != newOrder || order != newDirection else { return }
+        let newTypes = filters.serverHandlesMedia(source) ? (filters.serverMediaTypes ?? []) : []
+        guard orderBy != newOrder || order != newDirection || mediaTypes != newTypes else { return }
         guard loadedOnce || isReloading || isInitialLoading else {
             // Rien à recharger : le prochargement partira du bon ordre.
             applySort(filters)
@@ -358,16 +371,20 @@ final class FileGridViewModel {
         if let sortedBy {
             // Un tri serveur (dates, type, poids) remplace l'ordre par défaut
             // ; les tris restants (durée, médias, orientation) sont locaux et
-            // n'exigent aucune relecture ordonnée.
+            // n'exigent aucune relecture ordonnée. Le filtre média, lui, est
+            // appliqué par le serveur sur les sources qui le permettent : il
+            // change l'ensemble de résultats et impose donc une première page.
             let newOrderBy = (sortedBy.serverOrderBy ?? []).filter { source.supportedServerOrdering.contains($0) }
             let newOrder = newOrderBy.isEmpty ? "asc" : sortedBy.serverOrder
-            if orderBy != newOrderBy || order != newOrder {
+            let newTypes = sortedBy.serverHandlesMedia(source) ? (sortedBy.serverMediaTypes ?? []) : []
+            if orderBy != newOrderBy || order != newOrder || mediaTypes != newTypes {
                 orderingNeedsReload = true
                 cursor = nil
                 hasMore = false
             }
             orderBy = newOrderBy
             order = newOrder
+            mediaTypes = newTypes
         }
         if source == RecentUploadsLoader.source, orderBy.isEmpty {
             // Sans champs de tri, le serveur ignore le sens ; garder la clé
@@ -421,7 +438,8 @@ final class FileGridViewModel {
                     cursor: nil,
                     orderBy: requestedOrderBy.isEmpty ? nil : requestedOrderBy,
                     order: requestedOrder,
-                    forceNetwork: forceNetwork
+                    forceNetwork: forceNetwork,
+                    types: mediaTypes
                 )
                 page = (response.data, response.cursor, response.hasMore, Date())
             }
@@ -499,6 +517,9 @@ final class FileGridViewModel {
         let requestedCursor = cursor
         let requestedOrderBy = orderBy
         let requestedOrder = order
+        // Filtre média figé avec le curseur : la page suivante doit décrire
+        // exactement le même ensemble que celui qui a produit ce curseur.
+        let requestedTypes = mediaTypes
         isLoadingMore = true
         // Une nouvelle demande est une tentative explicite : elle efface
         // l'erreur précédente afin que le pager et le bouton « Réessayer »
@@ -515,7 +536,8 @@ final class FileGridViewModel {
                 driveId: driveId,
                 cursor: requestedCursor,
                 orderBy: requestedOrderBy.isEmpty ? nil : requestedOrderBy,
-                order: requestedOrder
+                order: requestedOrder,
+                types: requestedTypes
             )
             guard !Task.isCancelled, dataGeneration == requestGeneration,
                   confirmedMutationGeneration == requestMutationGeneration,
@@ -612,7 +634,8 @@ final class FileGridViewModel {
             cursor: cursor,
             hasMore: hasMore,
             totalItemCount: totalItemCount,
-            fetchedAt: fetchedAt
+            fetchedAt: fetchedAt,
+            types: mediaTypes
         )
     }
 

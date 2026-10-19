@@ -241,6 +241,45 @@ import Foundation
             assertUnlocked(sorted)
         }
 
+        // Le filtre média part au serveur sur la recherche, il ne reste pas
+        // local : changer « Vidéos » doit invalider le curseur et demander
+        // `types[]=video` dès la première page.
+        let mediaFiltered = FileGridViewModel(.search("clip", nil))
+        mediaFiltered.items = [DriveFile(id: 1)]
+        mediaFiltered.loadedOnce = true
+        mediaFiltered.cursor = "media-next"
+        mediaFiltered.hasMore = true
+        let mediaReload = Task {
+            await mediaFiltered.reload(sortedBy: FileFilters(serverMediaTypes: ["video"]), refreshCount: false)
+        }
+        await until { !server.pages.isEmpty }
+        let mediaRequest = server.requestedPages.last!
+        precondition(mediaRequest.cursor == nil, "Un nouveau filtre média repart de la première page")
+        precondition(mediaRequest.types == ["video"], "Le type doit partir au serveur, obtenu \(mediaRequest.types)")
+        server.finishPage([DriveFile(id: 5)], cursor: "media-2", hasMore: true)
+        await mediaReload.value
+        let mediaMore = Task { await mediaFiltered.loadMoreIfNeeded() }
+        await until { !server.pages.isEmpty }
+        precondition(server.requestedPages.last!.cursor == "media-2")
+        precondition(server.requestedPages.last!.types == ["video"],
+                     "La page suivante doit conserver le même filtre serveur")
+        server.finishPage([DriveFile(id: 6)])
+        await mediaMore.value
+        precondition(mediaFiltered.items.map { $0.id } == [5, 6])
+
+        // Sur une source qui n'accepte pas `types[]`, le filtre reste local :
+        // aucun paramètre ne part, sinon le serveur l'ignorerait en silence et
+        // la grille croirait à tort qu'il a filtré.
+        let directoryMedia = seeded(.directory(1))
+        let directoryReload = Task {
+            await directoryMedia.reload(sortedBy: FileFilters(serverMediaTypes: ["video"]), refreshCount: false)
+        }
+        await until { !server.pages.isEmpty }
+        precondition(server.requestedPages.last!.types.isEmpty,
+                     "Un dossier ne documente pas types[] : rien ne doit partir")
+        server.finishPage([DriveFile(id: 7)])
+        await directoryReload.value
+
         // The canonical recent first page uses the shared loader, not a second
         // service request. Subsequent pages still use the returned cursor.
         let recent = FileGridViewModel(.recents)

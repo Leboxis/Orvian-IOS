@@ -76,13 +76,23 @@ L'app n'envoie que `query`, `directory_id`, `depth=unlimited` et, pour les tags,
 
 | Paramètre | Usage concret | Effort |
 |---|---|---|
-| `types[]` | `image`, `video`, `pdf`, `dir`, `spreadsheet`… filtre exact et paginé côté serveur, au lieu du filtrage local sur la page chargée | S |
+| `types[]` | `image`, `video`, `pdf`, `dir`, `spreadsheet`… filtre exact et paginé côté serveur, au lieu du filtrage local sur la page chargée | **fait** |
 | `extensions[]` | « seulement .heic et .jpg » | S |
 | `modified_at` | Préréglages : `today`, `yesterday`, `last_7_days`, `last_30_days`, `this_month`, `last_year`… | S |
 | `modified_after` / `modified_before` | Période personnalisée (`modified_at=custom` obligatoire) | S |
 | `author_id` | « fichiers de untel » | M |
 | `query_scope` | `filename` (nom seul) ou `content` (contenu) — ce dernier exige `can_use_content_search` | M |
 | `category` | Déjà utilisé ; accepte `(1&2)|3` jusqu'à 200 caractères | — |
+
+**Ce qui est implémenté.** Le filtre média du menu (Images, Vidéos, Dossiers)
+part désormais au serveur en `types[]` sur les seules sources servies par
+`/files/search` : recherche, croisement de tags et fichiers d'un tag. Les
+listes (dossier, favoris, récents, corbeille) ne documentent que `type`
+(`dir`/`file`) et gardent donc leur filtrage local. « Tout » et « Autres » ne
+sont pas exprimables (le second est une négation) et restent locaux, comme
+`filesOnly`. Un changement de filtre délégué invalide le curseur et relit la
+première page ; la pagination suivante conserve le même `types[]`, et le cache
+mémoire distingue les listes filtrées.
 
 **Limite à ne pas ignorer** : sur `/files/search`, `order_by` n'accepte que
 `last_modified_at` et `relevance`. Les tris nom/taille/type y restent locaux —

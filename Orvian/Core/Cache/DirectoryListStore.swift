@@ -41,12 +41,24 @@ final class DirectoryListStore {
 
     private init() {}
 
-    /// Clé de cache : drive + source + tri serveur courant. Un changement
-    /// de tri relit une autre clé ; le retour au tri par défaut retrouve
-    /// l'instantané d'origine. `nil` pour les sources non mémorisées.
-    static func cacheKey(source: FileSource, driveId: Int, orderBy: [String], order: String) -> String? {
+    /// Clé de cache : drive + source + tri serveur courant + filtre média
+    /// appliqué par le serveur. Un changement de tri ou de types relit une
+    /// autre clé ; le retour au tri par défaut retrouve l'instantané d'origine.
+    /// `nil` pour les sources non mémorisées.
+    static func cacheKey(
+        source: FileSource,
+        driveId: Int,
+        orderBy: [String],
+        order: String,
+        types: [String] = []
+    ) -> String? {
         guard let credential = TokenStore.credentialFingerprint() else { return nil }
-        let ordering = "\(orderBy.joined(separator: ","))|\(order)"
+        // Le filtre média n'a de sens que sur les endpoints qui l'acceptent :
+        // l'inclure ailleurs créerait deux clés pour une seule et même liste.
+        let media = source.supportsServerMediaTypes && !types.isEmpty
+            ? "|t:\(types.joined(separator: ","))"
+            : ""
+        let ordering = "\(orderBy.joined(separator: ","))|\(order)\(media)"
         switch source {
         case let .directory(directoryId):
             return "\(credential)|\(driveId)|dir|\(directoryId)|\(ordering)"
@@ -68,8 +80,15 @@ final class DirectoryListStore {
     }
 
     /// Instantané servi s'il existe et n'a pas dépassé le TTL.
-    func snapshot(source: FileSource, driveId: Int, orderBy: [String], order: String) -> DirectoryListSnapshot? {
-        guard let key = Self.cacheKey(source: source, driveId: driveId, orderBy: orderBy, order: order),
+    func snapshot(
+        source: FileSource,
+        driveId: Int,
+        orderBy: [String],
+        order: String,
+        types: [String] = []
+    ) -> DirectoryListSnapshot? {
+        guard let key = Self.cacheKey(source: source, driveId: driveId, orderBy: orderBy,
+                                      order: order, types: types),
               let snapshot = entries[key] else { return nil }
         guard let date = dates[key], Date().timeIntervalSince(date) < ttl else {
             entries.removeValue(forKey: key)
@@ -91,9 +110,11 @@ final class DirectoryListStore {
         cursor: String?,
         hasMore: Bool,
         totalItemCount: Int?,
-        fetchedAt: Date = Date()
+        fetchedAt: Date = Date(),
+        types: [String] = []
     ) {
-        guard let key = Self.cacheKey(source: source, driveId: driveId, orderBy: orderBy, order: order) else { return }
+        guard let key = Self.cacheKey(source: source, driveId: driveId, orderBy: orderBy,
+                                      order: order, types: types) else { return }
         entries[key] = DirectoryListSnapshot(
             items: items,
             cursor: cursor,
@@ -110,9 +131,16 @@ final class DirectoryListStore {
         }
     }
 
-    func diskSnapshot(source: FileSource, driveId: Int, orderBy: [String], order: String) async -> DirectoryListSnapshot? {
+    func diskSnapshot(
+        source: FileSource,
+        driveId: Int,
+        orderBy: [String],
+        order: String,
+        types: [String] = []
+    ) async -> DirectoryListSnapshot? {
         guard source.isPersistedList,
-              let key = Self.cacheKey(source: source, driveId: driveId, orderBy: orderBy, order: order)
+              let key = Self.cacheKey(source: source, driveId: driveId, orderBy: orderBy,
+                                      order: order, types: types)
         else { return nil }
         return await FavoritesDiskCache.shared.snapshot(key: key)
     }

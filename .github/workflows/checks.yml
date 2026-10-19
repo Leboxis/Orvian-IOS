@@ -71,6 +71,7 @@ jobs:
           python3 .github/scripts/check_file_details.py
           python3 -m unittest discover -s Tests -p 'test_protected_navigation.py'
           python3 -m unittest discover -s Tests -p 'test_interface_recovery.py'
+          python3 -m unittest discover -s Tests -p 'test_server_media_filter.py'
 
       - name: Check GIF decoding
         run: |

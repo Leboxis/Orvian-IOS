@@ -155,17 +155,16 @@ struct FileGridView: View {
             // et pas seulement les éléments déjà chargés. Un seul déclencheur
             // sur l'ensemble `filters` : changer le tri ET le sens en même
             // temps ne lance plus deux rechargements réseau.
+            //
+            // Le filtre média suit la même règle quand le serveur sait
+            // l'appliquer (`types[]` sur la recherche) : « Vidéos » change
+            // l'ensemble des résultats, pas seulement leur affichage. Sans ce
+            // rechargement, la grille continuerait à paginer l'ancien ensemble.
             .onChange(of: filters) { oldFilters, newFilters in
-                if oldFilters.sort != newFilters.sort || oldFilters.direction != newFilters.direction {
-                    let oldServerSort = oldFilters.serverOrderBy
-                    let newServerSort = newFilters.serverOrderBy
-                    guard oldServerSort != nil || newServerSort != nil else { return }
-                    guard oldServerSort != newServerSort
-                            || (newServerSort != nil && oldFilters.direction != newFilters.direction) else { return }
-                    sortReloadTask?.cancel()
-                    sortReloadTask = Task {
-                        await viewModel.syncSort(with: newFilters)
-                    }
+                guard newFilters.requiresServerReload(from: oldFilters, source: viewModel.source) else { return }
+                sortReloadTask?.cancel()
+                sortReloadTask = Task {
+                    await viewModel.syncSort(with: newFilters)
                 }
             }
             .onAppear {
