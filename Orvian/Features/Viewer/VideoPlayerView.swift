@@ -32,10 +32,9 @@ private final class PlaybackClock {
     var scrubValue: Double = 0
 }
 
-/// Lecteur vidéo personnalisé : les barres (titre + boutons en haut,
-/// transport en bas) sont hors de la zone de lecture de la vidéo.
-/// Haut : tag et favori à gauche — muet + fermer à droite.
-/// Bas : play/pause, progression agrandie, vitesse de lecture et AirPlay.
+/// Lecteur vidéo personnalisé. Sur iPhone, titre et transport réservent
+/// leur espace hors image ; masqués, ils libèrent toute la zone disponible.
+/// Le chrome iPad conserve sa disposition historique.
 struct VideoPlayerView: View {
     let file: DriveFile
     let driveId: Int
@@ -73,6 +72,7 @@ struct VideoPlayerView: View {
     /// position remontée par l'observateur périodique.
     private var isSeeking: Bool { transport.isSeeking }
     @State private var playbackRate: Float = 1
+    @State private var showPhoneSpeedPicker = false
 
     // Son
     @AppStorage("videoMuted") private var isMuted = false
@@ -162,47 +162,19 @@ struct VideoPlayerView: View {
         _appliedCategoryIds = State(initialValue: Set((file.categories ?? []).map(\.categoryId)))
     }
 
+    /// Le périmètre produit est l’iPhone, y compris en paysage ; un iPad
+    /// en fenêtre étroite conserve son lecteur existant.
+    private var isPhone: Bool { UIDevice.current.userInterfaceIdiom == .phone }
+
     var body: some View {
         ZStack {
             Color.black.ignoresSafeArea()
 
-            videoArea
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .contentShape(Rectangle())
-                .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { videoAreaWidth = $0 }
-                .overlay(alignment: .center) {
-                    skipFeedbackOverlay
-                }
-                // Détection manuelle du double-tap : le simple tap reste
-                // instantané (un `onTapGesture(count: 2)` en amont retarde
-                // chaque simple tap de la fenêtre de désambiguïsation).
-                .onTapGesture(count: 1, coordinateSpace: .local) { location in
-                    handleVideoTap(at: location)
-                }
-                .accessibilityAction(named: Text("Reculer de 10 secondes")) { skipTime(by: -10) }
-                .accessibilityAction(named: Text("Avancer de 10 secondes")) { skipTime(by: 10) }
-
-            hiddenControlGestureRegions
-
-            VStack(spacing: 0) {
-                topBar
-                    .contentShape(Rectangle())
-                    .simultaneousGesture(controlRegionGesture)
-                    .onGeometryChange(for: CGFloat.self) { $0.size.height } action: {
-                        topControlsHeight = $0
-                    }
-                Spacer()
-                bottomBar
-                    .contentShape(Rectangle())
-                    .simultaneousGesture(controlRegionGesture)
-                    .onGeometryChange(for: CGFloat.self) { $0.size.height } action: {
-                        bottomControlsHeight = $0
-                    }
+            if isPhone {
+                phonePlayer
+            } else {
+                tabletPlayer
             }
-            .opacity(showControls ? 1 : 0)
-            .allowsHitTesting(showControls)
-            .accessibilityHidden(!showControls)
-            .animation(Motion.animation(.easeInOut(duration: 0.25)), value: showControls)
         }
         .onAppear {
             isDisappeared = false
@@ -272,6 +244,18 @@ struct VideoPlayerView: View {
         }
         .onChange(of: isTouchingControls) { _, isTouching in
             onControlsInteractionChanged(isTouching)
+            if isPhone { scheduleControlsAutoHide() }
+        }
+        .onChange(of: transport.wantsPlayback) { _, wantsPlayback in
+            guard isPhone else { return }
+            if !wantsPlayback { showControls = true }
+            scheduleControlsAutoHide()
+        }
+        .onChange(of: isLoadingVideo) { _, _ in
+            if isPhone { scheduleControlsAutoHide() }
+        }
+        .onChange(of: isBuffering) { _, _ in
+            if isPhone { scheduleControlsAutoHide() }
         }
         // Les notifications audio sont globales : chaque page du pager y est
         // abonnée. Une page inactive n'a rien à mettre en pause (son lecteur
@@ -321,6 +305,186 @@ struct VideoPlayerView: View {
         }
     }
 
+    // MARK: - Lecteur iPhone : trois régions sans superposition
+
+    private var phonePlayer: some View {
+        VStack(spacing: 0) {
+            if showControls {
+                phoneTopBar
+                    .fixedSize(horizontal: false, vertical: true)
+                    .contentShape(Rectangle())
+                    .simultaneousGesture(controlRegionGesture)
+                    .transition(.opacity)
+            }
+
+            videoArea
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .clipped()
+                .contentShape(Rectangle())
+                .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { videoAreaWidth = $0 }
+                .onTapGesture(count: 1, coordinateSpace: .local) { location in
+                    handleVideoTap(at: location)
+                }
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel(Text("Vidéo : \(file.name)"))
+                .accessibilityAction(named: Text("Afficher les commandes")) {
+                    showControls = true
+                    scheduleControlsAutoHide()
+                }
+                .accessibilityAction(named: Text("Reculer de 10 secondes")) { skipTime(by: -10) }
+                .accessibilityAction(named: Text("Avancer de 10 secondes")) { skipTime(by: 10) }
+
+            if player == nil {
+                preparing
+                    .fixedSize(horizontal: false, vertical: true)
+                    .simultaneousGesture(controlRegionGesture)
+            } else if isBuffering {
+                ProgressView("Chargement…")
+                    .font(.footnote)
+                    .tint(.white)
+                    .foregroundStyle(.white)
+                    .padding(.vertical, 8)
+            }
+
+            if showControls {
+                phoneBottomBar
+                    .fixedSize(horizontal: false, vertical: true)
+                    .contentShape(Rectangle())
+                    .simultaneousGesture(controlRegionGesture)
+                    .transition(.opacity)
+            }
+        }
+        .buttonStyle(.plain)
+        .confirmationDialog("Vitesse de lecture", isPresented: $showPhoneSpeedPicker, titleVisibility: .visible) {
+            ForEach(SpeedOption.allCases) { option in
+                Button(option.title) { setPlaybackRate(option.rate) }
+            }
+            Button("Annuler", role: .cancel) { }
+        }
+        .onChange(of: showPhoneSpeedPicker) { _, _ in scheduleControlsAutoHide() }
+    }
+
+    private var phoneTopBar: some View {
+        HStack(spacing: 4) {
+            if let direction = skipFeedback {
+                Text(direction == .forward ? "+10 s" : "−10 s")
+                    .font(.body.weight(.medium))
+                    .foregroundStyle(.white)
+                    .frame(maxWidth: .infinity, minHeight: 44)
+                    .accessibilityHidden(true)
+            } else {
+                MediaTitlePill(name: file.name)
+            }
+            tagMenu
+            favoriteButton
+            closeButton
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 2)
+    }
+
+    private var phoneBottomBar: some View {
+        VStack(spacing: 0) {
+            if dynamicTypeSize.isAccessibilitySize {
+                timeControls
+                phoneTransportButtons
+            } else {
+                ViewThatFits(in: .horizontal) {
+                    HStack(spacing: 12) {
+                        timeControls.frame(minWidth: 160)
+                        phoneTransportButtons
+                    }
+                    VStack(spacing: 0) {
+                        timeControls
+                        phoneTransportButtons
+                    }
+                }
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.bottom, 4)
+    }
+
+    private var phoneTransportButtons: some View {
+        HStack(spacing: 4) {
+            muteButton
+            Spacer(minLength: 0)
+            phoneSkipButton(forward: false)
+            playButton
+            phoneSkipButton(forward: true)
+            Spacer(minLength: 0)
+            Button {
+                showPhoneSpeedPicker = true
+            } label: {
+                Text(currentSpeedTitle)
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(.white)
+                    .frame(width: 44, height: 44)
+                    .contentShape(Rectangle())
+            }
+            .accessibilityLabel("Vitesse de lecture")
+            .accessibilityValue(currentSpeedTitle)
+            AirPlayButton()
+                .frame(width: 44, height: 44)
+        }
+    }
+
+    private func phoneSkipButton(forward: Bool) -> some View {
+        Button {
+            skipTime(by: forward ? 10 : -10)
+        } label: {
+            Image(systemName: forward ? "goforward.10" : "gobackward.10")
+                .font(.system(size: 20, weight: .regular))
+                .foregroundStyle(.white)
+                .frame(width: 44, height: 44)
+                .contentShape(Rectangle())
+        }
+        .disabled(player == nil || !isActive)
+        .accessibilityLabel(forward ? "Avancer de 10 secondes" : "Reculer de 10 secondes")
+    }
+
+    private var tabletPlayer: some View {
+        ZStack {
+            videoArea
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .contentShape(Rectangle())
+                .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { videoAreaWidth = $0 }
+                .overlay(alignment: .center) {
+                    skipFeedbackOverlay
+                }
+                // Détection manuelle du double-tap : le simple tap reste
+                // instantané (un `onTapGesture(count: 2)` en amont retarde
+                // chaque simple tap de la fenêtre de désambiguïsation).
+                .onTapGesture(count: 1, coordinateSpace: .local) { location in
+                    handleVideoTap(at: location)
+                }
+                .accessibilityAction(named: Text("Reculer de 10 secondes")) { skipTime(by: -10) }
+                .accessibilityAction(named: Text("Avancer de 10 secondes")) { skipTime(by: 10) }
+
+            hiddenControlGestureRegions
+
+            VStack(spacing: 0) {
+                topBar
+                    .contentShape(Rectangle())
+                    .simultaneousGesture(controlRegionGesture)
+                    .onGeometryChange(for: CGFloat.self) { $0.size.height } action: {
+                        topControlsHeight = $0
+                    }
+                Spacer()
+                bottomBar
+                    .contentShape(Rectangle())
+                    .simultaneousGesture(controlRegionGesture)
+                    .onGeometryChange(for: CGFloat.self) { $0.size.height } action: {
+                        bottomControlsHeight = $0
+                    }
+            }
+            .opacity(showControls ? 1 : 0)
+            .allowsHitTesting(showControls)
+            .accessibilityHidden(!showControls)
+            .animation(Motion.animation(.easeInOut(duration: 0.25)), value: showControls)
+        }
+    }
+
     // MARK: - Gestion de l'affichage des contrôles
 
     /// Reconnaît le contact sur une barre avant que le pager atteigne son
@@ -357,12 +521,18 @@ struct VideoPlayerView: View {
             }
     }
 
+    private var phoneControlsMayAutoHide: Bool {
+        transport.wantsPlayback && player != nil && !isLoadingVideo
+            && !isBuffering && !hasFailedSetup && !isTouchingControls
+            && !showTagSheet && !showPhoneSpeedPicker
+    }
+
     private func scheduleControlsAutoHide(delay: Double = 2.5) {
         hideControlsTask?.cancel()
-        guard !voiceOverEnabled else { return }
+        guard !voiceOverEnabled, !isPhone || phoneControlsMayAutoHide else { return }
         hideControlsTask = Task {
             try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
-            guard !Task.isCancelled else { return }
+            guard !Task.isCancelled, !isPhone || phoneControlsMayAutoHide else { return }
             if !isScrubbing, !isSeeking {
                 withAnimation(Motion.animation(.easeInOut(duration: 0.25))) {
                     showControls = false
@@ -410,7 +580,7 @@ struct VideoPlayerView: View {
                 PlayerLayerView(player: player)
                 // Image figée pendant que le tampon se remplit : l'indicateur
                 // distingue cette attente d'une vraie pause.
-                if isBuffering {
+                if isBuffering, !isPhone {
                     ProgressView()
                         .tint(.white)
                         .scaleEffect(1.4)
@@ -431,7 +601,7 @@ struct VideoPlayerView: View {
                 }
                 .padding(24)
                 .background(.black.opacity(0.6), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
-            } else if player == nil {
+            } else if player == nil, !isPhone {
                 preparing
             }
         }
@@ -492,6 +662,7 @@ struct VideoPlayerView: View {
     private var timeControls: some View {
         TransportTimeView(
             clock: clock,
+            fullWidthTimeline: isPhone && dynamicTypeSize.isAccessibilitySize,
             isScrubbing: isScrubbing,
             isSeeking: isSeeking,
             timeFormatter: { timeText($0) },
@@ -569,9 +740,9 @@ struct VideoPlayerView: View {
         } label: {
             Image(systemName: transport.wantsPlayback ? "pause.fill" : "play.fill")
                 .font(.system(size: 17, weight: .semibold))
-                .foregroundStyle(.white)
+                .foregroundStyle(isPhone ? .black : .white)
                 .frame(width: 44, height: 44)
-                .background(.white.opacity(0.12), in: Circle())
+                .background(.white.opacity(isPhone ? 1 : 0.12), in: Circle())
         }
         .disabled(player == nil || !isActive)
         .accessibilityLabel(transport.wantsPlayback ? "Pause" : "Lecture")
@@ -1311,6 +1482,7 @@ struct VideoPlayerView: View {
 /// compteurs et la glissière se rafraîchissent.
 private struct TransportTimeView: View {
     let clock: PlaybackClock
+    let fullWidthTimeline: Bool
     let isScrubbing: Bool
     let isSeeking: Bool
     let timeFormatter: (Double) -> String
@@ -1326,34 +1498,55 @@ private struct TransportTimeView: View {
     }
 
     var body: some View {
-        HStack(spacing: 8) {
-            Text(timeFormatter(displayedTime))
-                .font(.caption.monospacedDigit().weight(.medium))
-                .foregroundStyle(.white.opacity(0.85))
-                .scaleEffect(isScrubbing ? 1.18 : 1, anchor: .trailing)
-                .contentTransition(.numericText())
-                .animation(Motion.animation(.snappy(duration: 0.2)), value: Int(displayedTime))
-                .frame(minWidth: 34, alignment: .trailing)
-
-            ScrubberBar(
-                position: displayedTime,
-                duration: clock.duration,
-                bufferedEnd: clock.bufferedEnd,
-                isScrubbing: isScrubbing,
-                timeFormatter: timeFormatter,
-                onDragStarted: onDragStarted,
-                onDragChanged: onDragChanged,
-                onDragEnded: onDragEnded,
-                onDragCancelled: onDragCancelled
-            )
-
-            Text(timeFormatter(clock.duration))
-                .font(.caption.monospacedDigit().weight(.medium))
-                .foregroundStyle(.white.opacity(0.85))
-                .scaleEffect(isScrubbing ? 1.18 : 1, anchor: .leading)
-                .contentTransition(.numericText())
-                .animation(Motion.animation(.snappy(duration: 0.2)), value: Int(clock.duration))
-                .frame(minWidth: 34, alignment: .leading)
+        if fullWidthTimeline {
+            VStack(spacing: 0) {
+                HStack {
+                    currentTimeLabel
+                    Spacer(minLength: 8)
+                    durationLabel
+                }
+                scrubber
+            }
+        } else {
+            HStack(spacing: 8) {
+                currentTimeLabel
+                scrubber
+                durationLabel
+            }
         }
+    }
+
+    private var currentTimeLabel: some View {
+        Text(timeFormatter(displayedTime))
+            .font(.caption.monospacedDigit().weight(.medium))
+            .foregroundStyle(.white.opacity(0.85))
+            .scaleEffect(isScrubbing ? 1.18 : 1, anchor: .trailing)
+            .contentTransition(.numericText())
+            .animation(Motion.animation(.snappy(duration: 0.2)), value: Int(displayedTime))
+            .frame(minWidth: 34, alignment: .trailing)
+    }
+
+    private var scrubber: some View {
+        ScrubberBar(
+            position: displayedTime,
+            duration: clock.duration,
+            bufferedEnd: clock.bufferedEnd,
+            isScrubbing: isScrubbing,
+            timeFormatter: timeFormatter,
+            onDragStarted: onDragStarted,
+            onDragChanged: onDragChanged,
+            onDragEnded: onDragEnded,
+            onDragCancelled: onDragCancelled
+        )
+    }
+
+    private var durationLabel: some View {
+        Text(timeFormatter(clock.duration))
+            .font(.caption.monospacedDigit().weight(.medium))
+            .foregroundStyle(.white.opacity(0.85))
+            .scaleEffect(isScrubbing ? 1.18 : 1, anchor: .leading)
+            .contentTransition(.numericText())
+            .animation(Motion.animation(.snappy(duration: 0.2)), value: Int(clock.duration))
+            .frame(minWidth: 34, alignment: .leading)
     }
 }

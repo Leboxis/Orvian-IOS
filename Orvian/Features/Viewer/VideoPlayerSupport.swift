@@ -65,7 +65,12 @@ struct PlayerLayerView: UIViewRepresentable {
         return view
     }
 
-    func updateUIView(_ uiView: PlayerLayerUIView, context: Context) {}
+    func updateUIView(_ uiView: PlayerLayerUIView, context: Context) {
+        // Une récupération peut remplacer AVPlayer sans recréer la vue UIKit.
+        if (uiView.layer as? AVPlayerLayer)?.player !== player {
+            uiView.configure(player: player)
+        }
+    }
 
     final class PlayerLayerUIView: UIView {
         override class var layerClass: AnyClass { AVPlayerLayer.self }

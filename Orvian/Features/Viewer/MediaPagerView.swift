@@ -78,12 +78,47 @@ struct MediaPagerView: View {
     private var selectionIndex: Int? { indexByFileID[selectedFileID] }
 
     var body: some View {
+        VStack(spacing: 0) {
+            pagerContent
+            if usesPhoneVideoRetryRegion, let errorMessage = context.viewModel?.errorMessage {
+                paginationRetryButton(errorMessage: errorMessage)
+                    .padding(.vertical, 12)
+                    .frame(maxWidth: .infinity)
+                    .background(.black)
+            }
+        }
+        .statusBarHidden(false)
+        .persistentSystemOverlays(.hidden)
+        .task(id: context.viewModel?.itemsRevision) {
+            // `onChange` ne s'exécute pas à l'ouverture. Sans ce chargement,
+            // ouvrir directement le dernier média rendait le swipe suivant
+            // impossible alors que le serveur possédait encore des pages.
+            refreshFiles()
+            await loadMoreMediaIfNeeded(around: selectedFileID)
+        }
+        .onChange(of: selectedFileID) { _, newID in
+            dismissOffset = 0
+            controlInteractionFileIDs.removeAll()
+            guard let index = settled.firstIndex(where: { $0.id == newID }) else { return }
+            // Proche de la fin de la liste : demande la page suivante à la
+            // vue-modèle de la grille, qui reprend là où elle s'était arrêtée.
+            if index >= settled.count - 2 {
+                Task { await loadMoreMediaIfNeeded(around: newID) }
+            }
+        }
+    }
+
+    private var usesPhoneVideoRetryRegion: Bool {
+        UIDevice.current.userInterfaceIdiom == .phone && currentFile?.isVideo == true
+    }
+
+    private var pagerContent: some View {
         // Calculé une fois par rendu : évaluée dans le `ForEach`, cette
         // propriété relançait un balayage complet de la liste **par page** —
         // soit O(n²) à chaque frame du geste de fermeture, qui réévalue ce
         // corps à chaque déplacement du doigt.
         let preloadIDs = hiresPreloadIDs
-        ZStack {
+        return ZStack {
             Color.black.ignoresSafeArea()
 
             // Les pages vivent dans une sous-vue `Equatable` : le déplacement
@@ -149,25 +184,6 @@ struct MediaPagerView: View {
             }
 
             overlay
-        }
-        .statusBarHidden(false)
-        .persistentSystemOverlays(.hidden)
-        .task(id: context.viewModel?.itemsRevision) {
-            // `onChange` ne s'exécute pas à l'ouverture. Sans ce chargement,
-            // ouvrir directement le dernier média rendait le swipe suivant
-            // impossible alors que le serveur possédait encore des pages.
-            refreshFiles()
-            await loadMoreMediaIfNeeded(around: selectedFileID)
-        }
-        .onChange(of: selectedFileID) { _, newID in
-            dismissOffset = 0
-            controlInteractionFileIDs.removeAll()
-            guard let index = settled.firstIndex(where: { $0.id == newID }) else { return }
-            // Proche de la fin de la liste : demande la page suivante à la
-            // vue-modèle de la grille, qui reprend là où elle s'était arrêtée.
-            if index >= settled.count - 2 {
-                Task { await loadMoreMediaIfNeeded(around: newID) }
-            }
         }
     }
 
@@ -376,19 +392,9 @@ struct MediaPagerView: View {
             }
             Spacer()
 
-            if let errorMessage = context.viewModel?.errorMessage {
-                Button {
-                    Task { await loadMoreMediaIfNeeded(around: selectedFileID) }
-                } label: {
-                    Label("Réessayer le chargement", systemImage: "arrow.clockwise")
-                        .font(.footnote.weight(.semibold))
-                        .foregroundStyle(.white)
-                        .padding(.horizontal, 14)
-                        .padding(.vertical, 10)
-                        .background(.ultraThinMaterial, in: Capsule())
-                }
-                .accessibilityHint(Text(errorMessage))
-                .padding(.bottom, currentFile?.isVideo == true ? 64 : 24)
+            if !usesPhoneVideoRetryRegion, let errorMessage = context.viewModel?.errorMessage {
+                paginationRetryButton(errorMessage: errorMessage)
+                    .padding(.bottom, currentFile?.isVideo == true ? 64 : 24)
             }
         }
         .sheet(item: $tagSheetFile) { sheetFile in
@@ -420,6 +426,20 @@ struct MediaPagerView: View {
         } message: {
             Text(favoriteErrorMessage ?? "")
         }
+    }
+
+    private func paginationRetryButton(errorMessage: String) -> some View {
+        Button {
+            Task { await loadMoreMediaIfNeeded(around: selectedFileID) }
+        } label: {
+            Label("Réessayer le chargement", systemImage: "arrow.clockwise")
+                .font(.footnote.weight(.semibold))
+                .foregroundStyle(.white)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 10)
+                .background(.ultraThinMaterial, in: Capsule())
+        }
+        .accessibilityHint(Text(errorMessage))
     }
 
     // MARK: - Barre du haut (images)
