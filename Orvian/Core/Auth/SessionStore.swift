@@ -39,8 +39,6 @@ final class SessionStore {
         self.service = service
     }
 
-    var isSignedIn: Bool { phase == .signedIn && selectedDrive != nil }
-
     // MARK: - Cycle de vie
 
     /// Au lancement : si un token existe, retrouve compte + drive sélectionné.

@@ -44,7 +44,6 @@ struct DirectoryView: View {
 
     @State private var selectionMode = false
     @State private var selectedIDs: Set<Int> = []
-    @AppStorage("foldersFirstInTags") private var foldersFirstInTags = true
     @State private var pendingMove: MoveRequest?
     @State private var pendingTags: TagRequest?
     @State private var moveBusy = false

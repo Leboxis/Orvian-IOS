@@ -44,8 +44,6 @@ enum DS {
 
     /// Coins arrondis des cartes de fichiers.
     static let cardRadius: CGFloat = 18
-    /// Coins arrondis de la barre d'onglets flottante.
-    static let tabBarRadius: CGFloat = 28
     /// Coins arrondis des panneaux pleine largeur (cartes de Réglages).
     static let panelRadius: CGFloat = 22
     /// Coins arrondis des surfaces compactes (vignettes, lignes, liserés).

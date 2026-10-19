@@ -151,10 +151,6 @@ struct TrashView: View {
         return "\(selectedIDs.count) sélectionné\(selectedIDs.count > 1 ? "s" : "")"
     }
 
-    private func startSelection() {
-        selectionMode = true
-    }
-
     private func endSelection() {
         selectionMode = false
         selectedIDs.removeAll()

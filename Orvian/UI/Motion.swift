@@ -18,8 +18,6 @@ enum Motion {
     /// animée est préférable à un état figé définitif.
     nonisolated(unsafe) private static var reduceMotion = false
 
-    static var animationsEnabled: Bool { !reduceMotion }
-
     static func publish(reduceMotion: Bool) {
         Motion.reduceMotion = reduceMotion
     }
