@@ -127,8 +127,9 @@ struct FileGridView: View {
     var body: some View {
         scrollContent
             .background {
+                // Translucent cards need the same underlay beneath the phone's native toolbar.
                 Color(uiColor: .systemGroupedBackground)
-                    .ignoresSafeArea(.container, edges: iPadLayout.isPad ? [] : .bottom)
+                    .ignoresSafeArea(.container, edges: iPadLayout.isPad ? [] : [.top, .bottom])
             }
             .task(id: viewModel.source) {
                 await viewModel.loadIfNeeded()
