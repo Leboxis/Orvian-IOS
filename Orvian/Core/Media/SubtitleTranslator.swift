@@ -10,8 +10,8 @@ import Translation
 ///
 /// Contrainte documentée : `installedSource:target:` exige que les deux langues
 /// soient **déjà installées** sur l'appareil, sinon chaque traduction rejette.
-/// `prepare()` interroge donc `LanguageAvailability` avant de créer la session et
-/// refuse d'emblée si le modèle manque, au lieu d'échouer à chaque phrase.
+/// `translate()` interroge donc `LanguageAvailability` avant de créer la session
+/// et refuse d'emblée si le modèle manque, au lieu d'échouer à chaque phrase.
 actor SubtitleTranslator {
     private var session: TranslationSession?
     private var failures = 0
@@ -39,14 +39,16 @@ actor SubtitleTranslator {
                 target: Locale.Language(identifier: "fr")
             )
         }
-        guard let session else { throw SubtitleTranslationError.unavailable }
+        guard let activeSession = session else { throw SubtitleTranslationError.unavailable }
         do {
-            let response = try await session.translate(text)
+            let response = try await activeSession.translate(text)
             failures = 0
             return response.targetText
-        } catch SubtitleTranslationError {
-            session = nil
-            throw SubtitleTranslationError.notInstalled
+        } catch let translationError as SubtitleTranslationError {
+            // Le modèle a disparu entre-temps : repartir d'une session neuve à la
+            // prochaine phrase, avec un diagnostic exact.
+            self.session = nil
+            throw translationError
         } catch {
             failures += 1
             // Une session devenue inutilisable (modèle supprimé, compte changé)
