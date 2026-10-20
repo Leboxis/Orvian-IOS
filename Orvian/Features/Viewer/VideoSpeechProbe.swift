@@ -23,6 +23,8 @@ final class VideoSpeechProbe {
     private(set) var buffers = 0
     private(set) var audioSeconds = 0.0
     private(set) var analyzedBuffers = 0
+    private(set) var speechResults = 0
+    private(set) var speechTextResults = 0
     private(set) var audioDiagnostic = ""
     private(set) var playbackDiagnostic = ""
     private(set) var mediaLag: Double?
@@ -49,6 +51,8 @@ final class VideoSpeechProbe {
         buffers = 0
         audioSeconds = 0
         analyzedBuffers = 0
+        speechResults = 0
+        speechTextResults = 0
         audioDiagnostic = ""
         playbackDiagnostic = describePlayback(player, wantsPlayback: wantsPlayback())
         wantsPlaybackValue = wantsPlayback()
@@ -198,16 +202,21 @@ final class VideoSpeechProbe {
             audioSeconds = seconds
             audioDiagnostic = diagnostic
             if transcript.isEmpty { status = "Audio reçu (\(received) blocs) ; en attente de reconnaissance…" }
-        case let .text(text, final, mediaEnd):
-            transcript = text
+        case let .text(text, final, mediaEnd, results, withText):
+            speechResults = results
+            speechTextResults = withText
+            if !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { transcript = text }
             if let mediaEnd, let player {
                 let lag = player.currentTime().seconds - mediaEnd
                 mediaLag = lag.isFinite ? lag : nil
             } else {
                 mediaLag = nil
             }
-            status = final ? "Résultat définitif reçu — à vérifier sur la vidéo."
-                : "Résultat provisoire reçu — à vérifier sur la vidéo."
+            // « analysés » progresse sans texte : le problème est en aval de la conversion.
+            status = withText > 0
+                ? (final ? "Résultat définitif reçu — à vérifier sur la vidéo."
+                         : "Résultat provisoire reçu — à vérifier sur la vidéo.")
+                : "Speech produit des résultats sans texte (\(results)) ; audio peut-être vide ou non vocal."
         }
     }
 
@@ -267,7 +276,7 @@ struct VideoSpeechProbePanel: View {
         DisclosureGroup("Test audio IA (développement)", isExpanded: $expanded) {
             VStack(alignment: .leading, spacing: 8) {
                 Text(probe.status)
-                Text("Audio reçu : \(probe.buffers) blocs · \(probe.audioSeconds, specifier: "%.1f") s · analysés \(probe.analyzedBuffers)")
+                Text("Audio reçu : \(probe.buffers) blocs · \(probe.audioSeconds, specifier: "%.1f") s · analysés \(probe.analyzedBuffers) · résultats \(probe.speechResults) (\(probe.speechTextResults) avec texte)")
                     .monospacedDigit()
                 if !probe.audioDiagnostic.isEmpty {
                     Text(probe.audioDiagnostic).font(.caption2).foregroundStyle(.white.opacity(0.75))

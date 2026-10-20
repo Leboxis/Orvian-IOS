@@ -32,7 +32,7 @@ enum SpeechProbeError: Error, LocalizedError {
 
 enum SpeechProbeEvent: Sendable {
     case audio(received: Int, seconds: Double, analyzed: Int, diagnostic: String)
-    case text(String, isFinal: Bool, mediaEnd: Double?)
+    case text(String, isFinal: Bool, mediaEnd: Double?, results: Int, withText: Int)
 }
 
 /// Possède le convertisseur hors MainActor ; aucun buffer publié n'est recyclé.
@@ -45,6 +45,8 @@ actor SpeechProbeWorker {
     private var buffers = 0
     private var receivedBuffers = 0
     private var sourceSeconds = 0.0
+    private var resultCount = 0
+    private var textCount = 0
     private var isFinished = false
 
     init(transcriber: SpeechTranscriber, format: AVAudioFormat) {
@@ -106,16 +108,22 @@ actor SpeechProbeWorker {
 
     private func finish() async throws {
         try Task.checkCancellation()
-        isFinished = true
+        // Marquer terminé seulement après la finalisation : si elle échoue,
+        // `cancel()` doit encore pouvoir clore l'analyseur au lieu de le laisser ouvert.
         try await analyzer.finalizeAndFinishThroughEndOfInput()
+        isFinished = true
     }
 
     private func readResults(report: @escaping @Sendable (SpeechProbeEvent) async -> Void) async throws {
         for try await result in transcriber.results {
             try Task.checkCancellation()
+            resultCount += 1
+            let text = String(result.text.characters.suffix(500))
+            if !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { textCount += 1 }
             let mediaEnd = timeline.hasCompleteTiming ? timeline.origin.map { $0 + result.range.end.seconds } : nil
             // Transcrire même sans horodatage source ; ne pas prétendre être synchronisé dans ce cas.
-            await report(.text(String(result.text.characters.suffix(500)), isFinal: result.isFinal, mediaEnd: mediaEnd))
+            await report(.text(text, isFinal: result.isFinal, mediaEnd: mediaEnd,
+                               results: resultCount, withText: textCount))
         }
     }
 
@@ -192,6 +200,24 @@ actor SpeechProbeWorker {
         await report(.audio(received: receivedBuffers, seconds: sourceSeconds, analyzed: buffers, diagnostic: details))
     }
 
+    /// La politique de la file est `.bufferingOldest` : un yield peut être
+    /// refusé pendant que Speech rattrape son retard. Réessayer brièvement
+    /// évite d'arrêter tout le test sur un simple pic de charge.
+    private func yieldWithBackpressure(_ input: AnalyzerInput,
+                                       to continuation: AsyncStream<AnalyzerInput>.Continuation) async throws {
+        let deadline = ContinuousClock.now.advanced(by: .seconds(2))
+        while true {
+            switch continuation.yield(input) {
+            case .enqueued: return
+            case .dropped:
+                if ContinuousClock.now >= deadline { throw SpeechProbeError.backpressure }
+                try await Task.sleep(for: .milliseconds(10))
+            case .terminated: throw CancellationError()
+            @unknown default: throw SpeechProbeError.analysis
+            }
+        }
+    }
+
     private func makePCM(packet: SpeechProbePacket, bytes: UnsafeMutableRawPointer) throws -> AVAudioPCMBuffer {
         var description = packet.format
         guard let format = AVAudioFormat(streamDescription: &description),
@@ -247,12 +273,10 @@ actor SpeechProbeWorker {
                 let firstFrame = timeline.advance(frames: Int64(output.frameLength))
                 let time = CMTime(value: firstFrame, timescale: CMTimeScale(target.sampleRate))
                 // L'ownership du PCM sortant est transféré ; aucune réécriture après yield.
-                switch continuation.yield(AnalyzerInput(buffer: output, bufferStartTime: time)) {
-                case .enqueued: break
-                case .dropped: throw SpeechProbeError.backpressure
-                case .terminated: throw CancellationError()
-                @unknown default: throw SpeechProbeError.analysis
-                }
+                try await yieldWithBackpressure(
+                    AnalyzerInput(buffer: output, bufferStartTime: time),
+                    to: continuation
+                )
             }
             if status == .inputRanDry || status == .endOfStream { return }
             guard output.frameLength > 0 else { throw SpeechProbeError.format }

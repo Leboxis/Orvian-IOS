@@ -40,6 +40,25 @@ Premier essai sur appareil avec l’IPA de diagnostic `41047dc6` : après « Tes
 
 Ces changements restent un diagnostic : ils ne prouvent pas encore que la source kDrive fournit le PCM attendu. Le prochain essai doit indiquer si **audio reçu** augmente, même si l’analyse échoue ensuite.
 
+### Deuxième essai (IPA `7b7d5453`) : ce qui a été durci avant livraison
+
+Le premier rapport prouvait déjà l’extraction PCM kDrive (`frames=4096`, `44100 Hz`, position 17,15 s, lecture à 1×) et un bloc analysé. L’absence de texte venait de l’arrêt du test, pas du tap. Trois causes d’arrêt prématuré ont été supprimées :
+
+- **État `.inactive` transitoire** (notification, centre de contrôle) : seul l’arrière-plan arrête désormais le test.
+- **File Speech trop courte** (8 buffers, ~0,7 s) : elle débordait pendant le démarrage du modèle. Elle accepte maintenant 64 buffers (~12 s).
+- **Rejet `.dropped` traité comme fatal** : un pic de charge arrêtait tout. Le yield réessaie maintenant jusqu’à 2 s, puis échoue explicitement.
+
+Le panneau distingue désormais quatre niveaux : **audio reçu**, **analysés**, **résultats Speech** et **résultats avec texte**. Cette séparation est ce qui rend le prochain essai décisif :
+
+| Observation | Interprétation |
+|---|---|
+| `analysés` augmente, `résultats` reste 0 | Speech ne produit rien : format d’entrée ou session en cause. |
+| `résultats` augmente, `avec texte` reste 0 | Speech tourne mais n’entend pas de parole exploitable. |
+| `avec texte` augmente, pas de texte affiché | Défaut d’affichage, pas de transcription. |
+
+Un défaut de finalisation a aussi été corrigé : `isFinished` était marqué avant la finalisation de l’analyseur, ce qui pouvait laisser une session ouverte si la finalisation échouait.
+
+
 ## 1. Ouvrir le prototype sur l’appareil
 
 ### Sans Mac : IPA « Orvian Test IA » pour LiveContainer

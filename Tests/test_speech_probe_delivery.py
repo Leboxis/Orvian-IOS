@@ -89,6 +89,22 @@ class SpeechProbeDeliveryTests(unittest.TestCase):
         stop = probe.split("func stop(reason", 1)[1].split("private func describePlayback", 1)[0]
         self.assertNotIn('transcript = ""', stop, "Keep the last recognized text for diagnosis")
 
+    def test_speech_backpressure_waits_instead_of_ending_the_test(self):
+        worker = (ROOT / "Orvian/Core/Media/SpeechProbeWorker.swift").read_text(encoding="utf-8")
+        self.assertIn("yieldWithBackpressure", worker)
+        self.assertNotIn("case .dropped: throw SpeechProbeError.backpressure", worker,
+                         "A full queue must be retried, not treated as a fatal error")
+        self.assertIn("if ContinuousClock.now >= deadline { throw SpeechProbeError.backpressure }", worker)
+
+    def test_speech_results_are_counted_even_without_text(self):
+        worker = (ROOT / "Orvian/Core/Media/SpeechProbeWorker.swift").read_text(encoding="utf-8")
+        self.assertIn("resultCount += 1", worker)
+        self.assertIn("textCount += 1", worker)
+        probe = (ROOT / "Orvian/Features/Viewer/VideoSpeechProbe.swift").read_text(encoding="utf-8")
+        self.assertIn("speechResults", probe)
+        self.assertIn("speechTextResults", probe)
+        self.assertIn("résultats \\(probe.speechResults)", probe)
+
     def test_speech_input_queue_survives_model_startup(self):
         worker = (ROOT / "Orvian/Core/Media/SpeechProbeWorker.swift").read_text(encoding="utf-8")
         self.assertIn(".bufferingOldest(64)", worker,
