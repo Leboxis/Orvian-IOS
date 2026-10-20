@@ -146,7 +146,7 @@ actor SpeechProbeWorker {
                 if mailbox.isClosed {
                     // Le tap a livré tout ce qu'il pouvait : clore proprement la
                     // session Speech pour laisser sortir les derniers résultats.
-                    try convert(nil, ending: true, continuation: continuation)
+                    try await convert(nil, ending: true, continuation: continuation)
                     return
                 }
                 try await Task.sleep(for: .milliseconds(20))
@@ -173,7 +173,7 @@ actor SpeechProbeWorker {
                 let acceptance = timeline.accept(start: packet.timeRange.start.seconds, duration: duration)
                 guard let acceptance else { throw SpeechProbeError.format }
                 let pcm = try makePCM(packet: packet, bytes: scratch)
-                try convert(pcm, ending: false, continuation: continuation)
+                try await convert(pcm, ending: false, continuation: continuation)
                 buffers += 1
                 if acceptance == .restart {
                     await reportAudio(packet: packet, report: report)
@@ -185,7 +185,7 @@ actor SpeechProbeWorker {
                 lastReport = .now
             }
             if packet.endsStream {
-                try convert(nil, ending: true, continuation: continuation)
+                try await convert(nil, ending: true, continuation: continuation)
                 return
             }
         }
@@ -240,7 +240,7 @@ actor SpeechProbeWorker {
     }
 
     private func convert(_ input: AVAudioPCMBuffer?, ending: Bool,
-                         continuation: AsyncStream<AnalyzerInput>.Continuation) throws {
+                         continuation: AsyncStream<AnalyzerInput>.Continuation) async throws {
         if let input {
             if let converter {
                 guard converter.inputFormat == input.format else { throw SpeechProbeError.formatChange }
