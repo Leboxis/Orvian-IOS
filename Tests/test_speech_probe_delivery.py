@@ -89,6 +89,12 @@ class SpeechProbeDeliveryTests(unittest.TestCase):
         stop = probe.split("func stop(reason", 1)[1].split("private func describePlayback", 1)[0]
         self.assertNotIn('transcript = ""', stop, "Keep the last recognized text for diagnosis")
 
+    def test_speech_input_queue_survives_model_startup(self):
+        worker = (ROOT / "Orvian/Core/Media/SpeechProbeWorker.swift").read_text(encoding="utf-8")
+        self.assertIn(".bufferingOldest(64)", worker,
+                      "Eight buffers ended the test before the model produced anything")
+        self.assertNotIn(".bufferingOldest(8)", worker)
+
     def test_tap_stream_restart_does_not_discard_remaining_audio(self):
         worker = (ROOT / "Orvian/Core/Media/SpeechProbeWorker.swift").read_text(encoding="utf-8")
         self.assertNotIn("throw SpeechProbeError.streamRestart", worker)

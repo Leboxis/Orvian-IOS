@@ -66,7 +66,12 @@ actor SpeechProbeWorker {
 
     func run(mailbox: SpeechProbeMailbox<SpeechProbePacket>,
              report: @escaping @Sendable (SpeechProbeEvent) async -> Void) async throws {
-        let (stream, continuation) = AsyncStream.makeStream(of: AnalyzerInput.self, bufferingPolicy: .bufferingOldest(8))
+        // 64 buffers ≈ 12 s d'audio : absorbe le démarrage du modèle sans
+        // déborder. Une file plus courte arrêtait le test dès la première seconde.
+        let (stream, continuation) = AsyncStream.makeStream(
+            of: AnalyzerInput.self,
+            bufferingPolicy: .bufferingOldest(64)
+        )
         do {
             try Task.checkCancellation()
             try await analyzer.start(inputSequence: stream)
