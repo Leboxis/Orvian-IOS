@@ -39,6 +39,9 @@ struct SubtitleModeMenu: View {
 /// chrome) doivent continuer de fonctionner à travers le texte.
 struct SubtitleOverlay: View {
     let cue: SubtitleCue?
+    /// Raison d'un échec de traduction, affichée sous le sous-titre anglais.
+    var translationError: String?
+    var isPreparing: Bool = false
     let bottomInset: CGFloat
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
@@ -46,20 +49,34 @@ struct SubtitleOverlay: View {
         VStack {
             Spacer(minLength: 0)
             if let cue {
-                Text(cue.text)
-                    .font(.system(size: dynamicTypeSize.isAccessibilitySize ? 20 : 17, weight: .semibold))
-                    .foregroundStyle(.white)
-                    .multilineTextAlignment(.center)
-                    .lineLimit(3)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 8)
-                    .background(.black.opacity(0.72), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-                    .padding(.horizontal, 16)
-                    .padding(.bottom, bottomInset)
-                    .transition(.opacity)
-                    .accessibilityLabel(cue.isTranslated ? "Sous-titre traduit" : "Sous-titre anglais")
-                    .accessibilityValue(cue.text)
+                VStack(spacing: 4) {
+                    Text(cue.text)
+                        .font(.system(size: dynamicTypeSize.isAccessibilitySize ? 20 : 17, weight: .semibold))
+                        .foregroundStyle(.white)
+                        .multilineTextAlignment(.center)
+                        .lineLimit(3)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 8)
+                        .background(.black.opacity(0.72), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                        .padding(.horizontal, 16)
+                        .transition(.opacity)
+                        .accessibilityLabel(cue.isTranslated ? "Sous-titre traduit" : "Sous-titre anglais")
+                        .accessibilityValue(cue.text)
+                    if isPreparing {
+                        Text("Préparation de la traduction…")
+                            .font(.caption2.weight(.medium))
+                            .foregroundStyle(.white.opacity(0.75))
+                            .transition(.opacity)
+                    } else if let translationError {
+                        Text(translationError)
+                            .font(.caption2.weight(.medium))
+                            .foregroundStyle(.white.opacity(0.75))
+                            .multilineTextAlignment(.center)
+                            .transition(.opacity)
+                    }
+                }
+                .padding(.bottom, bottomInset)
             }
         }
         .allowsHitTesting(false)

@@ -180,6 +180,8 @@ struct VideoPlayerView: View {
             }
             SubtitleOverlay(
                 cue: speechProbe.displayedCue,
+                translationError: speechProbe.translationError,
+                isPreparing: speechProbe.isPreparingTranslation,
                 bottomInset: showControls ? bottomControlsHeight + 12 : 28
             )
             #if DEBUG

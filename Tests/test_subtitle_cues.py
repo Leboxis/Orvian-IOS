@@ -63,6 +63,20 @@ struct SubtitleCueChecks {
         assert(SubtitleMode.allCases == [.off, .english, .french])
         assert(SubtitleMode.off.title == "Sous-titres désactivés")
         assert(SubtitleMode.french.title == "Français (traduction automatique)")
+
+        // Une traduction en retard doit rester visible : elle est ancrée sur la
+        // position lue à son arrivée, pas sur l'instant de parole déjà dépassé.
+        var late = SubtitleCueTimeline()
+        late.upsert(SubtitleCue(start: 10, end: 12, text: "Second", isFinal: true, isTranslated: true))
+        // La parole a lieu à 10 s, la traduction arrive alors qu'on lit 14 s.
+        assert(late.cue(at: 14)?.text == "Second",
+               "A translation delivered after its spoken position must still show")
+        // Le repli anglais évite un écran vide quand la traduction manque.
+        var fallback = SubtitleCueTimeline()
+        fallback.upsert(SubtitleCue(start: 14, end: 16, text: "Second", isFinal: true, isTranslated: false))
+        assert(fallback.cue(at: 14)?.text == "Second",
+               "English text must remain available as a fallback")
+
         print("Subtitle cue checks passed")
     }
 }

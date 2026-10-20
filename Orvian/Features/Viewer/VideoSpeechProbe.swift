@@ -216,6 +216,10 @@ final class VideoSpeechProbe {
         monitorTask = nil
         translationTask?.cancel()
         translationTask = nil
+        // Une session de traduction arrêtée ne doit pas être réutilisée au
+        // redémarrage : elle pourrait rejeter en boucle. Reproduction fraîche.
+        let translator = self.translator
+        Task { await translator.reset() }
         restartTask?.cancel()
         restartTask = nil
         if resetsAttempts { restartAttempts = 0 }
@@ -238,6 +242,9 @@ final class VideoSpeechProbe {
         // Les reprises automatiques (seek/scrub/1×) continuent de l'accumuler.
         restartAttempts = 0
         translationError = nil
+        // Une session de traduction arrêtée avec un mode mort ne doit pas être
+        // réutilisée telle quelle quand on revient au français.
+        if newMode != .french { translationTask?.cancel(); translationTask = nil }
         if newMode == .off {
             translationConfiguration = nil
             stopTest()
@@ -257,18 +264,18 @@ final class VideoSpeechProbe {
         if !isRunning { start() }
     }
 
-    /// Prépare les modèles de traduction puis bascule sur la session directe.
+    /// Prépare les modèles de traduction (téléchargement nécessite le
+    /// consentement système, obtenu par `.translationTask`).
     func prepareTranslation(using session: TranslationSession) async {
         isPreparingTranslation = true
         defer { isPreparingTranslation = false }
         do {
             try await session.prepareTranslation()
             translationError = nil
-            await translator.prepare()
         } catch is CancellationError {
             return
         } catch {
-            translationError = SubtitleTranslationError.failed.localizedDescription
+            translationError = SubtitleTranslationError.notInstalled.localizedDescription
         }
     }
 
@@ -355,7 +362,9 @@ final class VideoSpeechProbe {
         let time = player.currentTime().seconds
         let newEnglish = englishCues.cue(at: time)
         if newEnglish != englishCue { englishCue = newEnglish }
-        let newFrench = mode == .french ? cues.cue(at: time) : nil
+        // En français, si aucune traduction n'est disponible, on retombe sur
+        // l'anglais : une traduction en retard ne doit pas laisser l'écran vide.
+        let newFrench = mode == .french ? (cues.cue(at: time) ?? newEnglish) : nil
         if newFrench != frenchCue { frenchCue = newFrench }
         scheduleRestartIfIdle(player: player)
     }
@@ -396,11 +405,16 @@ final class VideoSpeechProbe {
         translationTask = Task { [weak self] in
             guard let self else { return }
             do {
-                await translator.prepare()
                 let translated = try await translator.translate(cue.text)
                 guard !Task.isCancelled else { return }
                 translationError = nil
-                let french = SubtitleCue(start: cue.start, end: cue.end, text: translated,
+                // La traduction arrive plusieurs secondes après la parole : si on
+                // gardait le `start` d'origine, le cue serait déjà « trop vieux »
+                // (`maximumAge`) au premier rafraîchissement et ne s'afficherait
+                // jamais. On l'ancre sur la position lue au moment où il devient
+                // visible, visible jusqu'à ce que la phrase suivante le remplace.
+                let now = activePlayer?.currentTime().seconds ?? cue.start
+                let french = SubtitleCue(start: now, end: max(now, cue.end), text: translated,
                                          isFinal: cue.isFinal, isTranslated: true)
                 cues.upsert(french)
                 if let player = activePlayer { refresh(player: player) }
