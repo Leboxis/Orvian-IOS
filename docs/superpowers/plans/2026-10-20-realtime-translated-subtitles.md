@@ -136,6 +136,16 @@ L’audio et le texte de cette chaîne restent sur l’appareil ; le télécharg
 - [x] Exécuter les contrôles de transport existants, les tests Python de non-régression, dont le test de navigation protégée, et les nouveaux tests iOS ciblés.
 - [x] Activation de la fonctionnalité sur les seules sources/appareils validés ; toute source incompatible garde la lecture standard.
 
+### Défauts corrigés après retours sur l'IPA de la branche diagnostics
+
+Trois causes empêchaient les sous-titres français d'apparaître alors que l'anglais fonctionnait :
+
+1. **Le cue traduit gardait l'instant de parole.** La traduction arrivant plusieurs secondes après la parole, `refresh` le jugeait aussitôt plus vieux que `maximumAge` et ne l'affichait jamais. Il est désormais ancré sur la position lue au moment de son arrivée. Test verrouillé dans `Tests/test_subtitle_cues.py`.
+2. **Aucun contrôle d'installation.** `TranslationSession(installedSource:target:)` exige les deux langues déjà installées et rejette sinon chaque appel ; `LanguageAvailability` n'était interrogé nulle part. La disponibilité est maintenant vérifiée avant création de session, et le message distingue « modèle absent » d'un simple échec.
+3. **Aucun repli ni diagnostic.** Le mode français ne retombait pas sur l'anglais et n'affichait ni la préparation ni l'erreur — écran vide sans explication. L'overlay montre ces états et retombe sur l'anglais.
+
+Deux autres défauts de production ont été corrigés au passage : les arrêts de capture (seek, scrub, vitesse, arrière-plan, fermeture du lecteur) n'existaient que sous `#if DEBUG`, donc inactifs dans l'IPA Release ; et le compteur anti-boucle de relance était remis à zéro par chaque arrêt technique, ce qui annulait le plafond de sécurité.
+
 **Limites de la présente étude :** environnement Windows, aucun build Xcode, aucun test sur appareil/simulateur, aucune URL kDrive authentifiée consultée. Aucun test visuel ni capture via GitHub Actions. Les preuves de performance et d’accès au PCM restent à produire sur Mac + appareil réel.
 
 ## 9. Sources officielles structurantes
