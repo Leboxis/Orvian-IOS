@@ -6,24 +6,31 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class SpeechProbeDeliveryTests(unittest.TestCase):
-    def test_probe_can_compile_without_enabling_all_debug_features(self):
+    def test_subtitle_engine_ships_in_release(self):
+        """Le prototype est devenu une fonctionnalité : plus de garde de compilation."""
         for relative in [
             "Orvian/Core/Media/PlayerSpeechAudioTap.swift",
             "Orvian/Core/Media/SpeechProbeMailbox.swift",
             "Orvian/Core/Media/SpeechProbeWorker.swift",
             "Orvian/Features/Viewer/VideoSpeechProbe.swift",
+            "Orvian/Core/Media/SubtitleCue.swift",
+            "Orvian/Core/Media/SubtitleTranslator.swift",
+            "Orvian/UI/SubtitleOverlay.swift",
         ]:
             with self.subTest(path=relative):
                 source = (ROOT / relative).read_text(encoding="utf-8")
-                self.assertTrue(source.startswith("#if DEBUG || ORVIAN_SPEECH_PROBE\n"))
+                self.assertFalse(source.lstrip().startswith("#if"),
+                                 "A shipped subtitle source must not be compiled out")
         player = (ROOT / "Orvian/Features/Viewer/VideoPlayerView.swift").read_text(encoding="utf-8")
-        self.assertEqual(player.count("#if DEBUG"), player.count("#if DEBUG || ORVIAN_SPEECH_PROBE"))
-        self.assertIn("VideoSpeechProbe.isExposed, isActive", player)
+        self.assertIn("SubtitleOverlay(", player)
+        self.assertIn("SubtitleModeMenu(", player)
 
-    def test_diagnostic_ipa_exposes_panel_without_launch_arguments(self):
+    def test_diagnostic_panel_stays_out_of_the_product_ui(self):
+        player = (ROOT / "Orvian/Features/Viewer/VideoPlayerView.swift").read_text(encoding="utf-8")
+        panel = player.split("VideoSpeechProbePanel(", 1)[0].rsplit("#if", 1)[-1]
+        self.assertIn("DEBUG", panel, "The diagnostic panel is a development tool only")
         source = (ROOT / "Orvian/Features/Viewer/VideoSpeechProbe.swift").read_text(encoding="utf-8")
         exposure = source.split("static var isExposed: Bool {", 1)[1].split("private(set)", 1)[0]
-        self.assertIn("#if ORVIAN_SPEECH_PROBE\n        return true\n        #else", exposure)
         self.assertIn('environment["ORVIAN_SPEECH_PROBE"]', exposure)
         self.assertIn('arguments.contains("-OrvianSpeechProbe")', exposure)
 

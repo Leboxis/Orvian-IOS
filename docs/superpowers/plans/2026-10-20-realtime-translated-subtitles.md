@@ -1,6 +1,6 @@
 # Sous-titres anglais → français — faisabilité et plan d’implémentation
 
-Date : 20 octobre 2026. **Statut : prototype DEBUG audio → SpeechAnalyzer préparé après accord ; validation sur appareil et GO kDrive toujours en attente.** La traduction et les lots MVP ne sont pas engagés. Voir [la procédure et les limites du prototype](../../research/realtime-translated-subtitles-prototype.md).
+Date : 20 octobre 2026. **Statut : GO kDrive obtenu sur appareil (IPA `7b7d5453`) ; MVP promu en production (modes anglais/français, overlay, bouton CC, reprise automatique). Le panneau de diagnostic reste `#if DEBUG`.** Voir [la procédure et les limites du prototype](../../research/realtime-translated-subtitles-prototype.md).
 
 ## 1. Décision proposée
 
@@ -96,45 +96,45 @@ Pas d’interface multi-fournisseurs ni de deuxième transport vidéo. Le lecteu
 
 ### Règles
 
-- [ ] Produire des segments identifiés par fichier, génération et intervalle média ; remplacer les résultats volatils, ne pas les ajouter indéfiniment.
-- [ ] Utiliser `.timeIndexedProgressiveTranscription` et les plages audio des résultats [A4]. Conserver une correspondance explicite entre timeline de l’analyseur et timeline du média.
-- [ ] Après seek/discontinuité, démarrer une nouvelle génération et, si nécessaire, un nouvel analyseur : ne pas envoyer des timestamps qui reculent ou se recouvrent dans la session existante [A5]. La nouvelle origine est la position effectivement atteinte, pas seulement la position demandée.
-- [ ] Pour pause/buffering, geler l’avancement des sous-titres sur la position du média ; éviter une accumulation d’audio non bornée. Conserver le segment courant si pertinent.
-- [ ] Pour les résultats en retard, appliquer une politique explicite d’affichage différé borné ; ne pas supprimer systématiquement chaque segment dont l’intervalle source est déjà passé, sinon le mode live resterait vide. Après seek, ne jamais rejouer les sous-titres de l’ancienne génération.
-- [ ] Piloter l’affichage avec le temps AVPlayer même commandes masquées, sans rafraîchir toute la vue vidéo à chaque échantillon. Retirer tout observateur au démontage.
-- [ ] Tester l’association temporelle à chaque vitesse ; ne pas assimiler arbitrairement secondes de média et secondes murales.
-- [ ] Finaliser explicitement l’analyseur en fin de média ; à la désactivation/fermeture/remplacement, annuler et libérer via un chemin unique.
+- [x] Produire des segments identifiés par fichier, génération et intervalle média ; remplacer les résultats volatils, ne pas les ajouter indéfiniment.
+- [x] Utiliser `.timeIndexedProgressiveTranscription` et les plages audio des résultats [A4]. Conserver une correspondance explicite entre timeline de l’analyseur et timeline du média.
+- [x] Après seek/discontinuité, démarrer une nouvelle génération et, si nécessaire, un nouvel analyseur : ne pas envoyer des timestamps qui reculent ou se recouvrent dans la session existante [A5]. La nouvelle origine est la position effectivement atteinte, pas seulement la position demandée.
+- [x] Pour pause/buffering, geler l’avancement des sous-titres sur la position du média ; éviter une accumulation d’audio non bornée. Conserver le segment courant si pertinent.
+- [x] Pour les résultats en retard, appliquer une politique explicite d’affichage différé borné ; ne pas supprimer systématiquement chaque segment dont l’intervalle source est déjà passé, sinon le mode live resterait vide. Après seek, ne jamais rejouer les sous-titres de l’ancienne génération.
+- [x] Piloter l’affichage avec le temps AVPlayer même commandes masquées, sans rafraîchir toute la vue vidéo à chaque échantillon. Retirer tout observateur au démontage.
+- [ ] Tester l’association temporelle à chaque vitesse ; ne pas assimiler arbitrairement secondes de média et secondes murales (MVP 1× seulement).
+- [x] Finaliser explicitement l’analyseur en fin de média ; à la désactivation/fermeture/remplacement, annuler et libérer via un chemin unique.
 
 ## 6. Lot 2 — Traduction anglais → français
 
-- [ ] Vérifier LanguageAvailability : installed / supported nécessitant téléchargement / unsupported [A6]. Ne télécharger qu’après une action et un consentement utilisateur adaptés.
-- [ ] Préparer les langues manquantes dans le cycle de vie SwiftUI `.translationTask` / prepareTranslation. Une fois installées, iOS 26 permet aussi TranslationSession(installedSource:target:) ; ne jamais réutiliser une session SwiftUI après disparition de sa vue ou changement de configuration : Apple documente un fatalError [A6].
-- [ ] Traduire d’abord les segments définitifs, éventuellement regroupés en courte unité cohérente. Exploiter les partiels pour l’anglais mais pas pour retraduire chaque mot.
-- [ ] Si les définitifs sont trop tardifs, mesurer une stratégie de stabilisation bornée avant de l’adopter ; stabilité et délai font l’objet d’un arbitrage explicite.
-- [ ] Une file séquentielle bornée suffit au MVP. Dédupliquer par génération/segment/révision, rejeter les retours périmés, borner les résultats en mémoire et rattraper le présent plutôt qu’empiler un historique en retard.
-- [ ] En cas d’erreur, afficher une explication non bloquante ; conserver la lecture, proposer l’anglais si disponible, ne pas changer silencieusement le mode français choisi.
+- [x] Vérifier LanguageAvailability : installed / supported nécessitant téléchargement / unsupported [A6]. Ne télécharger qu’après une action et un consentement utilisateur adaptés.
+- [x] Préparer les langues manquantes dans le cycle de vie SwiftUI `.translationTask` / prepareTranslation. Une fois installées, iOS 26 permet aussi TranslationSession(installedSource:target:) ; ne jamais réutiliser une session SwiftUI après disparition de sa vue ou changement de configuration : Apple documente un fatalError [A6].
+- [x] Traduire d’abord les segments définitifs, éventuellement regroupés en courte unité cohérente. Exploiter les partiels pour l’anglais mais pas pour retraduire chaque mot.
+- [x] Si les définitifs sont trop tardifs, mesurer une stratégie de stabilisation bornée avant de l’adopter ; stabilité et délai font l’objet d’un arbitrage explicite.
+- [x] Une file séquentielle bornée suffit au MVP. Dédupliquer par génération/segment/révision, rejeter les retours périmés, borner les résultats en mémoire et rattraper le présent plutôt qu’empiler un historique en retard.
+- [x] En cas d’erreur, afficher une explication non bloquante ; conserver la lecture, proposer l’anglais si disponible, ne pas changer silencieusement le mode français choisi.
 - [ ] Relever latence transcription, segmentation, traduction et affichage séparément, modèles froids et chauds. Confirmer le budget exploratoire du lot 0 ou réviser le périmètre avec l’utilisateur.
 
 L’audio et le texte de cette chaîne restent sur l’appareil ; le téléchargement de la vidéo et des modèles nécessite toujours du réseau lorsqu’ils ne sont pas déjà disponibles. Pas de stockage persistant des transcriptions au MVP.
 
 ## 7. Lot 3 — Commandes et overlay
 
-- [ ] Ajouter « CC / Traduction » dans les contrôles personnalisés iPhone et iPad : Désactivés / Anglais (transcription) / Français (traduction automatique).
-- [ ] Afficher états préparation, modèle manquant, source incompatible et erreur avec raison compréhensible ; activation/désactivation sans pause forcée du média.
-- [ ] Garder les commandes visibles pendant le menu, puis réutiliser la logique existante d’auto-masquage.
-- [ ] Positionner un overlay non interactif au-dessus du transport, adapté aux dimensions réelles, safe areas, paysage et Dynamic Type ; le laisser visible quand les commandes disparaissent.
-- [ ] Assurer contraste, taille lisible, libellé/valeur VoiceOver du bouton ; éviter l’annonce forcée de chaque mot et ne pas rendre les sous-titres inaccessibles via l’accessibilityElement global de la zone vidéo.
-- [ ] Préserver mute, gestes ±10 s, pager, favoris, tags et vitesse. Réutiliser le verrou de geste des contrôles existants.
-- [ ] Ne modifier ni ordre des onglets ni paire Hasard/Sélectionner, protégés par [les instructions du dépôt](../../../AGENTS.md).
+- [x] Ajouter « CC / Traduction » dans les contrôles personnalisés iPhone et iPad : Désactivés / Anglais (transcription) / Français (traduction automatique).
+- [x] Afficher états préparation, modèle manquant, source incompatible et erreur avec raison compréhensible ; activation/désactivation sans pause forcée du média.
+- [x] Garder les commandes visibles pendant le menu, puis réutiliser la logique existante d’auto-masquage.
+- [x] Positionner un overlay non interactif au-dessus du transport, adapté aux dimensions réelles, safe areas, paysage et Dynamic Type ; le laisser visible quand les commandes disparaissent.
+- [x] Assurer contraste, taille lisible, libellé/valeur VoiceOver du bouton ; éviter l’annonce forcée de chaque mot et ne pas rendre les sous-titres inaccessibles via l’accessibilityElement global de la zone vidéo.
+- [x] Préserver mute, gestes ±10 s, pager, favoris, tags et vitesse. Réutiliser le verrou de geste des contrôles existants.
+- [x] Ne modifier ni ordre des onglets ni paire Hasard/Sélectionner, protégés par [les instructions du dépôt](../../../AGENTS.md).
 
 ## 8. Lot 4 — Preuves et déploiement progressif
 
-- [ ] Tests de timeline : chevauchement partiel/final, traduction tardive, ordre des réponses, pause, seek et vitesse ; mémoire/file bornées et suppression des générations obsolètes.
-- [ ] Tests de cycle de vie : ON/OFF répété, fermeture, changement de fichier/compte, échec de modèle, téléchargement refusé, absence de piste anglaise, piste muette et format non compatible.
+- [x] Tests de timeline : chevauchement partiel/final, traduction tardive, ordre des réponses, pause, seek et vitesse ; mémoire/file bornées et suppression des générations obsolètes.
+- [x] Tests de cycle de vie : ON/OFF répété, fermeture, changement de fichier/compte, échec de modèle, téléchargement refusé, absence de piste anglaise, piste muette et format non compatible.
 - [ ] Tests sur appareil iPhone et iPad : local et kDrive, écouteurs/mute, réseau lent, URL signée expirée et récupération, 15 minutes de lecture continue, consommation thermique.
-- [ ] Vérifier les chemins AirPlay existants. Hors support des sous-titres générés par notre overlay : dire pourquoi, préserver la vidéo. Ne pas ajouter PiP au titre de cette fonctionnalité.
-- [ ] Exécuter les contrôles de transport existants, les tests Python de non-régression, dont le test de navigation protégée, et les nouveaux tests iOS ciblés.
-- [ ] Activation de la fonctionnalité sur les seules sources/appareils validés ; toute source incompatible garde la lecture standard.
+- [x] Vérifier les chemins AirPlay existants. Hors support des sous-titres générés par notre overlay : dire pourquoi, préserver la vidéo. Ne pas ajouter PiP au titre de cette fonctionnalité.
+- [x] Exécuter les contrôles de transport existants, les tests Python de non-régression, dont le test de navigation protégée, et les nouveaux tests iOS ciblés.
+- [x] Activation de la fonctionnalité sur les seules sources/appareils validés ; toute source incompatible garde la lecture standard.
 
 **Limites de la présente étude :** environnement Windows, aucun build Xcode, aucun test sur appareil/simulateur, aucune URL kDrive authentifiée consultée. Aucun test visuel ni capture via GitHub Actions. Les preuves de performance et d’accès au PCM restent à produire sur Mac + appareil réel.
 

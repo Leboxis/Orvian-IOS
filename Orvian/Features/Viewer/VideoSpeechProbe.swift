@@ -1,24 +1,20 @@
-#if DEBUG || ORVIAN_SPEECH_PROBE
 import AVFoundation
 import Observation
 import Speech
 import SwiftUI
+import Translation
 
 @MainActor
 @Observable
 final class VideoSpeechProbe {
     static var isExposed: Bool {
-        #if ORVIAN_SPEECH_PROBE
-        return true
-        #else
-        return ProcessInfo.processInfo.environment["ORVIAN_SPEECH_PROBE"] == "1"
+        ProcessInfo.processInfo.environment["ORVIAN_SPEECH_PROBE"] == "1"
             || ProcessInfo.processInfo.arguments.contains("-OrvianSpeechProbe")
-        #endif
     }
 
     private(set) var isRunning = false
     private(set) var needsDownload = false
-    private(set) var status = "Prototype anglais uniquement, à 1×. Aucune validation kDrive acquise."
+    private(set) var status = "Sous-titres automatiques anglais → français."
     private(set) var transcript = ""
     private(set) var buffers = 0
     private(set) var audioSeconds = 0.0
@@ -28,6 +24,34 @@ final class VideoSpeechProbe {
     private(set) var audioDiagnostic = ""
     private(set) var playbackDiagnostic = ""
     private(set) var mediaLag: Double?
+    /// Mode demandé par le bouton CC du lecteur.
+    var mode: SubtitleMode = .off
+    /// Cue anglais à afficher (mode anglais).
+    private(set) var englishCue: SubtitleCue?
+    /// Cue français à afficher (mode français).
+    private(set) var frenchCue: SubtitleCue?
+    private(set) var translationError: String?
+    /// Configuration à passer à `.translationTask` : seule une session fournie
+    /// par cette vue peut demander le téléchargement du modèle français.
+    private(set) var translationConfiguration: TranslationSession.Configuration?
+    private(set) var isPreparingTranslation = false
+    /// Dernier cue à afficher, quel que soit le mode.
+    var displayedCue: SubtitleCue? {
+        switch mode {
+        case .off: nil
+        case .english: englishCue
+        case .french: frenchCue
+        }
+    }
+    @ObservationIgnored private var cues = SubtitleCueTimeline()
+    @ObservationIgnored private var englishCues = SubtitleCueTimeline()
+    @ObservationIgnored private var translator = SubtitleTranslator()
+    @ObservationIgnored private var translationTask: Task<Void, Never>?
+    @ObservationIgnored private var restartTask: Task<Void, Never>?
+    /// Tentatives de relance après une erreur transitoire ; plafonnée pour
+    /// éviter une boucle si la source reste incompatible.
+    @ObservationIgnored private var restartAttempts = 0
+    private let maxRestartAttempts = 3
     @ObservationIgnored private var generation = 0
     @ObservationIgnored private var task: Task<Void, Never>?
     @ObservationIgnored private var monitorTask: Task<Void, Never>?
@@ -76,7 +100,8 @@ final class VideoSpeechProbe {
             do {
                 guard let item = player.currentItem, !player.isExternalPlaybackActive,
                       player.defaultRate == 1, player.rate == 0 || player.rate == 1 else {
-                    status = "Test local uniquement : revenir à 1× et quitter AirPlay."
+                    status = "Sous-titres disponibles à 1×, hors AirPlay."
+                    mode = .off
                     return
                 }
                 let asset = item.asset
@@ -130,25 +155,44 @@ final class VideoSpeechProbe {
                     try await Task.sleep(for: .milliseconds(250))
                     if wasWanted, wantsPlayback() { restoreAfterTapChange?() }
                     playbackDiagnostic = describePlayback(player, wantsPlayback: wasWanted)
-                    status = "Tap installé ; en attente de PCM et de paroles anglaises…"
+                    status = "Tap installé ; en attente de paroles anglaises…"
                     startMonitor(player: player, item: item, credential: credential, token: token)
                     try await worker.run(mailbox: audioTap.mailbox) { [weak self, weak player] event in
                         await self?.receive(event, player: player, token: token, credential: credential)
                     }
                     if token == generation {
-                        status = buffers > 0 ? "Fin de l’audio. Vérifier le texte et les mesures avant décision GO."
-                            : "Fin sans PCM : extraction non prouvée."
+                        status = buffers > 0
+                            ? "Fin de l’audio : sous-titres arrêtés."
+                            : "Aucun audio exploitable : sous-titres indisponibles."
                     }
                 } catch {
                     await worker.cancel()
                     throw error
                 }
             } catch is CancellationError {
-                if token == generation { transcript = ""; status = "Test interrompu." }
+                if token == generation { transcript = ""; status = "Sous-titres arrêtés." }
             } catch {
                 if token == generation {
                     transcript = ""
-                    status = (error as? SpeechProbeError)?.errorDescription ?? SpeechProbeError.analysis.localizedDescription
+                    let reason = (error as? SpeechProbeError)?.errorDescription
+                        ?? SpeechProbeError.analysis.localizedDescription
+                    // Incompatibilité de source : la vidéo reste lisible mais sans
+                    // sous-titres. On coupe le mode pour ne pas boucler sur une
+                    // erreur non récupérable.
+                    let fatal: Bool
+                    if case let probe as SpeechProbeError = error {
+                        fatal = probe.isFatalForSubtitles
+                    } else {
+                        fatal = true
+                    }
+                    if fatal {
+                        status = reason
+                        mode = .off
+                    } else {
+                        // Discontinuité transitoire : `refresh` relancera la
+                        // capture (plafonnée) sans couper les sous-titres.
+                        status = reason + " Reconnexion…"
+                    }
                 }
             }
         }
@@ -163,11 +207,62 @@ final class VideoSpeechProbe {
         task?.cancel()
         monitorTask?.cancel()
         monitorTask = nil
+        translationTask?.cancel()
+        translationTask = nil
+        restartTask?.cancel()
+        restartTask = nil
+        restartAttempts = 0
         isRunning = false
+        englishCue = nil
+        frenchCue = nil
+        englishCues.clear()
+        cues.clear()
         // Conserver le dernier texte reconnu : il documente ce que Speech a
         // réellement produit, même si le test s'arrête avant la fin du flux.
         mediaLag = nil
         status = reason
+    }
+
+    /// Change de mode depuis le bouton CC. Revenir à `off` libère le tap.
+    func setMode(_ newMode: SubtitleMode, player: AVPlayer?, start: () -> Void, stopTest: () -> Void) {
+        guard newMode != mode else { return }
+        mode = newMode
+        // Choix utilisateur explicite : repartir avec un compteur de relances neuf.
+        // Les reprises automatiques (seek/scrub/1×) continuent de l'accumuler.
+        restartAttempts = 0
+        translationError = nil
+        if newMode == .off {
+            translationConfiguration = nil
+            stopTest()
+            return
+        }
+        if newMode == .french {
+            // Demande la préparation des langues ; `.translationTask` la réalise
+            // avec l'interface système et le consentement de téléchargement.
+            translationConfiguration = .init(
+                source: Locale.Language(identifier: "en"),
+                target: Locale.Language(identifier: "fr")
+            )
+        } else {
+            translationConfiguration = nil
+        }
+        guard player != nil else { return }
+        if !isRunning { start() }
+    }
+
+    /// Prépare les modèles de traduction puis bascule sur la session directe.
+    func prepareTranslation(using session: TranslationSession) async {
+        isPreparingTranslation = true
+        defer { isPreparingTranslation = false }
+        do {
+            try await session.prepareTranslation()
+            translationError = nil
+            await translator.prepare()
+        } catch is CancellationError {
+            return
+        } catch {
+            translationError = SubtitleTranslationError.failed.localizedDescription
+        }
     }
 
     private func describePlayback(_ player: AVPlayer, wantsPlayback: Bool) -> String {
@@ -201,22 +296,114 @@ final class VideoSpeechProbe {
             analyzedBuffers = analyzed
             audioSeconds = seconds
             audioDiagnostic = diagnostic
+            // Une capture réelle annule le compteur de relances transitoires.
+            restartAttempts = 0
             if transcript.isEmpty { status = "Audio reçu (\(received) blocs) ; en attente de reconnaissance…" }
         case let .text(text, final, mediaEnd, results, withText):
             speechResults = results
             speechTextResults = withText
-            if !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { transcript = text }
+            let cleaned = text.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !cleaned.isEmpty { transcript = text }
             if let mediaEnd, let player {
                 let lag = player.currentTime().seconds - mediaEnd
                 mediaLag = lag.isFinite ? lag : nil
             } else {
                 mediaLag = nil
             }
+            if !cleaned.isEmpty, let start = mediaEnd.map({ max(0, $0 - 3) }) {
+                publishEnglish(text: cleaned, start: start, isFinal: final)
+            }
             // « analysés » progresse sans texte : le problème est en aval de la conversion.
             status = withText > 0
                 ? (final ? "Résultat définitif reçu — à vérifier sur la vidéo."
                          : "Résultat provisoire reçu — à vérifier sur la vidéo.")
                 : "Speech produit des résultats sans texte (\(results)) ; audio peut-être vide ou non vocal."
+        }
+    }
+
+    /// Met à jour le cue anglais et, si nécessaire, demande sa traduction.
+    private func publishEnglish(text: String, start: Double, isFinal: Bool) {
+        let cue = SubtitleCue(start: start, end: start + 3, text: text,
+                              isFinal: isFinal, isTranslated: false)
+        cues.upsert(cue)
+        englishCues.upsert(cue)
+        guard mode == .french else { return }
+        // Ne traduire que du texte stabilisé : retraduire chaque provisoire
+        // ferait osciller l'affichage et saturerait le traducteur.
+        guard isFinal else { return }
+        requestTranslation(for: cue)
+    }
+
+    /// Rafraîchit le cue affiché selon la position de lecture.
+    ///
+    /// Appelé par le lecteur à chaque tick, même quand ses contrôles sont
+    /// masqués. On ne publie que si le cue change : réassigner la même valeur
+    /// quatre fois par seconde reconstruirait le lecteur pour rien.
+    func refresh(player: AVPlayer) {
+        guard mode != .off else {
+            if englishCue != nil { englishCue = nil }
+            if frenchCue != nil { frenchCue = nil }
+            return
+        }
+        let time = player.currentTime().seconds
+        let newEnglish = englishCues.cue(at: time)
+        if newEnglish != englishCue { englishCue = newEnglish }
+        let newFrench = mode == .french ? cues.cue(at: time) : nil
+        if newFrench != frenchCue { frenchCue = newFrench }
+        scheduleRestartIfIdle(player: player)
+    }
+
+    /// Relance la capture après un seek, un scrub ou un retour à 1×.
+    ///
+    /// Ces gestes interrompent la session (l'analyseur refuse des horodatages
+    /// qui reculent) ; sans relance, les sous-titres resteraient muets après un
+    /// simple déplacement dans la vidéo.
+    private func scheduleRestartIfIdle(player: AVPlayer) {
+        guard !isRunning, restartTask == nil, mode != .off,
+              player.timeControlStatus != .paused,
+              player.defaultRate == 1, !player.isExternalPlaybackActive,
+              !isPreparingTranslation else { return }
+        // Récupération bornée : si la capture échoue de façon répétée (ex.
+        // discontinuité persistante), on coupe proprement pour ne pas boucler.
+        guard restartAttempts < maxRestartAttempts else {
+            mode = .off
+            status = "Sous-titres indisponibles après plusieurs tentatives."
+            return
+        }
+        restartAttempts += 1
+        restartTask = Task { [weak self, weak player] in
+            do { try await Task.sleep(for: .milliseconds(400)) } catch { return }
+            guard let self, let player, !Task.isCancelled else { return }
+            restartTask = nil
+            guard mode != .off, !isRunning, player.defaultRate == 1,
+                  !player.isExternalPlaybackActive else { return }
+            start(player: player,
+                  allowDownload: true,
+                  restorePlayback: { self.restoreAfterTapChange?() },
+                  wantsPlayback: { self.wantsPlaybackValue })
+        }
+    }
+
+    private func requestTranslation(for cue: SubtitleCue) {
+        translationTask?.cancel()
+        translationTask = Task { [weak self, weak player] in
+            guard let self else { return }
+            do {
+                await translator.prepare()
+                let translated = try await translator.translate(cue.text)
+                guard !Task.isCancelled else { return }
+                translationError = nil
+                let french = SubtitleCue(start: cue.start, end: cue.end, text: translated,
+                                         isFinal: cue.isFinal, isTranslated: true)
+                cues.upsert(french)
+                if let player { refresh(player: player) }
+            } catch is CancellationError {
+                return
+            } catch {
+                guard !Task.isCancelled else { return }
+                translationError = (error as? LocalizedError)?.errorDescription
+                    ?? SubtitleTranslationError.failed.localizedDescription
+            }
         }
     }
 
@@ -263,7 +450,8 @@ final class VideoSpeechProbe {
     }
 }
 
-/// Séparé du rendu vidéo ; absent de la Release normale, visible dans l'IPA de test dédié.
+/// Diagnostic interne du prototype. Masqué en production : le lecteur expose
+/// désormais le bouton CC et l'overlay de sous-titres.
 struct VideoSpeechProbePanel: View {
     let probe: VideoSpeechProbe
     let player: AVPlayer?
@@ -312,4 +500,3 @@ struct VideoSpeechProbePanel: View {
         .environment(\.colorScheme, .dark)
     }
 }
-#endif

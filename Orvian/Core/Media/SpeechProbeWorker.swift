@@ -1,4 +1,3 @@
-#if DEBUG || ORVIAN_SPEECH_PROBE
 import AVFoundation
 import Speech
 
@@ -28,6 +27,18 @@ enum SpeechProbeError: Error, LocalizedError {
         case .localPlayback: "Test local uniquement : revenir à 1× et quitter AirPlay."
         }
     }
+
+    /// Les discontinuités (D1–D3, saturations, audio source) sont transitoires :
+    /// la capture peut être relancée. Le reste (DRM, modèle, format) est fatal
+    /// pour les sous-titres de cette vidéo.
+    var isFatalForSubtitles: Bool {
+        switch self {
+        case .streamRestart, .timeJump, .formatChange, .backpressure, .sourceAudio:
+            return false
+        default:
+            return true
+        }
+    }
 }
 
 enum SpeechProbeEvent: Sendable {
@@ -47,6 +58,8 @@ actor SpeechProbeWorker {
     private var sourceSeconds = 0.0
     private var resultCount = 0
     private var textCount = 0
+    /// Décalage entre l'horloge de l'analyseur (qui démarre à 0) et le temps média.
+    private var mediaOffset: Double?
     private var isFinished = false
 
     init(transcriber: SpeechTranscriber, format: AVAudioFormat) {
@@ -120,8 +133,7 @@ actor SpeechProbeWorker {
             resultCount += 1
             let text = String(result.text.characters.suffix(500))
             if !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { textCount += 1 }
-            let mediaEnd = timeline.hasCompleteTiming ? timeline.origin.map { $0 + result.range.end.seconds } : nil
-            // Transcrire même sans horodatage source ; ne pas prétendre être synchronisé dans ce cas.
+            let mediaEnd = mediaOffset.map { $0 + result.range.end.seconds }
             await report(.text(text, isFinal: result.isFinal, mediaEnd: mediaEnd,
                                results: resultCount, withText: textCount))
         }
@@ -172,10 +184,17 @@ actor SpeechProbeWorker {
                 // plage média parfois incomplète ou invalide.
                 let acceptance = timeline.accept(start: packet.timeRange.start.seconds, duration: duration)
                 guard let acceptance else { throw SpeechProbeError.format }
+                // Le résultat Speech est horodaté sur la timeline de l'analyseur
+                // (à partir de 0) ; mémoriser l'origine média pour le synchroniser.
+                if mediaOffset == nil, packet.timeRange.start.seconds.isFinite {
+                    mediaOffset = packet.timeRange.start.seconds
+                }
                 let pcm = try makePCM(packet: packet, bytes: scratch)
                 try await convert(pcm, ending: false, continuation: continuation)
                 buffers += 1
                 if acceptance == .restart {
+                    // Un saut arrière rompt l'ordre des horodatages attendu par
+                    // l'analyseur : on ne peut pas continuer cette session.
                     await reportAudio(packet: packet, report: report)
                     throw SpeechProbeError.timeJump
                 }
@@ -283,4 +302,3 @@ actor SpeechProbeWorker {
         }
     }
 }
-#endif

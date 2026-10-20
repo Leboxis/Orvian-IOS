@@ -1,4 +1,3 @@
-#if DEBUG || ORVIAN_SPEECH_PROBE
 import Foundation
 import Synchronization
 
@@ -139,4 +138,3 @@ struct SpeechProbeTimeline {
         hasCompleteTiming = false
     }
 }
-#endif

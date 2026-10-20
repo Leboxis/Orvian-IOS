@@ -53,9 +53,9 @@ struct VideoPlayerView: View {
     @Environment(\.scenePhase) private var scenePhase
     @State private var player: AVPlayer?
     @State private var poster: UIImage?
-    #if DEBUG || ORVIAN_SPEECH_PROBE
+    /// Sous-titres automatiques : propriétaire unique de l'audio, de la
+    /// transcription et de la traduction pour cette page du lecteur.
     @State private var speechProbe = VideoSpeechProbe()
-    #endif
 
     // Transport
     /// Position de lecture, durée, avance du tampon et position du doigt vivent
@@ -178,7 +178,11 @@ struct VideoPlayerView: View {
             } else {
                 tabletPlayer
             }
-            #if DEBUG || ORVIAN_SPEECH_PROBE
+            SubtitleOverlay(
+                cue: speechProbe.displayedCue,
+                bottomInset: showControls ? bottomControlsHeight + 12 : 28
+            )
+            #if DEBUG
             if VideoSpeechProbe.isExposed, isActive {
                 VStack {
                     HStack {
@@ -205,6 +209,12 @@ struct VideoPlayerView: View {
             // La session audio est retenue par `startPlayback` (et non ici) :
             // une page voisine du pager qui apparaît sans jouer ne doit pas
             // réserver la session.
+        }
+        // Seule une session fournie par cette vue peut télécharger le modèle
+        // français avec le consentement système. Elle ne doit jamais survivre
+        // à la vue (Apple documente un fatalError dans ce cas).
+        .translationTask(speechProbe.translationConfiguration) { session in
+            await speechProbe.prepareTranslation(using: session)
         }
         .task(id: isActive) {
             // Dans un pager, les pages hors écran ne chargent jamais : seule
@@ -256,7 +266,7 @@ struct VideoPlayerView: View {
         .onChange(of: isMuted) { _, muted in player?.isMuted = muted }
         .onChange(of: scenePhase) { _, phase in
             if phase == .background { pausePlayback() }
-            #if DEBUG || ORVIAN_SPEECH_PROBE
+            #if DEBUG
             // `.inactive` est transitoire (notification, centre de contrôle) : seul
             // l'arrière-plan doit arrêter un test qui a besoin de plusieurs secondes.
             if phase == .background { speechProbe.stop(reason: "App en arrière-plan : test arrêté.") }
@@ -488,8 +498,38 @@ struct VideoPlayerView: View {
                 phoneSkipButton(forward: true)
             }
             Spacer(minLength: 0)
+            subtitleButton
             phoneSpeedButton
         }
+    }
+
+    /// Bouton « CC / Traduction » du lecteur iPhone.
+    private var subtitleButton: some View {
+        SubtitleModeMenu(mode: speechProbe.mode, isSubtle: true) { mode in
+            applySubtitleMode(mode)
+        }
+    }
+
+    private func applySubtitleMode(_ mode: SubtitleMode) {
+        speechProbe.setMode(
+            mode,
+            player: player,
+            start: {
+                guard let player else { return }
+                speechProbe.start(
+                    player: player,
+                    // Le modèle anglais se télécharge après une action explicite :
+                    // choisir un mode de sous-titres en est une.
+                    allowDownload: true,
+                    restorePlayback: { self.resumePlaybackIfRequested() },
+                    wantsPlayback: { self.transport.wantsPlayback }
+                )
+            },
+            stopTest: {
+                speechProbe.stop(reason: "Sous-titres désactivés.")
+            }
+        )
+        scheduleControlsAutoHide(delay: 2.5)
     }
 
     private func phoneSkipButton(forward: Bool) -> some View {
@@ -712,6 +752,9 @@ struct VideoPlayerView: View {
                 timeControls
             }
             speedMenu
+            SubtitleModeMenu(mode: speechProbe.mode, isSubtle: false) { mode in
+                applySubtitleMode(mode)
+            }
             AirPlayButton()
                 .frame(width: 44, height: 44)
         }
@@ -743,7 +786,7 @@ struct VideoPlayerView: View {
     /// grossiers throttlés (`updateScrub`).
     private func beginScrub() {
         guard player != nil, isActive, !isDisappeared, !showTagSheet else { return }
-        #if DEBUG || ORVIAN_SPEECH_PROBE
+        #if DEBUG
         speechProbe.stop(reason: "Déplacement : relancez le test après la recherche.")
         #endif
         hideControlsTask?.cancel()
@@ -961,7 +1004,7 @@ struct VideoPlayerView: View {
 
     private func seek(to seconds: Double, precise: Bool = false) {
         guard let player else { return }
-        #if DEBUG || ORVIAN_SPEECH_PROBE
+        #if DEBUG
         speechProbe.stop(reason: "Recherche : relancez le test à la nouvelle position.")
         #endif
         // Tolérance volontairement non nulle même en « précis » : sur un flux
@@ -1026,7 +1069,7 @@ struct VideoPlayerView: View {
     }
 
     private func setPlaybackRate(_ rate: Float) {
-        #if DEBUG || ORVIAN_SPEECH_PROBE
+        #if DEBUG
         if rate != playbackRate { speechProbe.stop(reason: "Vitesse modifiée : prototype limité à 1×.") }
         #endif
         playbackRate = rate
@@ -1284,6 +1327,9 @@ struct VideoPlayerView: View {
             if isExternalPlaybackActive != externalPlaybackActive {
                 isExternalPlaybackActive = externalPlaybackActive
             }
+            // Les sous-titres suivent la vidéo même quand le chrome est masqué :
+            // ce rafraîchissement ne publie que le cue affiché, pas l'horloge.
+            speechProbe.refresh(player: player)
             guard showControls else { return }
             let itemDuration = player.currentItem?.duration.seconds ?? 0
             if itemDuration.isFinite, itemDuration > 0,
@@ -1394,7 +1440,7 @@ struct VideoPlayerView: View {
     /// le teardown est déclenché PAR le watchdog (récupération de stall) :
     /// il ne doit pas tuer la tâche de récupération en cours.
     private func teardown(cancelsStallWatchdog: Bool = true, preservingPlaybackIntent: Bool = false) {
-        #if DEBUG || ORVIAN_SPEECH_PROBE
+        #if DEBUG
         speechProbe.stop(reason: "Lecteur fermé ou remplacé : test arrêté.")
         #endif
         cancelPendingSeek()

@@ -1,4 +1,3 @@
-#if DEBUG || ORVIAN_SPEECH_PROBE
 import AVFoundation
 import MediaToolbox
 import Synchronization
@@ -129,4 +128,3 @@ final class PlayerSpeechAudioTap {
         return "callbacks=\(context.callbacks.load(ordering: .relaxed)) prepares=\(context.prepared.load(ordering: .relaxed)) osStatus=\(status) frames=\(context.lastFrames.load(ordering: .relaxed)) flags=\(context.lastFlags.load(ordering: .relaxed))"
     }
 }
-#endif
