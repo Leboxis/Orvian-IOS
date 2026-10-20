@@ -185,12 +185,8 @@ struct VideoPlayerView: View {
                         VideoSpeechProbePanel(
                             probe: speechProbe,
                             player: player,
-                            restorePlaybackRequested: { [weak self] in
-                                self?.resumePlaybackIfRequested()
-                            },
-                            wantsPlaybackRequested: { [weak self] in
-                                self?.transport.wantsPlayback ?? false
-                            }
+                            restorePlaybackRequested: { self.resumePlaybackIfRequested() },
+                            wantsPlaybackRequested: { self.transport.wantsPlayback }
                         )
                             .simultaneousGesture(controlRegionGesture)
                         Spacer(minLength: 0)

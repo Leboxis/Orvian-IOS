@@ -54,7 +54,7 @@ final class PlayerSpeechAudioTap {
             prepare: { tap, _, format in
                 let context = Unmanaged<SpeechTapContext>.fromOpaque(MTAudioProcessingTapGetStorage(tap)).takeUnretainedValue()
                 context.format = format.pointee
-                context.prepared.wrappingIncrement(ordering: .relaxed)
+                context.prepared.wrappingAdd(1, ordering: .relaxed)
             },
             unprepare: nil,
             process: { tap, requested, _, audio, framesOut, flagsOut in
@@ -63,7 +63,7 @@ final class PlayerSpeechAudioTap {
                 var range = CMTimeRange.invalid
                 let status = MTAudioProcessingTapGetSourceAudio(tap, requested, audio, flagsOut, &range, framesOut)
                 let context = Unmanaged<SpeechTapContext>.fromOpaque(MTAudioProcessingTapGetStorage(tap)).takeUnretainedValue()
-                context.callbacks.wrappingIncrement(ordering: .relaxed)
+                context.callbacks.wrappingAdd(1, ordering: .relaxed)
                 context.sourceStatus.store(status, ordering: .relaxed)
                 context.lastFrames.store(Int(framesOut.pointee), ordering: .relaxed)
                 context.lastFlags.store(flagsOut.pointee, ordering: .relaxed)
