@@ -130,5 +130,13 @@ struct SpeechProbeTimeline {
         outputFrames += frames
         return start
     }
+
+    /// Nouveau début de flux signalé par le tap : la continuité temporelle est
+    /// rompue sans que l'audio soit invalide. On ré-ancre au prochain paquet.
+    mutating func restart() {
+        expectedEnd = nil
+        reanchorCount += 1
+        hasCompleteTiming = false
+    }
 }
 #endif

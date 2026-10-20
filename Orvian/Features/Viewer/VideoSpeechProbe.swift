@@ -160,7 +160,8 @@ final class VideoSpeechProbe {
         monitorTask?.cancel()
         monitorTask = nil
         isRunning = false
-        transcript = ""
+        // Conserver le dernier texte reconnu : il documente ce que Speech a
+        // réellement produit, même si le test s'arrête avant la fin du flux.
         mediaLag = nil
         status = reason
     }

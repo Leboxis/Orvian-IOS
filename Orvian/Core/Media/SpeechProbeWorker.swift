@@ -101,8 +101,8 @@ actor SpeechProbeWorker {
 
     private func finish() async throws {
         try Task.checkCancellation()
-        try await analyzer.finalizeAndFinishThroughEndOfInput()
         isFinished = true
+        try await analyzer.finalizeAndFinishThroughEndOfInput()
     }
 
     private func readResults(report: @escaping @Sendable (SpeechProbeEvent) async -> Void) async throws {
@@ -130,7 +130,12 @@ actor SpeechProbeWorker {
                 }
             }
             guard let packet = mailbox.pop(into: UnsafeMutableRawBufferPointer(start: scratch, count: mailbox.byteCapacity)) else {
-                if mailbox.isClosed { throw CancellationError() }
+                if mailbox.isClosed {
+                    // Le tap a livré tout ce qu'il pouvait : clore proprement la
+                    // session Speech pour laisser sortir les derniers résultats.
+                    try convert(nil, ending: true, continuation: continuation)
+                    return
+                }
                 try await Task.sleep(for: .milliseconds(20))
                 continue
             }
@@ -141,9 +146,12 @@ actor SpeechProbeWorker {
                 if duration.isFinite, duration > 0 { sourceSeconds += duration }
                 if receivedBuffers == 1 { await reportAudio(packet: packet, report: report) }
             }
-            if packet.startsStream, buffers > 0 {
+            if packet.startsStream, receivedBuffers > 1 {
+                // Le tap peut redémarrer son flux (nouvelle session après
+                // installation du mix). Les seeks explicites arrêtent déjà le
+                // test : ré-ancrer ici évite de perdre l'audio restant.
+                timeline.restart()
                 await reportAudio(packet: packet, report: report)
-                throw SpeechProbeError.streamRestart
             }
             if packet.frames > 0 {
                 guard rate.isFinite, rate > 0 else { throw SpeechProbeError.format }

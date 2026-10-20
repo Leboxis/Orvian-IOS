@@ -257,7 +257,9 @@ struct VideoPlayerView: View {
         .onChange(of: scenePhase) { _, phase in
             if phase == .background { pausePlayback() }
             #if DEBUG || ORVIAN_SPEECH_PROBE
-            if phase != .active { speechProbe.stop(reason: "App inactive : test arrêté.") }
+            // `.inactive` est transitoire (notification, centre de contrôle) : seul
+            // l'arrière-plan doit arrêter un test qui a besoin de plusieurs secondes.
+            if phase == .background { speechProbe.stop(reason: "App en arrière-plan : test arrêté.") }
             #endif
         }
         .onChange(of: voiceOverEnabled) { _, enabled in

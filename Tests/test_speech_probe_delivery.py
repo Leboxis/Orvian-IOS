@@ -79,6 +79,23 @@ class SpeechProbeDeliveryTests(unittest.TestCase):
         self.assertIn("if wasWanted, wantsPlayback() { restoreAfterTapChange?() }", source)
         self.assertNotIn("player.play()", source, "The probe must never force playback")
 
+    def test_transient_inactive_state_does_not_end_the_test(self):
+        player = (ROOT / "Orvian/Features/Viewer/VideoPlayerView.swift").read_text(encoding="utf-8")
+        scene = player.split(".onChange(of: scenePhase)", 1)[1].split(".onChange(of: voiceOverEnabled)", 1)[0]
+        self.assertIn('if phase == .background { speechProbe.stop(', scene)
+        self.assertNotIn("phase != .active", scene,
+                         "A notification or Control Center makes scenePhase inactive for a moment")
+        probe = (ROOT / "Orvian/Features/Viewer/VideoSpeechProbe.swift").read_text(encoding="utf-8")
+        stop = probe.split("func stop(reason", 1)[1].split("private func describePlayback", 1)[0]
+        self.assertNotIn('transcript = ""', stop, "Keep the last recognized text for diagnosis")
+
+    def test_tap_stream_restart_does_not_discard_remaining_audio(self):
+        worker = (ROOT / "Orvian/Core/Media/SpeechProbeWorker.swift").read_text(encoding="utf-8")
+        self.assertNotIn("throw SpeechProbeError.streamRestart", worker)
+        self.assertIn("timeline.restart()", worker)
+        timeline = (ROOT / "Orvian/Core/Media/SpeechProbeMailbox.swift").read_text(encoding="utf-8")
+        self.assertIn("mutating func restart()", timeline)
+
 
 if __name__ == "__main__":
     unittest.main()
