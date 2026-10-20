@@ -59,6 +59,26 @@ class SpeechProbeDeliveryTests(unittest.TestCase):
         self.assertIn("-destination 'generic/platform=iOS'", diagnostic)
         self.assertIn('build 2>&1 | tee "$RUNNER_TEMP/orvian-speech-probe-build.log"', diagnostic)
 
+    def test_first_pcm_is_not_dropped_for_missing_media_timing(self):
+        timeline = (ROOT / "Orvian/Core/Media/SpeechProbeMailbox.swift").read_text(encoding="utf-8")
+        accept = timeline.split("mutating func accept(", 1)[1].split("mutating func advance", 1)[0]
+        self.assertIn("guard start.isFinite else", accept)
+        self.assertIn("hasCompleteTiming = false", accept)
+        self.assertIn("return .continuous", accept)
+        worker = (ROOT / "Orvian/Core/Media/SpeechProbeWorker.swift").read_text(encoding="utf-8")
+        self.assertNotIn("guard timeline.accept", worker, "A missing timestamp must not abort the test")
+        self.assertIn("if acceptance == .restart", worker)
+        self.assertIn("receivedBuffers += 1", worker)
+
+    def test_probe_reports_playback_and_separates_received_from_analyzed(self):
+        source = (ROOT / "Orvian/Features/Viewer/VideoSpeechProbe.swift").read_text(encoding="utf-8")
+        self.assertIn("playbackDiagnostic", source)
+        self.assertIn("analyzedBuffers", source)
+        self.assertIn("restoreAfterTapChange", source)
+        self.assertIn("wantsPlaybackValue", source)
+        self.assertIn("if wasWanted, wantsPlayback() { restoreAfterTapChange?() }", source)
+        self.assertNotIn("player.play()", source, "The probe must never force playback")
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -79,18 +79,49 @@ final class SpeechProbeMailbox<Metadata>: @unchecked Sendable {
     }
 }
 
-/// Timeline de diagnostic : pas de PCM discontinu dans une même session Speech.
+/// Timeline de diagnostic : le PCM reste exploitable ; l'horloge média est
+/// signalée comme fiable ou non, jamais inventée.
 struct SpeechProbeTimeline {
+    /// Résultat d'un bloc reçu.
+    enum Acceptance: Equatable {
+        /// Enchaînement continu, horloge média utilisable.
+        case continuous
+        /// Trou court : audio exploitable, position média ré-ancrée, retard approximatif.
+        case reanchored
+        /// Retour en arrière sans redémarrage de flux : ordre audio douteux.
+        case restart
+    }
+
     private(set) var origin: Double?
     private var expectedEnd: Double?
     private(set) var outputFrames: Int64 = 0
+    /// Faux dès qu'une position source manquait ou a dû être ré-ancrée.
+    private(set) var hasCompleteTiming = true
+    private(set) var reanchorCount = 0
 
-    mutating func accept(start: Double, duration: Double) -> Bool {
-        guard start.isFinite, duration.isFinite, duration > 0 else { return false }
-        if let expectedEnd, abs(start - expectedEnd) > 0.02 { return false }
-        if origin == nil { origin = start }
-        expectedEnd = start + duration
-        return true
+    /// Retour `nil` si la durée reçue n'est pas exploitable : le caller
+    /// rejette alors le bloc au lieu de le faire passer pour une continuity.
+    mutating func accept(start: Double, duration: Double) -> Acceptance? {
+        guard duration.isFinite, duration > 0 else { return nil }
+        guard start.isFinite else {
+            // Le PCM reste exploitable. Ne pas inventer de position média.
+            hasCompleteTiming = false
+            return .continuous
+        }
+        guard let expectedEnd else {
+            origin = start
+            self.expectedEnd = start + duration
+            return .continuous
+        }
+        let delta = start - expectedEnd
+        if abs(delta) <= 0.02 {
+            self.expectedEnd = start + duration
+            return .continuous
+        }
+        self.expectedEnd = start + duration
+        reanchorCount += 1
+        hasCompleteTiming = false
+        return delta < 0 ? .restart : .reanchored
     }
 
     mutating func advance(frames: Int64) -> Int64 {

@@ -188,24 +188,27 @@ struct SpeechProbeChecks {
     private static func timelineRejectsInvalidAndDiscontinuousInput() {
         var timeline = SpeechProbeTimeline()
         assert(timeline.origin == nil && timeline.outputFrames == 0)
-        for start in [Double.nan, .infinity, -.infinity] {
-            assert(!timeline.accept(start: start, duration: 1))
-        }
         for duration in [Double.nan, .infinity, -.infinity, 0, -1] {
-            assert(!timeline.accept(start: 10, duration: duration))
+            var invalid = SpeechProbeTimeline()
+            assert(invalid.accept(start: 10, duration: duration) == nil,
+                   "Only the duration must be strictly positive")
         }
-        assert(timeline.origin == nil, "Rejected first packets must not establish an origin")
-        assert(timeline.accept(start: 10, duration: 0.25))
+        for start in [Double.nan, .infinity, -.infinity] {
+            var untimed = SpeechProbeTimeline()
+            assert(untimed.accept(start: start, duration: 1) == .continuous)
+            assert(untimed.origin == nil && !untimed.hasCompleteTiming)
+        }
+        assert(timeline.accept(start: 10, duration: 0.25) == .continuous)
         assert(timeline.origin == 10)
-        assert(!timeline.accept(start: 10.5, duration: 0.25), "A gap must be rejected")
-        assert(!timeline.accept(start: 10, duration: 0.25), "A backward jump must be rejected")
-        assert(!timeline.accept(start: 10.25, duration: -0.25))
-        assert(!timeline.accept(start: .nan, duration: 0.25))
-        assert(timeline.accept(start: 10.25, duration: 0.25), "Rejection must not move the expected end")
-        assert(timeline.accept(start: 10.515, duration: 0.25), "Small positive timestamp jitter is tolerated")
-        assert(timeline.accept(start: 10.75, duration: 0.25), "Small negative timestamp jitter is tolerated")
-        assert(!timeline.accept(start: 11.021, duration: 0.25), "Jitter outside 20 ms is discontinuous")
-        assert(timeline.accept(start: 11, duration: 0.25))
+        assert(timeline.accept(start: 10.5, duration: 0.25) == .reanchored, "A gap stays usable audio")
+        assert(!timeline.hasCompleteTiming && timeline.reanchorCount == 1)
+        assert(timeline.accept(start: 10, duration: 0.25) == .restart, "A backward jump is flagged")
+        assert(timeline.reanchorCount == 2)
+        assert(timeline.accept(start: 10.25, duration: 0.25) == .continuous)
+        assert(timeline.accept(start: 10.515, duration: 0.25) == .continuous, "Small positive jitter is tolerated")
+        assert(timeline.accept(start: 10.75, duration: 0.25) == .continuous, "Small negative jitter is tolerated")
+        assert(timeline.accept(start: 11.021, duration: 0.25) == .reanchored, "Jitter outside 20 ms re-anchors")
+        assert(timeline.accept(start: 11.271, duration: 0.25) == .continuous, "The re-anchored baseline continues")
         assert(timeline.origin == 10)
         assert(timeline.outputFrames == 0, "Source time must not advance converted output frames")
         assert(timeline.advance(frames: 0) == 0)
@@ -216,7 +219,24 @@ struct SpeechProbeChecks {
         assert(timeline.origin == 10)
     }
 
+    private static func firstPCMWithoutTimestampMustNotLookLikeASeek() {
+        var timeline = SpeechProbeTimeline()
+        // Un paquet PCM peut être exploitable avant que sa position média le soit.
+        let receivedFrames: Int64 = 1024
+        let duration = Double(receivedFrames) / 48_000
+        assert(timeline.accept(start: .nan, duration: duration) == .continuous,
+               "Regression: the first real PCM packet was rejected as a discontinuity before PCM counting")
+        assert(timeline.origin == nil && !timeline.hasCompleteTiming, "Never fabricate a media clock")
+        assert(timeline.advance(frames: receivedFrames) == 0)
+        assert(timeline.outputFrames == receivedFrames)
+        assert(timeline.accept(start: 12, duration: duration) == .continuous,
+               "The first usable timestamp establishes the baseline instead of failing the test")
+        assert(!timeline.hasCompleteTiming, "The earlier untimed packet keeps the lag approximate")
+        assert(timeline.origin == 12)
+    }
+
     static func main() {
+        firstPCMWithoutTimestampMustNotLookLikeASeek()
         copiesOwnedBytesAndMetadata()
         planarSpansAndEmptyEndPacket()
         fifoWrapsWithoutLosingUnreadSlots()

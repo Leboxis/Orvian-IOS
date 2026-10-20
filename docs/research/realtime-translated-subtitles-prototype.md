@@ -24,6 +24,22 @@ Les modèles sont préparés avant l’installation du tap pour éviter de rempl
 - Résultats provisoires remplacés à l’écran, pas concaténés. Le résultat « définitif » n’est pas à lui seul une preuve que toutes les paroles ont été correctement reconnues.
 - Le tap peut ne produire aucun PCM, notamment selon les conditions de lecture muette ou de source ; ce comportement fait partie des observations à consigner.
 
+## 0. Rapport d’échec du 20 octobre 2026 et correctif
+
+Premier essai sur appareil avec l’IPA de diagnostic `41047dc6` : après « Tester l’audio anglais », l’écran affiche « Tap installé » avec **PCM 0 bloc / 0,0 s**, la vidéo s’arrête, puis « Discontinuité audio » apparaît dès la reprise de lecture.
+
+**Cause reproduite en test local :** le premier bloc PCM réel était rejeté avant d’être compté. Le contrôle temporel exigeait une position média exploitable pour le tout premier paquet ; un horodatage source absent ou invalide était traité comme une discontinuité. Le compteur PCM restait donc à zéro alors que l’audio pouvait déjà circuler. L’ancien code ne pouvait d’ailleurs jamais transcrire un flux dont la position initiale manquait, même avec un audio parfaitement valide.
+
+**Correctifs appliqués :**
+
+- Le PCM reste exploitable sans position média : l’horloge est marquée incomplète, le retard n’est plus affiché plutôt qu’inventé, et une position réelle ultérieure ré-ancre le suivi.
+- Les trois causes de discontinuité sont désormais distinctes et numérotées (D1 redémarrage de flux, D2 saut temporel arrière, D3 changement de format) au lieu d’un message unique.
+- Le panneau sépare **audio reçu** (blocs et secondes) et **blocs analysés**, et affiche les compteurs internes du tap : callbacks, préparations, `OSStatus`, frames, flags.
+- La durée d’un paquet est calculée à partir des frames réellement reçues, plus fiable qu’une plage média parfois incomplète.
+- Le prototype n’impose jamais la lecture : après l’installation du tap, il réaffirme l’intention courante via le chemin de reprise du lecteur, et ne contredit jamais une pause demandée. Un test sans audio et sans lecture active s’arrête avec un message explicite au lieu d’attendre indéfiniment.
+
+Ces changements restent un diagnostic : ils ne prouvent pas encore que la source kDrive fournit le PCM attendu. Le prochain essai doit indiquer si **audio reçu** augmente, même si l’analyse échoue ensuite.
+
 ## 1. Ouvrir le prototype sur l’appareil
 
 ### Sans Mac : IPA « Orvian Test IA » pour LiveContainer
@@ -32,7 +48,7 @@ Les modèles sont préparés avant l’installation du tap pour éviter de rempl
 2. Ouvrir **Orvian Test IA**, se connecter à kDrive si demandé, puis ouvrir une vidéo anglaise à **1×**, sans AirPlay.
 3. Déplier **Test audio IA (développement)** : il est visible directement, sans variable d’environnement ni argument.
 4. Toucher **Tester l’audio anglais**, puis **Télécharger le modèle anglais et tester** si le modèle manque. Aucun téléchargement de modèle n’est lancé simplement en ouvrant l’app.
-5. Relever le message, le compteur PCM et le texte anglais après quelques secondes de paroles. Si le test échoue, transmettre le message et les compteurs, sans URL signée ni jeton.
+5. Relever le message, **Audio reçu** (blocs et secondes), **analysés**, la ligne **Tap** et le texte anglais. Si le test échoue, transmettre ces lignes, sans URL signée ni jeton.
 
 L’IPA porte l’identifiant distinct `com.orvian.app.speechprobe`. Il est construit en Release optimisée avec le seul flag `ORVIAN_SPEECH_PROBE`, pas avec tous les comportements Debug. Le job dédié est déclenché manuellement depuis une branche `diagnostics/speech-probe…` et ne lance ni simulateur, ni vérification visuelle, ni capture. Sa publication est une **préversion non latest**, liée au commit de cette branche ; elle ne modifie ni le catalogue LiveContainer stable ni la numérotation normale.
 
@@ -73,6 +89,8 @@ Le [harness iOS non visuel](../../Tests/iOS/SpeechProbeTests.swift) contient un 
 | Mute, écouteurs, contrôle masqué | Consigner si PCM/transcription persistent ; contrôles et audio normaux. |
 | Source incompatible, multi-audio, mix préexistant | Refus explicite du prototype, sans remplacement du mix ni blocage de la lecture. |
 | Aucun PCM après environ huit secondes de lecture | Diagnostic « extraction non prouvée », pas de faux succès. |
+| « Audio reçu » augmente mais « analysés » reste à 0 | Distinguer un rejet aval (format, conversion) d’un problème de tap ; la ligne Tap fournit callbacks/OSStatus/frames. |
+| Vidéo suspendue après installation du tap | Le test réaffirme l’intention de lecture via le lecteur ; une pause explicite reste prioritaire. |
 | Activations/arrêts rapides, changement de page/fichier/compte | Pas de résultat tardif de l’ancienne génération ; pas de sessions simultanées. |
 | App inactive/arrière-plan, fermeture, récupération réseau | Branche fermée, texte effacé, pas de reprise automatique du test. |
 | Lecture 15 minutes | Files/mémoire bornées, pas de dérive continue, pas de coupure son imputable au test ; relever CPU/thermique avec Instruments. |

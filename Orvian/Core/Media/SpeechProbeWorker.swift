@@ -5,7 +5,7 @@ import Speech
 /// Erreurs volontairement sans URL, jeton ou texte privé issu des erreurs système.
 enum SpeechProbeError: Error, LocalizedError {
     case unavailable, locale, format, source, noAudio, multipleTracks, existingMix, tapCreation
-    case discontinuity, backpressure, sourceAudio, noBuffers, model, analysis, localPlayback
+    case streamRestart, timeJump, formatChange, backpressure, sourceAudio, noBuffers, model, analysis, localPlayback
 
     var errorDescription: String? {
         switch self {
@@ -17,7 +17,9 @@ enum SpeechProbeError: Error, LocalizedError {
         case .multipleTracks: "Plusieurs pistes audio : sélection à valider avant ce test."
         case .existingMix: "Un mix audio existe déjà ; le test ne le remplace pas."
         case .tapCreation: "Impossible d’installer le tap audio."
-        case .discontinuity: "Discontinuité audio : arrêtez puis relancez le test."
+        case .streamRestart: "Discontinuité D1 : nouveau début de flux après réception audio."
+        case .timeJump: "Discontinuité D2 : saut dans les positions audio source."
+        case .formatChange: "Discontinuité D3 : format PCM modifié en cours de test."
         case .backpressure: "File audio saturée ou occupée : test arrêté, lecture préservée."
         case .sourceAudio: "Le tap n’a pas pu lire les échantillons source."
         case .noBuffers: "Aucun PCM après 8 secondes de lecture : extraction non prouvée."
@@ -29,8 +31,8 @@ enum SpeechProbeError: Error, LocalizedError {
 }
 
 enum SpeechProbeEvent: Sendable {
-    case audio(buffers: Int, seconds: Double)
-    case text(String, isFinal: Bool, mediaEnd: Double)
+    case audio(received: Int, seconds: Double, analyzed: Int, diagnostic: String)
+    case text(String, isFinal: Bool, mediaEnd: Double?)
 }
 
 /// Possède le convertisseur hors MainActor ; aucun buffer publié n'est recyclé.
@@ -41,6 +43,7 @@ actor SpeechProbeWorker {
     private var converter: AVAudioConverter?
     private var timeline = SpeechProbeTimeline()
     private var buffers = 0
+    private var receivedBuffers = 0
     private var sourceSeconds = 0.0
     private var isFinished = false
 
@@ -105,10 +108,9 @@ actor SpeechProbeWorker {
     private func readResults(report: @escaping @Sendable (SpeechProbeEvent) async -> Void) async throws {
         for try await result in transcriber.results {
             try Task.checkCancellation()
-            guard let origin = timeline.origin else { continue }
-            // Diagnostic uniquement : dernier segment, pas un historique de transcription.
-            await report(.text(String(result.text.characters.suffix(500)), isFinal: result.isFinal,
-                               mediaEnd: origin + result.range.end.seconds))
+            let mediaEnd = timeline.hasCompleteTiming ? timeline.origin.map { $0 + result.range.end.seconds } : nil
+            // Transcrire même sans horodatage source ; ne pas prétendre être synchronisé dans ce cas.
+            await report(.text(String(result.text.characters.suffix(500)), isFinal: result.isFinal, mediaEnd: mediaEnd))
         }
     }
 
@@ -132,18 +134,33 @@ actor SpeechProbeWorker {
                 try await Task.sleep(for: .milliseconds(20))
                 continue
             }
-            if packet.startsStream, buffers > 0 { throw SpeechProbeError.discontinuity }
+            let rate = packet.format.mSampleRate
+            let duration = Double(packet.frames) / rate
             if packet.frames > 0 {
-                guard timeline.accept(start: packet.timeRange.start.seconds, duration: packet.timeRange.duration.seconds) else {
-                    throw SpeechProbeError.discontinuity
-                }
+                receivedBuffers += 1
+                if duration.isFinite, duration > 0 { sourceSeconds += duration }
+                if receivedBuffers == 1 { await reportAudio(packet: packet, report: report) }
+            }
+            if packet.startsStream, buffers > 0 {
+                await reportAudio(packet: packet, report: report)
+                throw SpeechProbeError.streamRestart
+            }
+            if packet.frames > 0 {
+                guard rate.isFinite, rate > 0 else { throw SpeechProbeError.format }
+                // La durée du PCM vient des frames réellement reçues, pas d'une
+                // plage média parfois incomplète ou invalide.
+                let acceptance = timeline.accept(start: packet.timeRange.start.seconds, duration: duration)
+                guard let acceptance else { throw SpeechProbeError.format }
                 let pcm = try makePCM(packet: packet, bytes: scratch)
                 try convert(pcm, ending: false, continuation: continuation)
                 buffers += 1
-                sourceSeconds += Double(packet.frames) / pcm.format.sampleRate
+                if acceptance == .restart {
+                    await reportAudio(packet: packet, report: report)
+                    throw SpeechProbeError.timeJump
+                }
             }
             if buffers == 1 || lastReport.duration(to: .now) >= .milliseconds(250) || packet.endsStream {
-                await report(.audio(buffers: buffers, seconds: sourceSeconds))
+                await reportAudio(packet: packet, report: report)
                 lastReport = .now
             }
             if packet.endsStream {
@@ -151,6 +168,15 @@ actor SpeechProbeWorker {
                 return
             }
         }
+    }
+
+    private func reportAudio(packet: SpeechProbePacket,
+                             report: @escaping @Sendable (SpeechProbeEvent) async -> Void) async {
+        let start = packet.timeRange.start
+        let duration = packet.timeRange.duration
+        let clock = timeline.hasCompleteTiming ? "temps source fiable" : "temps source incomplet ou ré-ancré, retard non mesurable"
+        let details = "frames=\(packet.frames) Hz=\(packet.format.mSampleRate) t=\(start.value)/\(start.timescale) flags=\(start.flags.rawValue) durée=\(duration.value)/\(duration.timescale) début=\(packet.startsStream ? 1 : 0) réancrages=\(timeline.reanchorCount) · \(clock)"
+        await report(.audio(received: receivedBuffers, seconds: sourceSeconds, analyzed: buffers, diagnostic: details))
     }
 
     private func makePCM(packet: SpeechProbePacket, bytes: UnsafeMutableRawPointer) throws -> AVAudioPCMBuffer {
@@ -178,7 +204,7 @@ actor SpeechProbeWorker {
                          continuation: AsyncStream<AnalyzerInput>.Continuation) throws {
         if let input {
             if let converter {
-                guard converter.inputFormat == input.format else { throw SpeechProbeError.discontinuity }
+                guard converter.inputFormat == input.format else { throw SpeechProbeError.formatChange }
             } else {
                 guard let created = AVAudioConverter(from: input.format, to: target) else { throw SpeechProbeError.format }
                 // shortcut: prime sans pré-roll pour le prototype ; alignement à mesurer sur appareil avant MVP.

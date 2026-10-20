@@ -1,6 +1,7 @@
 #if DEBUG || ORVIAN_SPEECH_PROBE
 import AVFoundation
 import MediaToolbox
+import Synchronization
 
 struct SpeechProbePacket {
     let format: AudioStreamBasicDescription
@@ -16,6 +17,12 @@ struct SpeechProbePacket {
 private final class SpeechTapContext {
     let mailbox: SpeechProbeMailbox<SpeechProbePacket>
     var format = AudioStreamBasicDescription()
+    // Compteurs atomiques : le callback audio ne prend jamais de verrou.
+    let callbacks = Atomic<Int>(0)
+    let prepared = Atomic<Int>(0)
+    let sourceStatus = Atomic<Int32>(0)
+    let lastFrames = Atomic<Int>(0)
+    let lastFlags = Atomic<UInt32>(0)
     init(mailbox: SpeechProbeMailbox<SpeechProbePacket>) { self.mailbox = mailbox }
 }
 
@@ -25,6 +32,7 @@ final class PlayerSpeechAudioTap {
     private weak var item: AVPlayerItem?
     private let previousMix: AVAudioMix?
     private var installedMix: AVAudioMix?
+    private var storedContext: SpeechTapContext?
 
     init(item: AVPlayerItem, track: AVAssetTrack) throws {
         self.item = item
@@ -32,6 +40,7 @@ final class PlayerSpeechAudioTap {
         // Le prototype ne remplace jamais les paramètres d'un mix existant.
         guard previousMix == nil else { throw SpeechProbeError.existingMix }
         let context = SpeechTapContext(mailbox: mailbox)
+        storedContext = context
         var callbacks = MTAudioProcessingTapCallbacks(
             version: kMTAudioProcessingTapCallbacksVersion_0,
             clientInfo: Unmanaged.passUnretained(context).toOpaque(),
@@ -45,6 +54,7 @@ final class PlayerSpeechAudioTap {
             prepare: { tap, _, format in
                 let context = Unmanaged<SpeechTapContext>.fromOpaque(MTAudioProcessingTapGetStorage(tap)).takeUnretainedValue()
                 context.format = format.pointee
+                context.prepared.wrappingIncrement(ordering: .relaxed)
             },
             unprepare: nil,
             process: { tap, requested, _, audio, framesOut, flagsOut in
@@ -53,6 +63,10 @@ final class PlayerSpeechAudioTap {
                 var range = CMTimeRange.invalid
                 let status = MTAudioProcessingTapGetSourceAudio(tap, requested, audio, flagsOut, &range, framesOut)
                 let context = Unmanaged<SpeechTapContext>.fromOpaque(MTAudioProcessingTapGetStorage(tap)).takeUnretainedValue()
+                context.callbacks.wrappingIncrement(ordering: .relaxed)
+                context.sourceStatus.store(status, ordering: .relaxed)
+                context.lastFrames.store(Int(framesOut.pointee), ordering: .relaxed)
+                context.lastFlags.store(flagsOut.pointee, ordering: .relaxed)
                 // Toujours servir le son, même après arrêt ou saturation de la branche Speech.
                 guard status == noErr else { context.mailbox.fail(.sourceAudio); return }
                 guard !context.mailbox.isClosed else { return }
@@ -100,9 +114,19 @@ final class PlayerSpeechAudioTap {
         installedMix = appliedMix
     }
 
-    func detach() {
+    @discardableResult
+    func detach() -> Bool {
         mailbox.close()
-        if let item, item.audioMix === installedMix { item.audioMix = previousMix }
+        guard let item, let installedMix, item.audioMix === installedMix else { return false }
+        item.audioMix = previousMix
+        return true
+    }
+
+    /// Photo du tap, lue hors callback : distingue « aucun audio » d'un rejet en aval.
+    func diagnostics() -> String {
+        guard let context = storedContext else { return "contexte du tap indisponible" }
+        let status = context.sourceStatus.load(ordering: .relaxed)
+        return "callbacks=\(context.callbacks.load(ordering: .relaxed)) prepares=\(context.prepared.load(ordering: .relaxed)) osStatus=\(status) frames=\(context.lastFrames.load(ordering: .relaxed)) flags=\(context.lastFlags.load(ordering: .relaxed))"
     }
 }
 #endif

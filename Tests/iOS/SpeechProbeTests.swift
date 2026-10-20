@@ -26,6 +26,18 @@ final class SpeechProbeTests: XCTestCase {
         XCTAssertTrue(item.audioMix === existing, "The exact existing mix must remain installed")
     }
 
+    func testDetachRestoresTheItemWithoutResumingPlayback() throws {
+        let composition = AVMutableComposition()
+        let track = try XCTUnwrap(composition.addMutableTrack(withMediaType: .audio,
+                                                              preferredTrackID: kCMPersistentTrackID_Invalid))
+        let item = AVPlayerItem(asset: composition)
+        let tap = try PlayerSpeechAudioTap(item: item, track: track)
+        XCTAssertNotNil(item.audioMix)
+        XCTAssertTrue(tap.detach())
+        XCTAssertNil(item.audioMix, "Detach restores the previous mix")
+        XCTAssertFalse(tap.detach(), "A stale detach must not erase a replacement mix")
+    }
+
     // Manuel uniquement : fixture anglaise locale et modèle déjà installé via le panneau Debug.
     func testManualLocalEnglishFixtureProducesPCMAndTranscript() async throws {
         guard ProcessInfo.processInfo.environment["ORVIAN_RUN_SPEECH_PROBE"] == "1" else {

@@ -22,14 +22,21 @@ final class VideoSpeechProbe {
     private(set) var transcript = ""
     private(set) var buffers = 0
     private(set) var audioSeconds = 0.0
+    private(set) var analyzedBuffers = 0
+    private(set) var audioDiagnostic = ""
+    private(set) var playbackDiagnostic = ""
     private(set) var mediaLag: Double?
     @ObservationIgnored private var generation = 0
     @ObservationIgnored private var task: Task<Void, Never>?
     @ObservationIgnored private var monitorTask: Task<Void, Never>?
     @ObservationIgnored private var tap: PlayerSpeechAudioTap?
+    @ObservationIgnored private var restoreAfterTapChange: (@MainActor () -> Void)?
+    @ObservationIgnored private var wantsPlaybackValue = false
     var isCapturing: Bool { tap != nil }
 
-    func start(player: AVPlayer, allowDownload: Bool = false) {
+    func start(player: AVPlayer, allowDownload: Bool = false,
+               restorePlayback: @escaping @MainActor () -> Void = {},
+               wantsPlayback: @escaping @MainActor () -> Bool = { false }) {
         guard !isRunning else { return }
         let previous = task
         previous?.cancel()
@@ -41,6 +48,11 @@ final class VideoSpeechProbe {
         transcript = ""
         buffers = 0
         audioSeconds = 0
+        analyzedBuffers = 0
+        audioDiagnostic = ""
+        playbackDiagnostic = describePlayback(player, wantsPlayback: wantsPlayback())
+        wantsPlaybackValue = wantsPlayback()
+        restoreAfterTapChange = restorePlayback
         mediaLag = nil
         status = "Préparation du test…"
         task = Task { [weak self, weak player] in
@@ -107,6 +119,13 @@ final class VideoSpeechProbe {
                     let audioTap = try PlayerSpeechAudioTap(item: item, track: tracks[0])
                     installedTap = audioTap
                     tap = audioTap
+                    // Changer le graphe audio peut interrompre la lecture. La reprise
+                    // reste conditionnée par l'intention courante : une pause de
+                    // l'utilisateur pendant la préparation doit primer.
+                    let wasWanted = wantsPlayback()
+                    try await Task.sleep(for: .milliseconds(250))
+                    if wasWanted, wantsPlayback() { restoreAfterTapChange?() }
+                    playbackDiagnostic = describePlayback(player, wantsPlayback: wasWanted)
                     status = "Tap installé ; en attente de PCM et de paroles anglaises…"
                     startMonitor(player: player, item: item, credential: credential, token: token)
                     try await worker.run(mailbox: audioTap.mailbox) { [weak self, weak player] event in
@@ -133,6 +152,8 @@ final class VideoSpeechProbe {
 
     func stop(reason: String = "Test arrêté.") {
         generation &+= 1
+        // Le retrait du mix ne doit pas redémarrer une lecture que le lecteur
+        // est en train de fermer ou que l'utilisateur a mise en pause.
         tap?.detach()
         tap = nil
         task?.cancel()
@@ -142,6 +163,17 @@ final class VideoSpeechProbe {
         transcript = ""
         mediaLag = nil
         status = reason
+    }
+
+    private func describePlayback(_ player: AVPlayer, wantsPlayback: Bool) -> String {
+        let state: String
+        switch player.timeControlStatus {
+        case .playing: state = "lecture"
+        case .paused: state = "pause"
+        case .waitingToPlayAtSpecifiedRate: state = "attente (buffer)"
+        @unknown default: state = "état inconnu"
+        }
+        return "intention=\(wantsPlayback ? "lecture" : "pause") état=\(state) vitesse=\(player.rate) externe=\(player.isExternalPlaybackActive ? "oui" : "non")"
     }
 
     private func checkSession(token: Int, player: AVPlayer, item: AVPlayerItem, credential: String?) throws {
@@ -159,14 +191,20 @@ final class VideoSpeechProbe {
             return
         }
         switch event {
-        case let .audio(count, seconds):
-            buffers = count
+        case let .audio(received, seconds, analyzed, diagnostic):
+            buffers = received
+            analyzedBuffers = analyzed
             audioSeconds = seconds
-            if transcript.isEmpty { status = "PCM reçu ; en attente de reconnaissance…" }
+            audioDiagnostic = diagnostic
+            if transcript.isEmpty { status = "Audio reçu (\(received) blocs) ; en attente de reconnaissance…" }
         case let .text(text, final, mediaEnd):
             transcript = text
-            let lag = (player?.currentTime().seconds ?? .nan) - mediaEnd
-            mediaLag = lag.isFinite ? lag : nil
+            if let mediaEnd, let player {
+                let lag = player.currentTime().seconds - mediaEnd
+                mediaLag = lag.isFinite ? lag : nil
+            } else {
+                mediaLag = nil
+            }
             status = final ? "Résultat définitif reçu — à vérifier sur la vidéo."
                 : "Résultat provisoire reçu — à vérifier sur la vidéo."
         }
@@ -176,6 +214,7 @@ final class VideoSpeechProbe {
         monitorTask?.cancel()
         monitorTask = Task { [weak self, weak player, weak item] in
             var playingWithoutPCM = 0
+            var idleSeconds = 0
             while !Task.isCancelled {
                 do { try await Task.sleep(for: .seconds(1)) } catch { return }
                 guard let self, let player, let item, token == generation else { return }
@@ -184,10 +223,30 @@ final class VideoSpeechProbe {
                     return
                 }
                 guard !player.isExternalPlaybackActive else { stop(reason: "AirPlay : test local arrêté."); return }
+                playbackDiagnostic = describePlayback(player, wantsPlayback: wantsPlaybackValue)
+                if let tap {
+                    audioDiagnostic = "Tap : \(tap.diagnostics()) · " + audioDiagnostic
+                }
                 if buffers == 0, player.timeControlStatus == .playing { playingWithoutPCM += 1 }
                 if playingWithoutPCM >= 8 {
                     stop(reason: SpeechProbeError.noBuffers.localizedDescription)
                     return
+                }
+                // Le tap peut laisser le lecteur suspendu alors que l'utilisateur
+                // veut lire : réaffirmer l'intention, jamais contredire une pause.
+                if buffers == 0, wantsPlaybackValue, player.timeControlStatus != .playing {
+                    restoreAfterTapChange?()
+                }
+                // Sans audio reçu et sans lecture active, le test ne peut pas aboutir :
+                // le dire au lieu d'attendre indéfiniment.
+                if buffers == 0, player.timeControlStatus != .playing {
+                    idleSeconds += 1
+                    if idleSeconds >= 10 {
+                        stop(reason: "Aucune audio et lecture inactive : relancez la vidéo, puis le test.")
+                        return
+                    }
+                } else {
+                    idleSeconds = 0
                 }
             }
         }
@@ -198,21 +257,37 @@ final class VideoSpeechProbe {
 struct VideoSpeechProbePanel: View {
     let probe: VideoSpeechProbe
     let player: AVPlayer?
+    /// Reprise conditionnée par l'intention de lecture du lecteur.
+    let restorePlaybackRequested: @MainActor () -> Void
+    let wantsPlaybackRequested: @MainActor () -> Bool
     @State private var expanded = false
 
     var body: some View {
         DisclosureGroup("Test audio IA (développement)", isExpanded: $expanded) {
             VStack(alignment: .leading, spacing: 8) {
                 Text(probe.status)
-                Text("PCM : \(probe.buffers) blocs · \(probe.audioSeconds, specifier: "%.1f") s")
+                Text("Audio reçu : \(probe.buffers) blocs · \(probe.audioSeconds, specifier: "%.1f") s · analysés \(probe.analyzedBuffers)")
                     .monospacedDigit()
+                if !probe.audioDiagnostic.isEmpty {
+                    Text(probe.audioDiagnostic).font(.caption2).foregroundStyle(.white.opacity(0.75))
+                }
+                if !probe.playbackDiagnostic.isEmpty {
+                    Text("Lecture : \(probe.playbackDiagnostic)").font(.caption2).foregroundStyle(.white.opacity(0.75))
+                }
                 if let lag = probe.mediaLag {
                     Text("Retard média : \(lag, specifier: "%.1f") s (pas une mesure de latence totale)")
                 }
                 if !probe.transcript.isEmpty { Text(probe.transcript).lineLimit(5) }
                 Button(probe.isRunning ? "Arrêter le test" : probe.needsDownload ? "Télécharger le modèle anglais et tester" : "Tester l’audio anglais") {
                     if probe.isRunning { probe.stop() }
-                    else if let player { probe.start(player: player, allowDownload: probe.needsDownload) }
+                    else if let player {
+                        probe.start(
+                            player: player,
+                            allowDownload: probe.needsDownload,
+                            restorePlayback: { restorePlaybackRequested() },
+                            wantsPlayback: { wantsPlaybackRequested() }
+                        )
+                    }
                 }
                 .disabled(player == nil)
                 .frame(minHeight: 44)

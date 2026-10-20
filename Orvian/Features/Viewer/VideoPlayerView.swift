@@ -182,7 +182,16 @@ struct VideoPlayerView: View {
             if VideoSpeechProbe.isExposed, isActive {
                 VStack {
                     HStack {
-                        VideoSpeechProbePanel(probe: speechProbe, player: player)
+                        VideoSpeechProbePanel(
+                            probe: speechProbe,
+                            player: player,
+                            restorePlaybackRequested: { [weak self] in
+                                self?.resumePlaybackIfRequested()
+                            },
+                            wantsPlaybackRequested: { [weak self] in
+                                self?.transport.wantsPlayback ?? false
+                            }
+                        )
                             .simultaneousGesture(controlRegionGesture)
                         Spacer(minLength: 0)
                     }
