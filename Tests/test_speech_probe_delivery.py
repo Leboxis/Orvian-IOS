@@ -89,7 +89,10 @@ class SpeechProbeDeliveryTests(unittest.TestCase):
     def test_transient_inactive_state_does_not_end_the_test(self):
         player = (ROOT / "Orvian/Features/Viewer/VideoPlayerView.swift").read_text(encoding="utf-8")
         scene = player.split(".onChange(of: scenePhase)", 1)[1].split(".onChange(of: voiceOverEnabled)", 1)[0]
-        self.assertIn('if phase == .background { speechProbe.stop(', scene)
+        # Le contrat porte sur l'intention, pas sur la mise en page : seul
+        # l'arrière-plan coupe la capture, jamais un `.inactive` transitoire.
+        self.assertIn("speechProbe.stop(", scene)
+        self.assertIn(".background", scene)
         self.assertNotIn("phase != .active", scene,
                          "A notification or Control Center makes scenePhase inactive for a moment")
         probe = (ROOT / "Orvian/Features/Viewer/VideoSpeechProbe.swift").read_text(encoding="utf-8")

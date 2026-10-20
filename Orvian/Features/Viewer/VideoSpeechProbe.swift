@@ -58,6 +58,9 @@ final class VideoSpeechProbe {
     @ObservationIgnored private var tap: PlayerSpeechAudioTap?
     @ObservationIgnored private var restoreAfterTapChange: (@MainActor () -> Void)?
     @ObservationIgnored private var wantsPlaybackValue = false
+    /// Player fourni à `start`, conservé faiblement pour rafraîchir les cues et
+    /// relancer la traduction sans le repasser en paramètre à chaque appel.
+    @ObservationIgnored private weak var activePlayer: AVPlayer?
     var isCapturing: Bool { tap != nil }
 
     func start(player: AVPlayer, allowDownload: Bool = false,
@@ -81,8 +84,9 @@ final class VideoSpeechProbe {
         playbackDiagnostic = describePlayback(player, wantsPlayback: wantsPlayback())
         wantsPlaybackValue = wantsPlayback()
         restoreAfterTapChange = restorePlayback
+        activePlayer = player
         mediaLag = nil
-        status = "Préparation du test…"
+        status = "Préparation des sous-titres…"
         task = Task { [weak self, weak player] in
             // Ne pas démarrer un deuxième analyseur avant la fin réelle du précédent.
             await previous?.value
@@ -198,7 +202,10 @@ final class VideoSpeechProbe {
         }
     }
 
-    func stop(reason: String = "Test arrêté.") {
+    /// Arrête la capture. `resetsAttempts` distingue un arrêt demandé par
+    /// l'utilisateur (compteur neuf) d'un arrêt technique (seek, vitesse,
+    /// changement de source) : seul le premier rend le budget de relances.
+    func stop(reason: String = "Sous-titres arrêtés.", resetsAttempts: Bool = true) {
         generation &+= 1
         // Le retrait du mix ne doit pas redémarrer une lecture que le lecteur
         // est en train de fermer ou que l'utilisateur a mise en pause.
@@ -211,14 +218,14 @@ final class VideoSpeechProbe {
         translationTask = nil
         restartTask?.cancel()
         restartTask = nil
-        restartAttempts = 0
+        if resetsAttempts { restartAttempts = 0 }
         isRunning = false
         englishCue = nil
         frenchCue = nil
         englishCues.clear()
         cues.clear()
         // Conserver le dernier texte reconnu : il documente ce que Speech a
-        // réellement produit, même si le test s'arrête avant la fin du flux.
+        // réellement produit, même si les sous-titres s'arrêtent avant la fin.
         mediaLag = nil
         status = reason
     }
@@ -287,7 +294,7 @@ final class VideoSpeechProbe {
     private func receive(_ event: SpeechProbeEvent, player: AVPlayer?, token: Int, credential: String?) {
         guard token == generation, isRunning else { return }
         guard credential == TokenStore.credentialFingerprint() else {
-            stop(reason: "Compte changé : test arrêté.")
+            stop(reason: "Compte changé : sous-titres arrêtés.", resetsAttempts: false)
             return
         }
         switch event {
@@ -386,7 +393,7 @@ final class VideoSpeechProbe {
 
     private func requestTranslation(for cue: SubtitleCue) {
         translationTask?.cancel()
-        translationTask = Task { [weak self, weak player] in
+        translationTask = Task { [weak self] in
             guard let self else { return }
             do {
                 await translator.prepare()
@@ -396,7 +403,7 @@ final class VideoSpeechProbe {
                 let french = SubtitleCue(start: cue.start, end: cue.end, text: translated,
                                          isFinal: cue.isFinal, isTranslated: true)
                 cues.upsert(french)
-                if let player { refresh(player: player) }
+                if let player = activePlayer { refresh(player: player) }
             } catch is CancellationError {
                 return
             } catch {
@@ -416,17 +423,21 @@ final class VideoSpeechProbe {
                 do { try await Task.sleep(for: .seconds(1)) } catch { return }
                 guard let self, let player, let item, token == generation else { return }
                 guard credential == TokenStore.credentialFingerprint(), player.currentItem === item else {
-                    stop(reason: "Source ou compte changé : test arrêté.")
+                    stop(reason: "Source ou compte changé : sous-titres arrêtés.", resetsAttempts: false)
                     return
                 }
-                guard !player.isExternalPlaybackActive else { stop(reason: "AirPlay : test local arrêté."); return }
+                guard !player.isExternalPlaybackActive else {
+                    stop(reason: "AirPlay : sous-titres locaux interrompus.", resetsAttempts: false)
+                    return
+                }
                 playbackDiagnostic = describePlayback(player, wantsPlayback: wantsPlaybackValue)
                 if let tap {
                     audioDiagnostic = "Tap : \(tap.diagnostics()) · " + audioDiagnostic
                 }
                 if buffers == 0, player.timeControlStatus == .playing { playingWithoutPCM += 1 }
                 if playingWithoutPCM >= 8 {
-                    stop(reason: SpeechProbeError.noBuffers.localizedDescription)
+                    stop(reason: SpeechProbeError.noBuffers.localizedDescription,
+                         resetsAttempts: false)
                     return
                 }
                 // Le tap peut laisser le lecteur suspendu alors que l'utilisateur
@@ -434,12 +445,14 @@ final class VideoSpeechProbe {
                 if buffers == 0, wantsPlaybackValue, player.timeControlStatus != .playing {
                     restoreAfterTapChange?()
                 }
-                // Sans audio reçu et sans lecture active, le test ne peut pas aboutir :
+                // Sans audio reçu et sans lecture active, les sous-titres ne
+                // peuvent pas aboutir : le dire plutôt qu'attendre indéfiniment.
                 // le dire au lieu d'attendre indéfiniment.
                 if buffers == 0, player.timeControlStatus != .playing {
                     idleSeconds += 1
                     if idleSeconds >= 10 {
-                        stop(reason: "Aucune audio et lecture inactive : relancez la vidéo, puis le test.")
+                        stop(reason: "Aucun audio et lecture inactive : relancez la vidéo, puis les sous-titres.",
+                             resetsAttempts: false)
                         return
                     }
                 } else {

@@ -266,11 +266,14 @@ struct VideoPlayerView: View {
         .onChange(of: isMuted) { _, muted in player?.isMuted = muted }
         .onChange(of: scenePhase) { _, phase in
             if phase == .background { pausePlayback() }
-            #if DEBUG
-            // `.inactive` est transitoire (notification, centre de contrôle) : seul
-            // l'arrière-plan doit arrêter un test qui a besoin de plusieurs secondes.
-            if phase == .background { speechProbe.stop(reason: "App en arrière-plan : test arrêté.") }
-            #endif
+            // `.inactive` est transitoire (notification, centre de contrôle) :
+            // seul l'arrière-plan doit couper une capture qui, sinon, consommerait
+            // du PCM sans que l'utilisateur le voie. Le retour en avant-plan
+            // relance la capture via `scheduleRestartIfIdle`.
+            if phase == .background {
+                speechProbe.stop(reason: "App en arrière-plan : sous-titres arrêtés.",
+                                 resetsAttempts: false)
+            }
         }
         .onChange(of: voiceOverEnabled) { _, enabled in
             if enabled { showControls = true }
@@ -786,9 +789,8 @@ struct VideoPlayerView: View {
     /// grossiers throttlés (`updateScrub`).
     private func beginScrub() {
         guard player != nil, isActive, !isDisappeared, !showTagSheet else { return }
-        #if DEBUG
-        speechProbe.stop(reason: "Déplacement : relancez le test après la recherche.")
-        #endif
+        speechProbe.stop(reason: "Déplacement : relancez les sous-titres après la recherche.",
+                         resetsAttempts: false)
         hideControlsTask?.cancel()
         cancelPendingSeek()
         transport.clearRecoveryPosition()
@@ -1004,9 +1006,8 @@ struct VideoPlayerView: View {
 
     private func seek(to seconds: Double, precise: Bool = false) {
         guard let player else { return }
-        #if DEBUG
-        speechProbe.stop(reason: "Recherche : relancez le test à la nouvelle position.")
-        #endif
+        speechProbe.stop(reason: "Recherche : relancez les sous-titres à la nouvelle position.",
+                         resetsAttempts: false)
         // Tolérance volontairement non nulle même en « précis » : sur un flux
         // réseau, une tolérance zéro force le décodage de l'image exacte et
         // prolonge le gel après chaque scrub. Une demi-seconde reste invisible
@@ -1069,9 +1070,11 @@ struct VideoPlayerView: View {
     }
 
     private func setPlaybackRate(_ rate: Float) {
-        #if DEBUG
-        if rate != playbackRate { speechProbe.stop(reason: "Vitesse modifiée : prototype limité à 1×.") }
-        #endif
+        // Le capteur impose 1× : au-delà, les horloges PCM et média divergent.
+        if rate != 1 {
+            speechProbe.stop(reason: "Vitesse modifiée : sous-titres limités à 1×.",
+                             resetsAttempts: false)
+        }
         playbackRate = rate
         player?.defaultRate = rate
         if transport.wantsPlayback, !isScrubbing, !isSeeking {
@@ -1440,9 +1443,8 @@ struct VideoPlayerView: View {
     /// le teardown est déclenché PAR le watchdog (récupération de stall) :
     /// il ne doit pas tuer la tâche de récupération en cours.
     private func teardown(cancelsStallWatchdog: Bool = true, preservingPlaybackIntent: Bool = false) {
-        #if DEBUG
-        speechProbe.stop(reason: "Lecteur fermé ou remplacé : test arrêté.")
-        #endif
+        speechProbe.stop(reason: "Lecteur fermé ou remplacé : sous-titres arrêtés.",
+                         resetsAttempts: false)
         cancelPendingSeek()
         if cancelsStallWatchdog {
             cancelStallWatchdog()
