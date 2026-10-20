@@ -63,6 +63,9 @@ struct SubtitleOverlay: View {
             }
         }
         .allowsHitTesting(false)
-        .animation(.easeOut(duration: 0.15), value: cue)
+        // Le changement de sous-titre passe par l'interrupteur central : sans
+        // lui, l'apparition du texte s'animerait même en « Réduire les
+        // animations ».
+        .animation(Motion.animation(.easeOut(duration: 0.15)), value: cue)
     }
 }
