@@ -1,4 +1,4 @@
-#if DEBUG
+#if DEBUG || ORVIAN_SPEECH_PROBE
 import AVFoundation
 import Observation
 import Speech
@@ -8,8 +8,12 @@ import SwiftUI
 @Observable
 final class VideoSpeechProbe {
     static var isExposed: Bool {
-        ProcessInfo.processInfo.environment["ORVIAN_SPEECH_PROBE"] == "1"
+        #if ORVIAN_SPEECH_PROBE
+        return true
+        #else
+        return ProcessInfo.processInfo.environment["ORVIAN_SPEECH_PROBE"] == "1"
             || ProcessInfo.processInfo.arguments.contains("-OrvianSpeechProbe")
+        #endif
     }
 
     private(set) var isRunning = false
@@ -190,7 +194,7 @@ final class VideoSpeechProbe {
     }
 }
 
-/// L'affichage de diagnostic reste séparé du rendu vidéo et n'existe pas en Release.
+/// Séparé du rendu vidéo ; absent de la Release normale, visible dans l'IPA de test dédié.
 struct VideoSpeechProbePanel: View {
     let probe: VideoSpeechProbe
     let player: AVPlayer?

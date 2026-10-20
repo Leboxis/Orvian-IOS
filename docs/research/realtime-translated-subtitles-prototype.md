@@ -9,7 +9,7 @@ Ce lot ne traduit pas en français et ne constitue pas le bouton « CC / Traduct
 - [Tap pass-through](../../Orvian/Core/Media/PlayerSpeechAudioTap.swift) sur le même AVPlayerItem, sans second lecteur, microphone, décodeur parallèle ou téléchargement intégral.
 - [Mailbox bornée](../../Orvian/Core/Media/SpeechProbeMailbox.swift) : 16 réserves de 256 Kio (4 Mio de données préallouées). Copie dans le callback ; aucun appel modèle, Task, conversion ou réseau à cet endroit. Un verrou essayé sans attente protège les échanges ; contention/saturation provoque un arrêt explicite du test, pas une attente dans le son. Ce compromis de prototype n’est pas une garantie hard-real-time.
 - [Worker acteur](../../Orvian/Core/Media/SpeechProbeWorker.swift) : conversion PCM sur un contexte hors UI, entrée Speech bornée à huit buffers, cumul entier des frames de sortie et finalisation/annulation explicites.
-- [Panneau de diagnostic](../../Orvian/Features/Viewer/VideoSpeechProbe.swift), raccordé au [lecteur actuel](../../Orvian/Features/Viewer/VideoPlayerView.swift) uniquement en DEBUG et avec activation de lancement.
+- [Panneau de diagnostic](../../Orvian/Features/Viewer/VideoSpeechProbe.swift), raccordé au [lecteur actuel](../../Orvian/Features/Viewer/VideoPlayerView.swift) en Debug avec activation de lancement, ou directement dans l’IPA de diagnostic compilé avec `ORVIAN_SPEECH_PROBE`.
 
 Les modèles sont préparés avant l’installation du tap pour éviter de remplir sa file pendant le démarrage de Speech. Le téléchargement du modèle anglais requiert un second clic explicite si le modèle manque. Aucun texte/URL signé/jeton n’est journalisé ou écrit sur disque par le prototype. Seul le dernier segment (500 caractères maximum) est conservé dans l’interface ; ce n’est pas un export de transcription.
 
@@ -26,6 +26,20 @@ Les modèles sont préparés avant l’installation du tap pour éviter de rempl
 
 ## 1. Ouvrir le prototype sur l’appareil
 
+### Sans Mac : IPA « Orvian Test IA » pour LiveContainer
+
+1. Télécharger l’IPA **Orvian-Test-IA-…-unsigned.ipa** joint à la préversion de diagnostic GitHub, et l’importer comme **nouvelle application** dans LiveContainer. Ne pas l’utiliser pour remplacer Orvian normal.
+2. Ouvrir **Orvian Test IA**, se connecter à kDrive si demandé, puis ouvrir une vidéo anglaise à **1×**, sans AirPlay.
+3. Déplier **Test audio IA (développement)** : il est visible directement, sans variable d’environnement ni argument.
+4. Toucher **Tester l’audio anglais**, puis **Télécharger le modèle anglais et tester** si le modèle manque. Aucun téléchargement de modèle n’est lancé simplement en ouvrant l’app.
+5. Relever le message, le compteur PCM et le texte anglais après quelques secondes de paroles. Si le test échoue, transmettre le message et les compteurs, sans URL signée ni jeton.
+
+L’IPA porte l’identifiant distinct `com.orvian.app.speechprobe`. Il est construit en Release optimisée avec le seul flag `ORVIAN_SPEECH_PROBE`, pas avec tous les comportements Debug. Le job dédié est déclenché manuellement depuis une branche `diagnostics/speech-probe…` et ne lance ni simulateur, ni vérification visuelle, ni capture. Sa publication est une **préversion non latest**, liée au commit de cette branche ; elle ne modifie ni le catalogue LiveContainer stable ni la numérotation normale.
+
+La traduction française n’est pas encore incluse. La compatibilité Speech et le fonctionnement à l’intérieur de LiveContainer restent à vérifier sur ton appareil : la compilation seule ne prouve pas l’accès au PCM kDrive.
+
+### Avec Mac : exécution Debug depuis Xcode
+
 1. Sur Mac, générer le projet avec XcodeGen à partir de [la configuration existante](../../project.yml) et utiliser un SDK iOS 26 ou supérieur.
 2. Configurer la signature locale si nécessaire, sélectionner le schéma Orvian et un iPhone/iPad physique compatible, configuration **Debug**.
 3. Dans **Edit Scheme → Run → Arguments**, ajouter l’argument `-OrvianSpeechProbe`, ou la variable d’environnement `ORVIAN_SPEECH_PROBE=1`.
@@ -34,7 +48,7 @@ Les modèles sont préparés avant l’installation du tap pour éviter de rempl
 6. Si le modèle manque, le test s’arrête avant de capturer l’audio. Toucher « Télécharger le modèle anglais et tester » pour autoriser sa préparation, puis attendre. La lecture vidéo n’est pas mise en pause par le test.
 7. Observer les compteurs PCM, le dernier texte anglais et l’état. Comparer à une phrase connue réellement prononcée dans la vidéo.
 
-Sans argument/variable, même un build Debug n’affiche pas le panneau. En Release, le code du prototype est exclu par `#if DEBUG` : **l’IPA Release habituel ne permet pas de réaliser ce test**. Aucun changement des workflows de publication n’a été effectué.
+Sans argument/variable, un build Debug ordinaire n’affiche pas le panneau. En Release normale sans flag dédié, le code du prototype est exclu par `#if DEBUG || ORVIAN_SPEECH_PROBE` : **l’IPA Release habituel ne permet pas de réaliser ce test**. Seul le job de diagnostic active le flag ; la publication normale reste inchangée.
 
 ## 2. Contrôle local puis vraie source kDrive
 

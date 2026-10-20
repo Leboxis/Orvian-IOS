@@ -53,7 +53,7 @@ struct VideoPlayerView: View {
     @Environment(\.scenePhase) private var scenePhase
     @State private var player: AVPlayer?
     @State private var poster: UIImage?
-    #if DEBUG
+    #if DEBUG || ORVIAN_SPEECH_PROBE
     @State private var speechProbe = VideoSpeechProbe()
     #endif
 
@@ -178,7 +178,7 @@ struct VideoPlayerView: View {
             } else {
                 tabletPlayer
             }
-            #if DEBUG
+            #if DEBUG || ORVIAN_SPEECH_PROBE
             if VideoSpeechProbe.isExposed, isActive {
                 VStack {
                     HStack {
@@ -251,7 +251,7 @@ struct VideoPlayerView: View {
         .onChange(of: isMuted) { _, muted in player?.isMuted = muted }
         .onChange(of: scenePhase) { _, phase in
             if phase == .background { pausePlayback() }
-            #if DEBUG
+            #if DEBUG || ORVIAN_SPEECH_PROBE
             if phase != .active { speechProbe.stop(reason: "App inactive : test arrêté.") }
             #endif
         }
@@ -736,7 +736,7 @@ struct VideoPlayerView: View {
     /// grossiers throttlés (`updateScrub`).
     private func beginScrub() {
         guard player != nil, isActive, !isDisappeared, !showTagSheet else { return }
-        #if DEBUG
+        #if DEBUG || ORVIAN_SPEECH_PROBE
         speechProbe.stop(reason: "Déplacement : relancez le test après la recherche.")
         #endif
         hideControlsTask?.cancel()
@@ -954,7 +954,7 @@ struct VideoPlayerView: View {
 
     private func seek(to seconds: Double, precise: Bool = false) {
         guard let player else { return }
-        #if DEBUG
+        #if DEBUG || ORVIAN_SPEECH_PROBE
         speechProbe.stop(reason: "Recherche : relancez le test à la nouvelle position.")
         #endif
         // Tolérance volontairement non nulle même en « précis » : sur un flux
@@ -1019,7 +1019,7 @@ struct VideoPlayerView: View {
     }
 
     private func setPlaybackRate(_ rate: Float) {
-        #if DEBUG
+        #if DEBUG || ORVIAN_SPEECH_PROBE
         if rate != playbackRate { speechProbe.stop(reason: "Vitesse modifiée : prototype limité à 1×.") }
         #endif
         playbackRate = rate
@@ -1387,7 +1387,7 @@ struct VideoPlayerView: View {
     /// le teardown est déclenché PAR le watchdog (récupération de stall) :
     /// il ne doit pas tuer la tâche de récupération en cours.
     private func teardown(cancelsStallWatchdog: Bool = true, preservingPlaybackIntent: Bool = false) {
-        #if DEBUG
+        #if DEBUG || ORVIAN_SPEECH_PROBE
         speechProbe.stop(reason: "Lecteur fermé ou remplacé : test arrêté.")
         #endif
         cancelPendingSeek()

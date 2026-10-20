@@ -1,0 +1,64 @@
+"""Build/activation separation contracts, not proof of PCM or device rendering."""
+from pathlib import Path
+import unittest
+
+ROOT = Path(__file__).resolve().parents[1]
+
+
+class SpeechProbeDeliveryTests(unittest.TestCase):
+    def test_probe_can_compile_without_enabling_all_debug_features(self):
+        for relative in [
+            "Orvian/Core/Media/PlayerSpeechAudioTap.swift",
+            "Orvian/Core/Media/SpeechProbeMailbox.swift",
+            "Orvian/Core/Media/SpeechProbeWorker.swift",
+            "Orvian/Features/Viewer/VideoSpeechProbe.swift",
+        ]:
+            with self.subTest(path=relative):
+                source = (ROOT / relative).read_text(encoding="utf-8")
+                self.assertTrue(source.startswith("#if DEBUG || ORVIAN_SPEECH_PROBE\n"))
+        player = (ROOT / "Orvian/Features/Viewer/VideoPlayerView.swift").read_text(encoding="utf-8")
+        self.assertEqual(player.count("#if DEBUG"), player.count("#if DEBUG || ORVIAN_SPEECH_PROBE"))
+        self.assertIn("VideoSpeechProbe.isExposed, isActive", player)
+
+    def test_diagnostic_ipa_exposes_panel_without_launch_arguments(self):
+        source = (ROOT / "Orvian/Features/Viewer/VideoSpeechProbe.swift").read_text(encoding="utf-8")
+        exposure = source.split("static var isExposed: Bool {", 1)[1].split("private(set)", 1)[0]
+        self.assertIn("#if ORVIAN_SPEECH_PROBE\n        return true\n        #else", exposure)
+        self.assertIn('environment["ORVIAN_SPEECH_PROBE"]', exposure)
+        self.assertIn('arguments.contains("-OrvianSpeechProbe")', exposure)
+
+    def test_workflow_dispatch_isolated_from_stable_publisher(self):
+        workflow = (ROOT / ".github/workflows/build.yml").read_text(encoding="utf-8")
+        stable, diagnostic = workflow.split("\n  speech-probe:\n", 1)
+        self.assertIn("if: ${{ !startsWith(github.ref, 'refs/heads/diagnostics/speech-probe') }}", stable)
+        self.assertIn("github.event_name == 'workflow_dispatch' && startsWith(github.ref, 'refs/heads/diagnostics/speech-probe')", diagnostic)
+        self.assertNotIn("needs:", diagnostic)
+        self.assertIn("SWIFT_ACTIVE_COMPILATION_CONDITIONS=$(inherited) ORVIAN_SPEECH_PROBE", diagnostic)
+        self.assertNotIn("ORVIAN_SPEECH_PROBE", stable)
+        for forbidden in ["update_repo.py", "repo.json", "git push", "-configuration Debug"]:
+            self.assertNotIn(forbidden, diagnostic)
+
+    def test_packaged_app_and_release_have_separate_identity(self):
+        workflow = (ROOT / ".github/workflows/build.yml").read_text(encoding="utf-8")
+        diagnostic = workflow.split("\n  speech-probe:\n", 1)[1]
+        self.assertIn("PRODUCT_BUNDLE_IDENTIFIER=com.orvian.app.speechprobe", diagnostic)
+        self.assertIn("INFOPLIST_KEY_CFBundleDisplayName=Orvian Test IA", diagnostic)
+        self.assertIn("Print :CFBundleIdentifier", diagnostic)
+        self.assertIn("Print :CFBundleDisplayName", diagnostic)
+        self.assertIn("Orvian-Test-IA-${GITHUB_SHA:0:8}-unsigned.ipa", diagnostic)
+        self.assertIn('--target "$GITHUB_SHA"', diagnostic)
+        self.assertIn("--prerelease --latest=false", diagnostic)
+        self.assertIn("GITHUB_RUN_ATTEMPT", diagnostic)
+        self.assertIn("GH_TOKEN: ${{ github.token }}", diagnostic)
+
+    def test_diagnostic_job_does_not_launch_app_or_capture_ui(self):
+        workflow = (ROOT / ".github/workflows/build.yml").read_text(encoding="utf-8")
+        diagnostic = workflow.split("\n  speech-probe:\n", 1)[1]
+        for forbidden in ["simctl", "screencapture", "test-without-building", "-destination 'platform=iOS Simulator"]:
+            self.assertNotIn(forbidden, diagnostic)
+        self.assertIn("-destination 'generic/platform=iOS'", diagnostic)
+        self.assertIn('build 2>&1 | tee "$RUNNER_TEMP/orvian-speech-probe-build.log"', diagnostic)
+
+
+if __name__ == "__main__":
+    unittest.main()

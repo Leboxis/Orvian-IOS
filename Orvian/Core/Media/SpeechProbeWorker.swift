@@ -1,4 +1,4 @@
-#if DEBUG
+#if DEBUG || ORVIAN_SPEECH_PROBE
 import AVFoundation
 import Speech
 

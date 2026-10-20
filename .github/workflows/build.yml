@@ -13,6 +13,7 @@ permissions:
 # retarder une publication.
 jobs:
   build:
+    if: ${{ !startsWith(github.ref, 'refs/heads/diagnostics/speech-probe') }}
     name: Build unsigned IPA (LiveContainer ready)
     runs-on: macos-26
     concurrency:
@@ -173,3 +174,86 @@ jobs:
           tag_name: v${{ steps.version.outputs.value }}
           files: Orvian-${{ steps.version.outputs.value }}-unsigned.ipa
           generate_release_notes: true
+
+  speech-probe:
+    if: github.event_name == 'workflow_dispatch' && startsWith(github.ref, 'refs/heads/diagnostics/speech-probe')
+    name: Build separate audio diagnostic IPA
+    runs-on: macos-26
+    timeout-minutes: 20
+    concurrency:
+      group: orvian-speech-probe-${{ github.ref }}
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Run nonvisual diagnostic contracts
+        run: |
+          python3 -m unittest discover -s Tests -p 'test_*.py'
+          python3 .github/scripts/check_speech_probe.py
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Generate Xcode project
+        run: xcodegen generate
+
+      - name: Compile dedicated diagnostic app without launching it
+        shell: bash
+        run: |
+          set -o pipefail
+          xcodebuild \
+            -project Orvian.xcodeproj \
+            -scheme Orvian \
+            -destination 'generic/platform=iOS' \
+            -configuration Release \
+            -derivedDataPath build-speech-probe \
+            'SWIFT_ACTIVE_COMPILATION_CONDITIONS=$(inherited) ORVIAN_SPEECH_PROBE' \
+            PRODUCT_BUNDLE_IDENTIFIER=com.orvian.app.speechprobe \
+            'INFOPLIST_KEY_CFBundleDisplayName=Orvian Test IA' \
+            CURRENT_PROJECT_VERSION="$GITHUB_RUN_NUMBER" \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY='' \
+            build 2>&1 | tee "$RUNNER_TEMP/orvian-speech-probe-build.log"
+
+      - name: Package isolated LiveContainer diagnostic IPA
+        shell: bash
+        run: |
+          set -euo pipefail
+          APP='build-speech-probe/Build/Products/Release-iphoneos/Orvian.app'
+          test -d "$APP"
+          PLIST="$APP/Info.plist"
+          /usr/libexec/PlistBuddy -c 'Set :CFBundleDisplayName Orvian Test IA' "$PLIST"
+          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleDisplayName' "$PLIST")" = 'Orvian Test IA'
+          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$PLIST")" = 'com.orvian.app.speechprobe'
+          mkdir -p diagnostic/Payload
+          cp -R "$APP" diagnostic/Payload/
+          IPA="Orvian-Test-IA-${GITHUB_SHA:0:8}-unsigned.ipa"
+          (cd diagnostic && zip -qry "../$IPA" Payload/)
+          echo "IPA=$IPA" >> "$GITHUB_ENV"
+
+      - name: Upload diagnostic IPA and compilation log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Orvian-Test-IA-${{ github.sha }}
+          path: |
+            Orvian-Test-IA-*-unsigned.ipa
+            ${{ runner.temp }}/orvian-speech-probe-build.log
+
+      - name: Publish diagnostic prerelease only
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          TAG="speech-probe-${GITHUB_SHA:0:8}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          gh release create "$TAG" "$IPA" \
+            --target "$GITHUB_SHA" \
+            --prerelease --latest=false \
+            --title 'Orvian Test IA — diagnostic audio uniquement' \
+            --notes 'IPA de test distinct pour LiveContainer. Ouvrir une vidéo kDrive anglaise à 1×, déplier Test audio IA (développement), puis Tester l’audio anglais. Télécharger le modèle si proposé. Ne remplace pas la version normale ; ne contient pas encore la traduction française. Aucun test visuel ni capture exécuté.'
