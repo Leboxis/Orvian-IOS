@@ -543,6 +543,7 @@ struct VideoPlayerView: View {
 
     private func loadPreparedSubtitles() async {
         preparedSubtitles.install(nil)
+        speechProbe.setMode(.off, player: player, start: {}, stopTest: { speechProbe.stop() })
         guard isActive, !isDisappeared, let credential = TokenStore.credentialFingerprint() else { return }
         let source = subtitleSource
         let key = PreparedSubtitleKey(credential: credential, driveID: driveId, file: file, source: source)

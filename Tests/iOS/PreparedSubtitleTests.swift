@@ -44,6 +44,13 @@ final class PreparedSubtitleTests: XCTestCase {
         XCTAssertEqual(cues.map(\.start), [2, 5])
         XCTAssertEqual(cues.map(\.end), [3.1, 6])
     }
+    func testFinalResultFragmentsKeepTheirWordBoundary() throws {
+        let cues = try PreparedSentenceBuilder.make([
+            .init(start: 0, end: 1, text: "Hello", beginsResult: true),
+            .init(start: 1, end: 2, text: "world.", beginsResult: true)
+        ], source: .english)
+        XCTAssertEqual(cues.map(\.original), ["Hello world."])
+    }
     func testCoarseSpeechTimesMergeWithoutLosingWords() throws {
         let cues = try PreparedSentenceBuilder.make([.init(start: 2, end: 7, text: "Hello world. Goodbye world.")], source: .english)
         XCTAssertEqual(cues.count, 1)

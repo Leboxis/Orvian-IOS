@@ -82,18 +82,19 @@ enum PreparedSentenceBuilder {
         var text = ""
         var mapped: [(range: Range<Int>, span: PreparedSpeechSpan)] = []
         var offset = 0
-        for span in spans {
+        for originalSpan in spans {
+            var span = originalSpan
             guard span.start.isFinite, span.end.isFinite, span.start >= 0,
                   span.end > span.start else { throw PreparedSubtitleError.timing }
             if span.beginsResult, let last = text.last, !last.isWhitespace,
                let first = span.text.first, !first.isWhitespace {
-                text += " "
-                offset += 1
+                span.text = " " + span.text
             }
             let length = span.text.utf16.count
             mapped.append((offset..<(offset + length), span))
             text += span.text
             offset += length
+            guard offset <= 8_000_000 else { throw PreparedSubtitleError.tooLarge }
         }
         let tokenizer = NLTokenizer(unit: .sentence)
         tokenizer.string = text

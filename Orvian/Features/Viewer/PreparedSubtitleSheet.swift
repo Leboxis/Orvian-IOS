@@ -1,6 +1,5 @@
 import SwiftUI
 import Translation
-import Speech
 
 @MainActor @Observable
 final class PreparedSubtitleJob {
@@ -11,15 +10,28 @@ final class PreparedSubtitleJob {
     var error: String?
     var configuration: TranslationSession.Configuration?
     var originalRun = UUID()
+    @ObservationIgnored private var cancelled = false
+    @ObservationIgnored private var configuredSource: SubtitleSourceLanguage?
     @ObservationIgnored private var work: Task<Void, Never>?
 
     func start(source: SubtitleSourceLanguage) {
         guard !isRunning else { return }
         isRunning = true
+        cancelled = false
         error = nil
         progress = 0
         status = "Préparation des modèles…"
-        if source == .french { originalRun = UUID(); return }
+        if source == .french {
+            configuration = nil
+            configuredSource = nil
+            originalRun = UUID()
+            return
+        }
+        if configuration != nil, configuredSource == source {
+            configuration?.invalidate()
+            return
+        }
+        configuredSource = source
         let sourceLanguage = Locale.Language(identifier: source.rawValue)
         if #available(iOS 26.4, *) {
             configuration = .init(source: sourceLanguage, target: .init(identifier: "fr"), preferredStrategy: .highFidelity)
@@ -29,20 +41,18 @@ final class PreparedSubtitleJob {
         configuration?.invalidate()
     }
 
-    func cancel() { work?.cancel() }
+    func cancel() { cancelled = true; work?.cancel() }
 
     func run(key: PreparedSubtitleKey, session: TranslationSession?) async {
-        guard isRunning, work == nil else { return }
+        guard isRunning, work == nil, !cancelled, !Task.isCancelled else { return }
         let task = Task { [self] in
             var temporaryDirectory: URL?
             defer {
                 if let temporaryDirectory { try? FileManager.default.removeItem(at: temporaryDirectory) }
             }
             do {
-                let authorization = await withCheckedContinuation { continuation in
-                    SFSpeechRecognizer.requestAuthorization { continuation.resume(returning: $0) }
-                }
-                guard authorization == .authorized else { throw PreparedSubtitleError.unavailable }
+                // SpeechAnalyzer analyse localement : l'autorisation du vieux
+                // SFSpeechRecognizer (serveurs Apple) ne s'applique pas ici.
                 if let session { try await session.prepareTranslation() }
                 try validate(key)
                 status = "Téléchargement de la vidéo…"

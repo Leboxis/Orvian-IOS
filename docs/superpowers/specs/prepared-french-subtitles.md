@@ -4,7 +4,8 @@
 
 Une action « Préparer les sous-titres français » apparaît dans le menu d’appui long
 des vidéos actives. Une feuille permet de choisir la langue réellement parlée,
-de préparer/recalculer, annuler, supprimer ou ouvrir la vidéo après réussite.
+de préparer/recalculer, annuler ou supprimer les sous-titres, puis fermer la
+feuille pour ouvrir la vidéo avec le geste habituel.
 Le traitement reste local : aucun nouveau service, clé API ou facturation.
 La préparation complète peut demander le téléchargement de toute la vidéo et
 des modèles ; l’application doit rester au premier plan.
@@ -27,7 +28,7 @@ L’observateur média vérifie les transitions à 20 Hz sans publier à chaque 
 ## Structure et style
 
 Core/Media : modèle Codable, cache actor, analyseur actor.
-Features/Shared : feuille et orchestration MainActor ; la grille reste propriétaire
+Features/Viewer : feuille et orchestration MainActor ; la grille reste propriétaire
 unique de sa présentation, comme les autres actions du menu.
 Features/Viewer : sélection des cues préenregistrés, distincte du mode temps réel.
 Modèles valeur Sendable, opérations lourdes hors MainActor, erreurs affichables
@@ -35,7 +36,6 @@ sans URL signée ni transcription privée dans les logs.
 
 ## Validation et commandes
 
-- `python3 -m unittest discover -s Tests -p test_prepared_subtitles.py`
 - `python3 -m unittest discover -s Tests -p test_protected_navigation.py`
 - `python3 -m unittest discover -s Tests -p test_phone_video_player.py`
 - `xcodegen generate`
