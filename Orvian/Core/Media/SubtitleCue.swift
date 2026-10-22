@@ -34,6 +34,9 @@ struct SubtitleCue: Equatable, Sendable {
     var text: String
     var isFinal: Bool
     var isTranslated: Bool
+    /// Instant où le texte devient disponible, distinct de la parole si le
+    /// moteur a du retard. La durée de lecture doit partir de cet instant.
+    var displayStart: Double? = nil
 }
 
 /// Conserve les sous-titres récents et choisit celui à afficher.
@@ -79,7 +82,7 @@ struct SubtitleCueTimeline: Sendable {
     /// Cue à afficher à `time`, ou `nil` si le plus récent est trop ancien.
     func cue(at time: Double) -> SubtitleCue? {
         guard let latest = cues.last(where: { $0.start <= time + lookahead }) else { return nil }
-        return time - latest.start <= maximumAge ? latest : nil
+        return time - (latest.displayStart ?? latest.start) <= maximumAge ? latest : nil
     }
 }
 

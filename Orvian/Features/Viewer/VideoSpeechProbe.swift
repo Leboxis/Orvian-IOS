@@ -380,8 +380,10 @@ final class VideoSpeechProbe {
 
     /// Met à jour la transcription et, si nécessaire, demande sa traduction.
     func publishTranscript(text: String, start: Double, isFinal: Bool) {
-        let cue = SubtitleCue(start: start, end: start + 3, text: text,
+        var cue = SubtitleCue(start: start, end: start + 3, text: text,
                               isFinal: isFinal, isTranslated: false)
+        let receivedAt = activePlayer?.currentTime().seconds ?? start
+        cue.displayStart = receivedAt.isFinite ? receivedAt : start
         englishCues.upsert(cue)
         guard mode == .french else { return }
         // Ne traduire que du texte stabilisé : retraduire chaque provisoire

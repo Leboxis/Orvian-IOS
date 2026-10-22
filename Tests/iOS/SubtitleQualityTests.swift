@@ -41,6 +41,16 @@ final class SubtitleQualityTests: XCTestCase {
         XCTAssertNil(queue.popFirst())
     }
 
+    func testDisplayDurationStartsWhenLateTextBecomesAvailable() {
+        var timeline = SubtitleCueTimeline()
+        timeline.maximumAge = 3
+        var delayed = cue("An original-language caption", start: 10)
+        delayed.displayStart = 14
+        timeline.upsert(delayed)
+        XCTAssertNotNil(timeline.cue(at: 15), "A three-second setting must not hide a late caption immediately")
+        XCTAssertNil(timeline.cue(at: 18), "The caption must still disappear after its configured lifetime")
+    }
+
     func testStoredNumericPreferencesAreBounded() {
         XCTAssertEqual(SubtitleSettings.fontSize(.nan), 17)
         XCTAssertEqual(SubtitleSettings.fontSize(100), 28)
