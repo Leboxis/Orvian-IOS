@@ -1,0 +1,19 @@
+name: Audio tap safety
+on:
+  push:
+    branches: [fix/subtitle-audio-crash]
+permissions:
+  contents: read
+jobs:
+  callbacks:
+    runs-on: macos-26
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Exercise real audio callbacks outside MainActor
+        run: |
+          swiftc -parse-as-library -swift-version 5 -Xfrontend -enable-actor-data-race-checks \
+            Orvian/Core/Media/SpeechProbeMailbox.swift \
+            Orvian/Core/Media/PlayerSpeechAudioTap.swift \
+            Tests/AudioTap/CallbackChecks.swift -o "$RUNNER_TEMP/audio-tap-checks"
+          "$RUNNER_TEMP/audio-tap-checks"

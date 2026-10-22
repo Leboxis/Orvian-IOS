@@ -40,9 +40,27 @@ final class PlayerSpeechAudioTap {
         guard previousMix == nil else { throw SpeechProbeError.existingMix }
         let context = SpeechTapContext(mailbox: mailbox)
         storedContext = context
-        var callbacks = MTAudioProcessingTapCallbacks(
+        var callbacks = Self.makeCallbacks(clientInfo: Unmanaged.passUnretained(context).toOpaque())
+        var tap: MTAudioProcessingTap?
+        let status = withExtendedLifetime(context) {
+            MTAudioProcessingTapCreate(nil, &callbacks, kMTAudioProcessingTapCreationFlag_PreEffects, &tap)
+        }
+        guard status == noErr, let tap else { throw SpeechProbeError.tapCreation }
+        let parameters = AVMutableAudioMixInputParameters(track: track)
+        parameters.audioTapProcessor = tap
+        let mix = AVMutableAudioMix()
+        mix.inputParameters = [parameters]
+        // AVPlayerItem copie le mix ; conserver la copie réellement installée pour le démontage.
+        item.audioMix = mix
+        guard let appliedMix = item.audioMix else { throw SpeechProbeError.tapCreation }
+        installedMix = appliedMix
+    }
+
+    /// Fabrique partagée avec le test qui appelle prepare sur un thread audio.
+    static func makeCallbacks(clientInfo: UnsafeMutableRawPointer?) -> MTAudioProcessingTapCallbacks {
+        return MTAudioProcessingTapCallbacks(
             version: kMTAudioProcessingTapCallbacksVersion_0,
-            clientInfo: Unmanaged.passUnretained(context).toOpaque(),
+            clientInfo: clientInfo,
             init: { _, info, storage in
                 guard let info else { return }
                 storage.pointee = Unmanaged<SpeechTapContext>.fromOpaque(info).retain().toOpaque()
@@ -98,19 +116,6 @@ final class PlayerSpeechAudioTap {
                 )
             }
         )
-        var tap: MTAudioProcessingTap?
-        let status = withExtendedLifetime(context) {
-            MTAudioProcessingTapCreate(nil, &callbacks, kMTAudioProcessingTapCreationFlag_PreEffects, &tap)
-        }
-        guard status == noErr, let tap else { throw SpeechProbeError.tapCreation }
-        let parameters = AVMutableAudioMixInputParameters(track: track)
-        parameters.audioTapProcessor = tap
-        let mix = AVMutableAudioMix()
-        mix.inputParameters = [parameters]
-        // AVPlayerItem copie le mix ; conserver la copie réellement installée pour le démontage.
-        item.audioMix = mix
-        guard let appliedMix = item.audioMix else { throw SpeechProbeError.tapCreation }
-        installedMix = appliedMix
     }
 
     @discardableResult
