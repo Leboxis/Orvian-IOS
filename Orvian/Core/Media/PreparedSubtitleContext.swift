@@ -50,7 +50,7 @@ struct PreparedSubtitleContext {
                 if started, !closed { output += fragment }
                 continue
             }
-            guard let index = ranges.firstIndex(where: { CMTimeRangeEqual($0, otherRange: time) }) else {
+            guard let index = ranges.firstIndex(where: { CMTimeRangeEqual($0, time) }) else {
                 throw PreparedSubtitleError.contextAlignment
             }
             if meaningful { seen.insert(index) }
