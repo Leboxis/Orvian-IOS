@@ -106,25 +106,37 @@ final class PreparedSubtitleTests: XCTestCase {
         let output = AVAssetReaderTrackOutput(track: track, outputSettings: format.settings)
         reader.add(output)
         let (stream, continuation) = AsyncStream.makeStream(of: AnalyzerInput.self, bufferingPolicy: .bufferingOldest(4))
-        let consumer = Task { () -> (Double?, Int, Float?) in
-            var firstTime: Double?
+        let consumer = Task { () -> (firstAudio: Double?, totalFrames: Int, audibleFrames: Int, end: Double) in
+            var firstAudio: Double?
             var frames = 0
-            var firstValue: Float?
+            var audibleFrames = 0
+            var end = 0.0
             for await input in stream {
-                if firstTime == nil { firstTime = input.bufferStartTime?.seconds }
-                if firstValue == nil { firstValue = input.buffer.floatChannelData?[0][0] }
-                frames += Int(input.buffer.frameLength)
+                let count = Int(input.buffer.frameLength)
+                let start = input.bufferStartTime?.seconds ?? .nan
+                if let samples = input.buffer.floatChannelData?[0] {
+                    for index in 0..<count where abs(samples[index]) > 0.0001 {
+                        if firstAudio == nil { firstAudio = start + Double(index) / format.sampleRate }
+                        audibleFrames += 1
+                    }
+                }
+                frames += count
+                end = start + Double(count) / format.sampleRate
             }
-            return (firstTime, frames, firstValue)
+            return (firstAudio, frames, audibleFrames, end)
         }
         do {
             try await PreparedSubtitleAnalyzer.shared.pump(reader: reader, output: output, format: format,
                 duration: 6, continuation: continuation, progress: { _ in })
             continuation.finish()
             let result = await consumer.value
-            XCTAssertEqual(try XCTUnwrap(result.0), 5, accuracy: 0.001)
-            XCTAssertEqual(result.1, 16000)
-            XCTAssertEqual(try XCTUnwrap(result.2), 0.1, accuracy: 0.001)
+            // AVAssetReader matérialise l'edit vide initial par cinq secondes
+            // de PCM silencieux. C'est le premier son, pas le premier buffer,
+            // qui doit rester exactement à 5 s sur la timeline vidéo.
+            XCTAssertEqual(try XCTUnwrap(result.firstAudio), 5, accuracy: 0.001)
+            XCTAssertEqual(result.totalFrames, 96000)
+            XCTAssertEqual(result.audibleFrames, 16000)
+            XCTAssertEqual(result.end, 6, accuracy: 0.001)
         } catch {
             continuation.finish()
             consumer.cancel()
