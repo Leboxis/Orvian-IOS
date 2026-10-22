@@ -14,7 +14,7 @@ final class VideoSpeechProbe {
 
     private(set) var isRunning = false
     private(set) var needsDownload = false
-    private(set) var status = "Sous-titres automatiques anglais → français."
+    private(set) var status = "Sous-titres automatiques vers le français."
     private(set) var transcript = ""
     private(set) var buffers = 0
     private(set) var audioSeconds = 0.0
@@ -26,7 +26,8 @@ final class VideoSpeechProbe {
     private(set) var mediaLag: Double?
     /// Mode demandé par le bouton CC du lecteur.
     var mode: SubtitleMode = .off
-    /// Cue anglais à afficher (mode anglais).
+    private(set) var sourceLanguage: SubtitleSourceLanguage = .english
+    /// Transcription originale à afficher.
     private(set) var englishCue: SubtitleCue?
     /// Cue français à afficher (mode français).
     private(set) var frenchCue: SubtitleCue?
@@ -47,6 +48,11 @@ final class VideoSpeechProbe {
     @ObservationIgnored private var englishCues = SubtitleCueTimeline()
     @ObservationIgnored private var translator = SubtitleTranslator()
     @ObservationIgnored private var translationTask: Task<Void, Never>?
+    @ObservationIgnored private var sentenceFlushTask: Task<Void, Never>?
+    @ObservationIgnored private var sentences = SubtitleSentenceBuffer()
+    @ObservationIgnored private var translationQueue = SubtitleTranslationQueue()
+    @ObservationIgnored private var translationGeneration = 0
+    private(set) var isTranslating = false
     @ObservationIgnored private var restartTask: Task<Void, Never>?
     /// Tentatives de relance après une erreur transitoire ; plafonnée pour
     /// éviter une boucle si la source reste incompatible.
@@ -85,6 +91,10 @@ final class VideoSpeechProbe {
         wantsPlaybackValue = wantsPlayback()
         restoreAfterTapChange = restorePlayback
         activePlayer = player
+        if mode == .french, sourceLanguage != .french {
+            configureTranslation()
+            translationConfiguration?.invalidate()
+        }
         mediaLag = nil
         status = "Préparation des sous-titres…"
         task = Task { [weak self, weak player] in
@@ -118,7 +128,7 @@ final class VideoSpeechProbe {
                 guard !tracks.isEmpty else { throw SpeechProbeError.noAudio }
                 guard tracks.count == 1 else { throw SpeechProbeError.multipleTracks }
                 guard SpeechTranscriber.isAvailable else { throw SpeechProbeError.unavailable }
-                guard let locale = await SpeechTranscriber.supportedLocale(equivalentTo: Locale(identifier: "en-US")) else {
+                guard let locale = await SpeechTranscriber.supportedLocale(equivalentTo: Locale(identifier: sourceLanguage.localeIdentifier)) else {
                     throw SpeechProbeError.locale
                 }
                 try checkSession(token: token, player: player, item: item, credential: credential)
@@ -128,10 +138,10 @@ final class VideoSpeechProbe {
                 if let request = installation {
                     guard allowDownload else {
                         needsDownload = true
-                        status = "Modèle anglais manquant. Le téléchargement nécessite du réseau."
+                        status = "Modèle de transcription \(sourceLanguage.title.lowercased()) manquant. Le téléchargement nécessite du réseau."
                         return
                     }
-                    status = "Téléchargement du modèle anglais…"
+                    status = "Téléchargement du modèle de transcription \(sourceLanguage.title.lowercased())…"
                     do { try await request.downloadAndInstall() }
                     catch is CancellationError { throw CancellationError() }
                     catch { throw SpeechProbeError.model }
@@ -159,12 +169,13 @@ final class VideoSpeechProbe {
                     try await Task.sleep(for: .milliseconds(250))
                     if wasWanted, wantsPlayback() { restoreAfterTapChange?() }
                     playbackDiagnostic = describePlayback(player, wantsPlayback: wasWanted)
-                    status = "Tap installé ; en attente de paroles anglaises…"
+                    status = "En attente de paroles en \(sourceLanguage.title.lowercased())…"
                     startMonitor(player: player, item: item, credential: credential, token: token)
                     try await worker.run(mailbox: audioTap.mailbox) { [weak self, weak player] event in
                         await self?.receive(event, player: player, token: token, credential: credential)
                     }
                     if token == generation {
+                        flushSentence()
                         status = buffers > 0
                             ? "Fin de l’audio : sous-titres arrêtés."
                             : "Aucun audio exploitable : sous-titres indisponibles."
@@ -214,12 +225,7 @@ final class VideoSpeechProbe {
         task?.cancel()
         monitorTask?.cancel()
         monitorTask = nil
-        translationTask?.cancel()
-        translationTask = nil
-        // Une session de traduction arrêtée ne doit pas être réutilisée au
-        // redémarrage : elle pourrait rejeter en boucle. Reproduction fraîche.
-        let translator = self.translator
-        Task { await translator.reset() }
+        clearTranslation()
         restartTask?.cancel()
         restartTask = nil
         if resetsAttempts { restartAttempts = 0 }
@@ -242,39 +248,67 @@ final class VideoSpeechProbe {
         // Les reprises automatiques (seek/scrub/1×) continuent de l'accumuler.
         restartAttempts = 0
         translationError = nil
-        // Une session de traduction arrêtée avec un mode mort ne doit pas être
-        // réutilisée telle quelle quand on revient au français.
-        if newMode != .french { translationTask?.cancel(); translationTask = nil }
+        clearTranslation()
+        cues.clear()
+        frenchCue = nil
         if newMode == .off {
             translationConfiguration = nil
             stopTest()
             return
         }
-        if newMode == .french {
-            // Demande la préparation des langues ; `.translationTask` la réalise
-            // avec l'interface système et le consentement de téléchargement.
-            translationConfiguration = .init(
-                source: Locale.Language(identifier: "en"),
-                target: Locale.Language(identifier: "fr")
-            )
-        } else {
-            translationConfiguration = nil
-        }
+        configureTranslation()
         guard player != nil else { return }
         if !isRunning { start() }
+    }
+
+    /// Changer de langue invalide les transcriptions et traductions précédentes.
+    func setSourceLanguage(_ language: SubtitleSourceLanguage) {
+        guard sourceLanguage != language else { return }
+        stop(reason: "Langue parlée : \(language.title).")
+        sourceLanguage = language
+        configureTranslation()
+        // Le tick du lecteur relance la capture si les sous-titres sont actifs.
+    }
+
+    private func configureTranslation() {
+        translationConfiguration = mode == .french && sourceLanguage != .french
+            ? .init(source: Locale.Language(identifier: sourceLanguage.rawValue),
+                    target: Locale.Language(identifier: "fr")) : nil
+    }
+
+    private func clearTranslation() {
+        translationGeneration &+= 1
+        translationTask?.cancel()
+        translationTask = nil
+        sentenceFlushTask?.cancel()
+        sentenceFlushTask = nil
+        sentences = SubtitleSentenceBuffer()
+        translationQueue.clear()
+        translator = SubtitleTranslator()
+        isTranslating = false
+        isPreparingTranslation = false
+        translationError = nil
     }
 
     /// Prépare les modèles de traduction (téléchargement nécessite le
     /// consentement système, obtenu par `.translationTask`).
     func prepareTranslation(using session: TranslationSession) async {
+        let token = translationGeneration
         isPreparingTranslation = true
-        defer { isPreparingTranslation = false }
+        defer {
+            if token == translationGeneration {
+                isPreparingTranslation = false
+                startTranslationIfNeeded()
+            }
+        }
         do {
             try await session.prepareTranslation()
+            guard token == translationGeneration, mode == .french else { return }
             translationError = nil
         } catch is CancellationError {
             return
         } catch {
+            guard token == translationGeneration else { return }
             translationError = SubtitleTranslationError.notInstalled.localizedDescription
         }
     }
@@ -325,7 +359,7 @@ final class VideoSpeechProbe {
                 mediaLag = nil
             }
             if !cleaned.isEmpty, let start = mediaEnd.map({ max(0, $0 - 3) }) {
-                publishEnglish(text: cleaned, start: start, isFinal: final)
+                publishTranscript(text: cleaned, start: start, isFinal: final)
             }
             // « analysés » progresse sans texte : le problème est en aval de la conversion.
             status = withText > 0
@@ -335,17 +369,29 @@ final class VideoSpeechProbe {
         }
     }
 
-    /// Met à jour le cue anglais et, si nécessaire, demande sa traduction.
-    private func publishEnglish(text: String, start: Double, isFinal: Bool) {
+    /// Met à jour la transcription et, si nécessaire, demande sa traduction.
+    func publishTranscript(text: String, start: Double, isFinal: Bool) {
         let cue = SubtitleCue(start: start, end: start + 3, text: text,
                               isFinal: isFinal, isTranslated: false)
-        cues.upsert(cue)
         englishCues.upsert(cue)
         guard mode == .french else { return }
         // Ne traduire que du texte stabilisé : retraduire chaque provisoire
         // ferait osciller l'affichage et saturerait le traducteur.
         guard isFinal else { return }
-        requestTranslation(for: cue)
+        if sourceLanguage == .french {
+            publishFrench(text: cue.text, cue: cue)
+            return
+        }
+        if let sentence = sentences.append(cue) { requestTranslation(for: sentence) }
+        // Final sans ponctuation : attendre brièvement une suite, puis traduire
+        // même si Speech ne produit plus rien (silence ou fin de vidéo).
+        sentenceFlushTask?.cancel()
+        let token = translationGeneration
+        sentenceFlushTask = Task { [weak self] in
+            do { try await Task.sleep(for: .milliseconds(1200)) } catch { return }
+            guard let self, token == translationGeneration else { return }
+            flushSentence()
+        }
     }
 
     /// Rafraîchit le cue affiché selon la position de lecture.
@@ -362,9 +408,9 @@ final class VideoSpeechProbe {
         let time = player.currentTime().seconds
         let newEnglish = englishCues.cue(at: time)
         if newEnglish != englishCue { englishCue = newEnglish }
-        // En français, si aucune traduction n'est disponible, on retombe sur
-        // l'anglais : une traduction en retard ne doit pas laisser l'écran vide.
-        let newFrench = mode == .french ? (cues.cue(at: time) ?? newEnglish) : nil
+        // Les deux langues ont des timelines distinctes : un nouveau résultat
+        // Speech ne doit jamais écraser le français déjà affiché.
+        let newFrench = mode == .french ? cues.cue(at: time) : nil
         if newFrench != frenchCue { frenchCue = newFrench }
         scheduleRestartIfIdle(player: player)
     }
@@ -400,32 +446,58 @@ final class VideoSpeechProbe {
         }
     }
 
+    private func flushSentence() {
+        if let sentence = sentences.flush() { requestTranslation(for: sentence) }
+    }
+
     private func requestTranslation(for cue: SubtitleCue) {
-        translationTask?.cancel()
+        translationQueue.append(cue)
+        startTranslationIfNeeded()
+    }
+
+    private func startTranslationIfNeeded() {
+        guard mode == .french, !isPreparingTranslation, translationTask == nil,
+              translationQueue.count > 0 else { return }
+        let token = translationGeneration
+        let source = sourceLanguage
+        let translator = self.translator
+        isTranslating = true
         translationTask = Task { [weak self] in
             guard let self else { return }
-            do {
-                let translated = try await translator.translate(cue.text)
-                guard !Task.isCancelled else { return }
-                translationError = nil
-                // La traduction arrive plusieurs secondes après la parole : si on
-                // gardait le `start` d'origine, le cue serait déjà « trop vieux »
-                // (`maximumAge`) au premier rafraîchissement et ne s'afficherait
-                // jamais. On l'ancre sur la position lue au moment où il devient
-                // visible, visible jusqu'à ce que la phrase suivante le remplace.
-                let now = activePlayer?.currentTime().seconds ?? cue.start
-                let french = SubtitleCue(start: now, end: max(now, cue.end), text: translated,
-                                         isFinal: cue.isFinal, isTranslated: true)
-                cues.upsert(french)
-                if let player = activePlayer { refresh(player: player) }
-            } catch is CancellationError {
-                return
-            } catch {
-                guard !Task.isCancelled else { return }
-                translationError = (error as? LocalizedError)?.errorDescription
-                    ?? SubtitleTranslationError.failed.localizedDescription
+            defer {
+                if token == translationGeneration {
+                    translationTask = nil
+                    isTranslating = false
+                }
+            }
+            // Une seule traduction active. Ajouter une phrase ne l'annule pas.
+            while token == translationGeneration, mode == .french,
+                  !Task.isCancelled, let cue = translationQueue.popFirst() {
+                do {
+                    let translated = try await translator.translate(cue.text, source: source)
+                    guard !Task.isCancelled, token == translationGeneration,
+                          mode == .french else { return }
+                    translationError = nil
+                    publishFrench(text: translated, cue: cue)
+                } catch is CancellationError {
+                    return
+                } catch {
+                    guard !Task.isCancelled, token == translationGeneration else { return }
+                    translationError = (error as? LocalizedError)?.errorDescription
+                        ?? SubtitleTranslationError.failed.localizedDescription
+                }
             }
         }
+    }
+
+    private func publishFrench(text: String, cue: SubtitleCue) {
+        // L'instant d'arrivée garantit une durée de lecture même en cas de
+        // retard. Les prochains fragments originaux restent sur leur timeline.
+        let position = activePlayer?.currentTime().seconds ?? cue.start
+        let now = position.isFinite ? position : cue.start
+        cues.upsert(SubtitleCue(start: now, end: max(now, cue.end), text: text,
+                                isFinal: true, isTranslated: sourceLanguage != .french))
+        if let player = activePlayer { refresh(player: player) }
     }
 
     private func startMonitor(player: AVPlayer, item: AVPlayerItem, credential: String?, token: Int) {
@@ -503,7 +575,7 @@ struct VideoSpeechProbePanel: View {
                     Text("Retard média : \(lag, specifier: "%.1f") s (pas une mesure de latence totale)")
                 }
                 if !probe.transcript.isEmpty { Text(probe.transcript).lineLimit(5) }
-                Button(probe.isRunning ? "Arrêter le test" : probe.needsDownload ? "Télécharger le modèle anglais et tester" : "Tester l’audio anglais") {
+                Button(probe.isRunning ? "Arrêter le test" : probe.needsDownload ? "Télécharger le modèle et tester" : "Tester l’audio") {
                     if probe.isRunning { probe.stop() }
                     else if let player {
                         probe.start(

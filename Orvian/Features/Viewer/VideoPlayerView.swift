@@ -182,6 +182,7 @@ struct VideoPlayerView: View {
                 cue: speechProbe.displayedCue,
                 translationError: speechProbe.translationError,
                 isPreparing: speechProbe.isPreparingTranslation,
+                isTranslating: speechProbe.isTranslating,
                 bottomInset: showControls ? bottomControlsHeight + 12 : 28
             )
             #if DEBUG
@@ -510,7 +511,9 @@ struct VideoPlayerView: View {
 
     /// Bouton « CC / Traduction » du lecteur iPhone.
     private var subtitleButton: some View {
-        SubtitleModeMenu(mode: speechProbe.mode, isSubtle: true) { mode in
+        SubtitleModeMenu(mode: speechProbe.mode, isSubtle: true,
+                         sourceLanguage: speechProbe.sourceLanguage,
+                         selectSource: { language in speechProbe.setSourceLanguage(language) }) { mode in
             applySubtitleMode(mode)
         }
     }
@@ -757,7 +760,9 @@ struct VideoPlayerView: View {
                 timeControls
             }
             speedMenu
-            SubtitleModeMenu(mode: speechProbe.mode, isSubtle: false) { mode in
+            SubtitleModeMenu(mode: speechProbe.mode, isSubtle: false,
+                         sourceLanguage: speechProbe.sourceLanguage,
+                         selectSource: { language in speechProbe.setSourceLanguage(language) }) { mode in
                 applySubtitleMode(mode)
             }
             AirPlayButton()
