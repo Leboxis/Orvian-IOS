@@ -41,6 +41,32 @@ final class SubtitleQualityTests: XCTestCase {
         XCTAssertNil(queue.popFirst())
     }
 
+    func testStoredNumericPreferencesAreBounded() {
+        XCTAssertEqual(SubtitleSettings.fontSize(.nan), 17)
+        XCTAssertEqual(SubtitleSettings.fontSize(100), 28)
+        XCTAssertEqual(SubtitleSettings.backgroundOpacity(-1), 0.6)
+        XCTAssertEqual(SubtitleSettings.backgroundOpacity(.infinity), 0.72)
+        XCTAssertEqual(SubtitleSettings.displayDuration(0), 3)
+        XCTAssertEqual(SubtitleSettings.displayDuration(.nan), 6)
+    }
+
+    @MainActor
+    func testConfiguredDurationAppliesToBothLanguageTimelines() {
+        let probe = VideoSpeechProbe()
+        probe.setSourceLanguage(.french)
+        probe.setMode(.french, player: nil, start: {}, stopTest: {})
+        probe.setDisplayDuration(3)
+        probe.publishTranscript(text: "Bonjour.", start: 0, isFinal: true)
+        probe.refreshCues(at: 4)
+        XCTAssertNil(probe.englishCue)
+        XCTAssertNil(probe.displayedCue)
+        probe.setDisplayDuration(10)
+        probe.refreshCues(at: 4)
+        XCTAssertEqual(probe.displayedCue?.text, "Bonjour.")
+        XCTAssertEqual(probe.englishCue?.text, "Bonjour.")
+        probe.stop()
+    }
+
     @MainActor
     func testFrenchModeNeverShowsOriginalAndLanguageChangeClearsOldState() {
         let probe = VideoSpeechProbe()

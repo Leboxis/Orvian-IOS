@@ -144,3 +144,16 @@ Les sous-titres restent limités à la lecture locale à 1× et aux sources audi
 compatibles. Ils arrivent après la parole ; le regroupement privilégie le
 contexte au prix d’un délai supplémentaire. La qualité linguistique et la
 synchronisation sont à vérifier sur iPhone avec des vidéos représentatives.
+
+
+### Préférences des sous-titres
+
+**Réglages → Sous-titres** permet de choisir le mode préféré, la langue parlée,
+la taille du texte (14–28 pt), l’opacité du fond (60–95 %) et la durée maximale
+d’affichage (3–10 s). Ces choix sont conservés après fermeture de l’application.
+Le menu CC mémorise également le mode et la langue choisis pour les vidéos
+suivantes. La langue parlée doit correspondre à l’audio de la vidéo.
+
+En mode français, le lecteur affiche uniquement la traduction française (ou la
+transcription si l’audio est déjà en français). Pendant la préparation ou en cas
+d’échec, il affiche un message au lieu de repasser sur le texte original.

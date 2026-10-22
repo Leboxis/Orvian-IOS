@@ -1,0 +1,48 @@
+name: Audio tap safety
+on:
+  push:
+    branches: [main, fix/subtitle-audio-crash, fix/subtitle-settings-french]
+    paths:
+      - 'Orvian/Core/Media/PlayerSpeechAudioTap.swift'
+      - 'Orvian/Core/Media/SpeechProbeMailbox.swift'
+      - 'Orvian/Features/Settings/**'
+      - 'Orvian/Core/Media/Subtitle*.swift'
+      - 'Orvian/Features/Viewer/Video*.swift'
+      - 'Orvian/UI/SubtitleOverlay.swift'
+      - 'Tests/AudioTap/**'
+      - '.github/workflows/audio-tap-safety.yml'
+permissions:
+  contents: read
+jobs:
+  callbacks:
+    runs-on: macos-26
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Exercise real audio callbacks outside MainActor
+        run: |
+          swiftc -parse-as-library -swift-version 5 -Xfrontend -enable-actor-data-race-checks \
+            Orvian/Core/Media/SpeechProbeMailbox.swift \
+            Orvian/Core/Media/PlayerSpeechAudioTap.swift \
+            Tests/AudioTap/CallbackChecks.swift -o "$RUNNER_TEMP/audio-tap-checks"
+          "$RUNNER_TEMP/audio-tap-checks"
+      - name: Install XcodeGen
+        run: brew install xcodegen
+      - name: Build unsigned iOS candidate
+        run: |
+          xcodegen generate
+          xcodebuild -project Orvian.xcodeproj -scheme Orvian \
+            -configuration Release -destination 'generic/platform=iOS' \
+            -derivedDataPath build-audio-safety \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO build
+      - name: Package candidate IPA
+        run: |
+          mkdir -p candidate/Payload
+          cp -R build-audio-safety/Build/Products/Release-iphoneos/Orvian.app candidate/Payload/
+          cd candidate
+          zip -qry ../Orvian-Subtitles-French-Settings-unsigned.ipa Payload
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Orvian-Subtitles-French-Settings-IPA
+          path: Orvian-Subtitles-French-Settings-unsigned.ipa
+          if-no-files-found: error

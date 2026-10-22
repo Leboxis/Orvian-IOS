@@ -242,7 +242,10 @@ final class VideoSpeechProbe {
 
     /// Change de mode depuis le bouton CC. Revenir à `off` libère le tap.
     func setMode(_ newMode: SubtitleMode, player: AVPlayer?, start: () -> Void, stopTest: () -> Void) {
-        guard newMode != mode else { return }
+        guard newMode != mode else {
+            if player != nil, mode != .off, !isRunning { start() }
+            return
+        }
         mode = newMode
         // Choix utilisateur explicite : repartir avec un compteur de relances neuf.
         // Les reprises automatiques (seek/scrub/1×) continuent de l'accumuler.
@@ -259,6 +262,12 @@ final class VideoSpeechProbe {
         configureTranslation()
         guard player != nil else { return }
         if !isRunning { start() }
+    }
+
+    func setDisplayDuration(_ seconds: Double) {
+        let duration = SubtitleSettings.displayDuration(seconds)
+        cues.maximumAge = duration
+        englishCues.maximumAge = duration
     }
 
     /// Changer de langue invalide les transcriptions et traductions précédentes.

@@ -61,6 +61,8 @@ struct SubtitleOverlay: View {
     var isTranslating: Bool = false
     let bottomInset: CGFloat
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @AppStorage(SubtitleSettings.fontSizeKey) private var fontSize = SubtitleSettings.defaultFontSize
+    @AppStorage(SubtitleSettings.backgroundOpacityKey) private var opacity = SubtitleSettings.defaultBackgroundOpacity
 
     var body: some View {
         VStack {
@@ -69,14 +71,14 @@ struct SubtitleOverlay: View {
                 VStack(spacing: 4) {
                     if let cue {
                         Text(cue.text)
-                            .font(.system(size: dynamicTypeSize.isAccessibilitySize ? 20 : 17, weight: .semibold))
+                            .font(.system(size: dynamicTypeSize.isAccessibilitySize ? max(20, SubtitleSettings.fontSize(fontSize)) : SubtitleSettings.fontSize(fontSize), weight: .semibold))
                             .foregroundStyle(.white)
                             .multilineTextAlignment(.center)
                             .lineLimit(3)
                             .fixedSize(horizontal: false, vertical: true)
                             .padding(.horizontal, 14)
                             .padding(.vertical, 8)
-                            .background(.black.opacity(0.72), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                            .background(.black.opacity(SubtitleSettings.backgroundOpacity(opacity)), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
                             .padding(.horizontal, 16)
                             .transition(.opacity)
                             .accessibilityLabel(cue.isTranslated ? "Sous-titre traduit" : "Sous-titre original")
@@ -88,7 +90,7 @@ struct SubtitleOverlay: View {
                             .foregroundStyle(.white)
                             .multilineTextAlignment(.center)
                             .padding(8)
-                            .background(.black.opacity(0.72), in: RoundedRectangle(cornerRadius: 10))
+                            .background(.black.opacity(SubtitleSettings.backgroundOpacity(opacity)), in: RoundedRectangle(cornerRadius: 10))
                     } else if isPreparing || (isTranslating && cue == nil) {
                         Text(isPreparing ? "Préparation de la traduction…" : "Traduction en cours…")
                             .font(.caption2.weight(.medium))

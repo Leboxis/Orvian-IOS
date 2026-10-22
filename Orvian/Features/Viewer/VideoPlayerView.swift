@@ -56,6 +56,9 @@ struct VideoPlayerView: View {
     /// Sous-titres automatiques : propriétaire unique de l'audio, de la
     /// transcription et de la traduction pour cette page du lecteur.
     @State private var speechProbe = VideoSpeechProbe()
+    @AppStorage(SubtitleSettings.modeKey) private var preferredSubtitleMode: SubtitleMode = .off
+    @AppStorage(SubtitleSettings.sourceKey) private var subtitleSource: SubtitleSourceLanguage = .english
+    @AppStorage(SubtitleSettings.displayDurationKey) private var subtitleDuration = SubtitleSettings.defaultDisplayDuration
 
     // Transport
     /// Position de lecture, durée, avance du tampon et position du doigt vivent
@@ -266,6 +269,9 @@ struct VideoPlayerView: View {
             onControlsInteractionChanged(false)
             teardown()
         }
+        .onChange(of: preferredSubtitleMode) { _, _ in applySubtitlePreferences() }
+        .onChange(of: subtitleSource) { _, _ in applySubtitlePreferences() }
+        .onChange(of: subtitleDuration) { _, duration in speechProbe.setDisplayDuration(duration) }
         .onChange(of: isMuted) { _, muted in player?.isMuted = muted }
         .onChange(of: scenePhase) { _, phase in
             if phase == .background { pausePlayback() }
@@ -513,12 +519,20 @@ struct VideoPlayerView: View {
     private var subtitleButton: some View {
         SubtitleModeMenu(mode: speechProbe.mode, isSubtle: true,
                          sourceLanguage: speechProbe.sourceLanguage,
-                         selectSource: { language in speechProbe.setSourceLanguage(language) }) { mode in
+                         selectSource: { language in subtitleSource = language; applySubtitlePreferences() }) { mode in
             applySubtitleMode(mode)
         }
     }
 
+    private func applySubtitlePreferences() {
+        guard isActive, !isDisappeared else { return }
+        speechProbe.setSourceLanguage(subtitleSource)
+        speechProbe.setDisplayDuration(subtitleDuration)
+        applySubtitleMode(preferredSubtitleMode)
+    }
+
     private func applySubtitleMode(_ mode: SubtitleMode) {
+        preferredSubtitleMode = mode
         speechProbe.setMode(
             mode,
             player: player,
@@ -762,7 +776,7 @@ struct VideoPlayerView: View {
             speedMenu
             SubtitleModeMenu(mode: speechProbe.mode, isSubtle: false,
                          sourceLanguage: speechProbe.sourceLanguage,
-                         selectSource: { language in speechProbe.setSourceLanguage(language) }) { mode in
+                         selectSource: { language in subtitleSource = language; applySubtitlePreferences() }) { mode in
                 applySubtitleMode(mode)
             }
             AirPlayButton()
@@ -1118,6 +1132,7 @@ struct VideoPlayerView: View {
         // Retour sur une page encore en mémoire : le lecteur existe, on
         // reprend simplement la lecture.
         if player != nil {
+            applySubtitlePreferences()
             requestPlayback()
             return
         }
@@ -1226,6 +1241,7 @@ struct VideoPlayerView: View {
             resumePlaybackIfRequested()
         }
 
+        applySubtitlePreferences()
         itemStatusObserver = newPlayer.currentItem?.observe(\.status, options: [.new]) { item, _ in
             // Être prêt ne prouve pas que la reprise fonctionne : le quota
             // est réinitialisé seulement après une progression réelle.
