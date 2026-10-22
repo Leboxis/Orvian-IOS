@@ -400,19 +400,24 @@ final class VideoSpeechProbe {
     /// masqués. On ne publie que si le cue change : réassigner la même valeur
     /// quatre fois par seconde reconstruirait le lecteur pour rien.
     func refresh(player: AVPlayer) {
+        refreshCues(at: player.currentTime().seconds)
+        scheduleRestartIfIdle(player: player)
+    }
+
+    /// Sélection purement temporelle, indépendante d'un AVPlayer prêt à lire.
+    func refreshCues(at time: Double) {
+        guard time.isFinite else { return }
         guard mode != .off else {
             if englishCue != nil { englishCue = nil }
             if frenchCue != nil { frenchCue = nil }
             return
         }
-        let time = player.currentTime().seconds
         let newEnglish = englishCues.cue(at: time)
         if newEnglish != englishCue { englishCue = newEnglish }
         // Les deux langues ont des timelines distinctes : un nouveau résultat
         // Speech ne doit jamais écraser le français déjà affiché.
         let newFrench = mode == .french ? cues.cue(at: time) : nil
         if newFrench != frenchCue { frenchCue = newFrench }
-        scheduleRestartIfIdle(player: player)
     }
 
     /// Relance la capture après un seek, un scrub ou un retour à 1×.

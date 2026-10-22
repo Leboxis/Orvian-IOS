@@ -1,4 +1,3 @@
-import AVFoundation
 import XCTest
 @testable import Orvian
 
@@ -46,15 +45,17 @@ final class SubtitleQualityTests: XCTestCase {
     func testFrenchModeNeverShowsOriginalAndLanguageChangeClearsOldState() {
         let probe = VideoSpeechProbe()
         probe.setMode(.french, player: nil, start: {}, stopTest: {})
-        let player = AVPlayer()
         probe.publishTranscript(text: "An unfinished English fragment", start: 0, isFinal: false)
-        probe.refresh(player: player)
+        probe.refreshCues(at: 0)
         XCTAssertNotNil(probe.englishCue)
         XCTAssertNil(probe.displayedCue, "French mode must not fall back to English")
         XCTAssertNotNil(probe.translationConfiguration)
         probe.setSourceLanguage(.french)
         XCTAssertNil(probe.translationConfiguration, "French audio needs transcription only")
         XCTAssertNil(probe.displayedCue)
+        probe.publishTranscript(text: "Bonjour, tout le monde.", start: 0, isFinal: true)
+        probe.refreshCues(at: 0)
+        XCTAssertEqual(probe.displayedCue?.text, "Bonjour, tout le monde.")
         probe.setSourceLanguage(.spanish)
         XCTAssertNotNil(probe.translationConfiguration)
         XCTAssertEqual(probe.sourceLanguage.localeIdentifier, "es-ES")

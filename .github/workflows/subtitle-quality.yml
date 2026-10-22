@@ -2,8 +2,14 @@ name: Subtitle quality
 on:
   pull_request:
     branches: [main]
-  push:
-    branches: [fix/french-subtitle-quality]
+    paths:
+      - 'Orvian/Core/Media/Subtitle*.swift'
+      - 'Orvian/Core/Media/SpeechProbe*.swift'
+      - 'Orvian/Features/Viewer/VideoSpeechProbe.swift'
+      - 'Orvian/UI/SubtitleOverlay.swift'
+      - 'Tests/iOS/SubtitleQualityTests.swift'
+      - 'Tests/test_subtitle_cues.py'
+      - '.github/workflows/subtitle-quality.yml'
 permissions:
   contents: read
 jobs:
