@@ -258,6 +258,7 @@ struct VideoPlayerView: View {
                 cancelPendingSeek()
                 _ = transport.endScrub()
                 teardown(preservingPlaybackIntent: true)
+                preparedSubtitles.install(nil)
                 if wasPlaying { transport.play() }
                 loadGeneration &+= 1
             }
@@ -270,6 +271,7 @@ struct VideoPlayerView: View {
             pendingToggleTask = nil
             onControlsInteractionChanged(false)
             teardown()
+            preparedSubtitles.install(nil)
         }
         .onChange(of: preferredSubtitleMode) { _, _ in applySubtitlePreferences() }
         .task(id: subtitleSource) {

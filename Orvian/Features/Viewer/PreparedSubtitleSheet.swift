@@ -193,8 +193,11 @@ struct PreparedSubtitleSheet: View {
             guard !job.isRunning, let credential = TokenStore.credentialFingerprint() else { return }
             let value = PreparedSubtitleKey(credential: credential, driveID: driveID, file: file, source: source)
             key = value
-            job.isReady = await PreparedSubtitleStore.shared.load(value) != nil
-            if job.isReady { job.status = "Des sous-titres préparés sont disponibles pour cette vidéo." }
+            let ready = await PreparedSubtitleStore.shared.load(value) != nil
+            guard !Task.isCancelled, !job.isRunning, source == value.source else { return }
+            job.isReady = ready
+            job.error = nil
+            job.status = ready ? "Des sous-titres préparés sont disponibles pour cette vidéo." : "Prêt à analyser la vidéo entière."
         }
         .onDisappear { job.cancel() }
         .onChange(of: scenePhase) { _, phase in if phase == .background { job.cancel() } }
