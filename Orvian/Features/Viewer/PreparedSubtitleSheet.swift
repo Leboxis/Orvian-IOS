@@ -120,7 +120,9 @@ private enum PreparedSubtitleDownload {
         guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode),
               response.url?.scheme?.lowercased() == "https",
               TokenStore.credentialFingerprint() == key.credential else { throw PreparedSubtitleError.download }
-        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("OrvianSubtitleSources", isDirectory: true)
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true,
             attributes: [.protectionKey: FileProtectionType.complete])
         do {

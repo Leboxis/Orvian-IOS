@@ -15,7 +15,7 @@ import Foundation
 /// retarder l'affichage.
 enum TemporaryFileSweeper {
     /// Dossiers entièrement dédiés à des copies jetables.
-    private static let ownedDirectories = ["Uploads", "DroppedFiles", "OrvianDownloads", "OrvianPreviews"]
+    private static let ownedDirectories = ["Uploads", "DroppedFiles", "OrvianDownloads", "OrvianPreviews", "OrvianSubtitleSources"]
 
     /// Préfixe des segments écrits par `UploadChunkReader` à la racine de `tmp`.
     private static let chunkPrefix = "orvian-chunk-"
