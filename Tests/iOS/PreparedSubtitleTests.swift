@@ -132,6 +132,18 @@ final class PreparedSubtitleTests: XCTestCase {
             throw error
         }
     }
+    @MainActor func testCancelBeforeSessionStartsAllowsAnotherPreparation() {
+        let job = PreparedSubtitleJob()
+        job.start(source: .french)
+        let firstRun = job.originalRun
+        XCTAssertTrue(job.isRunning)
+        job.cancel()
+        XCTAssertFalse(job.isRunning)
+        job.start(source: .french)
+        XCTAssertTrue(job.isRunning)
+        XCTAssertNotEqual(firstRun, job.originalRun)
+        job.cancel()
+    }
     @MainActor func testPlaybackUsesFrenchAndRefreshesOnlyOnCueChanges() throws {
         let playback = PreparedSubtitlePlayback()
         playback.install(try document())

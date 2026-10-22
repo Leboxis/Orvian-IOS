@@ -41,7 +41,13 @@ final class PreparedSubtitleJob {
         configuration?.invalidate()
     }
 
-    func cancel() { cancelled = true; work?.cancel() }
+    func cancel() {
+        cancelled = true
+        if let work { work.cancel() } else {
+            isRunning = false
+            status = "Préparation annulée."
+        }
+    }
 
     func run(key: PreparedSubtitleKey, session: TranslationSession?) async {
         guard isRunning, work == nil, !cancelled, !Task.isCancelled else { return }
@@ -53,6 +59,7 @@ final class PreparedSubtitleJob {
             do {
                 // SpeechAnalyzer analyse localement : l'autorisation du vieux
                 // SFSpeechRecognizer (serveurs Apple) ne s'applique pas ici.
+                try validate(key)
                 if let session { try await session.prepareTranslation() }
                 try validate(key)
                 status = "Téléchargement de la vidéo…"
@@ -87,11 +94,11 @@ final class PreparedSubtitleJob {
                 self.error = (error as? PreparedSubtitleError)?.localizedDescription
                     ?? "La préparation a échoué. Vérifiez les modèles de langue, la connexion et l’espace disponible, puis réessayez."
             }
-            isRunning = false
         }
         work = task
         await withTaskCancellationHandler { await task.value } onCancel: { task.cancel() }
         work = nil
+        isRunning = false
     }
 
     private func setProgress(_ value: Double) { progress = value }
