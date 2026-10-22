@@ -1366,54 +1366,57 @@ struct VideoPlayerView: View {
     private func updateTimeObserver(for player: AVPlayer) {
         if let timeObserver { player.removeTimeObserver(timeObserver) }
         timeObserver = player.addPeriodicTimeObserver(
-            // Le chrome suit à 4 Hz quand il est visible : un label à la seconde
-            // près et une barre de progression n'ont pas besoin de 8 images/s,
-            // et chaque tick reconstruit la vue sur le main. Caché, seul le
-            // suivi opérationnel (récupération/AirPlay) reste actif à 1 Hz.
+            // Les cues préparés suivent le média à 20 Hz, même sans chrome.
+            // Leur modèle ne publie qu'aux changements de phrase. L'horloge
+            // visible reste limitée à environ 4 Hz.
             forInterval: CMTime(value: 1, timescale: preparedSubtitles.isAvailable ? 20 : (showControls ? 4 : 1)),
             queue: .main
         ) { time in
-            guard self.player === player, !isDisappeared else { return }
-            if playbackRetryCount > 0, !isScrubbing, !isSeeking,
-               player.timeControlStatus == .playing,
-               time.seconds.isFinite, time.seconds >= retryResetPosition + 2 {
-                playbackRetryCount = 0
-            }
-            let externalPlaybackActive = player.isExternalPlaybackActive
-            if isExternalPlaybackActive != externalPlaybackActive {
-                isExternalPlaybackActive = externalPlaybackActive
-            }
-            // Les sous-titres suivent la vidéo même quand le chrome est masqué :
-            // ce rafraîchissement ne publie que le cue affiché, pas l'horloge.
-            if preparedSubtitles.isAvailable {
-                preparedSubtitles.refresh(at: time.seconds)
-            } else {
-                speechProbe.refresh(player: player)
-            }
-            guard showControls else { return }
-            let itemDuration = player.currentItem?.duration.seconds ?? 0
-            if itemDuration.isFinite, itemDuration > 0,
-               abs(clock.duration - itemDuration) > 0.01 {
-                clock.duration = itemDuration
-            }
-            if !isScrubbing, !isSeeking, showControls, time.seconds.isFinite {
-                clock.currentTime = time.seconds
-            }
-            // Plage bufferisée : fin la plus avancée des segments chargés —
-            // après un seek en avant, le segment contenant la position peut
-            // ne pas exister encore ; prendre le premier intervalle afficherait
-            // un buffer résiduel derrière le curseur. Borné à la durée.
-            let ranges = player.currentItem?.loadedTimeRanges.map(\.timeRangeValue) ?? []
-            if !ranges.isEmpty {
-                let rawEnd = ranges.map(\.end.seconds).max() ?? 0
-                let clampedEnd = clock.duration.isFinite && clock.duration > 0
-                    ? min(rawEnd, clock.duration)
-                    : rawEnd
-                if abs(clock.bufferedEnd - clampedEnd) > 0.05 {
-                    clock.bufferedEnd = max(0, clampedEnd)
+            // AVPlayer garantit la file .main passée ci-dessus.
+            MainActor.assumeIsolated {
+                guard self.player === player, !isDisappeared else { return }
+                if playbackRetryCount > 0, !isScrubbing, !isSeeking,
+                   player.timeControlStatus == .playing,
+                   time.seconds.isFinite, time.seconds >= retryResetPosition + 2 {
+                    playbackRetryCount = 0
                 }
-            } else if clock.bufferedEnd != 0 {
-                clock.bufferedEnd = 0
+                let externalPlaybackActive = player.isExternalPlaybackActive
+                if isExternalPlaybackActive != externalPlaybackActive {
+                    isExternalPlaybackActive = externalPlaybackActive
+                }
+                // Les sous-titres suivent la vidéo même quand le chrome est masqué :
+                // ce rafraîchissement ne publie que le cue affiché, pas l'horloge.
+                if preparedSubtitles.isAvailable {
+                    preparedSubtitles.refresh(at: time.seconds)
+                } else {
+                    speechProbe.refresh(player: player)
+                }
+                guard showControls else { return }
+                let itemDuration = player.currentItem?.duration.seconds ?? 0
+                if itemDuration.isFinite, itemDuration > 0,
+                   abs(clock.duration - itemDuration) > 0.01 {
+                    clock.duration = itemDuration
+                }
+                if !isScrubbing, !isSeeking, showControls, time.seconds.isFinite,
+                   abs(clock.currentTime - time.seconds) >= 0.2 {
+                    clock.currentTime = time.seconds
+                }
+                // Plage bufferisée : fin la plus avancée des segments chargés —
+                // après un seek en avant, le segment contenant la position peut
+                // ne pas exister encore ; prendre le premier intervalle afficherait
+                // un buffer résiduel derrière le curseur. Borné à la durée.
+                let ranges = player.currentItem?.loadedTimeRanges.map(\.timeRangeValue) ?? []
+                if !ranges.isEmpty {
+                    let rawEnd = ranges.map(\.end.seconds).max() ?? 0
+                    let clampedEnd = clock.duration.isFinite && clock.duration > 0
+                        ? min(rawEnd, clock.duration)
+                        : rawEnd
+                    if abs(clock.bufferedEnd - clampedEnd) > 0.05 {
+                        clock.bufferedEnd = max(0, clampedEnd)
+                    }
+                } else if clock.bufferedEnd != 0 {
+                    clock.bufferedEnd = 0
+                }
             }
         }
     }

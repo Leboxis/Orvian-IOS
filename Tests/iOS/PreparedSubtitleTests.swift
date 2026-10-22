@@ -1,4 +1,6 @@
 import XCTest
+import AVFoundation
+import Speech
 @testable import Orvian
 
 final class PreparedSubtitleTests: XCTestCase {
@@ -81,6 +83,54 @@ final class PreparedSubtitleTests: XCTestCase {
         await store.clear(credential: "accountA")
         let removed = await store.load(doc.key)
         XCTAssertNil(removed)
+    }
+    func testRealPCMDecodeKeepsTrackOffsetAndAllSamples() async throws {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".caf")
+        defer { try? FileManager.default.removeItem(at: url) }
+        let format = try XCTUnwrap(AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: 16000, channels: 1, interleaved: false))
+        do {
+            let file = try AVAudioFile(forWriting: url, settings: format.settings)
+            let buffer = try XCTUnwrap(AVAudioPCMBuffer(pcmFormat: format, frameCapacity: 16000))
+            buffer.frameLength = 16000
+            for index in 0..<16000 { buffer.floatChannelData![0][index] = 0.1 }
+            try file.write(from: buffer)
+        }
+        let source = AVURLAsset(url: url)
+        let sourceTracks = try await source.loadTracks(withMediaType: .audio)
+        let sourceTrack = try XCTUnwrap(sourceTracks.first)
+        let composition = AVMutableComposition()
+        let track = try XCTUnwrap(composition.addMutableTrack(withMediaType: .audio, preferredTrackID: kCMPersistentTrackID_Invalid))
+        try track.insertTimeRange(CMTimeRange(start: .zero, duration: CMTime(seconds: 1, preferredTimescale: 16000)),
+                                  of: sourceTrack, at: CMTime(seconds: 5, preferredTimescale: 16000))
+        let reader = try AVAssetReader(asset: composition)
+        let output = AVAssetReaderTrackOutput(track: track, outputSettings: format.settings)
+        reader.add(output)
+        let (stream, continuation) = AsyncStream.makeStream(of: AnalyzerInput.self, bufferingPolicy: .bufferingOldest(4))
+        let consumer = Task { () -> (Double?, Int, Float?) in
+            var firstTime: Double?
+            var frames = 0
+            var firstValue: Float?
+            for await input in stream {
+                if firstTime == nil { firstTime = input.bufferStartTime?.seconds }
+                if firstValue == nil { firstValue = input.buffer.floatChannelData?[0][0] }
+                frames += Int(input.buffer.frameLength)
+            }
+            return (firstTime, frames, firstValue)
+        }
+        do {
+            try await PreparedSubtitleAnalyzer.shared.pump(reader: reader, output: output, format: format,
+                duration: 6, continuation: continuation, progress: { _ in })
+            continuation.finish()
+            let result = await consumer.value
+            XCTAssertEqual(try XCTUnwrap(result.0), 5, accuracy: 0.001)
+            XCTAssertEqual(result.1, 16000)
+            XCTAssertEqual(try XCTUnwrap(result.2), 0.1, accuracy: 0.001)
+        } catch {
+            continuation.finish()
+            consumer.cancel()
+            _ = await consumer.value
+            throw error
+        }
     }
     @MainActor func testPlaybackUsesFrenchAndRefreshesOnlyOnCueChanges() throws {
         let playback = PreparedSubtitlePlayback()

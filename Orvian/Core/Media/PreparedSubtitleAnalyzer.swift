@@ -123,7 +123,7 @@ actor PreparedSubtitleAnalyzer {
         return spans
     }
 
-    private func pump(reader: AVAssetReader, output: AVAssetReaderTrackOutput, format: AVAudioFormat,
+    func pump(reader: AVAssetReader, output: AVAssetReaderTrackOutput, format: AVAudioFormat,
                       duration: Double, continuation: AsyncStream<AnalyzerInput>.Continuation,
                       progress: @escaping @Sendable (Double) async -> Void) async throws {
         guard reader.startReading() else { throw PreparedSubtitleError.source }
@@ -134,6 +134,9 @@ actor PreparedSubtitleAnalyzer {
             let frames = CMSampleBufferGetNumSamples(sample)
             guard frames > 0 else { continue }
             let time = CMSampleBufferGetPresentationTimeStamp(sample)
+            guard let description = CMSampleBufferGetFormatDescription(sample),
+                  let actualFormat = AVAudioFormat(cmAudioFormatDescription: description),
+                  actualFormat == format else { throw PreparedSubtitleError.source }
             guard time.seconds.isFinite, time.seconds >= 0, time.seconds >= previousTime,
                   frames <= Int(Int32.max),
                   let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: AVAudioFrameCount(frames)) else {
