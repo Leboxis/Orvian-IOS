@@ -59,6 +59,7 @@ struct SubtitleOverlay: View {
     var translationError: String?
     var isPreparing: Bool = false
     var isTranslating: Bool = false
+    var isPrepared: Bool = false
     let bottomInset: CGFloat
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @AppStorage(SubtitleSettings.fontSizeKey) private var fontSize = SubtitleSettings.defaultFontSize
@@ -74,13 +75,12 @@ struct SubtitleOverlay: View {
                             .font(.system(size: dynamicTypeSize.isAccessibilitySize ? max(20, SubtitleSettings.fontSize(fontSize)) : SubtitleSettings.fontSize(fontSize), weight: .semibold))
                             .foregroundStyle(.white)
                             .multilineTextAlignment(.center)
-                            .lineLimit(3)
+                            .lineLimit(isPrepared ? nil : 3)
                             .fixedSize(horizontal: false, vertical: true)
                             .padding(.horizontal, 14)
                             .padding(.vertical, 8)
                             .background(.black.opacity(SubtitleSettings.backgroundOpacity(opacity)), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
                             .padding(.horizontal, 16)
-                            .transition(.opacity)
                             .accessibilityLabel(cue.isTranslated ? "Sous-titre traduit" : "Sous-titre original")
                             .accessibilityValue(cue.text)
                     }
@@ -105,6 +105,6 @@ struct SubtitleOverlay: View {
         // Le changement de sous-titre passe par l'interrupteur central : sans
         // lui, l'apparition du texte s'animerait même en « Réduire les
         // animations ».
-        .animation(Motion.animation(.easeOut(duration: 0.15)), value: cue)
+        .animation(isPrepared ? nil : Motion.animation(.easeOut(duration: 0.15)), value: cue)
     }
 }

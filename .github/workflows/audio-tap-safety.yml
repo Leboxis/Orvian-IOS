@@ -1,12 +1,14 @@
 name: Audio tap safety
 on:
   push:
-    branches: [main, fix/subtitle-audio-crash, fix/subtitle-settings-french]
+    branches: [main, fix/subtitle-audio-crash, fix/subtitle-settings-french, feature/prepared-french-subtitles]
     paths:
       - 'Orvian/Core/Media/PlayerSpeechAudioTap.swift'
       - 'Orvian/Core/Media/SpeechProbeMailbox.swift'
       - 'Orvian/Features/Settings/**'
       - 'Orvian/Core/Media/Subtitle*.swift'
+      - 'Orvian/Core/Media/Prepared*.swift'
+      - 'Orvian/Features/Viewer/Prepared*.swift'
       - 'Orvian/Features/Viewer/Video*.swift'
       - 'Orvian/UI/SubtitleOverlay.swift'
       - 'Tests/AudioTap/**'
@@ -40,9 +42,9 @@ jobs:
           mkdir -p candidate/Payload
           cp -R build-audio-safety/Build/Products/Release-iphoneos/Orvian.app candidate/Payload/
           cd candidate
-          zip -qry ../Orvian-Subtitles-French-Settings-unsigned.ipa Payload
+          zip -qry ../Orvian-Prepared-French-Subtitles-unsigned.ipa Payload
       - uses: actions/upload-artifact@v4
         with:
-          name: Orvian-Subtitles-French-Settings-IPA
-          path: Orvian-Subtitles-French-Settings-unsigned.ipa
+          name: Orvian-Prepared-French-Subtitles-IPA
+          path: Orvian-Prepared-French-Subtitles-unsigned.ipa
           if-no-files-found: error

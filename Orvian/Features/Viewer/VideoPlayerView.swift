@@ -56,6 +56,7 @@ struct VideoPlayerView: View {
     /// Sous-titres automatiques : propriétaire unique de l'audio, de la
     /// transcription et de la traduction pour cette page du lecteur.
     @State private var speechProbe = VideoSpeechProbe()
+    @State private var preparedSubtitles = PreparedSubtitlePlayback()
     @AppStorage(SubtitleSettings.modeKey) private var preferredSubtitleMode: SubtitleMode = .off
     @AppStorage(SubtitleSettings.sourceKey) private var subtitleSource: SubtitleSourceLanguage = .english
     @AppStorage(SubtitleSettings.displayDurationKey) private var subtitleDuration = SubtitleSettings.defaultDisplayDuration
@@ -182,10 +183,11 @@ struct VideoPlayerView: View {
                 tabletPlayer
             }
             SubtitleOverlay(
-                cue: speechProbe.displayedCue,
-                translationError: speechProbe.translationError,
-                isPreparing: speechProbe.isPreparingTranslation,
-                isTranslating: speechProbe.isTranslating,
+                cue: preparedSubtitles.isAvailable ? preparedSubtitles.cue : speechProbe.displayedCue,
+                translationError: preparedSubtitles.isAvailable ? nil : speechProbe.translationError,
+                isPreparing: !preparedSubtitles.isAvailable && speechProbe.isPreparingTranslation,
+                isTranslating: !preparedSubtitles.isAvailable && speechProbe.isTranslating,
+                isPrepared: preparedSubtitles.isAvailable,
                 bottomInset: showControls ? bottomControlsHeight + 12 : 28
             )
             #if DEBUG
@@ -270,7 +272,10 @@ struct VideoPlayerView: View {
             teardown()
         }
         .onChange(of: preferredSubtitleMode) { _, _ in applySubtitlePreferences() }
-        .onChange(of: subtitleSource) { _, _ in applySubtitlePreferences() }
+        .task(id: subtitleSource) {
+            await loadPreparedSubtitles()
+            applySubtitlePreferences()
+        }
         .onChange(of: subtitleDuration) { _, duration in speechProbe.setDisplayDuration(duration) }
         .onChange(of: isMuted) { _, muted in player?.isMuted = muted }
         .onChange(of: scenePhase) { _, phase in
@@ -517,9 +522,9 @@ struct VideoPlayerView: View {
 
     /// Bouton « CC / Traduction » du lecteur iPhone.
     private var subtitleButton: some View {
-        SubtitleModeMenu(mode: speechProbe.mode, isSubtle: true,
+        SubtitleModeMenu(mode: preparedSubtitles.isAvailable ? preparedSubtitles.mode : speechProbe.mode, isSubtle: true,
                          sourceLanguage: speechProbe.sourceLanguage,
-                         selectSource: { language in subtitleSource = language; applySubtitlePreferences() }) { mode in
+                         selectSource: { language in subtitleSource = language }) { mode in
             applySubtitleMode(mode)
         }
     }
@@ -528,11 +533,33 @@ struct VideoPlayerView: View {
         guard isActive, !isDisappeared else { return }
         speechProbe.setSourceLanguage(subtitleSource)
         speechProbe.setDisplayDuration(subtitleDuration)
-        applySubtitleMode(preferredSubtitleMode)
+        if preparedSubtitles.isAvailable {
+            speechProbe.setMode(.off, player: player, start: {}, stopTest: { speechProbe.stop(reason: "Sous-titres préparés chargés.") })
+            preparedSubtitles.refresh(at: player?.currentTime().seconds ?? 0)
+        } else {
+            applySubtitleMode(preferredSubtitleMode)
+        }
+    }
+
+    private func loadPreparedSubtitles() async {
+        preparedSubtitles.install(nil)
+        guard isActive, !isDisappeared, let credential = TokenStore.credentialFingerprint() else { return }
+        let source = subtitleSource
+        let key = PreparedSubtitleKey(credential: credential, driveID: driveId, file: file, source: source)
+        let document = await PreparedSubtitleStore.shared.load(key)
+        guard !Task.isCancelled, isActive, !isDisappeared, subtitleSource == source,
+              TokenStore.credentialFingerprint() == credential else { return }
+        preparedSubtitles.install(document)
+        if let player { updateTimeObserver(for: player) }
     }
 
     private func applySubtitleMode(_ mode: SubtitleMode) {
         preferredSubtitleMode = mode
+        if preparedSubtitles.isAvailable {
+            preparedSubtitles.setMode(mode, at: player?.currentTime().seconds ?? 0)
+            scheduleControlsAutoHide(delay: 2.5)
+            return
+        }
         speechProbe.setMode(
             mode,
             player: player,
@@ -774,9 +801,9 @@ struct VideoPlayerView: View {
                 timeControls
             }
             speedMenu
-            SubtitleModeMenu(mode: speechProbe.mode, isSubtle: false,
+            SubtitleModeMenu(mode: preparedSubtitles.isAvailable ? preparedSubtitles.mode : speechProbe.mode, isSubtle: false,
                          sourceLanguage: speechProbe.sourceLanguage,
-                         selectSource: { language in subtitleSource = language; applySubtitlePreferences() }) { mode in
+                         selectSource: { language in subtitleSource = language }) { mode in
                 applySubtitleMode(mode)
             }
             AirPlayButton()
@@ -1188,6 +1215,8 @@ struct VideoPlayerView: View {
             return
         }
 
+        await loadPreparedSubtitles()
+        guard generation == loadGeneration, isActive, !isDisappeared, !Task.isCancelled else { return }
         startPlayback(asset: asset, at: recoveryPosition)
     }
 
@@ -1340,7 +1369,7 @@ struct VideoPlayerView: View {
             // près et une barre de progression n'ont pas besoin de 8 images/s,
             // et chaque tick reconstruit la vue sur le main. Caché, seul le
             // suivi opérationnel (récupération/AirPlay) reste actif à 1 Hz.
-            forInterval: CMTime(value: 1, timescale: showControls ? 4 : 1),
+            forInterval: CMTime(value: 1, timescale: preparedSubtitles.isAvailable ? 20 : (showControls ? 4 : 1)),
             queue: .main
         ) { time in
             guard self.player === player, !isDisappeared else { return }
@@ -1355,7 +1384,11 @@ struct VideoPlayerView: View {
             }
             // Les sous-titres suivent la vidéo même quand le chrome est masqué :
             // ce rafraîchissement ne publie que le cue affiché, pas l'horloge.
-            speechProbe.refresh(player: player)
+            if preparedSubtitles.isAvailable {
+                preparedSubtitles.refresh(at: time.seconds)
+            } else {
+                speechProbe.refresh(player: player)
+            }
             guard showControls else { return }
             let itemDuration = player.currentItem?.duration.seconds ?? 0
             if itemDuration.isFinite, itemDuration > 0,

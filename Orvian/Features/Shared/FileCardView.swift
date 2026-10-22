@@ -12,6 +12,7 @@ struct FileCardView: View {
     /// Actions du menu contextuel dont la présentation est portée par la grille.
     enum Intent {
         case details
+        case prepareSubtitles
         case colorPicker
         case tags
         case rename
@@ -90,6 +91,11 @@ struct FileCardView: View {
             if !file.isDirectory {
                 items.append(CardMenuItem(title: "Télécharger", systemImage: "arrow.down.circle") {
                     Task { await FileDownloadService.shared.downloadAndShare(driveId: driveId, file: file) }
+                })
+            }
+            if file.isVideo, onPresent != nil {
+                items.append(CardMenuItem(title: "Préparer les sous-titres français", systemImage: "captions.bubble", waitsForDismissal: true) {
+                    onPresent?(.prepareSubtitles)
                 })
             }
             items.append(CardMenuItem(title: "Tags", systemImage: "tag") { onPresent?(.tags) })

@@ -1,9 +1,12 @@
 name: Subtitle quality
 on:
   pull_request:
-    branches: [main]
+    branches: [main, fix/subtitle-settings-french]
     paths:
       - 'Orvian/Core/Media/Subtitle*.swift'
+      - 'Orvian/Core/Media/Prepared*.swift'
+      - 'Orvian/Features/Viewer/Prepared*.swift'
+      - 'Tests/iOS/PreparedSubtitleTests.swift'
       - 'Orvian/Core/Media/SpeechProbe*.swift'
       - 'Orvian/Features/Viewer/VideoSpeechProbe.swift'
       - 'Orvian/UI/SubtitleOverlay.swift'
@@ -35,4 +38,5 @@ jobs:
             -destination "platform=iOS Simulator,id=$SIMULATOR_ID" \
             -configuration Debug -derivedDataPath "$RUNNER_TEMP/subtitle-tests" \
             -only-testing:OrvianTests/SubtitleQualityTests \
+            -only-testing:OrvianTests/PreparedSubtitleTests \
             CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO test

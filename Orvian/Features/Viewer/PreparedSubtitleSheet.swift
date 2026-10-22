@@ -1,0 +1,192 @@
+import SwiftUI
+import Translation
+import Speech
+
+@MainActor @Observable
+final class PreparedSubtitleJob {
+    var status = "Prêt à analyser la vidéo entière."
+    var progress = 0.0
+    var isRunning = false
+    var isReady = false
+    var error: String?
+    var configuration: TranslationSession.Configuration?
+    var originalRun = UUID()
+    @ObservationIgnored private var work: Task<Void, Never>?
+
+    func start(source: SubtitleSourceLanguage) {
+        guard !isRunning else { return }
+        isRunning = true
+        error = nil
+        progress = 0
+        status = "Préparation des modèles…"
+        if source == .french { originalRun = UUID(); return }
+        let sourceLanguage = Locale.Language(identifier: source.rawValue)
+        if #available(iOS 26.4, *) {
+            configuration = .init(source: sourceLanguage, target: .init(identifier: "fr"), preferredStrategy: .highFidelity)
+        } else {
+            configuration = .init(source: sourceLanguage, target: .init(identifier: "fr"))
+        }
+        configuration?.invalidate()
+    }
+
+    func cancel() { work?.cancel() }
+
+    func run(key: PreparedSubtitleKey, session: TranslationSession?) async {
+        guard isRunning, work == nil else { return }
+        let task = Task { [self] in
+            var temporaryDirectory: URL?
+            defer {
+                if let temporaryDirectory { try? FileManager.default.removeItem(at: temporaryDirectory) }
+            }
+            do {
+                let authorization = await withCheckedContinuation { continuation in
+                    SFSpeechRecognizer.requestAuthorization { continuation.resume(returning: $0) }
+                }
+                guard authorization == .authorized else { throw PreparedSubtitleError.unavailable }
+                if let session { try await session.prepareTranslation() }
+                try validate(key)
+                status = "Téléchargement de la vidéo…"
+                let local = try await PreparedSubtitleDownload.fetch(key: key)
+                temporaryDirectory = local.deletingLastPathComponent()
+                try validate(key)
+                status = "Transcription précise de l’audio…"
+                var cues = try await PreparedSubtitleAnalyzer.shared.transcribe(url: local, source: key.source) { [weak self] value in
+                    await self?.setProgress(value * 0.65)
+                }
+                try validate(key)
+                status = "Traduction des phrases en français…"
+                for index in cues.indices {
+                    try validate(key)
+                    if let session {
+                        let response = try await session.translate(cues[index].original)
+                        cues[index].french = response.targetText.trimmingCharacters(in: .whitespacesAndNewlines)
+                    } else {
+                        guard key.source == .french else { throw PreparedSubtitleError.incomplete }
+                        cues[index].french = cues[index].original
+                    }
+                    progress = 0.65 + 0.35 * Double(index + 1) / Double(cues.count)
+                }
+                try validate(key)
+                try await PreparedSubtitleStore.shared.save(PreparedSubtitles(key: key, createdAt: Date(), cues: cues))
+                try validate(key)
+                isReady = true
+                status = "Sous-titres prêts. Ils seront chargés automatiquement à l’ouverture de cette vidéo."
+            } catch is CancellationError {
+                status = "Préparation annulée."
+            } catch {
+                self.error = (error as? PreparedSubtitleError)?.localizedDescription
+                    ?? "La préparation a échoué. Vérifiez les modèles de langue, la connexion et l’espace disponible, puis réessayez."
+            }
+            isRunning = false
+        }
+        work = task
+        await withTaskCancellationHandler { await task.value } onCancel: { task.cancel() }
+        work = nil
+    }
+
+    private func setProgress(_ value: Double) { progress = value }
+    private func validate(_ key: PreparedSubtitleKey) throws {
+        try Task.checkCancellation()
+        guard TokenStore.credentialFingerprint() == key.credential else { throw CancellationError() }
+    }
+}
+
+/// Le fichier signé ne reçoit aucun en-tête d'authentification de l'API.
+/// La source intégrale est temporaire et supprimée après analyse/annulation.
+private enum PreparedSubtitleDownload {
+    static func fetch(key: PreparedSubtitleKey) async throws -> URL {
+        guard TokenStore.credentialFingerprint() == key.credential,
+              let url = await MediaURLCache.shared.url(driveId: key.driveID, fileId: key.fileID),
+              url.scheme?.lowercased() == "https" else { throw PreparedSubtitleError.download }
+        try Task.checkCancellation()
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.httpCookieStorage = nil
+        configuration.urlCredentialStorage = nil
+        let session = URLSession(configuration: configuration)
+        defer { session.invalidateAndCancel() }
+        let (temporary, response) = try await session.download(from: url)
+        defer { try? FileManager.default.removeItem(at: temporary) }
+        try Task.checkCancellation()
+        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode),
+              response.url?.scheme?.lowercased() == "https",
+              TokenStore.credentialFingerprint() == key.credential else { throw PreparedSubtitleError.download }
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true,
+            attributes: [.protectionKey: FileProtectionType.complete])
+        do {
+            let local = directory.appendingPathComponent("source.mov")
+            try FileManager.default.moveItem(at: temporary, to: local)
+            try FileManager.default.setAttributes([.protectionKey: FileProtectionType.complete], ofItemAtPath: local.path)
+            return local
+        } catch {
+            try? FileManager.default.removeItem(at: directory)
+            throw error
+        }
+    }
+}
+
+struct PreparedSubtitleSheet: View {
+    let file: DriveFile
+    let driveID: Int
+    @Environment(\.dismiss) private var dismiss
+    @Environment(\.scenePhase) private var scenePhase
+    @AppStorage(SubtitleSettings.sourceKey) private var source = SubtitleSourceLanguage.english
+    @State private var job = PreparedSubtitleJob()
+    @State private var key: PreparedSubtitleKey?
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    Text(file.name).font(.headline)
+                    Text("La vidéo entière est analysée sur cet appareil avant lecture. Les phrases complètes sont traduites puis conservées avec les temps de l’audio.")
+                    Text("La qualité dépend de la voix et de l’enregistrement. Gardez cette fenêtre ouverte jusqu’à la fin.")
+                        .font(.footnote).foregroundStyle(.secondary)
+                    Picker("Langue parlée", selection: $source) {
+                        ForEach(SubtitleSourceLanguage.allCases) { language in Text(language.title).tag(language) }
+                    }.disabled(job.isRunning)
+                }
+                Section {
+                    Text(job.status)
+                    if job.isRunning { ProgressView(value: job.progress) }
+                    if let error = job.error { Text(error).foregroundStyle(.red) }
+                    Button(job.isReady ? "Recalculer les sous-titres français" : "Préparer les sous-titres français") {
+                        guard let credential = TokenStore.credentialFingerprint() else { return }
+                        key = PreparedSubtitleKey(credential: credential, driveID: driveID, file: file, source: source)
+                        job.start(source: source)
+                    }.disabled(job.isRunning)
+                    if job.isReady, let key {
+                        Button("Supprimer les sous-titres préparés", role: .destructive) {
+                            Task {
+                                await PreparedSubtitleStore.shared.remove(key)
+                                job.isReady = false
+                                job.status = "Sous-titres préparés supprimés."
+                            }
+                        }.disabled(job.isRunning)
+                    }
+                }
+            }
+            .navigationTitle("Préparer les sous-titres")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar { ToolbarItem(placement: .confirmationAction) {
+                Button(job.isRunning ? "Annuler" : "Fermer") { job.cancel(); dismiss() }
+            } }
+        }
+        .interactiveDismissDisabled(job.isRunning)
+        .translationTask(job.configuration) { session in
+            if let key { await job.run(key: key, session: session) }
+        }
+        .task(id: job.originalRun) {
+            if let key, key.source == .french, job.isRunning { await job.run(key: key, session: nil) }
+        }
+        .task(id: source) {
+            guard !job.isRunning, let credential = TokenStore.credentialFingerprint() else { return }
+            let value = PreparedSubtitleKey(credential: credential, driveID: driveID, file: file, source: source)
+            key = value
+            job.isReady = await PreparedSubtitleStore.shared.load(value) != nil
+            if job.isReady { job.status = "Des sous-titres préparés sont disponibles pour cette vidéo." }
+        }
+        .onDisappear { job.cancel() }
+        .onChange(of: scenePhase) { _, phase in if phase == .background { job.cancel() } }
+    }
+}

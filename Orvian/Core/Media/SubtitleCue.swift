@@ -87,7 +87,7 @@ struct SubtitleCueTimeline: Sendable {
 }
 
 /// Langue parlée choisie explicitement ; Speech vérifie sa disponibilité réelle.
-enum SubtitleSourceLanguage: String, CaseIterable, Identifiable, Sendable {
+enum SubtitleSourceLanguage: String, CaseIterable, Identifiable, Sendable, Codable {
     case english = "en", french = "fr", spanish = "es", german = "de", italian = "it", portuguese = "pt"
     var id: String { rawValue }
     var title: String {
