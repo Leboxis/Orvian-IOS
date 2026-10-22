@@ -42,9 +42,9 @@ jobs:
           mkdir -p candidate/Payload
           cp -R build-audio-safety/Build/Products/Release-iphoneos/Orvian.app candidate/Payload/
           cd candidate
-          zip -qry ../Orvian-Prepared-French-Subtitles-unsigned.ipa Payload
+          zip -qry ../Orvian-Prepared-French-Context8s-unsigned.ipa Payload
       - uses: actions/upload-artifact@v4
         with:
-          name: Orvian-Prepared-French-Subtitles-IPA
-          path: Orvian-Prepared-French-Subtitles-unsigned.ipa
+          name: Orvian-Prepared-French-Context8s-IPA
+          path: Orvian-Prepared-French-Context8s-unsigned.ipa
           if-no-files-found: error

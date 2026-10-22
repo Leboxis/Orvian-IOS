@@ -57,3 +57,16 @@ aucun texte anglais de repli en mode français.
 Ne jamais : modifier les onglets/boutons protégés, lancer des captures/contrôles
 visuels dans Actions, annoncer une précision parfaite du moteur automatique.
 Ne pas ajouter de service cloud ou de dépendance sans demande explicite.
+
+## Contexte précédent (révision 2)
+
+Sur iOS 26.4+, chaque traduction reçoit la phrase courante et les phrases
+précédentes dont la fin dépasse start − 8 secondes. La phrase chevauchant
+la borne est gardée entière pour préserver le sens ; aucun texte futur n'est
+fourni. Une requête AttributedString unique conserve les attributs Speech
+audioTimeRange de chaque phrase. On extrait uniquement la traduction associée
+à la phrase courante, sans modifier ses horaires ni réafficher le contexte.
+Des attributs absents/inconnus ou une attribution ambiguë arrêtent la préparation
+sans remplacer un cache complet. La version de cache passe à 2 sur iOS 26.4+
+pour imposer un recalcul ; iOS 26.0–26.3 reste en version 1 et indique clairement
+la traduction phrase par phrase. L'analyse Speech de l'audio reste inchangée.

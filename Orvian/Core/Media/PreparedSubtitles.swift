@@ -11,6 +11,11 @@ struct PreparedSubtitleKey: Codable, Hashable, Sendable {
     let source: SubtitleSourceLanguage
     let version: Int
 
+    static var currentVersion: Int {
+        if #available(iOS 26.4, *) { return 2 }
+        return 1
+    }
+
     init(credential: String, driveID: Int, file: DriveFile, source: SubtitleSourceLanguage) {
         self.credential = credential
         self.driveID = driveID
@@ -19,7 +24,7 @@ struct PreparedSubtitleKey: Codable, Hashable, Sendable {
         modifiedAt = file.lastModifiedAt
         updatedAt = file.updatedAt
         self.source = source
-        version = 1
+        version = Self.currentVersion
     }
 }
 
@@ -36,7 +41,7 @@ struct PreparedSubtitles: Codable, Equatable, Sendable {
     let cues: [PreparedSubtitle]
 
     var isValid: Bool {
-        guard key.version == 1, !cues.isEmpty, cues.count <= 50_000 else { return false }
+        guard key.version == PreparedSubtitleKey.currentVersion, !cues.isEmpty, cues.count <= 50_000 else { return false }
         var previousEnd = -Double.infinity
         for cue in cues {
             guard cue.start.isFinite, cue.end.isFinite, cue.start >= 0,
@@ -159,9 +164,10 @@ enum PreparedSentenceBuilder {
 }
 
 enum PreparedSubtitleError: Error, LocalizedError {
-    case source, noAudio, multipleTracks, timing, noSpeech, tooLarge, unavailable, busy, download, storage, incomplete
+    case contextAlignment, source, noAudio, multipleTracks, timing, noSpeech, tooLarge, unavailable, busy, download, storage, incomplete
     var errorDescription: String? {
         switch self {
+        case .contextAlignment: "Le moteur n’a pas conservé les repères nécessaires pour séparer la phrase de son contexte. Aucun résultat partiel n’a été enregistré."
         case .source: "Cette vidéo ne permet pas une analyse audio locale complète."
         case .noAudio: "La vidéo ne contient pas de piste audio."
         case .multipleTracks: "Plusieurs pistes audio : préparez une vidéo avec une seule piste pour éviter de traduire la mauvaise voix."

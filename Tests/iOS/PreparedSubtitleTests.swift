@@ -16,6 +16,66 @@ final class PreparedSubtitleTests: XCTestCase {
             .init(start: 6, end: 8, original: "Goodbye.", french: "Au revoir.")
         ])
     }
+    private func contextFixture() -> [PreparedSubtitle] {
+        [(0.0, 1.0, "Too old."), (1, 3, "Boundary."), (3, 4, "Near."),
+         (8, 9, "Previous."), (11, 12, "Current."), (30, 31, "After silence.")].map {
+            PreparedSubtitle(start: $0.0, end: $0.1, original: $0.2, french: "")
+        }
+    }
+    private func tagged(_ text: String, range: CMTimeRange) -> AttributedString {
+        var result = AttributedString(text)
+        result[AttributeScopes.SpeechAttributes.TimeRangeAttribute.self] = range
+        return result
+    }
+    func testContextWindowUsesMediaSecondsAndNeverFutureText() {
+        let context = PreparedSubtitleContext(cues: contextFixture(), index: 4)
+        XCTAssertEqual(String(context.text.characters), "Near. Previous. Current.")
+        XCTAssertEqual(context.ranges.count, 3)
+        XCTAssertTrue(context.hasContext)
+        XCTAssertEqual(context.currentRange.start.seconds, 11)
+        XCTAssertEqual(context.currentRange.end.seconds, 12)
+    }
+    func testContextKeepsBoundarySentenceWholeAndStopsAcrossSilence() {
+        var cues = contextFixture()
+        cues[1].end = 3.1
+        let overlapping = PreparedSubtitleContext(cues: cues, index: 4)
+        XCTAssertEqual(String(overlapping.text.characters), "Boundary. Near. Previous. Current.")
+        let silent = PreparedSubtitleContext(cues: cues, index: 5)
+        XCTAssertEqual(String(silent.text.characters), "After silence.")
+        XCTAssertFalse(silent.hasContext)
+    }
+    func testContextExtractionDoesNotRepeatEarlierTranslations() throws {
+        let context = PreparedSubtitleContext(cues: contextFixture(), index: 4)
+        var translated = tagged("Proche. ", range: context.ranges[0])
+        translated += tagged("Précédente. ", range: context.ranges[1])
+        translated += tagged("Actuelle", range: context.currentRange)
+        translated += AttributedString(" ")
+        translated += tagged("complète.", range: context.currentRange)
+        XCTAssertEqual(try context.currentTranslation(from: translated), "Actuelle complète.")
+    }
+    func testMissingOrAmbiguousContextAlignmentCannotBeSavedAsCurrentCaption() {
+        let context = PreparedSubtitleContext(cues: contextFixture(), index: 4)
+        XCTAssertThrowsError(try context.currentTranslation(from: nil))
+        XCTAssertThrowsError(try context.currentTranslation(from: AttributedString("Sans repères.")))
+        XCTAssertThrowsError(try context.currentTranslation(from: tagged("Partielle.", range: context.currentRange)))
+        var interleaved = tagged("Début", range: context.currentRange)
+        interleaved += tagged("Contexte", range: context.ranges[0])
+        interleaved += tagged("Autre", range: context.ranges[1])
+        interleaved += tagged("Fin", range: context.currentRange)
+        XCTAssertThrowsError(try context.currentTranslation(from: interleaved))
+    }
+    func testOldContextFreeCacheIsInvalidOnContextCapableSystem() throws {
+        guard #available(iOS 26.4, *) else { throw XCTSkip("Context requires iOS 26.4") }
+        let doc = try document()
+        XCTAssertEqual(doc.key.version, 2)
+        var json = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(doc)) as? [String: Any])
+        var key = try XCTUnwrap(json["key"] as? [String: Any])
+        key["version"] = 1
+        json["key"] = key
+        let old = try JSONDecoder().decode(PreparedSubtitles.self, from: JSONSerialization.data(withJSONObject: json))
+        XCTAssertFalse(old.isValid)
+        XCTAssertNotEqual(old.key, doc.key)
+    }
     func testExactBoundariesSilenceAndBackwardSeek() throws {
         let doc = try document()
         XCTAssertTrue(doc.isValid)

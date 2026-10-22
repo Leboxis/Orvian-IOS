@@ -75,8 +75,19 @@ final class PreparedSubtitleJob {
                 for index in cues.indices {
                     try validate(key)
                     if let session {
-                        let response = try await session.translate(cues[index].original)
-                        cues[index].french = response.targetText.trimmingCharacters(in: .whitespacesAndNewlines)
+                        if #available(iOS 26.4, *) {
+                            let context = PreparedSubtitleContext(cues: cues, index: index)
+                            if context.hasContext {
+                                let response = try await session.translate(context.text)
+                                cues[index].french = try context.currentTranslation(from: response.attributedTargetText)
+                            } else {
+                                let response = try await session.translate(cues[index].original)
+                                cues[index].french = response.targetText.trimmingCharacters(in: .whitespacesAndNewlines)
+                            }
+                        } else {
+                            let response = try await session.translate(cues[index].original)
+                            cues[index].french = response.targetText.trimmingCharacters(in: .whitespacesAndNewlines)
+                        }
                     } else {
                         guard key.source == .french else { throw PreparedSubtitleError.incomplete }
                         cues[index].french = cues[index].original
@@ -159,6 +170,13 @@ struct PreparedSubtitleSheet: View {
                 Section {
                     Text(file.name).font(.headline)
                     Text("La vidéo entière est analysée sur cet appareil avant lecture. Les phrases complètes sont traduites puis conservées avec les temps de l’audio.")
+                    if #available(iOS 26.4, *) {
+                        Text("Contexte de traduction : les phrases des 8 secondes précédentes sont incluses. Une phrase à cheval sur cette limite est conservée entière.")
+                            .font(.footnote).foregroundStyle(.secondary)
+                    } else {
+                        Text("Sur cette version d’iOS, la traduction reste phrase par phrase. Le contexte précédent nécessite iOS 26.4 ou plus.")
+                            .font(.footnote).foregroundStyle(.secondary)
+                    }
                     Text("La qualité dépend de la voix et de l’enregistrement. Gardez cette fenêtre ouverte jusqu’à la fin.")
                         .font(.footnote).foregroundStyle(.secondary)
                     Picker("Langue parlée", selection: $source) {
