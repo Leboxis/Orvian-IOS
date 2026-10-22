@@ -56,8 +56,11 @@ final class PlayerSpeechAudioTap {
         installedMix = appliedMix
     }
 
-    /// Fabrique partagée avec le test qui appelle prepare sur un thread audio.
-    static func makeCallbacks(clientInfo: UnsafeMutableRawPointer?) -> MTAudioProcessingTapCallbacks {
+    /// MediaToolbox appelle ces fonctions sur son thread audio, jamais sous
+    /// MainActor. Les créer ici évite l'héritage implicite de l'exécuteur de
+    /// l'initialiseur du lecteur et son assertion à l'arrivée des échantillons.
+    /// Le contexte est détenu par le tap ; seul prepare/process touche format.
+    nonisolated static func makeCallbacks(clientInfo: UnsafeMutableRawPointer?) -> MTAudioProcessingTapCallbacks {
         return MTAudioProcessingTapCallbacks(
             version: kMTAudioProcessingTapCallbacksVersion_0,
             clientInfo: clientInfo,
