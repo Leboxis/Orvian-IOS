@@ -94,7 +94,8 @@ enum PreparedParakeetTiming {
 /// remains video time zero, including edited tracks with a nonzero first PTS.
 enum PreparedParakeetAudio {
     static func extract(asset: AVAsset, to url: URL) async throws {
-        guard try await !asset.load(.hasProtectedContent) else { throw PreparedSubtitleError.source }
+        let protected = try await asset.load(.hasProtectedContent)
+        guard !protected else { throw PreparedSubtitleError.source }
         let tracks = try await asset.loadTracks(withMediaType: .audio)
         guard !tracks.isEmpty else { throw PreparedSubtitleError.noAudio }
         guard tracks.count == 1 else { throw PreparedSubtitleError.multipleTracks }

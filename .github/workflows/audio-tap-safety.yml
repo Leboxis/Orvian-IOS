@@ -12,6 +12,7 @@ on:
       - 'Orvian/Features/Viewer/Video*.swift'
       - 'Orvian/UI/SubtitleOverlay.swift'
       - 'Tests/AudioTap/**'
+      - 'Orvian/Resources/Licenses/**'
       - 'project.yml'
       - '.github/workflows/audio-tap-safety.yml'
 permissions:
