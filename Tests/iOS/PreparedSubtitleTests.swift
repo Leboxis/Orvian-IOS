@@ -234,6 +234,7 @@ final class PreparedSubtitleTests: XCTestCase {
             buffer.frameLength = 16000
             for index in 0..<16000 { buffer.floatChannelData![0][index] = 0.1 }
             try file.write(from: buffer)
+            file.close()
         }
         let source = AVURLAsset(url: url)
         let sourceTracks = try await source.loadTracks(withMediaType: .audio)
@@ -284,15 +285,22 @@ final class PreparedSubtitleTests: XCTestCase {
             try await PreparedParakeetAudio.extract(asset: composition, to: extracted)
             let pcm = try AVAudioFile(forReading: extracted)
             XCTAssertEqual(pcm.length, 96000)
-            let samples = try XCTUnwrap(AVAudioPCMBuffer(pcmFormat: pcm.processingFormat, frameCapacity: 96000))
-            try pcm.read(into: samples)
-            let values = try XCTUnwrap(samples.floatChannelData?[0])
-            XCTAssertTrue((0..<80000).allSatisfy { abs(values[$0]) < 0.0001 })
-            XCTAssertEqual(Int(samples.frameLength), result.samples.count)
-            // Compare every sample with AVAssetReader's decoded waveform,
-            // including any conversion at the edit boundaries. A constant input
-            // is not a valid reference for the composition's decoded amplitude.
-            let actual = Array(UnsafeBufferPointer(start: values, count: Int(samples.frameLength)))
+            let samples = try XCTUnwrap(AVAudioPCMBuffer(pcmFormat: pcm.processingFormat, frameCapacity: 16384))
+            var actual: [Float] = []
+            // File reads can be partial. Consume the complete stream, not the
+            // capacity or a single read's frameLength; retain the PCM owner
+            // while copying its borrowed channel pointer.
+            for _ in 0..<10 {
+                try pcm.read(into: samples)
+                guard samples.frameLength > 0 else { break }
+                try withExtendedLifetime(samples) {
+                    let values = try XCTUnwrap(samples.floatChannelData?[0])
+                    actual.append(contentsOf: UnsafeBufferPointer(start: values, count: Int(samples.frameLength)))
+                }
+            }
+            XCTAssertEqual(actual.count, result.samples.count)
+            XCTAssertTrue(actual.prefix(80000).allSatisfy { abs($0) < 0.0001 })
+            // Compare every sample, including conversion at edit boundaries.
             let mismatch = zip(actual, result.samples).enumerated().first { abs($0.element.0 - $0.element.1) > 0.000001 }
             XCTAssertNil(mismatch?.offset, "Extracted PCM differs from the decoded source at sample \(mismatch?.offset ?? -1)")
             let referenceAudio = result.samples.dropFirst(80000)

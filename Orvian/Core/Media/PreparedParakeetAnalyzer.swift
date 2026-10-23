@@ -106,47 +106,45 @@ enum PreparedParakeetAudio {
         guard reader.canAdd(output) else { throw PreparedSubtitleError.source }
         reader.add(output)
         defer { reader.cancelReading() }
-        // AVAudioFile may retain buffered PCM until its Objective-C writer is
-        // released. Drain its own pool before returning the URL to the model,
-        // including on errors; keep the inner pool to bound per-buffer memory.
-        try autoreleasepool {
-            let file = try AVAudioFile(forWriting: url, settings: format.settings)
-            try FileManager.default.setAttributes([.protectionKey: FileProtectionType.complete], ofItemAtPath: url.path)
-            guard reader.startReading() else { throw PreparedSubtitleError.source }
-            var written: Int64 = 0
-            let silence = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: 16000)!
-            memset(silence.floatChannelData![0], 0, 16000 * MemoryLayout<Float>.size)
-            while try autoreleasepool(invoking: { () throws -> Bool in
-                try Task.checkCancellation()
-                guard let sample = output.copyNextSampleBuffer() else { return false }
-                let count = CMSampleBufferGetNumSamples(sample)
-                guard count > 0 else { return true }
-                let seconds = CMSampleBufferGetPresentationTimeStamp(sample).seconds
-                guard seconds.isFinite, seconds >= 0, seconds < Double(Int64.max) / 16000,
-                      count <= Int(Int32.max), let description = CMSampleBufferGetFormatDescription(sample),
-                      AVAudioFormat(cmAudioFormatDescription: description) == format,
-                      let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: AVAudioFrameCount(count)) else {
-                    throw PreparedSubtitleError.timing
-                }
-                let position = Int64((seconds * 16000).rounded())
-                // At most two samples of rounding noise; reject overlapping edits.
-                guard position >= written - 2 else { throw PreparedSubtitleError.timing }
-                while written < position {
-                    try Task.checkCancellation()
-                    let gap = min(Int64(16000), position - written)
-                    silence.frameLength = AVAudioFrameCount(gap)
-                    try file.write(from: silence)
-                    written += gap
-                }
-                buffer.frameLength = AVAudioFrameCount(count)
-                guard CMSampleBufferCopyPCMDataIntoAudioBufferList(sample, at: 0, frameCount: Int32(count),
-                    into: buffer.mutableAudioBufferList) == noErr else { throw PreparedSubtitleError.source }
-                try file.write(from: buffer)
-                written += Int64(count)
-                return true
-            }) { }
+        let file = try AVAudioFile(forWriting: url, settings: format.settings)
+        // Update the CAF header and flush the writer before the model opens it.
+        // https://developer.apple.com/documentation/avfaudio/avaudiofile/close()
+        defer { file.close() }
+        try FileManager.default.setAttributes([.protectionKey: FileProtectionType.complete], ofItemAtPath: url.path)
+        guard reader.startReading() else { throw PreparedSubtitleError.source }
+        var written: Int64 = 0
+        let silence = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: 16000)!
+        memset(silence.floatChannelData![0], 0, 16000 * MemoryLayout<Float>.size)
+        while try autoreleasepool(invoking: { () throws -> Bool in
             try Task.checkCancellation()
-            guard reader.status == .completed, written > 0 else { throw PreparedSubtitleError.source }
-        }
+            guard let sample = output.copyNextSampleBuffer() else { return false }
+            let count = CMSampleBufferGetNumSamples(sample)
+            guard count > 0 else { return true }
+            let seconds = CMSampleBufferGetPresentationTimeStamp(sample).seconds
+            guard seconds.isFinite, seconds >= 0, seconds < Double(Int64.max) / 16000,
+                  count <= Int(Int32.max), let description = CMSampleBufferGetFormatDescription(sample),
+                  AVAudioFormat(cmAudioFormatDescription: description) == format,
+                  let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: AVAudioFrameCount(count)) else {
+                throw PreparedSubtitleError.timing
+            }
+            let position = Int64((seconds * 16000).rounded())
+            // At most two samples of rounding noise; reject overlapping edits.
+            guard position >= written - 2 else { throw PreparedSubtitleError.timing }
+            while written < position {
+                try Task.checkCancellation()
+                let gap = min(Int64(16000), position - written)
+                silence.frameLength = AVAudioFrameCount(gap)
+                try file.write(from: silence)
+                written += gap
+            }
+            buffer.frameLength = AVAudioFrameCount(count)
+            guard CMSampleBufferCopyPCMDataIntoAudioBufferList(sample, at: 0, frameCount: Int32(count),
+                into: buffer.mutableAudioBufferList) == noErr else { throw PreparedSubtitleError.source }
+            try file.write(from: buffer)
+            written += Int64(count)
+            return true
+        }) { }
+        try Task.checkCancellation()
+        guard reader.status == .completed, written > 0 else { throw PreparedSubtitleError.source }
     }
 }

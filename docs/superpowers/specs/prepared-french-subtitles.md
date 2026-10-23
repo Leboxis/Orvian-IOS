@@ -82,3 +82,5 @@ Validation: compile Release for iPhone and simulator; preserve existing tests; v
 ### Context attribute loss recovery
 
 Apple documents attributed translation preservation as best effort. If context timing attributes are missing, merged or ambiguous, retry just the current original sentence via plain-text translation. Preserve the original Parakeet cue times, never save the entire translated context, and never substitute English for French. Report the number of isolated retries after completion and disclose this fallback in the preparation sheet. Cancellation and translation failures still propagate; empty retries cannot be saved. A valid contextual response continues to use the eight-second window.
+
+Audio extraction explicitly closes its CAF writer before model loading, per AVAudioFile.close documentation. The PCM regression reads to end across partial reads and compares all 96,000 source samples with the decoded reference, retaining buffer ownership during pointer access.
