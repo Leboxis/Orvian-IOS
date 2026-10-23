@@ -201,15 +201,17 @@ final class PreparedSubtitleTests: XCTestCase {
         let output = AVAssetReaderTrackOutput(track: track, outputSettings: format.settings)
         reader.add(output)
         let (stream, continuation) = AsyncStream.makeStream(of: AnalyzerInput.self, bufferingPolicy: .bufferingOldest(4))
-        let consumer = Task { () -> (firstAudio: Double?, totalFrames: Int, audibleFrames: Int, end: Double) in
+        let consumer = Task { () -> (firstAudio: Double?, totalFrames: Int, audibleFrames: Int, end: Double, samples: [Float]) in
             var firstAudio: Double?
             var frames = 0
             var audibleFrames = 0
             var end = 0.0
+            var decoded: [Float] = []
             for await input in stream {
                 let count = Int(input.buffer.frameLength)
                 let start = input.bufferStartTime?.seconds ?? .nan
                 if let samples = input.buffer.floatChannelData?[0] {
+                    decoded.append(contentsOf: UnsafeBufferPointer(start: samples, count: count))
                     for index in 0..<count where abs(samples[index]) > 0.0001 {
                         if firstAudio == nil { firstAudio = start + Double(index) / format.sampleRate }
                         audibleFrames += 1
@@ -218,7 +220,7 @@ final class PreparedSubtitleTests: XCTestCase {
                 frames += count
                 end = start + Double(count) / format.sampleRate
             }
-            return (firstAudio, frames, audibleFrames, end)
+            return (firstAudio, frames, audibleFrames, end, decoded)
         }
         do {
             try await PreparedSubtitleAnalyzer.shared.pump(reader: reader, output: output, format: format,
@@ -241,7 +243,15 @@ final class PreparedSubtitleTests: XCTestCase {
             try pcm.read(into: samples)
             let values = try XCTUnwrap(samples.floatChannelData?[0])
             XCTAssertTrue((0..<80000).allSatisfy { abs(values[$0]) < 0.0001 })
-            XCTAssertTrue((80000..<96000).allSatisfy { abs(values[$0] - 0.1) < 0.0001 })
+            XCTAssertEqual(Int(samples.frameLength), result.samples.count)
+            // Compare every sample with AVAssetReader's decoded waveform,
+            // including any conversion at the edit boundaries. A constant input
+            // is not a valid reference for the composition's decoded amplitude.
+            let actual = Array(UnsafeBufferPointer(start: values, count: Int(samples.frameLength)))
+            let mismatch = zip(actual, result.samples).enumerated().first { abs($0.element.0 - $0.element.1) > 0.000001 }
+            XCTAssertNil(mismatch?.offset, "Extracted PCM differs from the decoded source at sample \(mismatch?.offset ?? -1)")
+            let referenceAudio = result.samples.dropFirst(80000)
+            print("PCM reference amplitude: min=\(referenceAudio.min() ?? 0), max=\(referenceAudio.max() ?? 0); extracted: min=\(actual.dropFirst(80000).min() ?? 0), max=\(actual.dropFirst(80000).max() ?? 0)")
         } catch {
             continuation.finish()
             consumer.cancel()
