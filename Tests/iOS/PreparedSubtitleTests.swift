@@ -27,9 +27,90 @@ final class PreparedSubtitleTests: XCTestCase {
         result[AttributeScopes.SpeechAttributes.TimeRangeAttribute.self] = range
         return result
     }
+    func testFollowingContextUsesWholeSentenceAndSelectsMiddleCaption() throws {
+        let cues = [PreparedSubtitle(start: 1, end: 2, original: "Before.", french: ""),
+                    .init(start: 3, end: 4, original: "Current.", french: ""),
+                    .init(start: 5, end: 10, original: "Following boundary sentence.", french: ""),
+                    .init(start: 10, end: 11, original: "Too far.", french: "")]
+        let context = PreparedSubtitleContext(cues: cues, index: 1)
+        XCTAssertEqual(context.currentIndex, 1)
+        XCTAssertEqual(String(context.text.characters), "Before. Current. Following boundary sentence.")
+        var response = tagged("Avant. ", range: context.ranges[0])
+        response += tagged("Actuelle. ", range: context.currentRange)
+        response += tagged("Après.", range: context.ranges[2])
+        XCTAssertEqual(try context.currentTranslation(from: response), "Actuelle.")
+        XCTAssertEqual(context.currentRange.start.seconds, 3)
+        XCTAssertEqual(context.currentRange.end.seconds, 4)
+    }
+    func testLinksPreserveCurrentCaptionWithoutSpeechAttributes() throws {
+        let context = PreparedSubtitleContext(cues: contextFixture(), index: 4)
+        var response = AttributedString()
+        for (index, value) in ["Proche. ", "Précédente. ", "Actuelle."].enumerated() {
+            var fragment = AttributedString(value)
+            fragment.link = context.identifiers[index]
+            response += fragment
+        }
+        XCTAssertEqual(try context.currentTranslation(from: response), "Actuelle.")
+        var conflicting = tagged("Mauvaise identité.", range: context.ranges[0])
+        conflicting.link = context.identifiers[context.currentIndex]
+        XCTAssertThrowsError(try context.currentTranslation(from: conflicting))
+    }
+    @MainActor func testCompactContextRetryPrecedesIsolation() async throws {
+        let context = PreparedSubtitleContext(cues: contextFixture(), index: 4)
+        var attempts = 0
+        let result = try await context.translateCurrent(contextual: { input in
+            attempts += 1
+            if attempts == 1 { return nil }
+            XCTAssertEqual(String(input.characters), "Previous. Current.")
+            XCTAssertTrue(input.runs.allSatisfy { $0[AttributeScopes.SpeechAttributes.TimeRangeAttribute.self] == nil })
+            var before = AttributedString("Précédente. ")
+            before.link = context.identifiers[context.currentIndex - 1]
+            var current = AttributedString("Actuelle.")
+            current.link = context.identifiers[context.currentIndex]
+            return before + current
+        }, isolated: { _ in XCTFail("Preserved compact context must not use isolation"); return "" })
+        XCTAssertEqual(attempts, 2)
+        XCTAssertTrue(result.usedContext)
+        XCTAssertTrue(result.reducedContext)
+        XCTAssertEqual(result.text, "Actuelle.")
+    }
+    func testUncertaintyRereadBudgetsAndMissingConfidence() {
+        XCTAssertNil(PreparedSpeechRefinement.confidence(.nan))
+        XCTAssertNil(PreparedSpeechRefinement.confidence(2))
+        XCTAssertTrue(PreparedSpeechRefinement.windows(for: [.init(start: 10, end: 11, text: "Unknown")], duration: 30).isEmpty)
+        let many: [PreparedSpeechSpan] = (0..<100).map { index in
+            let start = Double(index * 40 + 10)
+            return PreparedSpeechSpan(start: start, end: start + 1, text: "Word", confidence: 0.3)
+        }
+        let windows = PreparedSpeechRefinement.windows(for: many, duration: 5000)
+        XCTAssertLessThanOrEqual(windows.count, 12)
+        XCTAssertLessThanOrEqual(windows.reduce(0) { $0 + $1.duration.seconds }, 180)
+        XCTAssertTrue(windows.allSatisfy { $0.duration.seconds <= 30 })
+        XCTAssertEqual(windows[0].start.seconds, 2)
+        XCTAssertEqual(windows[0].end.seconds, 15)
+    }
+    func testUncertainWordRequiresCorroboratedAlternativeAndPreservesTimes() throws {
+        let original = [PreparedSpeechSpan(start: 5, end: 5.5, text: "The ", beginsResult: true, confidence: 0.95,
+                                          alternatives: ["The ship."]),
+                        .init(start: 5.5, end: 6, text: "sheep.", confidence: 0.3)]
+        let reread = [PreparedSpeechSpan(start: 5, end: 5.5, text: "A ", confidence: 1),
+                      .init(start: 5.5, end: 6, text: "ship.", confidence: 0.9)]
+        let merged = PreparedSpeechRefinement.merge(original: original, reread: reread)
+        XCTAssertEqual(merged.map(\.text), ["The ", "ship."])
+        XCTAssertEqual(merged.map(\.start), original.map(\.start))
+        XCTAssertEqual(merged.map(\.end), original.map(\.end))
+        XCTAssertFalse(try PreparedSentenceBuilder.make(merged, source: .english)[0].needsReview == true)
+        var unsupported = original
+        unsupported[0].alternatives = ["The shop."]
+        XCTAssertEqual(PreparedSpeechRefinement.merge(original: unsupported, reread: reread).map(\.text), original.map(\.text))
+        XCTAssertTrue(try PreparedSentenceBuilder.make(unsupported, source: .english)[0].needsReview == true)
+        var wrongTime = reread
+        wrongTime[1] = .init(start: 8, end: 9, text: "ship.", confidence: 0.99)
+        XCTAssertEqual(PreparedSpeechRefinement.merge(original: original, reread: wrongTime).map(\.text), original.map(\.text))
+    }
     func testAppleInvalidatesThirdPartyPreparedCache() throws {
         let doc = try document()
-        for version in [1, 2, 3, 4] {
+        for version in [1, 2, 3, 4, 5, 6] {
             var encoded = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(doc)) as? [String: Any])
             var key = try XCTUnwrap(encoded["key"] as? [String: Any])
             key["version"] = version
@@ -94,7 +175,7 @@ final class PreparedSubtitleTests: XCTestCase {
         for output in outputs {
             var isolatedCalls = 0
             let result = try await context.translateCurrent(contextual: { input in
-                XCTAssertEqual(String(input.characters), "Near. Previous. Current.")
+                XCTAssertTrue(["Near. Previous. Current.", "Previous. Current."].contains(String(input.characters)))
                 return output
             }, isolated: { source in
                 isolatedCalls += 1
@@ -135,7 +216,7 @@ final class PreparedSubtitleTests: XCTestCase {
     func testOldContextFreeCacheIsInvalidOnContextCapableSystem() throws {
         guard #available(iOS 26.4, *) else { throw XCTSkip("Context requires iOS 26.4") }
         let doc = try document()
-        XCTAssertEqual(doc.key.version, 6)
+        XCTAssertEqual(doc.key.version, 8)
         var json = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(doc)) as? [String: Any])
         var key = try XCTUnwrap(json["key"] as? [String: Any])
         key["version"] = 1

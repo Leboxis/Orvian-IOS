@@ -73,6 +73,7 @@ final class PreparedSubtitleJob {
                     await self?.setProgress(value * 0.65)
                 }
                 try validate(key)
+                let uncertainCount = cues.filter { $0.needsReview == true }.count
                 status = "Traduction des phrases en français…"
                 for index in cues.indices {
                     try validate(key)
@@ -103,6 +104,9 @@ final class PreparedSubtitleJob {
                 try validate(key)
                 isReady = true
                 status = "Sous-titres prêts. Ils seront chargés automatiquement à l’ouverture de cette vidéo."
+                if uncertainCount > 0 {
+                    status += " \(uncertainCount) phrase(s) contiennent encore des passages incertains après revérification audio. Écoutez ces passages pour les vérifier."
+                }
                 if contextFallbackCount > 0 {
                     status += " \(contextFallbackCount) phrase(s) ont été traduites séparément car le moteur n’a pas conservé les repères du contexte. Les temps de l’audio sont conservés."
                 }
@@ -178,7 +182,7 @@ struct PreparedSubtitleSheet: View {
                     Text(file.name).font(.headline)
                     Text("La vidéo entière est analysée sur cet appareil avant lecture. Les phrases complètes sont traduites puis conservées avec les temps de l’audio.")
                     if #available(iOS 26.4, *) {
-                        Text("Contexte de traduction : les phrases des 8 secondes précédentes sont incluses. Une phrase à cheval sur cette limite est conservée entière.")
+                        Text("Contexte de traduction : jusqu’à 8 secondes avant et 4 secondes après la phrase, avec les phrases voisines entières.")
                             .font(.footnote).foregroundStyle(.secondary)
                     } else {
                         Text("Sur cette version d’iOS, la traduction reste phrase par phrase. Le contexte précédent nécessite iOS 26.4 ou plus.")
@@ -187,9 +191,11 @@ struct PreparedSubtitleSheet: View {
                     Text("Transcription et traduction : moteurs Apple, sur l’appareil. Les modèles de langue nécessaires peuvent être téléchargés au premier lancement. Prévoyez de l’espace libre pour la vidéo temporaire.")
                         .font(.footnote).foregroundStyle(.secondary)
                     if #available(iOS 26.4, *) {
-                        Text("Si la traduction ne conserve pas les repères du contexte, la phrase concernée est traduite seule pour terminer la préparation sans répéter les phrases précédentes ni changer ses temps d’affichage.")
+                        Text("Si les repères sont perdus, une nouvelle traduction garde les phrases voisines les plus proches. La phrase est traduite seule en dernier recours, sans changer ses temps d’affichage.")
                             .font(.footnote).foregroundStyle(.secondary)
                     }
+                    Text("Les passages reconnus avec une faible confiance sont réécoutés automatiquement, dans la limite de 3 minutes d’audio supplémentaire. Une correction nécessite l’accord de deux analyses Apple ; les autres passages restent signalés comme incertains.")
+                        .font(.footnote).foregroundStyle(.secondary)
                     Text("La qualité dépend de la voix et de l’enregistrement. Gardez cette fenêtre ouverte jusqu’à la fin.")
                         .font(.footnote).foregroundStyle(.secondary)
                     Picker("Langue parlée", selection: $source) {

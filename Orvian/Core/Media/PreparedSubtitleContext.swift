@@ -2,83 +2,117 @@ import Foundation
 import CoreMedia
 import Speech
 
-/// Une requête unique : phrases précédentes dans la fenêtre de huit secondes
-/// + phrase courante. Les phrases à cheval sur la borne restent entières.
-/// L'attribut Speech documenté par Apple permet de retrouver la traduction
-/// courante sans traduire des marqueurs visibles ni deviner un découpage.
+/// Recorded-video context: eight seconds before and four seconds after, with
+/// whole boundary sentences. Never use the player's wall clock for captions.
 /// https://developer.apple.com/documentation/translation/translationsession/request/attributedsourcetext
 struct PreparedSubtitleContext {
     let text: AttributedString
     let ranges: [CMTimeRange]
+    let identifiers: [URL]
+    let currentIndex: Int
     let currentSource: String
-    var currentRange: CMTimeRange { ranges[ranges.count - 1] }
+    private let originals: [String]
+    var currentRange: CMTimeRange { ranges[currentIndex] }
     var hasContext: Bool { ranges.count > 1 }
 
     init(cues: [PreparedSubtitle], index: Int) {
         precondition(cues.indices.contains(index))
-        let lowerBound = cues[index].start - 8
         var first = index
-        while first > 0, cues[first - 1].end > lowerBound { first -= 1 }
-        var text = AttributedString()
-        var ranges: [CMTimeRange] = []
-        for position in first...index {
-            if position != first { text += AttributedString(" ") }
-            let cue = cues[position]
-            let range = CMTimeRange(start: CMTime(seconds: cue.start, preferredTimescale: 60_000),
-                                    end: CMTime(seconds: cue.end, preferredTimescale: 60_000))
-            var sentence = AttributedString(cue.original)
-            sentence[AttributeScopes.SpeechAttributes.TimeRangeAttribute.self] = range
-            text += sentence
-            ranges.append(range)
+        var last = index
+        var length = cues[index].original.utf16.count
+        while first > 0, cues[first - 1].end > cues[index].start - 8,
+              length + cues[first - 1].original.utf16.count <= 6000 {
+            first -= 1
+            length += cues[first].original.utf16.count
         }
-        self.text = text
-        self.ranges = ranges
+        while last + 1 < cues.count, cues[last + 1].start < cues[index].end + 4,
+              length + cues[last + 1].original.utf16.count <= 6000 {
+            last += 1
+            length += cues[last].original.utf16.count
+        }
+        currentIndex = index - first
         currentSource = cues[index].original
+        originals = (first...last).map { cues[$0].original }
+        ranges = (first...last).map {
+            CMTimeRange(start: CMTime(seconds: cues[$0].start, preferredTimescale: 60_000),
+                        end: CMTime(seconds: cues[$0].end, preferredTimescale: 60_000))
+        }
+        // Foundation links are supported translation attributes. These internal
+        // identifiers are never opened or displayed; they mark sentence identity
+        // independently of Apple's best-effort speech timing attributes.
+        identifiers = (first...last).map { URL(string: "orvian-caption://sentence/\($0)")! }
+        text = Self.attributed(originals: originals, ranges: ranges, identifiers: identifiers,
+                               indices: Array(originals.indices), includeTimes: true)
     }
 
-    /// Refuser une attribution perdue/ambiguë plutôt que d'afficher les huit
-    /// secondes de contexte à nouveau au temps de la phrase courante.
+    private static func attributed(originals: [String], ranges: [CMTimeRange], identifiers: [URL],
+                                   indices: [Int], includeTimes: Bool) -> AttributedString {
+        var output = AttributedString()
+        for index in indices {
+            if !output.characters.isEmpty { output += AttributedString(" ") }
+            var sentence = AttributedString(originals[index])
+            sentence.link = identifiers[index]
+            if includeTimes { sentence[AttributeScopes.SpeechAttributes.TimeRangeAttribute.self] = ranges[index] }
+            output += sentence
+        }
+        return output
+    }
+
+    /// Retry with only the nearest complete sentence on each side and link
+    /// identity. This retains context when speech attributes are discarded.
+    private var compactText: AttributedString {
+        Self.attributed(originals: originals, ranges: ranges, identifiers: identifiers,
+                        indices: Array(max(0, currentIndex - 1)...min(ranges.count - 1, currentIndex + 1)),
+                        includeTimes: false)
+    }
+
     func currentTranslation(from translated: AttributedString?) throws -> String {
         guard let translated else { throw PreparedSubtitleError.contextAlignment }
-        var seen = Set<Int>()
         var output = ""
         var started = false
         var closed = false
+        var sawContext = false
         for run in translated.runs {
             let fragment = String(translated[run.range].characters)
             let meaningful = !fragment.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            guard let time = run[AttributeScopes.SpeechAttributes.TimeRangeAttribute.self] else {
-                guard !meaningful else { throw PreparedSubtitleError.contextAlignment }
-                if started, !closed { output += fragment }
-                continue
-            }
-            guard let index = ranges.firstIndex(where: { CMTimeRangeEqual($0, time) }) else {
+            let link = run.link
+            let time = run[AttributeScopes.SpeechAttributes.TimeRangeAttribute.self]
+            let linkedIndex = link.flatMap { identifiers.firstIndex(of: $0) }
+            let timedIndex = time.flatMap { value in ranges.firstIndex { CMTimeRangeEqual($0, value) } }
+            if let link, !identifiers.contains(link) { throw PreparedSubtitleError.contextAlignment }
+            if let linkedIndex, let timedIndex, linkedIndex != timedIndex { throw PreparedSubtitleError.contextAlignment }
+            // A merged time range covering the current sentence is ambiguous,
+            // even if another attribute tries to identify just one sentence.
+            if let time, timedIndex == nil,
+               CMTimeRangeGetIntersection(time, otherRange: currentRange).duration.seconds > 0 {
                 throw PreparedSubtitleError.contextAlignment
             }
-            if meaningful { seen.insert(index) }
-            if index == ranges.count - 1 {
+            let identified = linkedIndex ?? timedIndex
+            let isCurrent = identified == currentIndex
+            var isContext = identified.map { $0 != currentIndex } ?? false
+            if identified == nil, let time, time.start.seconds.isFinite, time.end.seconds.isFinite,
+               time.duration.seconds > 0,
+               time.start.seconds >= ranges[0].start.seconds,
+               time.end.seconds <= ranges[ranges.count - 1].end.seconds,
+               time.end.seconds <= currentRange.start.seconds || time.start.seconds >= currentRange.end.seconds {
+                isContext = true
+            }
+            if isCurrent {
                 guard !closed else { throw PreparedSubtitleError.contextAlignment }
                 started = true
                 output += fragment
-            } else if started, meaningful {
-                closed = true
+            } else if isContext {
+                if meaningful { sawContext = true; if started { closed = true } }
+            } else {
+                guard !meaningful else { throw PreparedSubtitleError.contextAlignment }
+                if started, !closed { output += fragment }
             }
         }
         let result = output.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard seen.count == ranges.count, !result.isEmpty else { throw PreparedSubtitleError.contextAlignment }
+        guard !result.isEmpty, !hasContext || sawContext else { throw PreparedSubtitleError.contextAlignment }
         return result
     }
-}
 
-struct PreparedContextTranslation {
-    let text: String
-    let usedContext: Bool
-}
-
-extension PreparedSubtitleContext {
-    /// Apple preserves attributed timing on a best-effort basis, not as a
-    /// guarantee. Never save the whole contextual response as the current cue.
-    /// https://developer.apple.com/documentation/translation/translationsession/request/attributedsourcetext
     @MainActor
     func translateCurrent(
         contextual: (AttributedString) async throws -> AttributedString?,
@@ -86,13 +120,16 @@ extension PreparedSubtitleContext {
     ) async throws -> PreparedContextTranslation {
         try Task.checkCancellation()
         if hasContext {
-            let translated = try await contextual(text)
-            try Task.checkCancellation()
-            do {
-                return PreparedContextTranslation(text: try currentTranslation(from: translated), usedContext: true)
-            } catch PreparedSubtitleError.contextAlignment {
-                // Retry only the current source sentence. Do not guess a split,
-                // reuse untranslated English, or swallow translation errors.
+            for (attempt, input) in [text, compactText].enumerated() {
+                let translated = try await contextual(input)
+                try Task.checkCancellation()
+                do {
+                    return PreparedContextTranslation(text: try currentTranslation(from: translated),
+                                                      usedContext: true, reducedContext: attempt > 0)
+                } catch PreparedSubtitleError.contextAlignment {
+                    // Only alignment loss retries. Translation errors and
+                    // cancellation propagate; never guess a sentence boundary.
+                }
             }
         }
         try Task.checkCancellation()
@@ -102,4 +139,10 @@ extension PreparedSubtitleContext {
         guard !result.isEmpty else { throw PreparedSubtitleError.incomplete }
         return PreparedContextTranslation(text: result, usedContext: false)
     }
+}
+
+struct PreparedContextTranslation {
+    let text: String
+    let usedContext: Bool
+    var reducedContext = false
 }
