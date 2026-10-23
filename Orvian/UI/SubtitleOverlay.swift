@@ -105,6 +105,6 @@ struct SubtitleOverlay: View {
         // Le changement de sous-titre passe par l'interrupteur central : sans
         // lui, l'apparition du texte s'animerait même en « Réduire les
         // animations ».
-        .animation(isPrepared ? nil : Motion.animation(.easeOut(duration: 0.15)), value: cue)
+        .animation(Motion.animation(.easeOut(duration: 0.15)), value: isPrepared ? nil : cue)
     }
 }
