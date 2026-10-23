@@ -78,7 +78,10 @@ final class PreparedSubtitleTests: XCTestCase {
         XCTAssertNil(PreparedSpeechRefinement.confidence(.nan))
         XCTAssertNil(PreparedSpeechRefinement.confidence(2))
         XCTAssertTrue(PreparedSpeechRefinement.windows(for: [.init(start: 10, end: 11, text: "Unknown")], duration: 30).isEmpty)
-        let many = (0..<100).map { PreparedSpeechSpan(start: Double($0 * 40 + 10), end: Double($0 * 40 + 11), text: "Word", confidence: 0.3) }
+        let many: [PreparedSpeechSpan] = (0..<100).map { index in
+            let start = Double(index * 40 + 10)
+            return PreparedSpeechSpan(start: start, end: start + 1, text: "Word", confidence: 0.3)
+        }
         let windows = PreparedSpeechRefinement.windows(for: many, duration: 5000)
         XCTAssertLessThanOrEqual(windows.count, 12)
         XCTAssertLessThanOrEqual(windows.reduce(0) { $0 + $1.duration.seconds }, 180)
