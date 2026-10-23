@@ -5,15 +5,10 @@ options:
   deploymentTarget:
     iOS: "26.0"
 
-packages:
-  FluidAudio:
-    url: https://github.com/FluidInference/FluidAudio.git
-    revision: 503b4bd1bbf7220882de39fe8ae6716aae4132da
-
 settings:
   base:
     SWIFT_VERSION: "5.0"
-    MARKETING_VERSION: "0.22.1"
+    MARKETING_VERSION: "0.22.2"
     CURRENT_PROJECT_VERSION: "1"
     GENERATE_INFOPLIST_FILE: true
     INFOPLIST_KEY_CFBundleDisplayName: Orvian
@@ -32,8 +27,6 @@ targets:
     platform: iOS
     sources:
       - path: Orvian
-    dependencies:
-      - package: FluidAudio
     info:
       path: Orvian/Info.plist
       properties:

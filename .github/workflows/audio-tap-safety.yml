@@ -12,7 +12,6 @@ on:
       - 'Orvian/Features/Viewer/Video*.swift'
       - 'Orvian/UI/SubtitleOverlay.swift'
       - 'Tests/AudioTap/**'
-      - 'Orvian/Resources/Licenses/**'
       - 'project.yml'
       - '.github/workflows/audio-tap-safety.yml'
 permissions:
@@ -44,9 +43,9 @@ jobs:
           mkdir -p candidate/Payload
           cp -R build-audio-safety/Build/Products/Release-iphoneos/Orvian.app candidate/Payload/
           cd candidate
-          zip -qry ../Orvian-Parakeet-Ultra-unsigned.ipa Payload
+          zip -qry ../Orvian-Apple-Subtitles-unsigned.ipa Payload
       - uses: actions/upload-artifact@v4
         with:
-          name: Orvian-Parakeet-Ultra-IPA
-          path: Orvian-Parakeet-Ultra-unsigned.ipa
+          name: Orvian-Apple-Subtitles-IPA
+          path: Orvian-Apple-Subtitles-unsigned.ipa
           if-no-files-found: error

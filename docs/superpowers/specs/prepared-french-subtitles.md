@@ -71,16 +71,10 @@ sans remplacer un cache complet. La version de cache passe à 2 sur iOS 26.4+
 pour imposer un recalcul ; iOS 26.0–26.3 reste en version 1 et indique clairement
 la traduction phrase par phrase. L'analyse Speech de l'audio reste inchangée.
 
-## Parakeet Ultra
+## Apple-only transcription
 
-Prepared transcription now uses the explicitly selected Ultra Core ML model from FluidAudio 0.17.7, pinned at revision 503b4bd1bbf7220882de39fe8ae6716aae4132da. Live captions continue using Apple Speech. Translation remains Apple high-fidelity with eight seconds of previous sentence context on iOS 26.4+. No silent substitution of the transcription model.
-
-Audio is extracted incrementally to protected 16 kHz mono PCM, retaining timeline gaps as silence. Ultra uses one concurrent window and disk-backed processing for long recordings. Cache versions 3/4 isolate Ultra results from older Apple transcriptions. Missing/inconsistent token times fail preparation instead of estimating subtitle times. No model or transcript logging. Initial model download is disclosed with attribution to Moondream/NVIDIA and Fluid Inference.
-
-Validation: compile Release for iPhone and simulator; preserve existing tests; verify token text/timestamps, source timeline gaps, cache invalidation, and actual Ultra inference on a non-private synthetic fixture. Real iPhone memory/thermal performance remains device-dependent and requires on-device validation.
+Prepared and live subtitles use Apple Speech exclusively. Third-party model code, package dependencies, notices and inference tests are removed. Existing downloaded third-party weights are removed at startup; cache versions 5/6 invalidate their prepared transcripts. French translation retains eight seconds of previous sentence context where Apple preserves the alignment attributes.
 
 ### Context attribute loss recovery
 
-Apple documents attributed translation preservation as best effort. If context timing attributes are missing, merged or ambiguous, retry just the current original sentence via plain-text translation. Preserve the original Parakeet cue times, never save the entire translated context, and never substitute English for French. Report the number of isolated retries after completion and disclose this fallback in the preparation sheet. Cancellation and translation failures still propagate; empty retries cannot be saved. A valid contextual response continues to use the eight-second window.
-
-Audio extraction explicitly closes its CAF writer before model loading, per AVAudioFile.close documentation. The PCM regression reads to end across partial reads and compares all 96,000 source samples with the decoded reference, retaining buffer ownership during pointer access.
+Apple documents attributed translation preservation as best effort. If context timing attributes are missing, merged or ambiguous, retry just the current original sentence via plain-text translation. Preserve the original Apple Speech cue times, never save the entire translated context, and never substitute English for French. Report the number of isolated retries after completion and disclose this fallback in the preparation sheet. Cancellation and translation failures still propagate; empty retries cannot be saved. A valid contextual response continues to use the eight-second window.

@@ -1,5 +1,7 @@
 name: Subtitle quality
 on:
+  push:
+    branches: [main]
   pull_request:
     branches: [main, fix/subtitle-settings-french]
     paths:
@@ -7,7 +9,6 @@ on:
       - 'Orvian/Core/Media/Prepared*.swift'
       - 'Orvian/Features/Viewer/Prepared*.swift'
       - 'Tests/iOS/PreparedSubtitleTests.swift'
-      - 'Tests/Parakeet/**'
       - 'Orvian/Core/Media/SpeechProbe*.swift'
       - 'Orvian/Features/Viewer/VideoSpeechProbe.swift'
       - 'Orvian/UI/SubtitleOverlay.swift'
@@ -42,14 +43,3 @@ jobs:
             -only-testing:OrvianTests/SubtitleQualityTests \
             -only-testing:OrvianTests/PreparedSubtitleTests \
             CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO test
-
-  ultra-inference:
-    runs-on: macos-26
-    timeout-minutes: 30
-    steps:
-      - uses: actions/checkout@v4
-      - name: Generate non-private English speech longer than one model window
-        run: |
-          /usr/bin/say -r 140 -o "$RUNNER_TEMP/ultra-fixture.aiff" "Welcome to this subtitle test. The farmer walked through the orchard carrying a bright lantern. We are checking every spoken sentence and its timing carefully. The entire recording is processed before the video starts. Yesterday the farmer walked through the orchard carrying a bright lantern. We are checking every spoken sentence and its timing carefully. The entire recording is processed before the video starts. Today the farmer walked through the orchard carrying a bright lantern. We are checking every spoken sentence and its timing carefully. The entire recording is processed before the video starts. This final sentence confirms that the transcription is complete."
-      - name: Download actual Ultra model and verify long-form inference without visual capture
-        run: swift run --package-path Tests/Parakeet -c release UltraSmoke "$RUNNER_TEMP/ultra-fixture.aiff"

@@ -12,8 +12,8 @@ struct PreparedSubtitleKey: Codable, Hashable, Sendable {
     let version: Int
 
     static var currentVersion: Int {
-        if #available(iOS 26.4, *) { return 4 }
-        return 3
+        if #available(iOS 26.4, *) { return 6 }
+        return 5
     }
 
     init(credential: String, driveID: Int, file: DriveFile, source: SubtitleSourceLanguage) {

@@ -20,10 +20,20 @@ enum TemporaryFileSweeper {
     /// Préfixe des segments écrits par `UploadChunkReader` à la racine de `tmp`.
     private static let chunkPrefix = "orvian-chunk-"
 
+    /// One-time migration: remove only the weights downloaded by the retired
+    /// subtitle engine. Apple manages its own speech/translation assets.
+    static func removeLegacySubtitleModel(applicationSupport: URL) {
+        let legacy = applicationSupport.appendingPathComponent("FluidAudio/Models/parakeet-ultra", isDirectory: true)
+        try? FileManager.default.removeItem(at: legacy)
+    }
+
     static func sweep() async {
         await Task.detached(priority: .utility) {
             let manager = FileManager.default
             let root = manager.temporaryDirectory
+            if let support = manager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first {
+                removeLegacySubtitleModel(applicationSupport: support)
+            }
 
             for name in ownedDirectories {
                 let directory = root.appendingPathComponent(name, isDirectory: true)

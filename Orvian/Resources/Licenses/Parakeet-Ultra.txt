@@ -1,8 +1,0 @@
-Parakeet Ultra by Moondream, derived from NVIDIA Parakeet TDT 0.6B v3.
-Model: https://huggingface.co/moondream/parakeet-ultra
-Core ML INT8 conversion by Fluid Inference:
-https://huggingface.co/FluidInference/parakeet-ultra-coreml
-Licensed under Creative Commons Attribution 4.0 International:
-https://creativecommons.org/licenses/by/4.0/
-No model weights are modified by Orvian. The converted model is downloaded on demand.
-Integration uses FluidAudio 0.17.7, Apache License 2.0 (see FluidAudio.txt).
