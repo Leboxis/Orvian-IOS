@@ -12,6 +12,29 @@ actor PreparedSubtitleAnalyzer {
         guard !isRunning else { throw PreparedSubtitleError.busy }
         isRunning = true
         defer { isRunning = false }
+        let assetDuration = try await AVURLAsset(url: url).load(.duration).seconds
+        var spans = try await analyze(url: url, source: source, range: nil) { value in await progress(value * 0.8) }
+        let windows = PreparedSpeechRefinement.windows(for: spans, duration: assetDuration)
+        for (index, range) in windows.enumerated() {
+            try Task.checkCancellation()
+            do {
+                let reread = try await analyze(url: url, source: source, range: range, progress: { _ in })
+                spans = PreparedSpeechRefinement.merge(original: spans, reread: reread)
+            } catch is CancellationError {
+                throw CancellationError()
+            } catch {
+                // A failed optional reread does not invalidate the full first
+                // pass. Keep its original words and uncertainty flags.
+            }
+            await progress(0.8 + 0.2 * Double(index + 1) / Double(windows.count))
+        }
+        try Task.checkCancellation()
+        await progress(1)
+        return try PreparedSentenceBuilder.make(spans, source: source)
+    }
+
+    private func analyze(url: URL, source: SubtitleSourceLanguage, range: CMTimeRange?,
+                         progress: @escaping @Sendable (Double) async -> Void) async throws -> [PreparedSpeechSpan] {
         let asset = AVURLAsset(url: url)
         let protected = try await asset.load(.hasProtectedContent)
         guard !protected else { throw PreparedSubtitleError.source }
@@ -25,7 +48,7 @@ actor PreparedSubtitleAnalyzer {
         // Sans fastResults/volatileResults : attendre les hypothèses définitives
         // du modèle, avec le contexte de l'enregistrement et les temps des mots.
         let transcriber = SpeechTranscriber(locale: locale, transcriptionOptions: [],
-            reportingOptions: [], attributeOptions: [.audioTimeRange])
+            reportingOptions: [.alternativeTranscriptions], attributeOptions: [.audioTimeRange, .transcriptionConfidence])
         if let installation = try await AssetInventory.assetInstallationRequest(supporting: [transcriber]) {
             try await installation.downloadAndInstall()
         }
@@ -37,6 +60,7 @@ actor PreparedSubtitleAnalyzer {
         let analyzer = SpeechAnalyzer(modules: [transcriber])
         try await analyzer.prepareToAnalyze(in: format)
         let reader = try AVAssetReader(asset: asset)
+        if let range { reader.timeRange = range }
         let settings: [String: Any] = [
             AVFormatIDKey: kAudioFormatLinearPCM,
             AVSampleRateKey: format.sampleRate,
@@ -87,11 +111,12 @@ actor PreparedSubtitleAnalyzer {
             Task { await analyzer.cancelAndFinishNow() }
         }
         try Task.checkCancellation()
-        return try PreparedSentenceBuilder.make(spans, source: source)
+        return spans
     }
 
     private func collect(_ transcriber: SpeechTranscriber) async throws -> [PreparedSpeechSpan] {
         var spans: [PreparedSpeechSpan] = []
+        var alternativeBudget = 1_000_000
         for try await result in transcriber.results {
             try Task.checkCancellation()
             guard result.isFinal else { continue }
@@ -102,7 +127,8 @@ actor PreparedSubtitleAnalyzer {
                 let text = String(result.text[run.range].characters)
                 if let range = run.audioTimeRange {
                     current.append(PreparedSpeechSpan(start: range.start.seconds, end: range.end.seconds,
-                                                      text: prefix + text, beginsResult: current.isEmpty))
+                                                      text: prefix + text, beginsResult: current.isEmpty,
+                                                      confidence: PreparedSpeechRefinement.confidence(run[AttributeScopes.SpeechAttributes.ConfidenceAttribute.self].map { Double($0) })))
                     prefix = ""
                 } else if text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                     if current.isEmpty { prefix += text } else { current[current.count - 1].text += text }
@@ -115,6 +141,15 @@ actor PreparedSubtitleAnalyzer {
                 if !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                     current = [PreparedSpeechSpan(start: result.range.start.seconds, end: result.range.end.seconds,
                                                   text: text, beginsResult: true)]
+                }
+            }
+            if !current.isEmpty, current.contains(where: { $0.confidence.map { $0 < PreparedSpeechRefinement.uncertaintyThreshold } == true }) {
+                let primary = String(result.text.characters)
+                let alternatives = result.alternatives.lazy.map { String($0.characters) }
+                    .filter { $0 != primary && !$0.isEmpty && $0.utf16.count <= 2000 }.prefix(3)
+                for alternative in alternatives where alternative.utf16.count <= alternativeBudget {
+                    current[0].alternatives.append(alternative)
+                    alternativeBudget -= alternative.utf16.count
                 }
             }
             spans.append(contentsOf: current)

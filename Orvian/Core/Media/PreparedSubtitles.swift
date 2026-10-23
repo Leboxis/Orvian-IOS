@@ -12,8 +12,8 @@ struct PreparedSubtitleKey: Codable, Hashable, Sendable {
     let version: Int
 
     static var currentVersion: Int {
-        if #available(iOS 26.4, *) { return 6 }
-        return 5
+        if #available(iOS 26.4, *) { return 8 }
+        return 7
     }
 
     init(credential: String, driveID: Int, file: DriveFile, source: SubtitleSourceLanguage) {
@@ -33,6 +33,7 @@ struct PreparedSubtitle: Codable, Equatable, Sendable {
     var end: Double
     var original: String
     var french: String
+    var needsReview: Bool? = nil
 }
 
 struct PreparedSubtitles: Codable, Equatable, Sendable {
@@ -77,6 +78,8 @@ struct PreparedSpeechSpan: Sendable {
     let end: Double
     var text: String
     var beginsResult = false
+    var confidence: Double? = nil
+    var alternatives: [String] = []
 }
 
 /// Phrase complète + intervalle reconnu. NLTokenizer évite de couper aux
@@ -123,7 +126,7 @@ enum PreparedSentenceBuilder {
                 let right = min(upper, item.range.upperBound)
                 if right > left {
                     let substring = (text as NSString).substring(with: NSRange(location: left, length: right - left))
-                    words.append(PreparedSpeechSpan(start: item.span.start, end: item.span.end, text: substring))
+                    words.append(PreparedSpeechSpan(start: item.span.start, end: item.span.end, text: substring, confidence: item.span.confidence))
                 }
                 index += 1
             }
@@ -135,11 +138,13 @@ enum PreparedSentenceBuilder {
                     pending = nil
                 }
                 if var current = pending {
+                    current.needsReview = current.needsReview == true || PreparedSpeechRefinement.confidence(word.confidence).map { $0 < PreparedSpeechRefinement.uncertaintyThreshold } == true
                     current.original += word.text
                     current.end = max(current.end, word.end)
                     pending = current
                 } else {
-                    pending = PreparedSubtitle(start: word.start, end: word.end, original: word.text, french: "")
+                    pending = PreparedSubtitle(start: word.start, end: word.end, original: word.text, french: "",
+                        needsReview: PreparedSpeechRefinement.confidence(word.confidence).map { $0 < PreparedSpeechRefinement.uncertaintyThreshold })
                 }
             }
             if let pending { append(pending, to: &sentences) }
@@ -155,10 +160,11 @@ enum PreparedSentenceBuilder {
             // Des attributs Speech parfois grossiers couvrent plusieurs phrases.
             // Les réunir préserve le texte et les vraies bornes sans inventer
             // des temps intermédiaires pour la traduction.
+            result[result.count - 1].needsReview = last.needsReview == true || cue.needsReview == true
             result[result.count - 1].original += " " + original
             result[result.count - 1].end = max(last.end, cue.end)
         } else {
-            result.append(PreparedSubtitle(start: cue.start, end: cue.end, original: original, french: ""))
+            result.append(PreparedSubtitle(start: cue.start, end: cue.end, original: original, french: "", needsReview: cue.needsReview))
         }
     }
 }
