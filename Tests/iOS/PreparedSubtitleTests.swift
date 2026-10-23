@@ -291,7 +291,9 @@ final class PreparedSubtitleTests: XCTestCase {
             // capacity or a single read's frameLength; retain the PCM owner
             // while copying its borrowed channel pointer.
             for _ in 0..<10 {
-                try pcm.read(into: samples)
+                let remaining = pcm.length - pcm.framePosition
+                guard remaining > 0 else { break }
+                try pcm.read(into: samples, frameCount: AVAudioFrameCount(min(Int64(samples.frameCapacity), remaining)))
                 guard samples.frameLength > 0 else { break }
                 try withExtendedLifetime(samples) {
                     let values = try XCTUnwrap(samples.floatChannelData?[0])
