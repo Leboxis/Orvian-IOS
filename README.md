@@ -122,3 +122,38 @@ Points clés :
 - iOS 26.0+, iPhone & iPad
 - Conçu pour **LiveContainer** : aucun entitlement exotique, pas de BGTaskScheduler,
   Keychain avec repli UserDefaults, IPA non signé produit par la CI.
+
+
+## Sous-titres automatiques
+
+Dans le menu **CC**, choisissez d’abord la **langue parlée**, puis la transcription
+originale ou **Français (traduction automatique)**. Langues proposées : anglais,
+français, espagnol, allemand, italien et portugais ; leur disponibilité est
+vérifiée sur l’appareil. Les modèles nécessaires peuvent demander un téléchargement.
+Pour une vidéo déjà en français, le mode français affiche la transcription sans
+passer par une traduction.
+
+Les fragments définitifs sont regroupés jusqu’à une fin de phrase, avec une
+limite de longueur/durée et un délai de 1,2 seconde sans nouveau fragment.
+Une traduction en cours va jusqu’au bout ; quatre phrases peuvent attendre.
+En surcharge, les plus anciennes phrases encore en attente sont écartées afin
+de limiter le retard. Le mode français ne remplace plus une traduction par du
+texte original. La traduction reste locale, sans service externe ajouté.
+
+Les sous-titres restent limités à la lecture locale à 1× et aux sources audio
+compatibles. Ils arrivent après la parole ; le regroupement privilégie le
+contexte au prix d’un délai supplémentaire. La qualité linguistique et la
+synchronisation sont à vérifier sur iPhone avec des vidéos représentatives.
+
+
+### Préférences des sous-titres
+
+**Réglages → Sous-titres** permet de choisir le mode préféré, la langue parlée,
+la taille du texte (14–28 pt), l’opacité du fond (60–95 %) et la durée maximale
+d’affichage (3–10 s). Ces choix sont conservés après fermeture de l’application.
+Le menu CC mémorise également le mode et la langue choisis pour les vidéos
+suivantes. La langue parlée doit correspondre à l’audio de la vidéo.
+
+En mode français, le lecteur affiche uniquement la traduction française (ou la
+transcription si l’audio est déjà en français). Pendant la préparation ou en cas
+d’échec, il affiche un message au lieu de repasser sur le texte original.

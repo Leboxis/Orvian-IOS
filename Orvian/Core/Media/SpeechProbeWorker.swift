@@ -9,7 +9,7 @@ enum SpeechProbeError: Error, LocalizedError {
     var errorDescription: String? {
         switch self {
         case .unavailable: "SpeechTranscriber indisponible sur cet appareil."
-        case .locale: "Le modèle anglais n’est pas pris en charge."
+        case .locale: "La langue parlée choisie n’est pas prise en charge par Speech sur cet appareil."
         case .format: "Format PCM non pris en charge par ce prototype mono/stéréo."
         case .source: "Source non composable ou protégée : HLS/DRM hors de ce prototype."
         case .noAudio: "Cette vidéo n’a pas de piste audio."
@@ -22,7 +22,7 @@ enum SpeechProbeError: Error, LocalizedError {
         case .backpressure: "File audio saturée ou occupée : test arrêté, lecture préservée."
         case .sourceAudio: "Le tap n’a pas pu lire les échantillons source."
         case .noBuffers: "Aucun PCM après 8 secondes de lecture : extraction non prouvée."
-        case .model: "Préparation du modèle anglais impossible. Réessayez avec du réseau."
+        case .model: "Préparation du modèle de transcription impossible. Réessayez avec du réseau."
         case .analysis: "Analyse Speech interrompue ; aucune preuve de faisabilité acquise."
         case .localPlayback: "Test local uniquement : revenir à 1× et quitter AirPlay."
         }

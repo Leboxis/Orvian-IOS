@@ -1,0 +1,51 @@
+name: Audio tap safety
+on:
+  push:
+    branches: [main, fix/subtitle-audio-crash, fix/subtitle-settings-french, feature/prepared-french-subtitles]
+    paths:
+      - 'Orvian/Core/Media/PlayerSpeechAudioTap.swift'
+      - 'Orvian/Core/Media/SpeechProbeMailbox.swift'
+      - 'Orvian/Features/Settings/**'
+      - 'Orvian/Core/Media/Subtitle*.swift'
+      - 'Orvian/Core/Media/Prepared*.swift'
+      - 'Orvian/Features/Viewer/Prepared*.swift'
+      - 'Orvian/Features/Viewer/Video*.swift'
+      - 'Orvian/UI/SubtitleOverlay.swift'
+      - 'Tests/AudioTap/**'
+      - 'project.yml'
+      - '.github/workflows/audio-tap-safety.yml'
+permissions:
+  contents: read
+jobs:
+  callbacks:
+    runs-on: macos-26
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Exercise real audio callbacks outside MainActor
+        run: |
+          swiftc -parse-as-library -swift-version 5 -Xfrontend -enable-actor-data-race-checks \
+            Orvian/Core/Media/SpeechProbeMailbox.swift \
+            Orvian/Core/Media/PlayerSpeechAudioTap.swift \
+            Tests/AudioTap/CallbackChecks.swift -o "$RUNNER_TEMP/audio-tap-checks"
+          "$RUNNER_TEMP/audio-tap-checks"
+      - name: Install XcodeGen
+        run: brew install xcodegen
+      - name: Build unsigned iOS candidate
+        run: |
+          xcodegen generate
+          xcodebuild -project Orvian.xcodeproj -scheme Orvian \
+            -configuration Release -destination 'generic/platform=iOS' \
+            -derivedDataPath build-audio-safety \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO build
+      - name: Package candidate IPA
+        run: |
+          mkdir -p candidate/Payload
+          cp -R build-audio-safety/Build/Products/Release-iphoneos/Orvian.app candidate/Payload/
+          cd candidate
+          zip -qry ../Orvian-Apple-Subtitles-unsigned.ipa Payload
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Orvian-Apple-Subtitles-IPA
+          path: Orvian-Apple-Subtitles-unsigned.ipa
+          if-no-files-found: error

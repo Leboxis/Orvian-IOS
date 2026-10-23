@@ -9,6 +9,9 @@ struct SettingsView: View {
     @Binding var columnVisibility: NavigationSplitViewVisibility
     @Environment(\.iPadLayout) private var iPadLayout
 
+    @AppStorage(SubtitleSettings.modeKey) private var subtitleMode: SubtitleMode = .off
+    @AppStorage(SubtitleSettings.sourceKey) private var subtitleSource: SubtitleSourceLanguage = .english
+
     @State private var cacheSize: Int = 0
     @State private var showSignOutConfirm = false
 
@@ -187,6 +190,13 @@ struct SettingsView: View {
                 route: .media
             )
             SettingsLinkRow(
+                icon: "captions.bubble.fill",
+                title: "Sous-titres",
+                summary: subtitleMode == .off ? "Désactivés par défaut" : "\(subtitleMode.shortTitle) · audio \(subtitleSource.title.lowercased())",
+                tint: .blue,
+                route: .subtitles
+            )
+            SettingsLinkRow(
                 icon: "internaldrive.fill",
                 title: "Stockage",
                 summary: storageSummary,
@@ -293,6 +303,8 @@ struct SettingsView: View {
                 prefetchOnWiFiOnly: $prefetchOnWiFiOnly,
                 networkPerfEnabled: $networkPerfEnabled
             )
+        case .subtitles:
+            SubtitleSettingsView()
         case .storage:
             StorageSpace(
                 cacheSize: cacheSize,

@@ -11,7 +11,7 @@ enum SubtitleMode: String, CaseIterable, Identifiable, Sendable {
     var title: String {
         switch self {
         case .off: "Sous-titres désactivés"
-        case .english: "Anglais (transcription)"
+        case .english: "Langue originale (transcription)"
         case .french: "Français (traduction automatique)"
         }
     }
@@ -19,7 +19,7 @@ enum SubtitleMode: String, CaseIterable, Identifiable, Sendable {
     var shortTitle: String {
         switch self {
         case .off: "CC"
-        case .english: "EN"
+        case .english: "VO"
         case .french: "FR"
         }
     }
@@ -34,6 +34,9 @@ struct SubtitleCue: Equatable, Sendable {
     var text: String
     var isFinal: Bool
     var isTranslated: Bool
+    /// Instant où le texte devient disponible, distinct de la parole si le
+    /// moteur a du retard. La durée de lecture doit partir de cet instant.
+    var displayStart: Double? = nil
 }
 
 /// Conserve les sous-titres récents et choisit celui à afficher.
@@ -79,6 +82,75 @@ struct SubtitleCueTimeline: Sendable {
     /// Cue à afficher à `time`, ou `nil` si le plus récent est trop ancien.
     func cue(at time: Double) -> SubtitleCue? {
         guard let latest = cues.last(where: { $0.start <= time + lookahead }) else { return nil }
-        return time - latest.start <= maximumAge ? latest : nil
+        return time - (latest.displayStart ?? latest.start) <= maximumAge ? latest : nil
     }
+}
+
+/// Langue parlée choisie explicitement ; Speech vérifie sa disponibilité réelle.
+enum SubtitleSourceLanguage: String, CaseIterable, Identifiable, Sendable, Codable {
+    case english = "en", french = "fr", spanish = "es", german = "de", italian = "it", portuguese = "pt"
+    var id: String { rawValue }
+    var title: String {
+        switch self {
+        case .english: "Anglais"
+        case .french: "Français"
+        case .spanish: "Espagnol"
+        case .german: "Allemand"
+        case .italian: "Italien"
+        case .portuguese: "Portugais"
+        }
+    }
+    var localeIdentifier: String {
+        switch self {
+        case .english: "en-US"
+        case .french: "fr-FR"
+        case .spanish: "es-ES"
+        case .german: "de-DE"
+        case .italian: "it-IT"
+        case .portuguese: "pt-PT"
+        }
+    }
+}
+
+/// Regroupe uniquement les fragments définitifs. Un délai côté lecteur vide le
+/// reliquat lors d'un silence ; les limites évitent d'accumuler un monologue.
+struct SubtitleSentenceBuffer: Sendable {
+    private var pending: SubtitleCue?
+
+    mutating func append(_ cue: SubtitleCue) -> SubtitleCue? {
+        guard cue.isFinal, !cue.text.isEmpty else { return nil }
+        if var current = pending {
+            current.text += " " + cue.text
+            current.end = cue.end
+            pending = current
+        } else {
+            pending = cue
+        }
+        guard let current = pending else { return nil }
+        if current.text.last.map({ ".!?…。！？".contains($0) }) == true
+            || current.text.count >= 240 || current.end - current.start >= 5 {
+            return flush()
+        }
+        return nil
+    }
+
+    mutating func flush() -> SubtitleCue? {
+        defer { pending = nil }
+        return pending
+    }
+}
+
+/// La traduction active reste hors de cette file. En surcharge, seuls les
+/// anciens éléments encore en attente sont évincés pour limiter le retard.
+struct SubtitleTranslationQueue: Sendable {
+    private var pending: [SubtitleCue] = []
+    var count: Int { pending.count }
+    mutating func append(_ cue: SubtitleCue) {
+        pending.append(cue)
+        if pending.count > 4 { pending.removeFirst(pending.count - 4) }
+    }
+    mutating func popFirst() -> SubtitleCue? {
+        pending.isEmpty ? nil : pending.removeFirst()
+    }
+    mutating func clear() { pending.removeAll() }
 }

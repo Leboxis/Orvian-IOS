@@ -15,15 +15,25 @@ import Foundation
 /// retarder l'affichage.
 enum TemporaryFileSweeper {
     /// Dossiers entièrement dédiés à des copies jetables.
-    private static let ownedDirectories = ["Uploads", "DroppedFiles", "OrvianDownloads", "OrvianPreviews"]
+    private static let ownedDirectories = ["Uploads", "DroppedFiles", "OrvianDownloads", "OrvianPreviews", "OrvianSubtitleSources"]
 
     /// Préfixe des segments écrits par `UploadChunkReader` à la racine de `tmp`.
     private static let chunkPrefix = "orvian-chunk-"
+
+    /// One-time migration: remove only the weights downloaded by the retired
+    /// subtitle engine. Apple manages its own speech/translation assets.
+    static func removeLegacySubtitleModel(applicationSupport: URL) {
+        let legacy = applicationSupport.appendingPathComponent("FluidAudio/Models/parakeet-ultra", isDirectory: true)
+        try? FileManager.default.removeItem(at: legacy)
+    }
 
     static func sweep() async {
         await Task.detached(priority: .utility) {
             let manager = FileManager.default
             let root = manager.temporaryDirectory
+            if let support = manager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first {
+                removeLegacySubtitleModel(applicationSupport: support)
+            }
 
             for name in ownedDirectories {
                 let directory = root.appendingPathComponent(name, isDirectory: true)
@@ -36,7 +46,8 @@ enum TemporaryFileSweeper {
                 includingPropertiesForKeys: nil,
                 options: [.skipsHiddenFiles]
             )) ?? []
-            for entry in entries where entry.lastPathComponent.hasPrefix(chunkPrefix) {
+            for entry in entries where entry.lastPathComponent.hasPrefix(chunkPrefix)
+                || entry.lastPathComponent.hasPrefix("fluidaudio-streaming-") {
                 try? manager.removeItem(at: entry)
             }
         }.value

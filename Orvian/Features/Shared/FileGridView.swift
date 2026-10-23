@@ -117,6 +117,7 @@ struct FileGridView: View {
     @State private var tagsRequest: FileRequest?
     /// Sélecteur de couleur demandé par une carte (dossiers).
     @State private var colorRequest: FileRequest?
+    @State private var subtitleRequest: FileRequest?
     /// Confirmation de suppression demandée par une carte.
     @State private var deleteRequest: FileRequest?
     /// Alerte de renommage demandée par une carte.
@@ -230,6 +231,9 @@ struct FileGridView: View {
                     }
                 )
             }
+            .sheet(item: $subtitleRequest) { request in
+                PreparedSubtitleSheet(file: currentFile(matching: request), driveID: viewModel.driveId)
+            }
             .sheet(item: $colorRequest) { request in
                 FolderColorPickerSheet(
                     file: currentFile(matching: request),
@@ -325,6 +329,8 @@ struct FileGridView: View {
             var transaction = Transaction(animation: nil)
             transaction.disablesAnimations = true
             withTransaction(transaction) { detailRequest = FileRequest(file: file) }
+        case .prepareSubtitles:
+            subtitleRequest = FileRequest(file: file)
         case .colorPicker:
             colorRequest = FileRequest(file: file)
         case .tags:

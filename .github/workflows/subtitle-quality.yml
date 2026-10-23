@@ -1,0 +1,45 @@
+name: Subtitle quality
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main, fix/subtitle-settings-french]
+    paths:
+      - 'Orvian/Core/Media/Subtitle*.swift'
+      - 'Orvian/Core/Media/Prepared*.swift'
+      - 'Orvian/Features/Viewer/Prepared*.swift'
+      - 'Tests/iOS/PreparedSubtitleTests.swift'
+      - 'Orvian/Core/Media/SpeechProbe*.swift'
+      - 'Orvian/Features/Viewer/VideoSpeechProbe.swift'
+      - 'Orvian/UI/SubtitleOverlay.swift'
+      - 'Orvian/Features/Settings/SubtitleSettingsView.swift'
+      - 'Orvian/Features/Settings/SettingsView.swift'
+      - 'Orvian/Features/Viewer/VideoPlayerView.swift'
+      - 'Orvian/App/TabNavigationState.swift'
+      - 'Tests/iOS/SubtitleQualityTests.swift'
+      - 'Tests/test_subtitle_cues.py'
+      - 'project.yml'
+      - '.github/workflows/subtitle-quality.yml'
+permissions:
+  contents: read
+jobs:
+  subtitles:
+    runs-on: macos-26
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check subtitle timeline
+        run: python3 -m unittest discover -s Tests -p test_subtitle_cues.py
+      - name: Install XcodeGen
+        run: brew install xcodegen
+      - name: Compile app and run subtitle logic tests without visual capture
+        shell: bash
+        run: |
+          set -o pipefail
+          xcodegen generate
+          SIMULATOR_ID=$(xcrun simctl list devices available -j | python3 -c 'import json,sys; d=json.load(sys.stdin); print(next(x["udid"] for k,v in d["devices"].items() if "iOS-26" in k for x in v if "iPhone" in x["name"]))')
+          xcodebuild -project Orvian.xcodeproj -scheme Orvian \
+            -destination "platform=iOS Simulator,id=$SIMULATOR_ID" \
+            -configuration Debug -derivedDataPath "$RUNNER_TEMP/subtitle-tests" \
+            -only-testing:OrvianTests/SubtitleQualityTests \
+            -only-testing:OrvianTests/PreparedSubtitleTests \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO test
