@@ -50,7 +50,7 @@ actor PreparedParakeetAnalyzer {
                 // The URL API switches to disk-backed windows above 30 seconds.
                 // One concurrent window bounds model working memory on iPhone.
                 result = try await manager.transcribe(audioURL, decoderState: &state,
-                                                       language: FluidAudio.Language(rawValue: source.rawValue))
+                                                       language: Language(rawValue: source.rawValue))
             } catch {
                 observer.cancel()
                 await observer.value
