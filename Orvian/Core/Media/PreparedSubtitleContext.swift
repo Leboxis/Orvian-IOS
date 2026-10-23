@@ -84,7 +84,7 @@ struct PreparedSubtitleContext {
             // A merged time range covering the current sentence is ambiguous,
             // even if another attribute tries to identify just one sentence.
             if let time, timedIndex == nil,
-               CMTimeRangeGetIntersection(time, currentRange).duration.seconds > 0 {
+               CMTimeRangeGetIntersection(time, otherRange: currentRange).duration.seconds > 0 {
                 throw PreparedSubtitleError.contextAlignment
             }
             let identified = linkedIndex ?? timedIndex

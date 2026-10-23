@@ -140,7 +140,10 @@ actor PreparedSubtitleAnalyzer {
                 let text = String(result.text.characters)
                 if !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                     current = [PreparedSpeechSpan(start: result.range.start.seconds, end: result.range.end.seconds,
-                                                  text: text, beginsResult: true)]
+                                                  text: text, beginsResult: true,
+                                                  confidence: result.text.runs.compactMap {
+                                                      PreparedSpeechRefinement.confidence($0[AttributeScopes.SpeechAttributes.ConfidenceAttribute.self].map { Double($0) })
+                                                  }.min())]
                 }
             }
             if !current.isEmpty, current.contains(where: { $0.confidence.map { $0 < PreparedSpeechRefinement.uncertaintyThreshold } == true }) {
