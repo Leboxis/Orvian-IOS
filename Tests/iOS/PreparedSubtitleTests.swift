@@ -1,6 +1,7 @@
 import XCTest
 import AVFoundation
 import Speech
+import FluidAudio
 @testable import Orvian
 
 final class PreparedSubtitleTests: XCTestCase {
@@ -26,6 +27,40 @@ final class PreparedSubtitleTests: XCTestCase {
         var result = AttributedString(text)
         result[AttributeScopes.SpeechAttributes.TimeRangeAttribute.self] = range
         return result
+    }
+    func testUltraTokenPiecesRetainTextPunctuationAndSourceTimes() throws {
+        let tokens = [
+            TokenTiming(token: "▁Hello", tokenId: 1, startTime: 5, endTime: 5.4, confidence: 1),
+            TokenTiming(token: ",", tokenId: 2, startTime: 5.4, endTime: 5.48, confidence: 1),
+            TokenTiming(token: " world", tokenId: 3, startTime: 5.5, endTime: 6.2, confidence: 1),
+            TokenTiming(token: ".", tokenId: 4, startTime: 6.2, endTime: 6.28, confidence: 1)
+        ]
+        let cues = try PreparedParakeetTiming.make(text: "Hello, world.", tokens: tokens, source: .english)
+        XCTAssertEqual(cues.count, 1)
+        XCTAssertEqual(cues.first?.original, "Hello, world.")
+        XCTAssertEqual(cues.first?.start, 5)
+        XCTAssertEqual(cues.first?.end, 6.28)
+    }
+    func testUltraRejectsMissingOrInconsistentTimingInsteadOfEstimating() {
+        XCTAssertThrowsError(try PreparedParakeetTiming.make(text: "Hello", tokens: nil, source: .english))
+        let missing = [TokenTiming(token: "Hello", tokenId: 1, startTime: 1, endTime: 2, confidence: 1)]
+        XCTAssertThrowsError(try PreparedParakeetTiming.make(text: "Hello world", tokens: missing, source: .english))
+        let invalid = [TokenTiming(token: "Hello", tokenId: 1, startTime: .nan, endTime: 2, confidence: 1)]
+        XCTAssertThrowsError(try PreparedParakeetTiming.make(text: "Hello", tokens: invalid, source: .english))
+        let reversed = [TokenTiming(token: "Hello", tokenId: 1, startTime: 3, endTime: 4, confidence: 1),
+                        TokenTiming(token: " world", tokenId: 2, startTime: 1, endTime: 2, confidence: 1)]
+        XCTAssertThrowsError(try PreparedParakeetTiming.make(text: "Hello world", tokens: reversed, source: .english))
+    }
+    func testUltraInvalidatesPreviousApplePreparedCache() throws {
+        let doc = try document()
+        for version in [1, 2] {
+            var encoded = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(doc)) as? [String: Any])
+            var key = try XCTUnwrap(encoded["key"] as? [String: Any])
+            key["version"] = version
+            encoded["key"] = key
+            let old = try JSONDecoder().decode(PreparedSubtitles.self, from: JSONSerialization.data(withJSONObject: encoded))
+            XCTAssertFalse(old.isValid)
+        }
     }
     func testContextWindowUsesMediaSecondsAndNeverFutureText() {
         let context = PreparedSubtitleContext(cues: contextFixture(), index: 4)
@@ -67,7 +102,7 @@ final class PreparedSubtitleTests: XCTestCase {
     func testOldContextFreeCacheIsInvalidOnContextCapableSystem() throws {
         guard #available(iOS 26.4, *) else { throw XCTSkip("Context requires iOS 26.4") }
         let doc = try document()
-        XCTAssertEqual(doc.key.version, 2)
+        XCTAssertEqual(doc.key.version, 4)
         var json = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(doc)) as? [String: Any])
         var key = try XCTUnwrap(json["key"] as? [String: Any])
         key["version"] = 1
@@ -197,6 +232,16 @@ final class PreparedSubtitleTests: XCTestCase {
             XCTAssertEqual(result.totalFrames, 96000)
             XCTAssertEqual(result.audibleFrames, 16000)
             XCTAssertEqual(result.end, 6, accuracy: 0.001)
+            let extracted = url.deletingLastPathComponent().appendingPathComponent(UUID().uuidString + ".caf")
+            defer { try? FileManager.default.removeItem(at: extracted) }
+            try await PreparedParakeetAudio.extract(asset: composition, to: extracted)
+            let pcm = try AVAudioFile(forReading: extracted)
+            XCTAssertEqual(pcm.length, 96000)
+            let samples = try XCTUnwrap(AVAudioPCMBuffer(pcmFormat: pcm.processingFormat, frameCapacity: 96000))
+            try pcm.read(into: samples)
+            let values = try XCTUnwrap(samples.floatChannelData?[0])
+            XCTAssertTrue((0..<80000).allSatisfy { abs(values[$0]) < 0.0001 })
+            XCTAssertTrue((80000..<96000).allSatisfy { abs(values[$0] - 0.1) < 0.0001 })
         } catch {
             continuation.finish()
             consumer.cancel()

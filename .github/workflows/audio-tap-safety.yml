@@ -12,13 +12,14 @@ on:
       - 'Orvian/Features/Viewer/Video*.swift'
       - 'Orvian/UI/SubtitleOverlay.swift'
       - 'Tests/AudioTap/**'
+      - 'project.yml'
       - '.github/workflows/audio-tap-safety.yml'
 permissions:
   contents: read
 jobs:
   callbacks:
     runs-on: macos-26
-    timeout-minutes: 10
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - name: Exercise real audio callbacks outside MainActor
@@ -42,9 +43,9 @@ jobs:
           mkdir -p candidate/Payload
           cp -R build-audio-safety/Build/Products/Release-iphoneos/Orvian.app candidate/Payload/
           cd candidate
-          zip -qry ../Orvian-Prepared-French-Context8s-unsigned.ipa Payload
+          zip -qry ../Orvian-Parakeet-Ultra-unsigned.ipa Payload
       - uses: actions/upload-artifact@v4
         with:
-          name: Orvian-Prepared-French-Context8s-IPA
-          path: Orvian-Prepared-French-Context8s-unsigned.ipa
+          name: Orvian-Parakeet-Ultra-IPA
+          path: Orvian-Parakeet-Ultra-unsigned.ipa
           if-no-files-found: error

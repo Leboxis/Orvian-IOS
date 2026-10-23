@@ -67,8 +67,8 @@ final class PreparedSubtitleJob {
                 temporaryDirectory = local.deletingLastPathComponent()
                 try validate(key)
                 status = "Transcription précise de l’audio…"
-                var cues = try await PreparedSubtitleAnalyzer.shared.transcribe(url: local, source: key.source) { [weak self] value in
-                    await self?.setProgress(value * 0.65)
+                var cues = try await PreparedParakeetAnalyzer.shared.transcribe(url: local, source: key.source) { [weak self] message, value in
+                    await self?.setTranscriptionProgress(message, value: value * 0.65)
                 }
                 try validate(key)
                 status = "Traduction des phrases en français…"
@@ -112,7 +112,10 @@ final class PreparedSubtitleJob {
         isRunning = false
     }
 
-    private func setProgress(_ value: Double) { progress = value }
+    private func setTranscriptionProgress(_ message: String, value: Double) {
+        status = message
+        progress = value
+    }
     private func validate(_ key: PreparedSubtitleKey) throws {
         try Task.checkCancellation()
         guard TokenStore.credentialFingerprint() == key.credential else { throw CancellationError() }
@@ -177,6 +180,8 @@ struct PreparedSubtitleSheet: View {
                         Text("Sur cette version d’iOS, la traduction reste phrase par phrase. Le contexte précédent nécessite iOS 26.4 ou plus.")
                             .font(.footnote).foregroundStyle(.secondary)
                     }
+                    Text("Transcription : Parakeet Ultra, sur l’appareil. Le premier lancement télécharge environ 630 Mo de modèles, réutilisés pour les vidéos suivantes. Prévoyez de l’espace libre pour la vidéo et son audio temporaire.")
+                        .font(.footnote).foregroundStyle(.secondary)
                     Text("La qualité dépend de la voix et de l’enregistrement. Gardez cette fenêtre ouverte jusqu’à la fin.")
                         .font(.footnote).foregroundStyle(.secondary)
                     Picker("Langue parlée", selection: $source) {
@@ -201,6 +206,12 @@ struct PreparedSubtitleSheet: View {
                             }
                         }.disabled(job.isRunning)
                     }
+                }
+                Section("Modèle et licences") {
+                    Text("Parakeet Ultra par Moondream, dérivé de NVIDIA Parakeet TDT 0.6B v3. Conversion Core ML INT8 par Fluid Inference. FluidAudio 0.17.7, licence Apache 2.0.")
+                        .font(.footnote)
+                    Link("Parakeet Ultra — modèle et attribution", destination: URL(string: "https://huggingface.co/moondream/parakeet-ultra")!)
+                    Link("Licence du modèle : CC BY 4.0", destination: URL(string: "https://creativecommons.org/licenses/by/4.0/")!)
                 }
             }
             .navigationTitle("Préparer les sous-titres")

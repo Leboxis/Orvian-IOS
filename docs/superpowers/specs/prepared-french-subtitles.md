@@ -70,3 +70,11 @@ Des attributs absents/inconnus ou une attribution ambiguë arrêtent la prépara
 sans remplacer un cache complet. La version de cache passe à 2 sur iOS 26.4+
 pour imposer un recalcul ; iOS 26.0–26.3 reste en version 1 et indique clairement
 la traduction phrase par phrase. L'analyse Speech de l'audio reste inchangée.
+
+## Parakeet Ultra
+
+Prepared transcription now uses the explicitly selected Ultra Core ML model from FluidAudio 0.17.7, pinned at revision 503b4bd1bbf7220882de39fe8ae6716aae4132da. Live captions continue using Apple Speech. Translation remains Apple high-fidelity with eight seconds of previous sentence context on iOS 26.4+. No silent substitution of the transcription model.
+
+Audio is extracted incrementally to protected 16 kHz mono PCM, retaining timeline gaps as silence. Ultra uses one concurrent window and disk-backed processing for long recordings. Cache versions 3/4 isolate Ultra results from older Apple transcriptions. Missing/inconsistent token times fail preparation instead of estimating subtitle times. No model or transcript logging. Initial model download is disclosed with attribution to Moondream/NVIDIA and Fluid Inference.
+
+Validation: compile Release for iPhone and simulator; preserve existing tests; verify token text/timestamps, source timeline gaps, cache invalidation, and actual Ultra inference on a non-private synthetic fixture. Real iPhone memory/thermal performance remains device-dependent and requires on-device validation.
