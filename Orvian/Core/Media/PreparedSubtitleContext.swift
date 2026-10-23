@@ -10,6 +10,7 @@ import Speech
 struct PreparedSubtitleContext {
     let text: AttributedString
     let ranges: [CMTimeRange]
+    let currentSource: String
     var currentRange: CMTimeRange { ranges[ranges.count - 1] }
     var hasContext: Bool { ranges.count > 1 }
 
@@ -32,6 +33,7 @@ struct PreparedSubtitleContext {
         }
         self.text = text
         self.ranges = ranges
+        currentSource = cues[index].original
     }
 
     /// Refuser une attribution perdue/ambiguë plutôt que d'afficher les huit
@@ -65,5 +67,39 @@ struct PreparedSubtitleContext {
         let result = output.trimmingCharacters(in: .whitespacesAndNewlines)
         guard seen.count == ranges.count, !result.isEmpty else { throw PreparedSubtitleError.contextAlignment }
         return result
+    }
+}
+
+struct PreparedContextTranslation {
+    let text: String
+    let usedContext: Bool
+}
+
+extension PreparedSubtitleContext {
+    /// Apple preserves attributed timing on a best-effort basis, not as a
+    /// guarantee. Never save the whole contextual response as the current cue.
+    /// https://developer.apple.com/documentation/translation/translationsession/request/attributedsourcetext
+    @MainActor
+    func translateCurrent(
+        contextual: (AttributedString) async throws -> AttributedString?,
+        isolated: (String) async throws -> String
+    ) async throws -> PreparedContextTranslation {
+        try Task.checkCancellation()
+        if hasContext {
+            let translated = try await contextual(text)
+            try Task.checkCancellation()
+            do {
+                return PreparedContextTranslation(text: try currentTranslation(from: translated), usedContext: true)
+            } catch PreparedSubtitleError.contextAlignment {
+                // Retry only the current source sentence. Do not guess a split,
+                // reuse untranslated English, or swallow translation errors.
+            }
+        }
+        try Task.checkCancellation()
+        let translated = try await isolated(currentSource)
+        try Task.checkCancellation()
+        let result = translated.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !result.isEmpty else { throw PreparedSubtitleError.incomplete }
+        return PreparedContextTranslation(text: result, usedContext: false)
     }
 }

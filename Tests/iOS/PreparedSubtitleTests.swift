@@ -99,6 +99,51 @@ final class PreparedSubtitleTests: XCTestCase {
         interleaved += tagged("Fin", range: context.currentRange)
         XCTAssertThrowsError(try context.currentTranslation(from: interleaved))
     }
+    @MainActor func testLostContextAttributesRetryOnlyCurrentSentence() async throws {
+        let context = PreparedSubtitleContext(cues: contextFixture(), index: 4)
+        let ambiguous = tagged("Contexte et phrase fusionnés", range: CMTimeRange(start: .zero, duration: CMTime(seconds: 12, preferredTimescale: 600)))
+        let outputs: [AttributedString?] = [nil, AttributedString("Tout le contexte traduit."), ambiguous]
+        for output in outputs {
+            var isolatedCalls = 0
+            let result = try await context.translateCurrent(contextual: { input in
+                XCTAssertEqual(String(input.characters), "Near. Previous. Current.")
+                return output
+            }, isolated: { source in
+                isolatedCalls += 1
+                XCTAssertEqual(source, "Current.")
+                return "  Actuelle.  "
+            })
+            XCTAssertEqual(isolatedCalls, 1)
+            XCTAssertEqual(result.text, "Actuelle.")
+            XCTAssertFalse(result.usedContext)
+        }
+    }
+    @MainActor func testValidContextKeepsContextualTranslationWithoutRetry() async throws {
+        let context = PreparedSubtitleContext(cues: contextFixture(), index: 4)
+        var translated = tagged("Proche. ", range: context.ranges[0])
+        translated += tagged("Précédente. ", range: context.ranges[1])
+        translated += tagged("Actuelle.", range: context.currentRange)
+        let result = try await context.translateCurrent(contextual: { _ in translated }, isolated: { _ in
+            XCTFail("Valid context must not trigger isolated translation")
+            return ""
+        })
+        XCTAssertEqual(result.text, "Actuelle.")
+        XCTAssertTrue(result.usedContext)
+    }
+    @MainActor func testContextRetryPreservesCancellationAndRejectsEmptyTranslation() async {
+        let context = PreparedSubtitleContext(cues: contextFixture(), index: 4)
+        do {
+            _ = try await context.translateCurrent(contextual: { _ in throw CancellationError() }, isolated: { _ in
+                XCTFail("Cancellation must not retry translation")
+                return "Actuelle."
+            })
+            XCTFail("Cancellation must propagate")
+        } catch is CancellationError { } catch { XCTFail("Unexpected error: \(error)") }
+        do {
+            _ = try await context.translateCurrent(contextual: { _ in nil }, isolated: { _ in "  " })
+            XCTFail("Empty translation must not be saved")
+        } catch PreparedSubtitleError.incomplete { } catch { XCTFail("Unexpected error: \(error)") }
+    }
     func testOldContextFreeCacheIsInvalidOnContextCapableSystem() throws {
         guard #available(iOS 26.4, *) else { throw XCTSkip("Context requires iOS 26.4") }
         let doc = try document()

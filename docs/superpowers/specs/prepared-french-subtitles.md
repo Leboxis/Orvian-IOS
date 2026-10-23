@@ -78,3 +78,7 @@ Prepared transcription now uses the explicitly selected Ultra Core ML model from
 Audio is extracted incrementally to protected 16 kHz mono PCM, retaining timeline gaps as silence. Ultra uses one concurrent window and disk-backed processing for long recordings. Cache versions 3/4 isolate Ultra results from older Apple transcriptions. Missing/inconsistent token times fail preparation instead of estimating subtitle times. No model or transcript logging. Initial model download is disclosed with attribution to Moondream/NVIDIA and Fluid Inference.
 
 Validation: compile Release for iPhone and simulator; preserve existing tests; verify token text/timestamps, source timeline gaps, cache invalidation, and actual Ultra inference on a non-private synthetic fixture. Real iPhone memory/thermal performance remains device-dependent and requires on-device validation.
+
+### Context attribute loss recovery
+
+Apple documents attributed translation preservation as best effort. If context timing attributes are missing, merged or ambiguous, retry just the current original sentence via plain-text translation. Preserve the original Parakeet cue times, never save the entire translated context, and never substitute English for French. Report the number of isolated retries after completion and disclose this fallback in the preparation sheet. Cancellation and translation failures still propagate; empty retries cannot be saved. A valid contextual response continues to use the eight-second window.

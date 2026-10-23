@@ -7,6 +7,7 @@ final class PreparedSubtitleJob {
     var progress = 0.0
     var isRunning = false
     var isReady = false
+    var contextFallbackCount = 0
     var error: String?
     var configuration: TranslationSession.Configuration?
     var originalRun = UUID()
@@ -20,6 +21,7 @@ final class PreparedSubtitleJob {
         cancelled = false
         error = nil
         progress = 0
+        contextFallbackCount = 0
         status = "Préparation des modèles…"
         if source == .french {
             configuration = nil
@@ -57,7 +59,7 @@ final class PreparedSubtitleJob {
                 if let temporaryDirectory { try? FileManager.default.removeItem(at: temporaryDirectory) }
             }
             do {
-                // SpeechAnalyzer analyse localement : l'autorisation du vieux
+                // La transcription préparée est locale : l'autorisation du vieux
                 // SFSpeechRecognizer (serveurs Apple) ne s'applique pas ici.
                 try validate(key)
                 if let session { try await session.prepareTranslation() }
@@ -77,13 +79,15 @@ final class PreparedSubtitleJob {
                     if let session {
                         if #available(iOS 26.4, *) {
                             let context = PreparedSubtitleContext(cues: cues, index: index)
-                            if context.hasContext {
-                                let response = try await session.translate(context.text)
-                                cues[index].french = try context.currentTranslation(from: response.attributedTargetText)
-                            } else {
-                                let response = try await session.translate(cues[index].original)
-                                cues[index].french = response.targetText.trimmingCharacters(in: .whitespacesAndNewlines)
-                            }
+                            let translated = try await context.translateCurrent(contextual: { text in
+                                let response = try await session.translate(text)
+                                return response.attributedTargetText
+                            }, isolated: { text in
+                                let response = try await session.translate(text)
+                                return response.targetText
+                            })
+                            cues[index].french = translated.text
+                            if context.hasContext, !translated.usedContext { contextFallbackCount += 1 }
                         } else {
                             let response = try await session.translate(cues[index].original)
                             cues[index].french = response.targetText.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -99,6 +103,9 @@ final class PreparedSubtitleJob {
                 try validate(key)
                 isReady = true
                 status = "Sous-titres prêts. Ils seront chargés automatiquement à l’ouverture de cette vidéo."
+                if contextFallbackCount > 0 {
+                    status += " \(contextFallbackCount) phrase(s) ont été traduites séparément car le moteur n’a pas conservé les repères du contexte. Les temps de l’audio sont conservés."
+                }
             } catch is CancellationError {
                 status = "Préparation annulée."
             } catch {
@@ -182,6 +189,10 @@ struct PreparedSubtitleSheet: View {
                     }
                     Text("Transcription : Parakeet Ultra, sur l’appareil. Le premier lancement télécharge environ 630 Mo de modèles, réutilisés pour les vidéos suivantes. Prévoyez de l’espace libre pour la vidéo et son audio temporaire.")
                         .font(.footnote).foregroundStyle(.secondary)
+                    if #available(iOS 26.4, *) {
+                        Text("Si la traduction ne conserve pas les repères du contexte, la phrase concernée est traduite seule pour terminer la préparation sans répéter les phrases précédentes ni changer ses temps d’affichage.")
+                            .font(.footnote).foregroundStyle(.secondary)
+                    }
                     Text("La qualité dépend de la voix et de l’enregistrement. Gardez cette fenêtre ouverte jusqu’à la fin.")
                         .font(.footnote).foregroundStyle(.secondary)
                     Picker("Langue parlée", selection: $source) {
