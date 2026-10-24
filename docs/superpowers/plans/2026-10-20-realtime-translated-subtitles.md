@@ -148,6 +148,15 @@ Deux autres défauts de production ont été corrigés au passage : les arrêts 
 
 **Limites de la présente étude :** environnement Windows, aucun build Xcode, aucun test sur appareil/simulateur, aucune URL kDrive authentifiée consultée. Aucun test visuel ni capture via GitHub Actions. Les preuves de performance et d’accès au PCM restent à produire sur Mac + appareil réel.
 
+### Périmètre fonctionnel — clarification du 20 octobre 2026
+
+**La traduction et la transcription ne concernent que les vidéos kDrive de l’utilisateur en anglais.** C’est le seul cas où la chaîne s’active ; aucune autre source n’est visée. Conséquences directes pour la suite :
+
+- **Le vocabulaire est connu et fermé.** Les noms propres qui font échouer la reconnaissance et la traduction sont ceux de ce drive : noms de fichiers, dossiers, tags, catégories. C’est précisément le vocabulaire à fournir via `contextualStrings`, et le seul qui ait un retour sur investissement mesurable ici.
+- **Ne pas viser un modèle généraliste.** Un modèle en→fr générique traduira correctement la langue courante ; ce qui casse, ce sont les noms propres et les termes métier kDrive. Les corriger en amont (transcription) protège aussi la traduction en aval.
+- **L’hypothèse « source anglaise » doit rester vérifiée, pas présumée.** Une vidéo française du même drive ne doit pas passer en traduction : la détection de langue reste à établir côté transcription avant d’activer le mode français.
+- **Aucune promesse sur d’autres langues ou d’autres sources.** Le plan ne couvre que en→fr sur kDrive.
+
 ## 9. Sources officielles structurantes
 
 - **[A1]** [AVPlayerItem.audioMix](https://developer.apple.com/documentation/avfoundation/avplayeritem/audiomix) — file-based uniquement, exclusion HLS ; [JSON Apple consulté](https://developer.apple.com/tutorials/data/documentation/avfoundation/avplayeritem/audiomix.json). [audioTapProcessor](https://developer.apple.com/documentation/avfoundation/avmutableaudiomixinputparameters/audiotapprocessor).

@@ -12,13 +12,18 @@ actor PreparedSubtitleAnalyzer {
         guard !isRunning else { throw PreparedSubtitleError.busy }
         isRunning = true
         defer { isRunning = false }
-        let assetDuration = try await AVURLAsset(url: url).load(.duration).seconds
-        var spans = try await analyze(url: url, source: source, range: nil) { value in await progress(value * 0.8) }
+        // Only explicit preparation uses the extra audio decoder. Playback/live
+        // capture remain unchanged, and native containers keep the Apple reader.
+        let usesAudioDecoder = ["mkv", "mpg", "mpeg", "ts", "mts", "m2ts", "vob", "webm"].contains(url.pathExtension.lowercased())
+        let assetDuration = usesAudioDecoder
+            ? try await decodedDuration(url: url)
+            : try await AVURLAsset(url: url).load(.duration).seconds
+        var spans = try await analyze(url: url, source: source, range: nil, usesAudioDecoder: usesAudioDecoder) { value in await progress(value * 0.8) }
         let windows = PreparedSpeechRefinement.windows(for: spans, duration: assetDuration)
         for (index, range) in windows.enumerated() {
             try Task.checkCancellation()
             do {
-                let reread = try await analyze(url: url, source: source, range: range, progress: { _ in })
+                let reread = try await analyze(url: url, source: source, range: range, usesAudioDecoder: usesAudioDecoder, progress: { _ in })
                 spans = PreparedSpeechRefinement.merge(original: spans, reread: reread)
             } catch is CancellationError {
                 throw CancellationError()
@@ -33,14 +38,35 @@ actor PreparedSubtitleAnalyzer {
         return try PreparedSentenceBuilder.make(spans, source: source)
     }
 
-    private func analyze(url: URL, source: SubtitleSourceLanguage, range: CMTimeRange?,
+    private func decodedDuration(url: URL) async throws -> Double {
+        let cancellation = try PreparedAudioCancellation()
+        return try await withTaskCancellationHandler {
+            try Task.checkCancellation()
+            let decoder = try PreparedAudioDecoder(url: url, sampleRate: 16_000, channels: 1, cancellation: cancellation)
+            let duration = decoder.duration
+            await decoder.close()
+            try Task.checkCancellation()
+            return duration
+        } onCancel: { cancellation.cancel() }
+    }
+
+    private func analyze(url: URL, source: SubtitleSourceLanguage, range: CMTimeRange?, usesAudioDecoder: Bool,
                          progress: @escaping @Sendable (Double) async -> Void) async throws -> [PreparedSpeechSpan] {
-        let asset = AVURLAsset(url: url)
-        let protected = try await asset.load(.hasProtectedContent)
-        guard !protected else { throw PreparedSubtitleError.source }
-        let tracks = try await asset.loadTracks(withMediaType: .audio)
-        guard !tracks.isEmpty else { throw PreparedSubtitleError.noAudio }
-        guard tracks.count == 1 else { throw PreparedSubtitleError.multipleTracks }
+        let asset: AVURLAsset?
+        let audioTrack: AVAssetTrack?
+        if usesAudioDecoder {
+            asset = nil
+            audioTrack = nil
+        } else {
+            let nativeAsset = AVURLAsset(url: url)
+            let protected = try await nativeAsset.load(.hasProtectedContent)
+            guard !protected else { throw PreparedSubtitleError.source }
+            let tracks = try await nativeAsset.loadTracks(withMediaType: .audio)
+            guard !tracks.isEmpty else { throw PreparedSubtitleError.noAudio }
+            guard tracks.count == 1 else { throw PreparedSubtitleError.multipleTracks }
+            asset = nativeAsset
+            audioTrack = tracks[0]
+        }
         guard SpeechTranscriber.isAvailable,
               let locale = await SpeechTranscriber.supportedLocale(equivalentTo: Locale(identifier: source.localeIdentifier)) else {
             throw PreparedSubtitleError.unavailable
@@ -56,34 +82,63 @@ actor PreparedSubtitleAnalyzer {
         guard let format = await SpeechAnalyzer.bestAvailableAudioFormat(compatibleWith: [transcriber]) else {
             throw PreparedSubtitleError.unavailable
         }
-        let duration = try await asset.load(.duration).seconds
         let analyzer = SpeechAnalyzer(modules: [transcriber])
         try await analyzer.prepareToAnalyze(in: format)
-        let reader = try AVAssetReader(asset: asset)
-        if let range { reader.timeRange = range }
-        let settings: [String: Any] = [
-            AVFormatIDKey: kAudioFormatLinearPCM,
-            AVSampleRateKey: format.sampleRate,
-            AVNumberOfChannelsKey: format.channelCount,
-            AVLinearPCMBitDepthKey: format.streamDescription.pointee.mBitsPerChannel,
-            AVLinearPCMIsFloatKey: format.commonFormat == .pcmFormatFloat32 || format.commonFormat == .pcmFormatFloat64,
-            AVLinearPCMIsNonInterleaved: !format.isInterleaved,
-            AVLinearPCMIsBigEndianKey: false
-        ]
-        let output = AVAssetReaderTrackOutput(track: tracks[0], outputSettings: settings)
-        output.alwaysCopiesSampleData = false
-        guard reader.canAdd(output) else { throw PreparedSubtitleError.source }
-        reader.add(output)
+        let cancellation = usesAudioDecoder ? try PreparedAudioCancellation() : nil
+        let decoder: PreparedAudioDecoder?
+        let reader: AVAssetReader?
+        let output: AVAssetReaderTrackOutput?
+        let duration: Double
+        if let cancellation {
+            guard format.sampleRate.isFinite, (16_000...192_000).contains(format.sampleRate),
+                  format.sampleRate.rounded() == format.sampleRate else { throw PreparedSubtitleError.source }
+            let decoded = try await withTaskCancellationHandler {
+                try Task.checkCancellation()
+                let value = try PreparedAudioDecoder(url: url, sampleRate: Int(format.sampleRate),
+                                                     channels: Int(format.channelCount), cancellation: cancellation)
+                try Task.checkCancellation()
+                return value
+            } onCancel: { cancellation.cancel() }
+            decoder = decoded
+            duration = decoded.duration
+            reader = nil
+            output = nil
+        } else if let asset, let audioTrack {
+            duration = try await asset.load(.duration).seconds
+            let nativeReader = try AVAssetReader(asset: asset)
+            if let range { nativeReader.timeRange = range }
+            let settings: [String: Any] = [
+                AVFormatIDKey: kAudioFormatLinearPCM,
+                AVSampleRateKey: format.sampleRate,
+                AVNumberOfChannelsKey: format.channelCount,
+                AVLinearPCMBitDepthKey: format.streamDescription.pointee.mBitsPerChannel,
+                AVLinearPCMIsFloatKey: format.commonFormat == .pcmFormatFloat32 || format.commonFormat == .pcmFormatFloat64,
+                AVLinearPCMIsNonInterleaved: !format.isInterleaved,
+                AVLinearPCMIsBigEndianKey: false
+            ]
+            let nativeOutput = AVAssetReaderTrackOutput(track: audioTrack, outputSettings: settings)
+            nativeOutput.alwaysCopiesSampleData = false
+            guard nativeReader.canAdd(nativeOutput) else { throw PreparedSubtitleError.source }
+            nativeReader.add(nativeOutput)
+            decoder = nil
+            reader = nativeReader
+            output = nativeOutput
+        } else { throw PreparedSubtitleError.source }
         let (stream, continuation) = AsyncStream.makeStream(of: AnalyzerInput.self, bufferingPolicy: .bufferingOldest(4))
-        defer { continuation.finish(); reader.cancelReading() }
+        defer { continuation.finish(); reader?.cancelReading(); cancellation?.cancel() }
         let spans = try await withTaskCancellationHandler {
             do {
                 try await analyzer.start(inputSequence: stream)
                 return try await withThrowingTaskGroup(of: [PreparedSpeechSpan]?.self) { group in
                     group.addTask { try await self.collect(transcriber) }
                     group.addTask {
-                        try await self.pump(reader: reader, output: output, format: format,
-                                            duration: duration, continuation: continuation, progress: progress)
+                        if let decoder {
+                            try await self.pump(decoder: decoder, format: format, range: range,
+                                                duration: duration, continuation: continuation, progress: progress)
+                        } else if let reader, let output {
+                            try await self.pump(reader: reader, output: output, format: format,
+                                                duration: duration, continuation: continuation, progress: progress)
+                        } else { throw PreparedSubtitleError.source }
                         continuation.finish()
                         try await analyzer.finalizeAndFinishThroughEndOfInput()
                         return nil
@@ -95,6 +150,7 @@ actor PreparedSubtitleAnalyzer {
                         }
                     } catch {
                         group.cancelAll()
+                        cancellation?.cancel()
                         continuation.finish()
                         await analyzer.cancelAndFinishNow()
                         throw error
@@ -103,13 +159,17 @@ actor PreparedSubtitleAnalyzer {
                 }
             } catch {
                 continuation.finish()
+                cancellation?.cancel()
                 await analyzer.cancelAndFinishNow()
+                if let decoder { await decoder.close() }
                 throw error
             }
         } onCancel: {
             // Annuler CET analyseur, pas un éventuel traitement suivant.
+            cancellation?.cancel()
             Task { await analyzer.cancelAndFinishNow() }
         }
+        if let decoder { await decoder.close() }
         try Task.checkCancellation()
         return spans
     }
@@ -161,6 +221,39 @@ actor PreparedSubtitleAnalyzer {
         return spans
     }
 
+    private func pump(decoder: PreparedAudioDecoder, format: AVAudioFormat, range: CMTimeRange?,
+                      duration: Double, continuation: AsyncStream<AnalyzerInput>.Continuation,
+                      progress: @escaping @Sendable (Double) async -> Void) async throws {
+        if let range { try await decoder.seek(to: range.start.seconds) }
+        var previousTime = -Double.infinity
+        var lastProgress = ContinuousClock.now
+        while let chunk = try await decoder.read() {
+            try Task.checkCancellation()
+            guard chunk.startTime >= previousTime else { throw PreparedSubtitleError.timing }
+            previousTime = chunk.startTime
+            if let range, chunk.startTime >= range.end.seconds { break }
+            guard let input = try chunk.input(format: format, range: range) else { continue }
+            try await enqueue(input, into: continuation)
+            if lastProgress.duration(to: .now) >= .milliseconds(200) {
+                if duration.isFinite, duration > 0 { await progress(min(0.99, chunk.startTime / duration)) }
+                lastProgress = .now
+            }
+        }
+        try Task.checkCancellation()
+    }
+
+    private func enqueue(_ input: AnalyzerInput, into continuation: AsyncStream<AnalyzerInput>.Continuation) async throws {
+        while true {
+            try Task.checkCancellation()
+            switch continuation.yield(input) {
+            case .enqueued: return
+            case .dropped: try await Task.sleep(for: .milliseconds(20))
+            case .terminated: throw CancellationError()
+            @unknown default: throw PreparedSubtitleError.source
+            }
+        }
+    }
+
     func pump(reader: AVAssetReader, output: AVAssetReaderTrackOutput, format: AVAudioFormat,
                       duration: Double, continuation: AsyncStream<AnalyzerInput>.Continuation,
                       progress: @escaping @Sendable (Double) async -> Void) async throws {
@@ -189,15 +282,7 @@ actor PreparedSubtitleAnalyzer {
             // Garder les PTS de la piste vidéo, y compris un éventuel décalage
             // initial. Ne jamais repartir artificiellement à zéro.
             let input = AnalyzerInput(buffer: buffer, bufferStartTime: time)
-            retry: while true {
-                try Task.checkCancellation()
-                switch continuation.yield(input) {
-                case .enqueued: break retry
-                case .dropped: try await Task.sleep(for: .milliseconds(20))
-                case .terminated: throw CancellationError()
-                @unknown default: throw PreparedSubtitleError.source
-                }
-            }
+            try await enqueue(input, into: continuation)
             if lastProgress.duration(to: .now) >= .milliseconds(200) {
                 if duration.isFinite, duration > 0 { await progress(min(0.99, time.seconds / duration)) }
                 lastProgress = .now

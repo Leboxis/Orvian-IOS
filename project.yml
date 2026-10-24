@@ -27,15 +27,21 @@ targets:
     platform: iOS
     sources:
       - path: Orvian
+    dependencies:
+      - framework: Vendor/OrvianAudioDecoder.xcframework
+        embed: true
     postBuildScripts:
       - name: Install dependency license acknowledgements
         script: |
           set -eu
           cp "$PODS_ROOT/Target Support Files/Pods-Orvian/Pods-Orvian-acknowledgements.plist" "$TARGET_BUILD_DIR/$UNLOCALIZED_RESOURCES_FOLDER_PATH/Settings.bundle/Acknowledgements.plist"
+          cp "$SRCROOT/Vendor/OrvianAudioDecoder-Settings.plist" "$TARGET_BUILD_DIR/$UNLOCALIZED_RESOURCES_FOLDER_PATH/Settings.bundle/FFmpeg.plist"
         inputFiles:
           - "$(PODS_ROOT)/Target Support Files/Pods-Orvian/Pods-Orvian-acknowledgements.plist"
+          - "$(SRCROOT)/Vendor/OrvianAudioDecoder-Settings.plist"
         outputFiles:
           - "$(TARGET_BUILD_DIR)/$(UNLOCALIZED_RESOURCES_FOLDER_PATH)/Settings.bundle/Acknowledgements.plist"
+          - "$(TARGET_BUILD_DIR)/$(UNLOCALIZED_RESOURCES_FOLDER_PATH)/Settings.bundle/FFmpeg.plist"
     info:
       path: Orvian/Info.plist
       properties:

@@ -12,6 +12,10 @@ on:
       - 'Orvian/Features/Viewer/Video*.swift'
       - 'Orvian/UI/SubtitleOverlay.swift'
       - 'Tests/AudioTap/**'
+      - 'Native/PreparedAudio/**'
+      - '.github/scripts/build_prepared_audio.sh'
+      - 'docs/prepared-audio-decoder.md'
+      - 'Orvian/Resources/Settings.bundle/**'
       - 'project.yml'
       - '.github/workflows/audio-tap-safety.yml'
 permissions:
@@ -31,6 +35,20 @@ jobs:
           "$RUNNER_TEMP/audio-tap-checks"
       - name: Install XcodeGen and CocoaPods
         run: brew install xcodegen cocoapods
+      - name: Identify prepared audio toolchain
+        id: prepared-audio-toolchain
+        run: echo "version=$(xcodebuild -version | shasum -a 256 | awk '{print $1}')" >> "$GITHUB_OUTPUT"
+      - name: Cache isolated prepared audio decoder
+        uses: actions/cache@v4
+        with:
+          path: |
+            Vendor/OrvianAudioDecoder.xcframework
+            Vendor/OrvianAudioDecoder-Settings.plist
+            Vendor/OrvianAudioDecoder-relink.tar.gz
+            Vendor/OrvianAudioDecoder-build.sha256
+          key: prepared-audio-${{ runner.os }}-${{ runner.arch }}-${{ steps.prepared-audio-toolchain.outputs.version }}-ffmpeg-9.0.2-8c385028-${{ hashFiles('.github/scripts/build_prepared_audio.sh', 'Native/PreparedAudio/**', 'docs/prepared-audio-decoder.md') }}
+      - name: Build and verify isolated prepared audio decoder
+        run: bash .github/scripts/build_prepared_audio.sh
       - name: Build unsigned iOS candidate
         run: |
           xcodegen generate
@@ -48,5 +66,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: Orvian-Apple-Subtitles-IPA
-          path: Orvian-Apple-Subtitles-unsigned.ipa
+          path: |
+            Orvian-Apple-Subtitles-unsigned.ipa
+            Vendor/OrvianAudioDecoder-relink.tar.gz
           if-no-files-found: error

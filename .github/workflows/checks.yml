@@ -91,6 +91,23 @@ jobs:
       - name: Install XcodeGen and CocoaPods
         run: brew install xcodegen cocoapods
 
+      - name: Identify prepared audio toolchain
+        id: prepared-audio-toolchain
+        run: echo "version=$(xcodebuild -version | shasum -a 256 | awk '{print $1}')" >> "$GITHUB_OUTPUT"
+
+      - name: Cache isolated prepared audio decoder
+        uses: actions/cache@v4
+        with:
+          path: |
+            Vendor/OrvianAudioDecoder.xcframework
+            Vendor/OrvianAudioDecoder-Settings.plist
+            Vendor/OrvianAudioDecoder-relink.tar.gz
+            Vendor/OrvianAudioDecoder-build.sha256
+          key: prepared-audio-${{ runner.os }}-${{ runner.arch }}-${{ steps.prepared-audio-toolchain.outputs.version }}-ffmpeg-9.0.2-8c385028-${{ hashFiles('.github/scripts/build_prepared_audio.sh', 'Native/PreparedAudio/**', 'docs/prepared-audio-decoder.md') }}
+
+      - name: Build and verify isolated prepared audio decoder
+        run: bash .github/scripts/build_prepared_audio.sh
+
       - name: Generate project and run hosted iOS tests
         shell: bash
         run: |

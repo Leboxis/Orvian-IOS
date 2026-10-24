@@ -114,6 +114,23 @@ jobs:
       - name: Install XcodeGen and CocoaPods
         run: brew install xcodegen cocoapods
 
+      - name: Identify prepared audio toolchain
+        id: prepared-audio-toolchain
+        run: echo "version=$(xcodebuild -version | shasum -a 256 | awk '{print $1}')" >> "$GITHUB_OUTPUT"
+
+      - name: Cache isolated prepared audio decoder
+        uses: actions/cache@v4
+        with:
+          path: |
+            Vendor/OrvianAudioDecoder.xcframework
+            Vendor/OrvianAudioDecoder-Settings.plist
+            Vendor/OrvianAudioDecoder-relink.tar.gz
+            Vendor/OrvianAudioDecoder-build.sha256
+          key: prepared-audio-${{ runner.os }}-${{ runner.arch }}-${{ steps.prepared-audio-toolchain.outputs.version }}-ffmpeg-9.0.2-8c385028-${{ hashFiles('.github/scripts/build_prepared_audio.sh', 'Native/PreparedAudio/**', 'docs/prepared-audio-decoder.md') }}
+
+      - name: Build and verify isolated prepared audio decoder
+        run: bash .github/scripts/build_prepared_audio.sh
+
       - name: Generate Xcode project and install pinned dependencies
         run: |
           xcodegen generate
@@ -149,7 +166,9 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: Orvian-unsigned-ipa
-          path: Orvian-*-unsigned.ipa
+          path: |
+            Orvian-*-unsigned.ipa
+            Vendor/OrvianAudioDecoder-relink.tar.gz
 
       - name: Publish LiveContainer version
         id: release
@@ -189,7 +208,9 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: v${{ steps.version.outputs.value }}
-          files: Orvian-${{ steps.version.outputs.value }}-unsigned.ipa
+          files: |
+            Orvian-${{ steps.version.outputs.value }}-unsigned.ipa
+            Vendor/OrvianAudioDecoder-relink.tar.gz
           generate_release_notes: true
 
   speech-probe:
@@ -214,6 +235,23 @@ jobs:
 
       - name: Install XcodeGen and CocoaPods
         run: brew install xcodegen cocoapods
+
+      - name: Identify prepared audio toolchain
+        id: prepared-audio-toolchain
+        run: echo "version=$(xcodebuild -version | shasum -a 256 | awk '{print $1}')" >> "$GITHUB_OUTPUT"
+
+      - name: Cache isolated prepared audio decoder
+        uses: actions/cache@v4
+        with:
+          path: |
+            Vendor/OrvianAudioDecoder.xcframework
+            Vendor/OrvianAudioDecoder-Settings.plist
+            Vendor/OrvianAudioDecoder-relink.tar.gz
+            Vendor/OrvianAudioDecoder-build.sha256
+          key: prepared-audio-${{ runner.os }}-${{ runner.arch }}-${{ steps.prepared-audio-toolchain.outputs.version }}-ffmpeg-9.0.2-8c385028-${{ hashFiles('.github/scripts/build_prepared_audio.sh', 'Native/PreparedAudio/**', 'docs/prepared-audio-decoder.md') }}
+
+      - name: Build and verify isolated prepared audio decoder
+        run: bash .github/scripts/build_prepared_audio.sh
 
       - name: Generate Xcode project and install pinned dependencies
         run: |
@@ -263,6 +301,7 @@ jobs:
           path: |
             Orvian-Test-IA-*-unsigned.ipa
             ${{ runner.temp }}/orvian-speech-probe-build.log
+            Vendor/OrvianAudioDecoder-relink.tar.gz
 
       - name: Publish diagnostic prerelease only
         env:
@@ -271,7 +310,7 @@ jobs:
         run: |
           set -euo pipefail
           TAG="speech-probe-${GITHUB_SHA:0:8}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
-          gh release create "$TAG" "$IPA" \
+          gh release create "$TAG" "$IPA" Vendor/OrvianAudioDecoder-relink.tar.gz \
             --target "$GITHUB_SHA" \
             --prerelease --latest=false \
             --title 'Orvian Test IA — diagnostic audio uniquement' \

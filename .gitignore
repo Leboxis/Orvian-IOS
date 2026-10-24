@@ -31,3 +31,10 @@ Pods/
 model-cache/
 
 __pycache__/
+
+# Generated isolated audio decoder, license pane, and corresponding source/relink package.
+Vendor/OrvianAudioDecoder.xcframework/
+Vendor/OrvianAudioDecoder-Settings.plist
+Vendor/OrvianAudioDecoder-relink.tar.gz
+Vendor/OrvianAudioDecoder-build.sha256
+Vendor/.prepared-audio.*/
