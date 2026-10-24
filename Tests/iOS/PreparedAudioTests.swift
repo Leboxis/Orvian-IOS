@@ -82,6 +82,23 @@ struct PreparedAudioTests {
         #expect(try chunk.input(format: format, range: gap) == nil)
     }
 
+    @Test func speechDiagnosticNamesUseSDKConstantsRatherThanGuessedNumbers() {
+        let cases: [(SFSpeechError.Code, String)] = [
+            (.audioDisordered, "audioDisordered"),
+            (.unexpectedAudioFormat, "unexpectedAudioFormat"),
+            (.insufficientResources, "insufficientResources"),
+            (.moduleOutputFailed, "moduleOutputFailed")
+        ]
+        for (code, name) in cases {
+            let error = NSError(domain: SFSpeechErrorDomain, code: code.rawValue, userInfo: [
+                NSLocalizedDescriptionKey: "https://private.example/movie.mkv?token=SECRET"
+            ])
+            let message = PreparedSubtitleStage.transcription.failureMessage(for: error)
+            #expect(message.contains("[\(name)]"))
+            #expect(!message.contains("SECRET"))
+        }
+    }
+
     @Test func rejectsMalformedChunksAndNonLocalSources() throws {
         let format = try #require(AVAudioFormat(standardFormatWithSampleRate: 16_000, channels: 1))
         let malformed = PreparedAudioChunk(samples: [], frameCount: 4, sampleRate: 16_000, channelCount: 1, startTime: 0)

@@ -86,7 +86,7 @@ actor PreparedSubtitleAnalyzer {
         guard let format = await SpeechAnalyzer.bestAvailableAudioFormat(compatibleWith: [transcriber]) else {
             throw PreparedSubtitleError.unavailable
         }
-        await stage(.transcription)
+        await stage(.speechPreparation)
         let analyzer = SpeechAnalyzer(modules: [transcriber])
         try await analyzer.prepareToAnalyze(in: format)
         await stage(.audio)
@@ -147,6 +147,7 @@ actor PreparedSubtitleAnalyzer {
                                                 duration: duration, continuation: continuation, progress: progress)
                         } else { throw PreparedSubtitleError.source }
                         continuation.finish()
+                        await stage(.speechFinishing)
                         try await analyzer.finalizeAndFinishThroughEndOfInput()
                         return nil
                     }

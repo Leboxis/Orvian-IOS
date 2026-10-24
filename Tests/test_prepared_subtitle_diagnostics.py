@@ -32,7 +32,7 @@ class PreparedSubtitleDiagnosticsTests(unittest.TestCase):
         self.assertIn("catch is CancellationError", job)
         for stage in ("translationModels", "translation", "saving"):
             self.assertIn(f"stage = .{stage}", job)
-        for stage in ("audio", "speechModels", "transcription"):
+        for stage in ("audio", "speechModels", "speechPreparation", "transcription", "speechFinishing"):
             self.assertIn(f"await stage(.{stage})", analyzer)
         self.assertNotIn("Vérifiez les modèles de langue, la connexion", job)
 
