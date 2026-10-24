@@ -1,7 +1,8 @@
 name: Audio tap safety
 on:
+  workflow_dispatch:
   push:
-    branches: [main, fix/subtitle-audio-crash, fix/subtitle-settings-french, feature/prepared-french-subtitles]
+    branches: [fix/subtitle-audio-crash, fix/subtitle-settings-french, feature/prepared-french-subtitles]
     paths:
       - 'Orvian/Core/Media/PlayerSpeechAudioTap.swift'
       - 'Orvian/Core/Media/SpeechProbeMailbox.swift'

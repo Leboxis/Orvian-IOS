@@ -1,7 +1,6 @@
 name: Subtitle quality
 on:
-  push:
-    branches: [main]
+  workflow_dispatch:
   pull_request:
     branches: [main, fix/subtitle-settings-french]
     paths:

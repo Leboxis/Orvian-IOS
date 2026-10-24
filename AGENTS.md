@@ -9,3 +9,8 @@
   pas une autorisation de les contourner.
 - Ne pas lancer de vérification visuelle ou de captures via GitHub Actions.
   Les tests non visuels restent autorisés. Signaler les limites de validation iOS.
+
+# Publication sur main
+
+- À chaque push sur `main`, seul le workflow `Build IPA` doit démarrer automatiquement.
+- Garder les autres vérifications sur les pull requests, les branches dédiées ou en lancement manuel ; ne pas réintroduire leur déclenchement au push sur `main` sans demande explicite.

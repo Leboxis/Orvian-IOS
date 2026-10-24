@@ -1,13 +1,9 @@
 name: Checks
 
-# Les vérifications tournent sur les pull requests et aussi sur chaque push
-# vers main : le dépôt est utilisé en direct sur main, sans PR, donc un
-# déclencheur « pull_request » seul ne lançait jamais rien. Elles restent
-# séparées du workflow de publication, qui ne dépend pas de leur résultat.
+# Sur main, seul Build IPA démarre au push. Ces vérifications restent
+# disponibles sur les pull requests et par lancement manuel.
 on:
   pull_request:
-    branches: [main]
-  push:
     branches: [main]
   workflow_dispatch:
 
