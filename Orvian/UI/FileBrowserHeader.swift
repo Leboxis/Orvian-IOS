@@ -5,7 +5,7 @@ extension EnvironmentValues {
     @Entry var phoneBrowserBottomInset: CGFloat = 0
 }
 
-/// Search takes the centered toolbar slot on iPad. On iPhone the compact
+/// Search/summary share the leading system command row on iPad. On iPhone the compact
 /// header floats above the cards without cutting off their scrolling viewport.
 struct FileBrowserHeader<Header: View, Search: View>: ViewModifier {
     @Environment(\.iPadLayout) private var layout
@@ -27,7 +27,9 @@ struct FileBrowserHeader<Header: View, Search: View>: ViewModifier {
             }
             .toolbar {
                 if isVisible {
-                    ToolbarItem(placement: .principal) {
+                    // Native iPad tabs merge edge items into their command row;
+                    // .principal instead creates a separate navigation-title row.
+                    ToolbarItem(placement: .topBarLeading) {
                         VStack(spacing: 0) {
                             if searchPresented {
                                 search()

@@ -34,6 +34,12 @@ class IPadNavigationWiringChecks(unittest.TestCase):
         self.assertIn("-only-testing:OrvianTests/BrowserPresentationTests", pad)
         self.assertNotIn("-skip-testing:OrvianTests/BrowserPresentationTests", workflow)
 
+    def test_ipad_summary_uses_the_native_command_row_not_a_second_title_row(self):
+        header = self.source("Orvian/UI/FileBrowserHeader.swift")
+        pad = header.split("if layout.isPad {", 1)[1].split("        } else {", 1)[0]
+        self.assertIn("ToolbarItem(placement: .topBarLeading)", pad)
+        self.assertNotIn("ToolbarItem(placement: .principal)", pad)
+
     def test_toolbar_fixture_samples_live_window_coordinates_not_layout_callback_snapshots(self):
         tests = self.source("Tests/iOS/BrowserPresentationTests.swift")
         probes = tests.split("struct WindowFrameProbe:", 1)[1].split(
