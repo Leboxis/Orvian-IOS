@@ -86,42 +86,53 @@ final class BrowserPresentationTests: XCTestCase {
         }
     }
 
-    /// Toolbar controls have separate SwiftUI hosting roots. Measure both
-    /// sides in window coordinates without inspecting private accessibility nodes.
+    /// Keep weak probes, not frame snapshots: UIKit may reposition a toolbar's
+    /// hosting root without laying out its unchanged 44-point child again.
     struct WindowFrameProbe: UIViewRepresentable {
-        let onFrame: (CGRect) -> Void
+        let onView: (UIView) -> Void
 
-        func makeUIView(context: Context) -> ProbeView { ProbeView() }
-        func updateUIView(_ view: ProbeView, context: Context) {
-            view.onFrame = onFrame
-            view.setNeedsLayout()
-        }
-        static func dismantleUIView(_ view: ProbeView, coordinator: ()) {
-            view.onFrame = nil
-        }
-
-        final class ProbeView: UIView {
-            var onFrame: ((CGRect) -> Void)?
-            override func layoutSubviews() {
-                super.layoutSubviews()
-                reportFrame()
-            }
-            override func didMoveToWindow() {
-                super.didMoveToWindow()
-                reportFrame()
-            }
-            private func reportFrame() {
-                guard let window, bounds.width > 0, bounds.height > 0 else { return }
-                onFrame?(convert(bounds, to: window))
-            }
-        }
+        func makeUIView(context: Context) -> UIView { UIView() }
+        func updateUIView(_ view: UIView, context: Context) { onView(view) }
     }
 
     final class Frames {
-        var title = CGRect.zero
-        var header = CGRect.zero
-        var cards = CGRect.zero
-        var command = CGRect.zero
+        weak var titleView: UIView?
+        weak var headerView: UIView?
+        weak var cardsView: UIView?
+        weak var commandView: UIView?
+
+        private func frame(of view: UIView?) -> CGRect {
+            guard let view, let window = view.window else { return .zero }
+            return view.convert(view.bounds, to: window)
+        }
+
+        var title: CGRect { frame(of: titleView) }
+        var header: CGRect { frame(of: headerView) }
+        var cards: CGRect { frame(of: cardsView) }
+        var command: CGRect { frame(of: commandView) }
+        var sample: [CGRect] { [title, header, cards, command] }
+
+        func areAttached(to window: UIWindow) -> Bool {
+            [titleView, headerView, cardsView, commandView].allSatisfy { $0?.window === window }
+        }
+    }
+
+    func testWindowFrameProbeFollowsAncestorMovementWithoutChildRelayout() {
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 400, height: 600))
+        let toolbarRoot = UIView(frame: CGRect(x: 0, y: 0, width: 400, height: 44))
+        let probe = UIView(frame: CGRect(x: 300, y: 0, width: 44, height: 44))
+        window.addSubview(toolbarRoot)
+        toolbarRoot.addSubview(probe)
+        let frames = Frames()
+        frames.commandView = probe
+        let initial = frames.command
+
+        // A native tab bar can move the hosting root without changing the
+        // probe's local bounds or asking it to lay out again.
+        toolbarRoot.frame.origin.y += 54
+        XCTAssertEqual(probe.bounds.size, initial.size)
+        XCTAssertEqual(frames.command.midY, initial.midY + 54, accuracy: 0.01)
+        XCTAssertEqual(frames.command.size, initial.size)
     }
 
     func testActualGridDetailsActionInEachBrowserScope() async throws {
@@ -197,15 +208,15 @@ final class BrowserPresentationTests: XCTestCase {
                     CardNameLayout {
                         Text("Un nom de fichier très long qui doit remplir la largeur disponible")
                             .lineLimit(1).frame(maxWidth: .infinity)
-                            .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: {
-                                if tab == .home { frames.title = $0 }
-                            }
+                            .background(WindowFrameProbe { view in
+                                if tab == .home { frames.titleView = view }
+                            })
                     }
                     .frame(width: 240)
                     ScrollView {
                         Color.clear.frame(height: 1000)
-                            .background(WindowFrameProbe { frame in
-                                if tab == .home { frames.cards = frame }
+                            .background(WindowFrameProbe { view in
+                                if tab == .home { frames.cardsView = view }
                             })
                     }
                 }
@@ -215,8 +226,8 @@ final class BrowserPresentationTests: XCTestCase {
                         Text("12 éléments")
                     }
                     .font(.caption).frame(width: 180)
-                    .background(WindowFrameProbe { frame in
-                        if tab == .home { frames.header = frame }
+                    .background(WindowFrameProbe { view in
+                        if tab == .home { frames.headerView = view }
                     })
                 })
                 .toolbar {
@@ -224,8 +235,8 @@ final class BrowserPresentationTests: XCTestCase {
                         Button {} label: {
                             Image(systemName: "checkmark.circle")
                                 .frame(width: 44, height: 44)
-                                .background(WindowFrameProbe { frame in
-                                    if tab == .home { frames.command = frame }
+                                .background(WindowFrameProbe { view in
+                                    if tab == .home { frames.commandView = view }
                                 })
                         }
                         .accessibilityLabel("Sélectionner")
@@ -249,16 +260,21 @@ final class BrowserPresentationTests: XCTestCase {
         }
         host.view.layoutIfNeeded()
         var failure: Error?
+        var previousSample: [CGRect]?
         do {
             try await waitUntil(message: "Toolbar probes did not settle: title=\(frames.title), header=\(frames.header), cards=\(frames.cards), command=\(frames.command)") {
-                frames.title.width > 0 && frames.header.height > 0
-                    && frames.cards.height > 0 && frames.command.height > 0
+                window.layoutIfNeeded()
+                let sample = frames.sample
+                defer { previousSample = sample }
+                return frames.areAttached(to: window) && sample.allSatisfy { !$0.isEmpty }
+                    && sample == previousSample
             }
-            XCTAssertEqual(frames.title.width, 228, accuracy: 0.5)
+            let diagnostics = "Toolbar probe frames: title=\(frames.title), header=\(frames.header), cards=\(frames.cards), command=\(frames.command)"
+            XCTAssertEqual(frames.title.width, 228, accuracy: 0.5, diagnostics)
             let command = frames.command
             XCTAssertEqual(frames.header.midY, command.midY, accuracy: 2,
-                           "The summary must share the system toolbar's vertical center, not add a content row")
-            XCTAssertGreaterThanOrEqual(frames.cards.minY, frames.header.maxY)
+                           "The summary must share the system toolbar's vertical center, not add a content row. \(diagnostics)")
+            XCTAssertGreaterThanOrEqual(frames.cards.minY, frames.header.maxY, diagnostics)
         } catch {
             failure = error
         }

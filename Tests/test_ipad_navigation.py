@@ -19,8 +19,13 @@ class IPadNavigationWiringChecks(unittest.TestCase):
         self.assertLess(fixture.index("XCTSkipIf("), fixture.index("IPadTabView("))
         self.assertIn("XCTAssertEqual(frames.title.width, 228", fixture)
         self.assertIn("XCTAssertEqual(frames.header.midY, command.midY", fixture)
-        self.assertIn("frames.command = frame", fixture)
-        self.assertIn("frames.header = frame", fixture)
+        self.assertIn("frames.commandView = view", fixture)
+        self.assertIn("frames.headerView = view", fixture)
+        self.assertIn("frames.areAttached(to: window)", fixture)
+        self.assertIn("window.layoutIfNeeded()", fixture)
+        self.assertIn("sample == previousSample", fixture)
+        self.assertIn("Toolbar probe frames:", fixture)
+        self.assertIn("XCTAssertGreaterThanOrEqual(frames.cards.minY, frames.header.maxY", fixture)
         self.assertNotIn("func commandFrame()", fixture)
         self.assertIn("host.rootView = AnyView(EmptyView())", fixture)
         workflow = self.source(".github/workflows/checks.yml")
@@ -28,6 +33,19 @@ class IPadNavigationWiringChecks(unittest.TestCase):
         self.assertIn("platform=iOS Simulator,id=$IPAD_ID", pad)
         self.assertIn("-only-testing:OrvianTests/BrowserPresentationTests", pad)
         self.assertNotIn("-skip-testing:OrvianTests/BrowserPresentationTests", workflow)
+
+    def test_toolbar_fixture_samples_live_window_coordinates_not_layout_callback_snapshots(self):
+        tests = self.source("Tests/iOS/BrowserPresentationTests.swift")
+        probes = tests.split("struct WindowFrameProbe:", 1)[1].split(
+            "func testActualGridDetailsActionInEachBrowserScope", 1)[0]
+        self.assertIn("weak var commandView: UIView?", probes)
+        self.assertIn("weak var headerView: UIView?", probes)
+        self.assertIn("view.convert(view.bounds, to: window)", probes)
+        self.assertNotIn("override func layoutSubviews", probes)
+        self.assertNotIn("override func didMoveToWindow", probes)
+        self.assertIn("testWindowFrameProbeFollowsAncestorMovementWithoutChildRelayout", probes)
+        self.assertIn("toolbarRoot.frame.origin.y += 54", probes)
+        self.assertIn("initial.midY + 54", probes)
 
     def test_ipad_uses_native_tabs_instead_of_the_phone_stack_overlay(self):
         main = self.source("Orvian/App/MainTabView.swift")
