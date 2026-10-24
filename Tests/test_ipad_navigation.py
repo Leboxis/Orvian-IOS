@@ -19,6 +19,10 @@ class IPadNavigationWiringChecks(unittest.TestCase):
         self.assertLess(fixture.index("XCTSkipIf("), fixture.index("IPadTabView("))
         self.assertIn("XCTAssertEqual(frames.title.width, 228", fixture)
         self.assertIn("XCTAssertEqual(frames.header.midY, command.midY", fixture)
+        self.assertIn("frames.command = frame", fixture)
+        self.assertIn("frames.header = frame", fixture)
+        self.assertNotIn("func commandFrame()", fixture)
+        self.assertIn("host.rootView = AnyView(EmptyView())", fixture)
         workflow = self.source(".github/workflows/checks.yml")
         pad = workflow.split("- name: Verify native iPad details presentations", 1)[1]
         self.assertIn("platform=iOS Simulator,id=$IPAD_ID", pad)

@@ -38,12 +38,13 @@ final class BrowserPresentationTests: XCTestCase {
         [view] + view.subviews.flatMap(descendants)
     }
 
-    private func waitUntil(_ condition: () -> Bool) async throws {
+    private func waitUntil(message: @autoclosure () -> String = "The native presentation did not settle",
+                           _ condition: () -> Bool) async throws {
         for _ in 0..<250 {
             if condition() { return }
             try await Task.sleep(for: .milliseconds(20))
         }
-        XCTFail("The details presentation did not settle")
+        XCTFail(message())
         throw WaitError.timeout
     }
 
@@ -85,10 +86,42 @@ final class BrowserPresentationTests: XCTestCase {
         }
     }
 
+    /// Toolbar controls have separate SwiftUI hosting roots. Measure both
+    /// sides in window coordinates without inspecting private accessibility nodes.
+    struct WindowFrameProbe: UIViewRepresentable {
+        let onFrame: (CGRect) -> Void
+
+        func makeUIView(context: Context) -> ProbeView { ProbeView() }
+        func updateUIView(_ view: ProbeView, context: Context) {
+            view.onFrame = onFrame
+            view.setNeedsLayout()
+        }
+        static func dismantleUIView(_ view: ProbeView, coordinator: ()) {
+            view.onFrame = nil
+        }
+
+        final class ProbeView: UIView {
+            var onFrame: ((CGRect) -> Void)?
+            override func layoutSubviews() {
+                super.layoutSubviews()
+                reportFrame()
+            }
+            override func didMoveToWindow() {
+                super.didMoveToWindow()
+                reportFrame()
+            }
+            private func reportFrame() {
+                guard let window, bounds.width > 0, bounds.height > 0 else { return }
+                onFrame?(convert(bounds, to: window))
+            }
+        }
+    }
+
     final class Frames {
         var title = CGRect.zero
         var header = CGRect.zero
         var cards = CGRect.zero
+        var command = CGRect.zero
     }
 
     func testActualGridDetailsActionInEachBrowserScope() async throws {
@@ -171,9 +204,9 @@ final class BrowserPresentationTests: XCTestCase {
                     .frame(width: 240)
                     ScrollView {
                         Color.clear.frame(height: 1000)
-                            .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: {
-                                if tab == .home { frames.cards = $0 }
-                            }
+                            .background(WindowFrameProbe { frame in
+                                if tab == .home { frames.cards = frame }
+                            })
                     }
                 }
                 .modifier(FileBrowserHeader {
@@ -182,22 +215,28 @@ final class BrowserPresentationTests: XCTestCase {
                         Text("12 éléments")
                     }
                     .font(.caption).frame(width: 180)
-                    .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: {
-                        if tab == .home { frames.header = $0 }
-                    }
+                    .background(WindowFrameProbe { frame in
+                        if tab == .home { frames.header = frame }
+                    })
                 })
                 .toolbar {
                     ToolbarItem(placement: .topBarTrailing) {
-                        Button("Sélectionner", systemImage: "checkmark.circle") {}
-                            .labelStyle(.iconOnly).frame(width: 44, height: 44)
-                            .accessibilityIdentifier("fixture.select")
+                        Button {} label: {
+                            Image(systemName: "checkmark.circle")
+                                .frame(width: 44, height: 44)
+                                .background(WindowFrameProbe { frame in
+                                    if tab == .home { frames.command = frame }
+                                })
+                        }
+                        .accessibilityLabel("Sélectionner")
+                        .accessibilityIdentifier("fixture.select")
                     }
                 }
                 .navigationBarTitleDisplayMode(.inline)
             }
         }
         .environment(\.iPadLayout, IPadLayout(isPad: true, width: 1000))
-        let host = UIHostingController(rootView: fixture)
+        let host = UIHostingController(rootView: AnyView(fixture))
         let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
         let previous = scene.keyWindow
         let window = UIWindow(windowScene: scene)
@@ -209,30 +248,27 @@ final class BrowserPresentationTests: XCTestCase {
             previous?.makeKey()
         }
         host.view.layoutIfNeeded()
-        // A native bar button has its own SwiftUI hosting coordinate space.
-        // Convert UIKit's command to the window instead of comparing that
-        // local button frame with the header's global frame. The full bar's
-        // background bounds can extend below the centered controls.
-        func commandFrame() -> CGRect? {
-            for case let bar as UINavigationBar in descendants(window) {
-                for view in descendants(bar) {
-                    let isCommand = view.accessibilityIdentifier == "fixture.select"
-                        || view.accessibilityLabel == "Sélectionner"
-                    if isCommand && !view.isHidden && view.alpha > 0 && view.bounds.height > 0 {
-                        return view.convert(view.bounds, to: window)
-                    }
-                }
+        var failure: Error?
+        do {
+            try await waitUntil(message: "Toolbar probes did not settle: title=\(frames.title), header=\(frames.header), cards=\(frames.cards), command=\(frames.command)") {
+                frames.title.width > 0 && frames.header.height > 0
+                    && frames.cards.height > 0 && frames.command.height > 0
             }
-            return nil
+            XCTAssertEqual(frames.title.width, 228, accuracy: 0.5)
+            let command = frames.command
+            XCTAssertEqual(frames.header.midY, command.midY, accuracy: 2,
+                           "The summary must share the system toolbar's vertical center, not add a content row")
+            XCTAssertGreaterThanOrEqual(frames.cards.minY, frames.header.maxY)
+        } catch {
+            failure = error
         }
+        // Retire native tab/navigation controllers before destroying their window,
+        // including timeout paths; otherwise UIKit can throw failed(deinit).
+        host.rootView = AnyView(EmptyView())
         try await waitUntil {
-            frames.title.width > 0 && frames.header.height > 0
-                && frames.cards.height > 0 && commandFrame() != nil
+            !self.descendants(window).contains { $0 is UINavigationBar }
+                && host.presentedViewController == nil
         }
-        XCTAssertEqual(frames.title.width, 228, accuracy: 0.5)
-        let command = try XCTUnwrap(commandFrame())
-        XCTAssertEqual(frames.header.midY, command.midY, accuracy: 2,
-                       "The summary must share the system toolbar's vertical center, not add a content row")
-        XCTAssertGreaterThanOrEqual(frames.cards.minY, frames.header.maxY)
+        if let failure { throw failure }
     }
 }
