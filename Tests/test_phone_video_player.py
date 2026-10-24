@@ -71,7 +71,9 @@ class PhoneVideoPlayerTests(unittest.TestCase):
         video = section("    private var videoArea:", "    private var preparing:")
         self.assertIn(".scaledToFit()", video)
         self.assertIn("if isBuffering, !isPhone", video)
-        self.assertIn("player == nil, !isPhone", video)
+        self.assertIn("!hasPlaybackEngine, !isPhone", video)
+        self.assertIn("VLCVideoSurface(playback: vlcPlayback)", video)
+        self.assertIn("player != nil || vlcPlayback != nil", PLAYER)
 
     def test_compact_transport_keeps_full_width_timeline_and_touch_targets(self):
         bar = section("    private var phoneBottomBar:", "    private var tabletPlayer:")
@@ -128,7 +130,7 @@ class PhoneVideoPlayerTests(unittest.TestCase):
 
     def test_auto_hide_rechecks_interaction_after_its_delay(self):
         policy = section("    private var phoneControlsMayAutoHide:", "    private func toggleControls()")
-        for state in ["transport.wantsPlayback", "player != nil", "!isLoadingVideo",
+        for state in ["transport.wantsPlayback", "hasPlaybackEngine", "!isLoadingVideo",
                       "!isBuffering", "!hasFailedSetup", "!isTouchingControls",
                       "!showTagSheet", "!showPhoneSpeedPicker", "!voiceOverEnabled"]:
             self.assertIn(state, policy)

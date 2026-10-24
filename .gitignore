@@ -10,6 +10,8 @@ DerivedData/
 xcuserdata/
 *.xcuserstate
 .swiftpm/
+Pods/
+*.xcworkspace
 
 # macOS / divers
 .DS_Store

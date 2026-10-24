@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>PreferenceSpecifiers</key>
+    <array>
+        <dict>
+            <key>Type</key>
+            <string>PSGroupSpecifier</string>
+            <key>Title</key>
+            <string>Logiciels libres</string>
+            <key>FooterText</key>
+            <string>Orvian utilise MobileVLCKit et libVLC, Copyright VideoLAN et contributeurs, sous licence GNU LGPL 2.1 ou ultérieure, sans garantie. Sources et droits : https://code.videolan.org/videolan/VLCKit/-/tree/3.7.4 et https://www.videolan.org/legal.html</string>
+        </dict>
+        <dict>
+            <key>Type</key>
+            <string>PSChildPaneSpecifier</string>
+            <key>Title</key>
+            <string>Licences des dépendances</string>
+            <key>File</key>
+            <string>Acknowledgements</string>
+        </dict>
+    </array>
+</dict>
+</plist>

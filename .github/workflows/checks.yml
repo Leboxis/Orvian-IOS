@@ -30,6 +30,13 @@ jobs:
       - name: Check performance regressions
         run: python3 .github/scripts/check_performance_regressions.py
 
+      - name: Check pinned playback dependency without rendering
+        run: |
+          python3 -m unittest discover -s Tests -p 'test_vlckit_dependency.py'
+          python3 -m unittest discover -s Tests -p 'test_video_fallback.py'
+          python3 .github/scripts/check_vlc_playback.py
+          python3 .github/scripts/check_video_compatibility.py
+
       - name: Check media startup without rendering
         run: python3 .github/scripts/check_media_startup.py
 
@@ -78,16 +85,17 @@ jobs:
           swiftc Orvian/Core/Media/GIFImageStore.swift Tests/GIFImageChecks.swift -o /tmp/orvian-gif-checks
           /tmp/orvian-gif-checks
 
-      - name: Install XcodeGen
-        run: brew install xcodegen
+      - name: Install XcodeGen and CocoaPods
+        run: brew install xcodegen cocoapods
 
       - name: Generate project and run hosted iOS tests
         shell: bash
         run: |
           set -o pipefail
           xcodegen generate
+          pod install
           SIMULATOR_ID=$(xcrun simctl list devices available -j | python -c 'import json,re,sys; d=json.load(sys.stdin); print(next(x["udid"] for k,v in d["devices"].items() if (m := re.search(r"iOS-(\d+)", k)) and int(m[1]) >= 26 for x in v if "iPhone" in x["name"]))')
-          xcodebuild -project Orvian.xcodeproj -scheme Orvian \
+          xcodebuild -workspace Orvian.xcworkspace -scheme Orvian \
             -destination "platform=iOS Simulator,id=$SIMULATOR_ID" \
             -configuration Debug -derivedDataPath "$RUNNER_TEMP/orvian-tests" \
             -skip-testing:OrvianTests/IPadNavigationTests/testActualScreensAndFolderDestinationsRenderInBothThemesWithoutCredentials \
@@ -98,7 +106,7 @@ jobs:
         run: |
           set -o pipefail
           IPAD_ID=$(xcrun simctl list devices available -j | python -c 'import json,re,sys; d=json.load(sys.stdin); pads=[x for k,v in d["devices"].items() if (m := re.search(r"iOS-(\d+)", k)) and int(m[1]) >= 26 for x in v if "iPad" in x["name"]]; assert pads, "No iPadOS 26 simulator available"; print(next((x["udid"] for x in pads if "13-inch" in x["name"]), pads[0]["udid"]))')
-          xcodebuild -project Orvian.xcodeproj -scheme Orvian \
+          xcodebuild -workspace Orvian.xcworkspace -scheme Orvian \
             -destination "platform=iOS Simulator,id=$IPAD_ID" \
             -configuration Debug -derivedDataPath "$RUNNER_TEMP/orvian-tests" \
             -resultBundlePath "$RUNNER_TEMP/orvian-ipad.xcresult" \
@@ -117,7 +125,7 @@ jobs:
         run: |
           set -o pipefail
           IPAD_ID=$(xcrun simctl list devices available -j | python -c 'import json,re,sys; d=json.load(sys.stdin); pads=[x for k,v in d["devices"].items() if (m := re.search(r"iOS-(\d+)", k)) and int(m[1]) >= 26 for x in v if "iPad" in x["name"]]; assert pads, "No iPadOS 26 simulator available"; print(next((x["udid"] for x in pads if "13-inch" in x["name"]), pads[0]["udid"]))')
-          xcodebuild -project Orvian.xcodeproj -scheme Orvian \
+          xcodebuild -workspace Orvian.xcworkspace -scheme Orvian \
             -destination "platform=iOS Simulator,id=$IPAD_ID" \
             -configuration Debug -derivedDataPath "$RUNNER_TEMP/orvian-tests" \
             -resultBundlePath "$RUNNER_TEMP/orvian-ipad-details.xcresult" \

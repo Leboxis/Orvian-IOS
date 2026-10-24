@@ -23,7 +23,10 @@ Les comptes et drives accessibles sont découverts automatiquement
 ### 2. Build & installation via LiveContainer
 
 Le dépôt ne contient **pas** de `.xcodeproj` : il est généré par [XcodeGen](https://github.com/yonaskolb/XcodeGen)
-à partir de `project.yml`, aussi bien en local que dans la CI.
+à partir de [project.yml](<project.yml>), aussi bien en local que dans la CI.
+CocoaPods installe ensuite **MobileVLCKit 3.7.4**, version stable officielle de
+VideoLAN, épinglée dans le [Podfile](<Podfile>). Ouvrir le workspace, pas le projet seul.
+Voir les [notes de dépendance et de licence](<docs/vlckit-dependency.md>) avant toute redistribution.
 
 **Via GitHub Actions (recommandé)** :
 
@@ -35,9 +38,10 @@ Le dépôt ne contient **pas** de `.xcodeproj` : il est généré par [XcodeGen]
 **En local (macOS)** :
 
 ```bash
-brew install xcodegen
+brew install xcodegen cocoapods
 xcodegen generate
-open Orvian.xcodeproj   # puis Cmd+R avec son certificat de développement
+pod install
+open Orvian.xcworkspace # puis Cmd+R avec son certificat de développement
 ```
 
 ### 3. Installation directe via la source LiveContainer
@@ -57,7 +61,7 @@ Lien direct (si votre version de LiveContainer le supporte) :
 `.github/workflows/build.yml` (runner `macos-26`) :
 
 ```
-checkout → xcodegen → xcodebuild (unsigned, generic/platform=iOS)
+checkout → xcodegen → pod install → xcodebuild -workspace (unsigned, generic/platform=iOS)
         → packaging Payload/Orvian.app en IPA → artefact → Release si tag
 ```
 

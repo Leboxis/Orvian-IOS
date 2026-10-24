@@ -52,6 +52,9 @@ struct VideoPlayerView: View {
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @Environment(\.scenePhase) private var scenePhase
     @State private var player: AVPlayer?
+    @State private var vlcPlayback: VLCPlaybackController?
+    @State private var requiresVLC = false
+    private var hasPlaybackEngine: Bool { player != nil || vlcPlayback != nil }
     @State private var poster: UIImage?
     /// Sous-titres automatiques : propriétaire unique de l'audio, de la
     /// transcription et de la traduction pour cette page du lecteur.
@@ -185,7 +188,7 @@ struct VideoPlayerView: View {
                 bottomInset: showControls ? bottomControlsHeight + 12 : 28
             )
             #if DEBUG
-            if VideoSpeechProbe.isExposed, isActive {
+            if VideoSpeechProbe.isExposed, isActive, vlcPlayback == nil {
                 VStack {
                     HStack {
                         VideoSpeechProbePanel(
@@ -265,7 +268,10 @@ struct VideoPlayerView: View {
             onControlsInteractionChanged(false)
             teardown()
         }
-        .onChange(of: isMuted) { _, muted in player?.isMuted = muted }
+        .onChange(of: isMuted) { _, muted in
+            player?.isMuted = muted
+            vlcPlayback?.isMuted = muted
+        }
         .onChange(of: scenePhase) { _, phase in
             if phase == .background { pausePlayback() }
             // `.inactive` est transitoire (notification, centre de contrôle) :
@@ -396,7 +402,7 @@ struct VideoPlayerView: View {
                     .transition(.opacity)
             }
             .overlay(alignment: .center) {
-                if player == nil {
+                if !hasPlaybackEngine {
                     preparing
                         .fixedSize(horizontal: false, vertical: true)
                         // Même verrou de pager qu'avant sur les commandes :
@@ -443,6 +449,8 @@ struct VideoPlayerView: View {
             }
             .background(.white.opacity(0.06), in: Capsule())
             AirPlayButton()
+                .disabled(vlcPlayback != nil)
+                .accessibilityHint(vlcPlayback == nil ? "" : "AirPlay vidéo indisponible avec le lecteur de secours VLC")
                 .frame(width: 44, height: 44)
                 .background(.white.opacity(0.06), in: Circle())
             closeButton
@@ -513,6 +521,8 @@ struct VideoPlayerView: View {
         SubtitleModeMenu(mode: speechProbe.mode, isSubtle: true) { mode in
             applySubtitleMode(mode)
         }
+        .disabled(vlcPlayback != nil)
+        .accessibilityHint(vlcPlayback == nil ? "" : "Sous-titres automatiques indisponibles avec le lecteur de secours VLC")
     }
 
     private func applySubtitleMode(_ mode: SubtitleMode) {
@@ -547,7 +557,7 @@ struct VideoPlayerView: View {
                 .frame(width: 44, height: 44)
                 .contentShape(Rectangle())
         }
-        .disabled(player == nil || !isActive)
+        .disabled(!hasPlaybackEngine || !isActive)
         .accessibilityLabel(forward ? "Avancer de 10 secondes" : "Reculer de 10 secondes")
     }
 
@@ -630,7 +640,7 @@ struct VideoPlayerView: View {
     }
 
     private var phoneControlsMayAutoHide: Bool {
-        transport.wantsPlayback && player != nil && !isLoadingVideo
+        transport.wantsPlayback && hasPlaybackEngine && !isLoadingVideo
             && !isBuffering && !hasFailedSetup && !isTouchingControls
             && !showTagSheet && !showPhoneSpeedPicker
     }
@@ -693,6 +703,10 @@ struct VideoPlayerView: View {
                         .tint(.white)
                         .scaleEffect(1.4)
                 }
+            } else if let vlcPlayback {
+                VLCVideoSurface(playback: vlcPlayback)
+                    .id(ObjectIdentifier(vlcPlayback))
+                if isBuffering, !isPhone { ProgressView().tint(.white) }
             } else if let poster {
                 Image(uiImage: poster)
                     .resizable()
@@ -709,7 +723,7 @@ struct VideoPlayerView: View {
                 }
                 .padding(24)
                 .background(.black.opacity(0.6), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
-            } else if player == nil, !isPhone {
+            } else if !hasPlaybackEngine, !isPhone {
                 preparing
             }
         }
@@ -760,7 +774,11 @@ struct VideoPlayerView: View {
             SubtitleModeMenu(mode: speechProbe.mode, isSubtle: false) { mode in
                 applySubtitleMode(mode)
             }
+            .disabled(vlcPlayback != nil)
+            .accessibilityHint(vlcPlayback == nil ? "" : "Sous-titres automatiques indisponibles avec le lecteur de secours VLC")
             AirPlayButton()
+                .disabled(vlcPlayback != nil)
+                .accessibilityHint(vlcPlayback == nil ? "" : "AirPlay vidéo indisponible avec le lecteur de secours VLC")
                 .frame(width: 44, height: 44)
         }
         }
@@ -790,7 +808,7 @@ struct VideoPlayerView: View {
     /// prépare la prévisualisation. La vidéo suivra le doigt via des seeks
     /// grossiers throttlés (`updateScrub`).
     private func beginScrub() {
-        guard player != nil, isActive, !isDisappeared, !showTagSheet else { return }
+        guard hasPlaybackEngine, isActive, !isDisappeared, !showTagSheet else { return }
         speechProbe.stop(reason: "Déplacement : relancez les sous-titres après la recherche.",
                          resetsAttempts: false)
         hideControlsTask?.cancel()
@@ -801,6 +819,7 @@ struct VideoPlayerView: View {
         // Le son cesse pendant le geste : le suivi visuel sous le doigt
         // remplace la lecture (comportement natif).
         player?.pause()
+        vlcPlayback?.pause()
     }
 
     private func updateScrub(to seconds: Double) {
@@ -857,7 +876,7 @@ struct VideoPlayerView: View {
                 .frame(width: 44, height: 44)
                 .background(.white.opacity(isPhone ? 0.14 : 0.12), in: Circle())
         }
-        .disabled(player == nil || !isActive)
+        .disabled(!hasPlaybackEngine || !isActive)
         .accessibilityLabel(transport.wantsPlayback ? "Pause" : "Lecture")
         .keyboardShortcut(.space, modifiers: [])
     }
@@ -952,12 +971,25 @@ struct VideoPlayerView: View {
     // MARK: - Transport
 
     private var playerTime: Double? {
+        if let vlcPlayback { return vlcPlayback.currentTime }
         guard let player else { return nil }
         let time = player.currentTime().seconds
         return time.isFinite ? time : nil
     }
 
     private func togglePlay() {
+        if let vlcPlayback {
+            if transport.wantsPlayback {
+                pausePlayback()
+            } else {
+                if vlcPlayback.hasEnded || (clock.duration > 0 && vlcPlayback.currentTime >= clock.duration - 0.5) {
+                    seek(to: 0, precise: true)
+                }
+                requestPlayback()
+            }
+            scheduleControlsAutoHide(delay: 2.5)
+            return
+        }
         guard let player else { return }
         scheduleControlsAutoHide(delay: 2.5)
         if transport.wantsPlayback {
@@ -989,6 +1021,7 @@ struct VideoPlayerView: View {
         transport.pause()
         resumePlaybackAfterTags = false
         player?.pause()
+        vlcPlayback?.pause()
         // Le watchdog peut déjà être en train de remplacer le lecteur : le
         // laisser terminer en pause évite de rester sans lecteur ni erreur.
         if player != nil { cancelStallWatchdog() }
@@ -1002,11 +1035,32 @@ struct VideoPlayerView: View {
 
     private func resumePlaybackIfRequested() {
         guard scenePhase == .active, transport.wantsPlayback, !isScrubbing, !isSeeking,
-              isActive, !isDisappeared, !showTagSheet, let player else { return }
-        player.playImmediately(atRate: playbackRate)
+              isActive, !isDisappeared, !showTagSheet else { return }
+        if let vlcPlayback {
+            vlcPlayback.rate = playbackRate
+            vlcPlayback.play()
+        } else {
+            player?.playImmediately(atRate: playbackRate)
+        }
     }
 
     private func seek(to seconds: Double, precise: Bool = false) {
+        if let vlcPlayback {
+            if vlcPlayback.hasEnded {
+                let url = vlcPlayback.url
+                teardown(preservingPlaybackIntent: true)
+                startVLCPlayback(url: url, at: max(0, seconds))
+                return
+            }
+            if vlcPlayback.seek(to: seconds) {
+                clock.currentTime = max(0, seconds)
+                clock.scrubValue = clock.currentTime
+                transport.clearRecoveryPosition()
+            }
+            resumePlaybackIfRequested()
+            scheduleControlsAutoHide(delay: 2.5)
+            return
+        }
         guard let player else { return }
         speechProbe.stop(reason: "Recherche : relancez les sous-titres à la nouvelle position.",
                          resetsAttempts: false)
@@ -1078,6 +1132,7 @@ struct VideoPlayerView: View {
                              resetsAttempts: false)
         }
         playbackRate = rate
+        vlcPlayback?.rate = rate
         player?.defaultRate = rate
         if transport.wantsPlayback, !isScrubbing, !isSeeking {
             player?.rate = rate
@@ -1112,7 +1167,7 @@ struct VideoPlayerView: View {
     private func load() async {
         // Retour sur une page encore en mémoire : le lecteur existe, on
         // reprend simplement la lecture.
-        if player != nil {
+        if hasPlaybackEngine {
             requestPlayback()
             return
         }
@@ -1168,7 +1223,55 @@ struct VideoPlayerView: View {
             return
         }
 
-        startPlayback(asset: asset, at: recoveryPosition)
+        if requiresVLC {
+            startVLCPlayback(url: asset.url, at: recoveryPosition)
+        } else {
+            startPlayback(asset: asset, at: recoveryPosition)
+        }
+    }
+
+    private func startVLCPlayback(url: URL, at resumePosition: Double?) {
+        guard !hasPlaybackEngine, isActive, !isDisappeared, !Task.isCancelled else { return }
+        let controller = VLCPlaybackController(url: url, resumePosition: resumePosition)
+        controller.isMuted = isMuted
+        controller.rate = playbackRate
+        controller.onTime = { [weak controller] time, duration in
+            guard let controller, self.vlcPlayback === controller, isActive, !isDisappeared else { return }
+            clock.duration = duration
+            if !controller.isRestoringPosition { transport.clearRecoveryPosition() }
+            if showControls, !isScrubbing {
+                clock.currentTime = time
+                clock.scrubValue = time
+            }
+        }
+        controller.onEvent = { [weak controller] event in
+            guard let controller, self.vlcPlayback === controller, isActive, !isDisappeared else { return }
+            switch event {
+            case .buffering:
+                isBuffering = transport.wantsPlayback
+            case .playing:
+                isBuffering = false
+                hasFailedSetup = false
+            case .ended:
+                isBuffering = false
+                clock.currentTime = controller.duration
+                pausePlayback()
+            case .failed:
+                // A VLC failure does not justify another engine or an automatic conversion.
+                VideoAssetCache.shared.invalidate(driveId: driveId, fileId: file.id)
+                failPlayback(message: "Lecture VLC impossible. Vérifiez la connexion ou réessayez avec un autre fichier.")
+            }
+        }
+        clock.currentTime = resumePosition ?? 0
+        clock.scrubValue = clock.currentTime
+        clock.duration = 0
+        clock.bufferedEnd = 0
+        isExternalPlaybackActive = false
+        hasFailedSetup = false
+        isBuffering = true
+        AudioSessionKeeper.shared.retain()
+        vlcPlayback = controller
+        resumePlaybackIfRequested()
     }
 
     private func startPlayback(asset: AVURLAsset, at resumePosition: Double? = nil) {
@@ -1250,6 +1353,17 @@ struct VideoPlayerView: View {
         // entre l'échec et ce réveil. Le remplacer donnerait deux AVPlayer en
         // lecture simultanée, avec des observateurs écrasés jamais invalidés.
         guard player?.currentItem === failedItem else { return }
+        if VideoPlaybackCompatibility.requiresVLC(
+            for: failedItem.error,
+            httpStatusCodes: failedItem.errorLog()?.events.map { $0.errorStatusCode } ?? []
+        ),
+           let asset = failedItem.asset as? AVURLAsset {
+            rememberRecoveryPosition()
+            teardown(preservingPlaybackIntent: true)
+            requiresVLC = true
+            startVLCPlayback(url: asset.url, at: recoveryPosition)
+            return
+        }
         guard playbackRetryCount < 2 else {
             failPlayback(message: "Lecture impossible : \(lastError)")
             return
@@ -1309,7 +1423,11 @@ struct VideoPlayerView: View {
             errorMessage = failureMessage
             return
         }
-        startPlayback(asset: asset, at: recoveryPosition)
+        if requiresVLC {
+            startVLCPlayback(url: asset.url, at: recoveryPosition)
+        } else {
+            startPlayback(asset: asset, at: recoveryPosition)
+        }
     }
 
     private func updateTimeObserver(for player: AVPlayer) {
@@ -1476,9 +1594,11 @@ struct VideoPlayerView: View {
         // une autre page du pager peut être en train de l'utiliser. La
         // désactivation est différée via le gardien : si une page voisine
         // démarre dans la seconde, la session reste active.
-        if player != nil {
+        if hasPlaybackEngine {
             player?.pause()
             player = nil
+            vlcPlayback?.stop()
+            vlcPlayback = nil
             AudioSessionKeeper.shared.release()
         }
     }
@@ -1502,7 +1622,7 @@ struct VideoPlayerView: View {
             pendingToggleTask?.cancel()
             pendingToggleTask = nil
             lastTapDate = nil
-            guard player != nil, !hasFailedSetup, !isScrubbing, !isSeeking else { return }
+            guard hasPlaybackEngine, !hasFailedSetup, !isScrubbing, !isSeeking else { return }
             let onLeftHalf = location.x * 2 < videoAreaWidth
             // En RTL, l'avance se fait côté gauche (lecture inversée).
             let forward = layoutDirection == .rightToLeft ? onLeftHalf : !onLeftHalf
@@ -1525,7 +1645,7 @@ struct VideoPlayerView: View {
     }
 
     private func skipTime(by delta: Double) {
-        guard player != nil, !isScrubbing, !isSeeking else { return }
+        guard hasPlaybackEngine, !isScrubbing, !isSeeking else { return }
         // Source de vérité : la position réelle du lecteur (l'état peut être
         // périmé quand les contrôles sont masqués).
         let position = playerTime ?? clock.currentTime

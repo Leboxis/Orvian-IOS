@@ -96,11 +96,13 @@ jobs:
           path.write_text(updated, encoding="utf-8")
           PY
 
-      - name: Install XcodeGen
-        run: brew install xcodegen
+      - name: Install XcodeGen and CocoaPods
+        run: brew install xcodegen cocoapods
 
-      - name: Generate Xcode project
-        run: xcodegen generate
+      - name: Generate Xcode project and install pinned dependencies
+        run: |
+          xcodegen generate
+          pod install
 
       - name: Build (unsigned, generic iOS device)
         # Le runner est vierge : `clean` ne nettoierait que le DerivedDataPath
@@ -108,7 +110,7 @@ jobs:
         run: |
           set -o pipefail
           xcodebuild \
-            -project Orvian.xcodeproj \
+            -workspace Orvian.xcworkspace \
             -scheme Orvian \
             -destination 'generic/platform=iOS' \
             -configuration Release \
@@ -195,18 +197,20 @@ jobs:
           python3 -m unittest discover -s Tests -p 'test_*.py'
           python3 .github/scripts/check_speech_probe.py
 
-      - name: Install XcodeGen
-        run: brew install xcodegen
+      - name: Install XcodeGen and CocoaPods
+        run: brew install xcodegen cocoapods
 
-      - name: Generate Xcode project
-        run: xcodegen generate
+      - name: Generate Xcode project and install pinned dependencies
+        run: |
+          xcodegen generate
+          pod install
 
       - name: Compile dedicated diagnostic app without launching it
         shell: bash
         run: |
           set -o pipefail
           xcodebuild \
-            -project Orvian.xcodeproj \
+            -workspace Orvian.xcworkspace \
             -scheme Orvian \
             -destination 'generic/platform=iOS' \
             -configuration Release \
