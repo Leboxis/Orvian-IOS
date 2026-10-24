@@ -9,6 +9,7 @@ final class PreparedSubtitleJob {
     var error: String?
     var configuration: TranslationSession.Configuration?
     var originalRun = UUID()
+    @ObservationIgnored private var stage = PreparedSubtitleStage.download
     @ObservationIgnored private var cancelled = false
     @ObservationIgnored private var configuredSource: SubtitleSourceLanguage?
     @ObservationIgnored private var work: Task<Void, Never>?
@@ -19,6 +20,7 @@ final class PreparedSubtitleJob {
         cancelled = false
         error = nil
         progress = 0
+        stage = .download
         if source == .french {
             configuration = nil
             configuredSource = nil
@@ -58,9 +60,12 @@ final class PreparedSubtitleJob {
                 let local = try await PreparedSubtitleDownload.fetch(key: key, fileName: fileName)
                 temporaryDirectory = local.deletingLastPathComponent()
                 try validate(key)
-                var cues = try await PreparedSubtitleAnalyzer.shared.transcribe(url: local, source: key.source) { [weak self] value in
+                var cues = try await PreparedSubtitleAnalyzer.shared.transcribe(url: local, source: key.source, stage: { [weak self] value in
+                    await self?.setStage(value)
+                }) { [weak self] value in
                     await self?.setProgress(value * 0.65)
                 }
+                stage = .translationModels
                 try validate(key)
                 // Ne télécharger le modèle de traduction qu’après décodage de l’audio.
                 if let session { try await session.prepareTranslation() }
@@ -68,6 +73,7 @@ final class PreparedSubtitleJob {
                 for index in cues.indices {
                     try validate(key)
                     if let session {
+                        stage = .translation
                         if #available(iOS 26.4, *) {
                             let context = PreparedSubtitleContext(cues: cues, index: index)
                             let translated = try await context.translateCurrent(contextual: { text in
@@ -89,6 +95,7 @@ final class PreparedSubtitleJob {
                     progress = 0.65 + 0.35 * Double(index + 1) / Double(cues.count)
                 }
                 try validate(key)
+                stage = .saving
                 try await PreparedSubtitleStore.shared.save(PreparedSubtitles(key: key, createdAt: Date(), cues: cues))
                 try validate(key)
                 isReady = true
@@ -97,12 +104,13 @@ final class PreparedSubtitleJob {
             } catch {
                 guard !Task.isCancelled, !cancelled,
                       TokenStore.credentialFingerprint() == key.credential else { return }
+                let explanation: String?
                 if VideoPlaybackCompatibility.requiresVLC(for: error) {
-                    self.error = PreparedSubtitleError.unsupportedMedia.localizedDescription
+                    explanation = PreparedSubtitleError.unsupportedMedia.localizedDescription
                 } else {
-                    self.error = (error as? PreparedSubtitleError)?.localizedDescription
-                        ?? "La préparation a échoué. Vérifiez les modèles de langue, la connexion et l’espace disponible, puis réessayez."
+                    explanation = (error as? PreparedSubtitleError)?.localizedDescription
                 }
+                self.error = stage.failureMessage(for: error, explanation: explanation)
             }
         }
         work = task
@@ -111,6 +119,7 @@ final class PreparedSubtitleJob {
         isRunning = false
     }
 
+    private func setStage(_ value: PreparedSubtitleStage) { stage = value }
     private func setProgress(_ value: Double) { progress = value }
     private func validate(_ key: PreparedSubtitleKey) throws {
         try Task.checkCancellation()
