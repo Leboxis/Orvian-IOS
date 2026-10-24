@@ -23,7 +23,7 @@ final class VLCPlaybackController: NSObject, VLCMediaPlayerDelegate {
         didSet { player.rate = rate }
     }
     var isMuted = false {
-        didSet { player.audio.isMuted = isMuted }
+        didSet { player.audio?.isMuted = isMuted }
     }
     var currentTime: Double { max(0, Double(player.time.intValue) / 1_000) }
     var duration: Double { max(0, Double(player.media?.length.intValue ?? 0) / 1_000) }
@@ -145,7 +145,7 @@ final class VLCPlaybackController: NSObject, VLCMediaPlayerDelegate {
         case .playing:
             bufferingTimeout?.cancel()
             bufferingTimeout = nil
-            player.audio.isMuted = isMuted
+            player.audio?.isMuted = isMuted
             player.rate = rate
             restorePositionIfPossible()
             if !wantsPlayback { player.pause() }

@@ -80,7 +80,11 @@ been typechecked with the iOS SDK on Windows.
 - `player.time` and `player.media?.length` are VLCTime values in **milliseconds**;
   `VLCTime(int: milliseconds)` takes Int32, `intValue` returns Int32, and
   `value` is an optional NSNumber. `player.rate` is Float.
-- `player.audio.isMuted` controls mute. Decoding continues while muted.
+- `player.audio?.isMuted` controls mute. The distributed 3.7.4 XCFramework imports
+  `audio` as optional (confirmed by device and simulator CI compilation), even
+  when source-tag headers suggest nonnull. Preserve mute intent and reapply it
+  on `.playing` when the audio interface becomes available. Decoding continues
+  while muted; the test stand-in must model the same optionality.
 - `player.isSeekable` must be true before assigning time/position.
 - VLCMediaPlayerDelegate uses `mediaPlayerStateChanged(_ notification:
   Notification)` and `mediaPlayerTimeChanged(_ notification: Notification)`.

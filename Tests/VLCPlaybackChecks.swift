@@ -33,7 +33,7 @@ final class VLCMediaPlayer {
     // Like the Objective-C API, the cached state can be read in its delegate.
     nonisolated(unsafe) var state: VLCMediaPlayerState = .stopped
     var media: VLCMedia?
-    let audio = VLCAudio()
+    var audio: VLCAudio? = VLCAudio()
     var time = VLCTime(int: 0)
     var isSeekable = false
     var rate: Float = 1
@@ -63,6 +63,7 @@ struct VLCPlaybackChecks {
     @MainActor
     static func main() async {
         await checkPausedAttachmentAndConfiguration()
+        await checkAudioAppearingAfterPreparation()
         await checkPendingResumeAndSeekBounds()
         await checkStopBeforeFirstStateDelivery()
         await checkRetainedStopAndStaleCallbacks()
@@ -117,12 +118,30 @@ struct VLCPlaybackChecks {
         assert(player.playCalls == 1, "attachment must open input even when paused")
         await stateEvent(.playing, controller: controller, player: player)
         assert(player.pauseCalls == 1, "pause intent before attachment must be preserved")
-        assert(player.audio.isMuted && player.rate == 1.5, "mute/rate must survive first playing event")
+        assert(player.audio?.isMuted == true && player.rate == 1.5, "mute/rate must survive first playing event")
         assert(player.media?.options.contains(":avcodec-hw=any") == true, "hardware automatic selection must stay enabled")
         controller.attach(to: UIView())
         assert(player.playCalls == 1, "SwiftUI updates must not open a second input")
         controller.play()
         assert(player.playCalls == 2)
+        controller.stop()
+        await completeStop(player)
+    }
+
+    @MainActor
+    static func checkAudioAppearingAfterPreparation() async {
+        let (controller, player) = make()
+        player.audio = nil
+        controller.isMuted = true
+        controller.play()
+        controller.attach(to: UIView())
+        await stateEvent(.playing, controller: controller, player: player)
+        assert(controller.isMuted, "mute intent survives an unavailable audio interface")
+        player.audio = VLCAudio()
+        await stateEvent(.playing, controller: controller, player: player)
+        assert(player.audio?.isMuted == true, "apply saved mute when audio becomes available")
+        controller.isMuted = false
+        assert(player.audio?.isMuted == false)
         controller.stop()
         await completeStop(player)
     }
