@@ -12,6 +12,19 @@ class IPadNavigationWiringChecks(unittest.TestCase):
         self.assertTrue(path.is_file(), f"Missing implementation: {name}")
         return path.read_text(encoding="utf-8")
 
+    def test_native_ipad_toolbar_fixture_runs_only_on_the_ipad_destination(self):
+        tests = self.source("Tests/iOS/BrowserPresentationTests.swift")
+        fixture = tests.split("func testCardTitleUsesNinetyFivePercentAndPadSummarySharesTopToolbar()", 1)[1]
+        self.assertIn("XCTSkipIf(UIDevice.current.userInterfaceIdiom != .pad", fixture)
+        self.assertLess(fixture.index("XCTSkipIf("), fixture.index("IPadTabView("))
+        self.assertIn("XCTAssertEqual(frames.title.width, 228", fixture)
+        self.assertIn("XCTAssertEqual(frames.header.midY, command.midY", fixture)
+        workflow = self.source(".github/workflows/checks.yml")
+        pad = workflow.split("- name: Verify native iPad details presentations", 1)[1]
+        self.assertIn("platform=iOS Simulator,id=$IPAD_ID", pad)
+        self.assertIn("-only-testing:OrvianTests/BrowserPresentationTests", pad)
+        self.assertNotIn("-skip-testing:OrvianTests/BrowserPresentationTests", workflow)
+
     def test_ipad_uses_native_tabs_instead_of_the_phone_stack_overlay(self):
         main = self.source("Orvian/App/MainTabView.swift")
         self.assertIn("private var phoneNavigation:", main)

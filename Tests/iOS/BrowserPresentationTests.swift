@@ -152,6 +152,8 @@ final class BrowserPresentationTests: XCTestCase {
     }
 
     func testCardTitleUsesNinetyFivePercentAndPadSummarySharesTopToolbar() async throws {
+        try XCTSkipIf(UIDevice.current.userInterfaceIdiom != .pad,
+                      "Native iPad toolbar geometry is exercised on the dedicated iPad destination.")
         let frames = Frames()
         // Native tabs may lay out inactive panes too. Only the selected pane
         // may publish into these shared probes; hidden toolbar frames are not
