@@ -51,8 +51,26 @@ a refreshed signed URL, not another engine switch.
 The input/drawable stay retained until asynchronous stop completes. EOF replay
 creates a fresh input rather than trying to reuse a dead one.
 
-**VLC limitations:** native AirPlay video and the AVPlayer-specific automatic
-speech/translation subtitles are disabled, with accessibility explanations.
+Prepared subtitle documents are engine-independent: VLC uses its media clock to
+refresh captions even with controls hidden, and seeking/replaying keeps their source
+timestamps. Switching away from AVPlayer must not discard a loaded document. The CC
+menu remains available for prepared captions on VLC.
+
+**VLC limitations:** native AirPlay video and live speech capture remain unavailable.
+The AVPlayer audio tap cannot observe VLC. Stock VLCKit has no public decoded-PCM
+tap; LibVLC's C callbacks replace audible output and provide scheduled playback
+PTS, not original media sample timestamps. An unvalidated WAV export would discard
+initial audio offsets/gaps. No such fallback, microphone capture, extra playback
+engine or full-video transcode is introduced here.
+
+Explicit subtitle preparation still uses Apple's audio reader. Downloaded sources
+keep a sanitized original extension rather than being renamed MOV; explicit format
+errors explain that VLC playback does not imply Apple transcription compatibility.
+Translation model preparation runs only after audio transcription succeeds. Existing
+prepared captions can still be displayed on VLC even when that source cannot be
+transcribed again by Apple. Informational preparation text is removed; controls,
+progress and actionable errors remain.
+
 Embedded VLC subtitles can render according to VLC defaults; no new track picker
 is added here. Hardware acceleration is preferred, not guaranteed for all MPEG,
 MKV codecs, profiles, or devices.

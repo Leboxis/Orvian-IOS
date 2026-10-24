@@ -55,10 +55,8 @@ struct SubtitleModeMenu: View {
 /// chrome) doivent continuer de fonctionner à travers le texte.
 struct SubtitleOverlay: View {
     let cue: SubtitleCue?
-    /// Les messages restent visibles même avant le premier sous-titre.
+    /// Les erreurs restent visibles même avant le premier sous-titre.
     var translationError: String?
-    var isPreparing: Bool = false
-    var isTranslating: Bool = false
     var isPrepared: Bool = false
     let bottomInset: CGFloat
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
@@ -68,7 +66,7 @@ struct SubtitleOverlay: View {
     var body: some View {
         VStack {
             Spacer(minLength: 0)
-            if cue != nil || isPreparing || isTranslating || translationError != nil {
+            if cue != nil || translationError != nil {
                 VStack(spacing: 4) {
                     if let cue {
                         Text(cue.text)
@@ -91,11 +89,6 @@ struct SubtitleOverlay: View {
                             .multilineTextAlignment(.center)
                             .padding(8)
                             .background(.black.opacity(SubtitleSettings.backgroundOpacity(opacity)), in: RoundedRectangle(cornerRadius: 10))
-                    } else if isPreparing || (isTranslating && cue == nil) {
-                        Text(isPreparing ? "Préparation de la traduction…" : "Traduction en cours…")
-                            .font(.caption2.weight(.medium))
-                            .foregroundStyle(.white.opacity(0.75))
-                            .transition(.opacity)
                     }
                 }
                 .padding(.bottom, bottomInset)

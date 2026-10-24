@@ -3,11 +3,9 @@ import Translation
 
 @MainActor @Observable
 final class PreparedSubtitleJob {
-    var status = "Prêt à analyser la vidéo entière."
     var progress = 0.0
     var isRunning = false
     var isReady = false
-    var contextFallbackCount = 0
     var error: String?
     var configuration: TranslationSession.Configuration?
     var originalRun = UUID()
@@ -21,8 +19,6 @@ final class PreparedSubtitleJob {
         cancelled = false
         error = nil
         progress = 0
-        contextFallbackCount = 0
-        status = "Préparation des modèles…"
         if source == .french {
             configuration = nil
             configuredSource = nil
@@ -45,13 +41,10 @@ final class PreparedSubtitleJob {
 
     func cancel() {
         cancelled = true
-        if let work { work.cancel() } else {
-            isRunning = false
-            status = "Préparation annulée."
-        }
+        if let work { work.cancel() } else { isRunning = false }
     }
 
-    func run(key: PreparedSubtitleKey, session: TranslationSession?) async {
+    func run(key: PreparedSubtitleKey, fileName: String, session: TranslationSession?) async {
         guard isRunning, work == nil, !cancelled, !Task.isCancelled else { return }
         let task = Task { [self] in
             var temporaryDirectory: URL?
@@ -62,19 +55,16 @@ final class PreparedSubtitleJob {
                 // La transcription préparée est locale : l'autorisation du vieux
                 // SFSpeechRecognizer (serveurs Apple) ne s'applique pas ici.
                 try validate(key)
-                if let session { try await session.prepareTranslation() }
-                try validate(key)
-                status = "Téléchargement de la vidéo…"
-                let local = try await PreparedSubtitleDownload.fetch(key: key)
+                let local = try await PreparedSubtitleDownload.fetch(key: key, fileName: fileName)
                 temporaryDirectory = local.deletingLastPathComponent()
                 try validate(key)
-                status = "Transcription précise de l’audio…"
                 var cues = try await PreparedSubtitleAnalyzer.shared.transcribe(url: local, source: key.source) { [weak self] value in
                     await self?.setProgress(value * 0.65)
                 }
                 try validate(key)
-                let uncertainCount = cues.filter { $0.needsReview == true }.count
-                status = "Traduction des phrases en français…"
+                // Ne télécharger le modèle de traduction qu’après décodage de l’audio.
+                if let session { try await session.prepareTranslation() }
+                try validate(key)
                 for index in cues.indices {
                     try validate(key)
                     if let session {
@@ -88,7 +78,6 @@ final class PreparedSubtitleJob {
                                 return response.targetText
                             })
                             cues[index].french = translated.text
-                            if context.hasContext, !translated.usedContext { contextFallbackCount += 1 }
                         } else {
                             let response = try await session.translate(cues[index].original)
                             cues[index].french = response.targetText.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -103,18 +92,17 @@ final class PreparedSubtitleJob {
                 try await PreparedSubtitleStore.shared.save(PreparedSubtitles(key: key, createdAt: Date(), cues: cues))
                 try validate(key)
                 isReady = true
-                status = "Sous-titres prêts. Ils seront chargés automatiquement à l’ouverture de cette vidéo."
-                if uncertainCount > 0 {
-                    status += " \(uncertainCount) phrase(s) contiennent encore des passages incertains après revérification audio. Écoutez ces passages pour les vérifier."
-                }
-                if contextFallbackCount > 0 {
-                    status += " \(contextFallbackCount) phrase(s) ont été traduites séparément car le moteur n’a pas conservé les repères du contexte. Les temps de l’audio sont conservés."
-                }
             } catch is CancellationError {
-                status = "Préparation annulée."
+                // Une annulation ne présente pas de message d’erreur.
             } catch {
-                self.error = (error as? PreparedSubtitleError)?.localizedDescription
-                    ?? "La préparation a échoué. Vérifiez les modèles de langue, la connexion et l’espace disponible, puis réessayez."
+                guard !Task.isCancelled, !cancelled,
+                      TokenStore.credentialFingerprint() == key.credential else { return }
+                if VideoPlaybackCompatibility.requiresVLC(for: error) {
+                    self.error = PreparedSubtitleError.unsupportedMedia.localizedDescription
+                } else {
+                    self.error = (error as? PreparedSubtitleError)?.localizedDescription
+                        ?? "La préparation a échoué. Vérifiez les modèles de langue, la connexion et l’espace disponible, puis réessayez."
+                }
             }
         }
         work = task
@@ -133,7 +121,14 @@ final class PreparedSubtitleJob {
 /// Le fichier signé ne reçoit aucun en-tête d'authentification de l'API.
 /// La source intégrale est temporaire et supprimée après analyse/annulation.
 private enum PreparedSubtitleDownload {
-    static func fetch(key: PreparedSubtitleKey) async throws -> URL {
+    static func sourceExtension(fileName: String) -> String {
+        let suffix = (fileName as NSString).pathExtension.lowercased()
+        guard !suffix.isEmpty, suffix.utf8.count <= 16,
+              suffix.utf8.allSatisfy({ (97...122).contains($0) || (48...57).contains($0) }) else { return "bin" }
+        return suffix
+    }
+
+    static func fetch(key: PreparedSubtitleKey, fileName: String) async throws -> URL {
         guard TokenStore.credentialFingerprint() == key.credential,
               let url = await MediaURLCache.shared.url(driveId: key.driveID, fileId: key.fileID),
               url.scheme?.lowercased() == "https" else { throw PreparedSubtitleError.download }
@@ -155,7 +150,8 @@ private enum PreparedSubtitleDownload {
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true,
             attributes: [.protectionKey: FileProtectionType.complete])
         do {
-            let local = directory.appendingPathComponent("source.mov")
+            let local = directory.appendingPathComponent("source")
+                .appendingPathExtension(sourceExtension(fileName: fileName))
             try FileManager.default.moveItem(at: temporary, to: local)
             try FileManager.default.setAttributes([.protectionKey: FileProtectionType.complete], ofItemAtPath: local.path)
             return local
@@ -180,30 +176,11 @@ struct PreparedSubtitleSheet: View {
             Form {
                 Section {
                     Text(file.name).font(.headline)
-                    Text("La vidéo entière est analysée sur cet appareil avant lecture. Les phrases complètes sont traduites puis conservées avec les temps de l’audio.")
-                    if #available(iOS 26.4, *) {
-                        Text("Contexte de traduction : jusqu’à 8 secondes avant et 4 secondes après la phrase, avec les phrases voisines entières.")
-                            .font(.footnote).foregroundStyle(.secondary)
-                    } else {
-                        Text("Sur cette version d’iOS, la traduction reste phrase par phrase. Le contexte précédent nécessite iOS 26.4 ou plus.")
-                            .font(.footnote).foregroundStyle(.secondary)
-                    }
-                    Text("Transcription et traduction : moteurs Apple, sur l’appareil. Les modèles de langue nécessaires peuvent être téléchargés au premier lancement. Prévoyez de l’espace libre pour la vidéo temporaire.")
-                        .font(.footnote).foregroundStyle(.secondary)
-                    if #available(iOS 26.4, *) {
-                        Text("Si les repères sont perdus, une nouvelle traduction garde les phrases voisines les plus proches. La phrase est traduite seule en dernier recours, sans changer ses temps d’affichage.")
-                            .font(.footnote).foregroundStyle(.secondary)
-                    }
-                    Text("Les passages reconnus avec une faible confiance sont réécoutés automatiquement, dans la limite de 3 minutes d’audio supplémentaire. Une correction nécessite l’accord de deux analyses Apple ; les autres passages restent signalés comme incertains.")
-                        .font(.footnote).foregroundStyle(.secondary)
-                    Text("La qualité dépend de la voix et de l’enregistrement. Gardez cette fenêtre ouverte jusqu’à la fin.")
-                        .font(.footnote).foregroundStyle(.secondary)
                     Picker("Langue parlée", selection: $source) {
                         ForEach(SubtitleSourceLanguage.allCases) { language in Text(language.title).tag(language) }
                     }.disabled(job.isRunning)
                 }
                 Section {
-                    Text(job.status)
                     if job.isRunning { ProgressView(value: job.progress) }
                     if let error = job.error { Text(error).foregroundStyle(.red) }
                     Button(job.isReady ? "Recalculer les sous-titres français" : "Préparer les sous-titres français") {
@@ -216,7 +193,6 @@ struct PreparedSubtitleSheet: View {
                             Task {
                                 await PreparedSubtitleStore.shared.remove(key)
                                 job.isReady = false
-                                job.status = "Sous-titres préparés supprimés."
                             }
                         }.disabled(job.isRunning)
                     }
@@ -231,10 +207,10 @@ struct PreparedSubtitleSheet: View {
         }
         .interactiveDismissDisabled(job.isRunning)
         .translationTask(job.configuration) { session in
-            if let key { await job.run(key: key, session: session) }
+            if let key { await job.run(key: key, fileName: file.name, session: session) }
         }
         .task(id: job.originalRun) {
-            if let key, key.source == .french, job.isRunning { await job.run(key: key, session: nil) }
+            if let key, key.source == .french, job.isRunning { await job.run(key: key, fileName: file.name, session: nil) }
         }
         .task(id: source) {
             guard !job.isRunning, let credential = TokenStore.credentialFingerprint() else { return }
@@ -244,7 +220,6 @@ struct PreparedSubtitleSheet: View {
             guard !Task.isCancelled, !job.isRunning, source == value.source else { return }
             job.isReady = ready
             job.error = nil
-            job.status = ready ? "Des sous-titres préparés sont disponibles pour cette vidéo." : "Prêt à analyser la vidéo entière."
         }
         .onDisappear { job.cancel() }
         .onChange(of: scenePhase) { _, phase in if phase == .background { job.cancel() } }

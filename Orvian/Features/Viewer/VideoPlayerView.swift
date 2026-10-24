@@ -188,8 +188,6 @@ struct VideoPlayerView: View {
             SubtitleOverlay(
                 cue: preparedSubtitles.isAvailable ? preparedSubtitles.cue : speechProbe.displayedCue,
                 translationError: preparedSubtitles.isAvailable ? nil : speechProbe.translationError,
-                isPreparing: !preparedSubtitles.isAvailable && speechProbe.isPreparingTranslation,
-                isTranslating: !preparedSubtitles.isAvailable && speechProbe.isTranslating,
                 isPrepared: preparedSubtitles.isAvailable,
                 bottomInset: showControls ? bottomControlsHeight + 12 : 28
             )
@@ -537,17 +535,19 @@ struct VideoPlayerView: View {
                          selectSource: { language in subtitleSource = language }) { mode in
             applySubtitleMode(mode)
         }
-        .disabled(vlcPlayback != nil)
-        .accessibilityHint(vlcPlayback == nil ? "" : "Sous-titres automatiques indisponibles avec le lecteur de secours VLC")
+        .disabled(vlcPlayback != nil && !preparedSubtitles.isAvailable)
+        .accessibilityHint(vlcPlayback == nil || preparedSubtitles.isAvailable ? "" : "La transcription en direct n’est pas disponible avec VLC. Les sous-titres préparés restent pris en charge.")
     }
 
     private func applySubtitlePreferences() {
-        guard isActive, !isDisappeared, !requiresVLC else { return }
+        guard isActive, !isDisappeared else { return }
         speechProbe.setSourceLanguage(subtitleSource)
         speechProbe.setDisplayDuration(subtitleDuration)
         if preparedSubtitles.isAvailable {
             speechProbe.setMode(.off, player: player, start: {}, stopTest: { speechProbe.stop(reason: "Sous-titres préparés chargés.") })
-            preparedSubtitles.refresh(at: player?.currentTime().seconds ?? 0)
+            preparedSubtitles.refresh(at: playerTime ?? 0)
+        } else if requiresVLC {
+            speechProbe.setMode(.off, player: nil, start: {}, stopTest: { speechProbe.stop() })
         } else {
             applySubtitleMode(preferredSubtitleMode)
         }
@@ -556,11 +556,11 @@ struct VideoPlayerView: View {
     private func loadPreparedSubtitles() async {
         preparedSubtitles.install(nil)
         speechProbe.setMode(.off, player: player, start: {}, stopTest: { speechProbe.stop() })
-        guard isActive, !isDisappeared, !requiresVLC, let credential = TokenStore.credentialFingerprint() else { return }
+        guard isActive, !isDisappeared, let credential = TokenStore.credentialFingerprint() else { return }
         let source = subtitleSource
         let key = PreparedSubtitleKey(credential: credential, driveID: driveId, file: file, source: source)
         let document = await PreparedSubtitleStore.shared.load(key)
-        guard !Task.isCancelled, isActive, !isDisappeared, !requiresVLC, subtitleSource == source,
+        guard !Task.isCancelled, isActive, !isDisappeared, subtitleSource == source,
               TokenStore.credentialFingerprint() == credential else { return }
         preparedSubtitles.install(document)
         if let player { updateTimeObserver(for: player) }
@@ -569,8 +569,12 @@ struct VideoPlayerView: View {
     private func applySubtitleMode(_ mode: SubtitleMode) {
         preferredSubtitleMode = mode
         if preparedSubtitles.isAvailable {
-            preparedSubtitles.setMode(mode, at: player?.currentTime().seconds ?? 0)
+            preparedSubtitles.setMode(mode, at: playerTime ?? 0)
             scheduleControlsAutoHide(delay: 2.5)
+            return
+        }
+        guard !requiresVLC else {
+            speechProbe.setMode(.off, player: nil, start: {}, stopTest: { speechProbe.stop() })
             return
         }
         speechProbe.setMode(
@@ -823,8 +827,8 @@ struct VideoPlayerView: View {
                          selectSource: { language in subtitleSource = language }) { mode in
                 applySubtitleMode(mode)
             }
-            .disabled(vlcPlayback != nil)
-            .accessibilityHint(vlcPlayback == nil ? "" : "Sous-titres automatiques indisponibles avec le lecteur de secours VLC")
+            .disabled(vlcPlayback != nil && !preparedSubtitles.isAvailable)
+            .accessibilityHint(vlcPlayback == nil || preparedSubtitles.isAvailable ? "" : "La transcription en direct n’est pas disponible avec VLC. Les sous-titres préparés restent pris en charge.")
             AirPlayButton()
                 .disabled(vlcPlayback != nil)
                 .accessibilityHint(vlcPlayback == nil ? "" : "AirPlay vidéo indisponible avec le lecteur de secours VLC")
@@ -1103,8 +1107,9 @@ struct VideoPlayerView: View {
                 return
             }
             if vlcPlayback.seek(to: seconds) {
-                clock.currentTime = max(0, seconds)
+                clock.currentTime = min(max(0, seconds), vlcPlayback.duration > 0 ? vlcPlayback.duration : .infinity)
                 clock.scrubValue = clock.currentTime
+                preparedSubtitles.refresh(at: clock.currentTime)
                 transport.clearRecoveryPosition()
             }
             resumePlaybackIfRequested()
@@ -1285,13 +1290,13 @@ struct VideoPlayerView: View {
 
     private func startVLCPlayback(url: URL, at resumePosition: Double?) {
         guard !hasPlaybackEngine, isActive, !isDisappeared, !Task.isCancelled else { return }
-        preparedSubtitles.install(nil)
         let controller = VLCPlaybackController(url: url, resumePosition: resumePosition)
         controller.isMuted = isMuted
         controller.rate = playbackRate
         controller.onTime = { [weak controller] time, duration in
             guard let controller, self.vlcPlayback === controller, isActive, !isDisappeared else { return }
             clock.duration = duration
+            preparedSubtitles.refresh(at: time)
             if !controller.isRestoringPosition { transport.clearRecoveryPosition() }
             if showControls, !isScrubbing {
                 clock.currentTime = time
@@ -1309,6 +1314,7 @@ struct VideoPlayerView: View {
             case .ended:
                 isBuffering = false
                 clock.currentTime = controller.duration
+                preparedSubtitles.refresh(at: controller.duration)
                 pausePlayback()
             case .failed:
                 // A VLC failure does not justify another engine or an automatic conversion.
@@ -1325,6 +1331,8 @@ struct VideoPlayerView: View {
         isBuffering = true
         AudioSessionKeeper.shared.retain()
         vlcPlayback = controller
+        applySubtitlePreferences()
+        preparedSubtitles.refresh(at: resumePosition ?? 0)
         resumePlaybackIfRequested()
 
     }

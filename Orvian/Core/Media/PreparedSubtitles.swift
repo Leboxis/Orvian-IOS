@@ -170,11 +170,12 @@ enum PreparedSentenceBuilder {
 }
 
 enum PreparedSubtitleError: Error, LocalizedError {
-    case contextAlignment, source, noAudio, multipleTracks, timing, noSpeech, tooLarge, unavailable, busy, download, storage, incomplete
+    case contextAlignment, source, unsupportedMedia, noAudio, multipleTracks, timing, noSpeech, tooLarge, unavailable, busy, download, storage, incomplete
     var errorDescription: String? {
         switch self {
         case .contextAlignment: "Le moteur n’a pas conservé les repères nécessaires pour séparer la phrase de son contexte. Aucun résultat partiel n’a été enregistré."
         case .source: "Cette vidéo ne permet pas une analyse audio locale complète."
+        case .unsupportedMedia: "Cette vidéo peut être lisible avec VLC, mais le moteur de transcription audio d’Apple ne peut pas décoder cette source. La préparation des sous-titres n’est pas possible pour ce fichier."
         case .noAudio: "La vidéo ne contient pas de piste audio."
         case .multipleTracks: "Plusieurs pistes audio : préparez une vidéo avec une seule piste pour éviter de traduire la mauvaise voix."
         case .timing: "Horodatages audio incohérents : préparation arrêtée pour éviter des sous-titres décalés."

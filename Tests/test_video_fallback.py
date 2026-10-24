@@ -33,8 +33,9 @@ class VideoFallbackTests(unittest.TestCase):
         self.assertIn("coordinator.stop()", VLC)
 
     def test_unsupported_apple_integrations_are_not_offered_for_vlc(self):
-        self.assertEqual(PLAYER.count(".disabled(vlcPlayback != nil)"), 4)
-        self.assertIn("Sous-titres automatiques indisponibles", PLAYER)
+        self.assertEqual(PLAYER.count(".disabled(vlcPlayback != nil)"), 2)
+        self.assertEqual(PLAYER.count(".disabled(vlcPlayback != nil && !preparedSubtitles.isAvailable)"), 2)
+        self.assertIn("La transcription en direct n’est pas disponible avec VLC", PLAYER)
         self.assertIn("AirPlay vidéo indisponible", PLAYER)
 
     def test_hardware_is_preferred_without_conversion(self):
