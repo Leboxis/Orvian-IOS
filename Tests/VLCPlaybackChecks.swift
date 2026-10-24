@@ -58,12 +58,18 @@ final class VLCMediaPlayer {
     }
 }
 
+// The runner compiles these checks in the controller's source file.
+extension VLCPlaybackController {
+    var hasPendingBufferingTimeout: Bool { bufferingTimeout != nil }
+}
+
 @main
 struct VLCPlaybackChecks {
     @MainActor
     static func main() async {
         await checkPausedAttachmentAndConfiguration()
         await checkAudioAppearingAfterPreparation()
+        await checkProgressOverridesBufferingNotifications()
         await checkPendingResumeAndSeekBounds()
         await checkStopBeforeFirstStateDelivery()
         await checkRetainedStopAndStaleCallbacks()
@@ -142,6 +148,48 @@ struct VLCPlaybackChecks {
         assert(player.audio?.isMuted == true, "apply saved mute when audio becomes available")
         controller.isMuted = false
         assert(player.audio?.isMuted == false)
+        controller.stop()
+        await completeStop(player)
+    }
+
+    @MainActor
+    static func checkProgressOverridesBufferingNotifications() async {
+        let (controller, player) = make()
+        controller.play()
+        controller.attach(to: UIView())
+        await stateEvent(.buffering, controller: controller, player: player)
+        assert(controller.hasPendingBufferingTimeout)
+        player.time = VLCTime(int: 1_000)
+        await timeEvent(controller: controller, player: player)
+        var progressEvents = 0
+        controller.onEvent = { event in
+            if case .playing = event { progressEvents += 1 }
+        }
+        player.time = VLCTime(int: 2_000)
+        await timeEvent(controller: controller, player: player)
+        assert(progressEvents == 1, "real playback must dismiss the buffering indicator")
+        assert(!controller.hasPendingBufferingTimeout, "a playing video must not hit the 20s buffering cutoff")
+        // Buffer-fill notifications during live video must not flash a spinner.
+        var bufferingEvents = 0
+        controller.onEvent = { event in
+            if case .buffering = event { bufferingEvents += 1 }
+        }
+        player.emit(.buffering)
+        await timeEvent(controller: controller, player: player) // unchanged media time
+        assert(bufferingEvents == 0)
+        // A subsequent real stall must still be protected, even after playback worked.
+        assert(controller.hasPendingBufferingTimeout, "repeated timestamps do not prove playback")
+        player.time = VLCTime(int: 3_000)
+        await timeEvent(controller: controller, player: player)
+        assert(!controller.hasPendingBufferingTimeout)
+        player.isSeekable = true
+        await stateEvent(.buffering, controller: controller, player: player)
+        assert(controller.seek(to: 20))
+        await timeEvent(controller: controller, player: player)
+        assert(controller.hasPendingBufferingTimeout, "a seek jump alone must not dismiss a real stall")
+        player.time = VLCTime(int: 20_500)
+        await timeEvent(controller: controller, player: player)
+        assert(!controller.hasPendingBufferingTimeout)
         controller.stop()
         await completeStop(player)
     }

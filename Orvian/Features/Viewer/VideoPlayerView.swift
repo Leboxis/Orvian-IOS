@@ -1071,6 +1071,7 @@ struct VideoPlayerView: View {
         resumePlaybackAfterTags = false
         player?.pause()
         vlcPlayback?.pause()
+        if vlcPlayback != nil { isBuffering = false }
         // Le watchdog peut déjà être en train de remplacer le lecteur : le
         // laisser terminer en pause évite de rester sans lecteur ni erreur.
         if player != nil { cancelStallWatchdog() }

@@ -43,8 +43,11 @@ bearer token. There is no local remux, transcode, or automatic full-file downloa
 
 VLC shares play/pause, seek, speed, mute, favorites and tag controls. Page departure,
 backgrounding and audio interruptions pause/stop it through the existing lifecycle.
-Opening/buffering is bounded to 20 seconds while playback is requested; a VLC
-failure offers manual retry with a refreshed signed URL, not another engine switch.
+Opening/buffering is bounded to 20 seconds while playback is requested. Actual
+forward progress dismisses buffering and cancels its timeout even if VLC continues
+to report a buffering state; repeated timestamps or a seek jump alone do not.
+A later real stall still arms the timeout. A VLC failure offers manual retry with
+a refreshed signed URL, not another engine switch.
 The input/drawable stay retained until asynchronous stop completes. EOF replay
 creates a fresh input rather than trying to reuse a dead one.
 

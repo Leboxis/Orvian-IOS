@@ -15,12 +15,14 @@ final class VLCPlaybackController: NSObject, VLCMediaPlayerDelegate {
     private var pendingPosition: Double?
     private var stopping = false
     private var bufferingTimeout: Task<Void, Never>?
+    private var lastObservedTime: Double?
+    private var lastProgressAt: ContinuousClock.Instant?
     // libVLC stops asynchronously: never deallocate its player/drawable mid-stop.
     private static var retiring: [ObjectIdentifier: VLCPlaybackController] = [:]
     var onTime: ((Double, Double) -> Void)?
     var onEvent: ((Event) -> Void)?
     var rate: Float = 1 {
-        didSet { player.rate = rate }
+        didSet { if player.rate != rate { player.rate = rate } }
     }
     var isMuted = false {
         didSet { player.audio?.isMuted = isMuted }
@@ -66,6 +68,7 @@ final class VLCPlaybackController: NSObject, VLCMediaPlayerDelegate {
         bufferingTimeout?.cancel()
         bufferingTimeout = nil
         wantsPlayback = false
+        lastProgressAt = nil
         if hasStarted { player.pause() }
     }
 
@@ -75,6 +78,8 @@ final class VLCPlaybackController: NSObject, VLCMediaPlayerDelegate {
         let upper = duration > 0 ? duration : Double(Int32.max) / 1_000
         let milliseconds = Int32(min(min(max(0, seconds), upper) * 1_000, Double(Int32.max)))
         pendingPosition = nil
+        lastObservedTime = nil
+        lastProgressAt = nil
         player.time = VLCTime(int: milliseconds)
         return true
     }
@@ -114,7 +119,15 @@ final class VLCPlaybackController: NSObject, VLCMediaPlayerDelegate {
         Task { @MainActor [weak self] in
             guard let self, !self.stopping else { return }
             self.restorePositionIfPossible()
-            self.onTime?(self.currentTime, self.duration)
+            let time = self.currentTime
+            // VLC may keep reporting buffering after decoding starts. Actual
+            // forward progress wins, but a seek jump alone is not playback.
+            if self.wantsPlayback, let previous = self.lastObservedTime, time > previous {
+                self.lastProgressAt = ContinuousClock.now
+                if self.bufferingTimeout != nil { self.stateChanged(.playing) }
+            }
+            self.lastObservedTime = time
+            self.onTime?(time, self.duration)
         }
     }
 
@@ -141,12 +154,15 @@ final class VLCPlaybackController: NSObject, VLCMediaPlayerDelegate {
         switch state {
         case .opening, .buffering:
             startBufferingTimeout()
-            onEvent?(.buffering)
+            // Buffer-fill notifications can continue during normal playback.
+            // Keep stall protection, but do not flash a spinner over live video.
+            let recentlyAdvanced = lastProgressAt.map { $0.duration(to: ContinuousClock.now) < .seconds(1) } ?? false
+            onEvent?(recentlyAdvanced ? .playing : .buffering)
         case .playing:
             bufferingTimeout?.cancel()
             bufferingTimeout = nil
             player.audio?.isMuted = isMuted
-            player.rate = rate
+            if player.rate != rate { player.rate = rate }
             restorePositionIfPossible()
             if !wantsPlayback { player.pause() }
             onEvent?(.playing)
