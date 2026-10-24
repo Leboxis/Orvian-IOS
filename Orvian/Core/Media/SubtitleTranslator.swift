@@ -1,7 +1,7 @@
 import Foundation
 import Translation
 
-/// Traductions anglais → français pour les sous-titres.
+/// Traductions vers le français pour les sous-titres.
 ///
 /// La session `TranslationSession` fournie par `.translationTask` ne doit pas
 /// survivre à la vue qui l'a créée (Apple documente un `fatalError`). Une fois
@@ -15,27 +15,31 @@ import Translation
 actor SubtitleTranslator {
     private var session: TranslationSession?
     private var failures = 0
+    private var source: SubtitleSourceLanguage?
 
     /// Langues installées ? Sinon, la préparation doit passer par l'interface.
-    static func availability() async -> LanguageAvailability.Status {
+    static func availability(source: SubtitleSourceLanguage = .english) async -> LanguageAvailability.Status {
         await LanguageAvailability().status(
-            from: Locale.Language(identifier: "en"),
+            from: Locale.Language(identifier: source.rawValue),
             to: Locale.Language(identifier: "fr")
         )
     }
 
-    /// Interroge le système : la paire en→fr est-elle installée ?
-    func isInstalled() async -> Bool {
-        await Self.availability() == .installed
+    /// Interroge le système : la paire choisie vers le français est-elle installée ?
+    func isInstalled(source: SubtitleSourceLanguage) async -> Bool {
+        await Self.availability(source: source) == .installed
     }
 
-    func translate(_ text: String) async throws -> String {
+    func translate(_ text: String, source: SubtitleSourceLanguage) async throws -> String {
+        if source == .french { return text }
+        if self.source != source { reset(); self.source = source }
+        try Task.checkCancellation()
         if session == nil {
             // Une installation absente est irrécupérable ici : le diagnostic doit
             // être explicite plutôt qu'un échec répété à chaque phrase.
-            guard await isInstalled() else { throw SubtitleTranslationError.notInstalled }
+            guard await isInstalled(source: source) else { throw SubtitleTranslationError.notInstalled }
             session = TranslationSession(
-                installedSource: Locale.Language(identifier: "en"),
+                installedSource: Locale.Language(identifier: source.rawValue),
                 target: Locale.Language(identifier: "fr")
             )
         }
@@ -61,6 +65,7 @@ actor SubtitleTranslator {
     func reset() {
         session = nil
         failures = 0
+        source = nil
     }
 }
 

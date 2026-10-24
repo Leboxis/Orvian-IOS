@@ -4,10 +4,26 @@ import SwiftUI
 struct SubtitleModeMenu: View {
     let mode: SubtitleMode
     let isSubtle: Bool
+    let sourceLanguage: SubtitleSourceLanguage
+    let selectSource: (SubtitleSourceLanguage) -> Void
     let action: (SubtitleMode) -> Void
 
     var body: some View {
         Menu {
+            Menu("Langue parlée : \(sourceLanguage.title)") {
+                ForEach(SubtitleSourceLanguage.allCases) { language in
+                    Button {
+                        selectSource(language)
+                    } label: {
+                        if language == sourceLanguage {
+                            Label(language.title, systemImage: "checkmark")
+                        } else {
+                            Text(language.title)
+                        }
+                    }
+                }
+            }
+            Divider()
             ForEach(SubtitleMode.allCases) { option in
                 Button {
                     action(option)
@@ -28,7 +44,7 @@ struct SubtitleModeMenu: View {
                 .contentShape(Circle())
         }
         .accessibilityLabel("Sous-titres")
-        .accessibilityValue(mode.title)
+        .accessibilityValue("\(mode.title), langue parlée : \(sourceLanguage.title)")
         .accessibilityHint("Choisit la langue des sous-titres automatiques")
     }
 }
@@ -39,40 +55,46 @@ struct SubtitleModeMenu: View {
 /// chrome) doivent continuer de fonctionner à travers le texte.
 struct SubtitleOverlay: View {
     let cue: SubtitleCue?
-    /// Raison d'un échec de traduction, affichée sous le sous-titre anglais.
+    /// Les messages restent visibles même avant le premier sous-titre.
     var translationError: String?
     var isPreparing: Bool = false
+    var isTranslating: Bool = false
+    var isPrepared: Bool = false
     let bottomInset: CGFloat
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @AppStorage(SubtitleSettings.fontSizeKey) private var fontSize = SubtitleSettings.defaultFontSize
+    @AppStorage(SubtitleSettings.backgroundOpacityKey) private var opacity = SubtitleSettings.defaultBackgroundOpacity
 
     var body: some View {
         VStack {
             Spacer(minLength: 0)
-            if let cue {
+            if cue != nil || isPreparing || isTranslating || translationError != nil {
                 VStack(spacing: 4) {
-                    Text(cue.text)
-                        .font(.system(size: dynamicTypeSize.isAccessibilitySize ? 20 : 17, weight: .semibold))
-                        .foregroundStyle(.white)
-                        .multilineTextAlignment(.center)
-                        .lineLimit(3)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .padding(.horizontal, 14)
-                        .padding(.vertical, 8)
-                        .background(.black.opacity(0.72), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-                        .padding(.horizontal, 16)
-                        .transition(.opacity)
-                        .accessibilityLabel(cue.isTranslated ? "Sous-titre traduit" : "Sous-titre anglais")
-                        .accessibilityValue(cue.text)
-                    if isPreparing {
-                        Text("Préparation de la traduction…")
-                            .font(.caption2.weight(.medium))
-                            .foregroundStyle(.white.opacity(0.75))
-                            .transition(.opacity)
-                    } else if let translationError {
+                    if let cue {
+                        Text(cue.text)
+                            .font(.system(size: dynamicTypeSize.isAccessibilitySize ? max(20, SubtitleSettings.fontSize(fontSize)) : SubtitleSettings.fontSize(fontSize), weight: .semibold))
+                            .foregroundStyle(.white)
+                            .multilineTextAlignment(.center)
+                            .lineLimit(isPrepared ? nil : 3)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .padding(.horizontal, 14)
+                            .padding(.vertical, 8)
+                            .background(.black.opacity(SubtitleSettings.backgroundOpacity(opacity)), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                            .padding(.horizontal, 16)
+                            .accessibilityLabel(cue.isTranslated ? "Sous-titre traduit" : "Sous-titre original")
+                            .accessibilityValue(cue.text)
+                    }
+                    if let translationError {
                         Text(translationError)
                             .font(.caption2.weight(.medium))
-                            .foregroundStyle(.white.opacity(0.75))
+                            .foregroundStyle(.white)
                             .multilineTextAlignment(.center)
+                            .padding(8)
+                            .background(.black.opacity(SubtitleSettings.backgroundOpacity(opacity)), in: RoundedRectangle(cornerRadius: 10))
+                    } else if isPreparing || (isTranslating && cue == nil) {
+                        Text(isPreparing ? "Préparation de la traduction…" : "Traduction en cours…")
+                            .font(.caption2.weight(.medium))
+                            .foregroundStyle(.white.opacity(0.75))
                             .transition(.opacity)
                     }
                 }
@@ -83,6 +105,6 @@ struct SubtitleOverlay: View {
         // Le changement de sous-titre passe par l'interrupteur central : sans
         // lui, l'apparition du texte s'animerait même en « Réduire les
         // animations ».
-        .animation(Motion.animation(.easeOut(duration: 0.15)), value: cue)
+        .animation(Motion.animation(.easeOut(duration: 0.15)), value: isPrepared ? nil : cue)
     }
 }

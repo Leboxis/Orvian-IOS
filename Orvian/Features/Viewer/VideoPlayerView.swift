@@ -59,6 +59,10 @@ struct VideoPlayerView: View {
     /// Sous-titres automatiques : propriétaire unique de l'audio, de la
     /// transcription et de la traduction pour cette page du lecteur.
     @State private var speechProbe = VideoSpeechProbe()
+    @State private var preparedSubtitles = PreparedSubtitlePlayback()
+    @AppStorage(SubtitleSettings.modeKey) private var preferredSubtitleMode: SubtitleMode = .off
+    @AppStorage(SubtitleSettings.sourceKey) private var subtitleSource: SubtitleSourceLanguage = .english
+    @AppStorage(SubtitleSettings.displayDurationKey) private var subtitleDuration = SubtitleSettings.defaultDisplayDuration
 
     // Transport
     /// Position de lecture, durée, avance du tampon et position du doigt vivent
@@ -182,9 +186,11 @@ struct VideoPlayerView: View {
                 tabletPlayer
             }
             SubtitleOverlay(
-                cue: speechProbe.displayedCue,
-                translationError: speechProbe.translationError,
-                isPreparing: speechProbe.isPreparingTranslation,
+                cue: preparedSubtitles.isAvailable ? preparedSubtitles.cue : speechProbe.displayedCue,
+                translationError: preparedSubtitles.isAvailable ? nil : speechProbe.translationError,
+                isPreparing: !preparedSubtitles.isAvailable && speechProbe.isPreparingTranslation,
+                isTranslating: !preparedSubtitles.isAvailable && speechProbe.isTranslating,
+                isPrepared: preparedSubtitles.isAvailable,
                 bottomInset: showControls ? bottomControlsHeight + 12 : 28
             )
             #if DEBUG
@@ -255,6 +261,7 @@ struct VideoPlayerView: View {
                 cancelPendingSeek()
                 _ = transport.endScrub()
                 teardown(preservingPlaybackIntent: true)
+                preparedSubtitles.install(nil)
                 if wasPlaying { transport.play() }
                 loadGeneration &+= 1
             }
@@ -267,7 +274,14 @@ struct VideoPlayerView: View {
             pendingToggleTask = nil
             onControlsInteractionChanged(false)
             teardown()
+            preparedSubtitles.install(nil)
         }
+        .onChange(of: preferredSubtitleMode) { _, _ in applySubtitlePreferences() }
+        .task(id: subtitleSource) {
+            await loadPreparedSubtitles()
+            applySubtitlePreferences()
+        }
+        .onChange(of: subtitleDuration) { _, duration in speechProbe.setDisplayDuration(duration) }
         .onChange(of: isMuted) { _, muted in
             player?.isMuted = muted
             vlcPlayback?.isMuted = muted
@@ -518,14 +532,47 @@ struct VideoPlayerView: View {
 
     /// Bouton « CC / Traduction » du lecteur iPhone.
     private var subtitleButton: some View {
-        SubtitleModeMenu(mode: speechProbe.mode, isSubtle: true) { mode in
+        SubtitleModeMenu(mode: preparedSubtitles.isAvailable ? preparedSubtitles.mode : speechProbe.mode, isSubtle: true,
+                         sourceLanguage: speechProbe.sourceLanguage,
+                         selectSource: { language in subtitleSource = language }) { mode in
             applySubtitleMode(mode)
         }
         .disabled(vlcPlayback != nil)
         .accessibilityHint(vlcPlayback == nil ? "" : "Sous-titres automatiques indisponibles avec le lecteur de secours VLC")
     }
 
+    private func applySubtitlePreferences() {
+        guard isActive, !isDisappeared, !requiresVLC else { return }
+        speechProbe.setSourceLanguage(subtitleSource)
+        speechProbe.setDisplayDuration(subtitleDuration)
+        if preparedSubtitles.isAvailable {
+            speechProbe.setMode(.off, player: player, start: {}, stopTest: { speechProbe.stop(reason: "Sous-titres préparés chargés.") })
+            preparedSubtitles.refresh(at: player?.currentTime().seconds ?? 0)
+        } else {
+            applySubtitleMode(preferredSubtitleMode)
+        }
+    }
+
+    private func loadPreparedSubtitles() async {
+        preparedSubtitles.install(nil)
+        speechProbe.setMode(.off, player: player, start: {}, stopTest: { speechProbe.stop() })
+        guard isActive, !isDisappeared, !requiresVLC, let credential = TokenStore.credentialFingerprint() else { return }
+        let source = subtitleSource
+        let key = PreparedSubtitleKey(credential: credential, driveID: driveId, file: file, source: source)
+        let document = await PreparedSubtitleStore.shared.load(key)
+        guard !Task.isCancelled, isActive, !isDisappeared, !requiresVLC, subtitleSource == source,
+              TokenStore.credentialFingerprint() == credential else { return }
+        preparedSubtitles.install(document)
+        if let player { updateTimeObserver(for: player) }
+    }
+
     private func applySubtitleMode(_ mode: SubtitleMode) {
+        preferredSubtitleMode = mode
+        if preparedSubtitles.isAvailable {
+            preparedSubtitles.setMode(mode, at: player?.currentTime().seconds ?? 0)
+            scheduleControlsAutoHide(delay: 2.5)
+            return
+        }
         speechProbe.setMode(
             mode,
             player: player,
@@ -771,7 +818,9 @@ struct VideoPlayerView: View {
                 timeControls
             }
             speedMenu
-            SubtitleModeMenu(mode: speechProbe.mode, isSubtle: false) { mode in
+            SubtitleModeMenu(mode: preparedSubtitles.isAvailable ? preparedSubtitles.mode : speechProbe.mode, isSubtle: false,
+                         sourceLanguage: speechProbe.sourceLanguage,
+                         selectSource: { language in subtitleSource = language }) { mode in
                 applySubtitleMode(mode)
             }
             .disabled(vlcPlayback != nil)
@@ -1168,6 +1217,7 @@ struct VideoPlayerView: View {
         // Retour sur une page encore en mémoire : le lecteur existe, on
         // reprend simplement la lecture.
         if hasPlaybackEngine {
+            applySubtitlePreferences()
             requestPlayback()
             return
         }
@@ -1223,6 +1273,8 @@ struct VideoPlayerView: View {
             return
         }
 
+        await loadPreparedSubtitles()
+        guard generation == loadGeneration, isActive, !isDisappeared, !Task.isCancelled else { return }
         if requiresVLC {
             startVLCPlayback(url: asset.url, at: recoveryPosition)
         } else {
@@ -1232,6 +1284,7 @@ struct VideoPlayerView: View {
 
     private func startVLCPlayback(url: URL, at resumePosition: Double?) {
         guard !hasPlaybackEngine, isActive, !isDisappeared, !Task.isCancelled else { return }
+        preparedSubtitles.install(nil)
         let controller = VLCPlaybackController(url: url, resumePosition: resumePosition)
         controller.isMuted = isMuted
         controller.rate = playbackRate
@@ -1272,6 +1325,7 @@ struct VideoPlayerView: View {
         AudioSessionKeeper.shared.retain()
         vlcPlayback = controller
         resumePlaybackIfRequested()
+
     }
 
     private func startPlayback(asset: AVURLAsset, at resumePosition: Double? = nil) {
@@ -1324,6 +1378,7 @@ struct VideoPlayerView: View {
             resumePlaybackIfRequested()
         }
 
+        applySubtitlePreferences()
         itemStatusObserver = newPlayer.currentItem?.observe(\.status, options: [.new]) { item, _ in
             // Être prêt ne prouve pas que la reprise fonctionne : le quota
             // est réinitialisé seulement après une progression réelle.
@@ -1433,50 +1488,57 @@ struct VideoPlayerView: View {
     private func updateTimeObserver(for player: AVPlayer) {
         if let timeObserver { player.removeTimeObserver(timeObserver) }
         timeObserver = player.addPeriodicTimeObserver(
-            // Le chrome suit à 4 Hz quand il est visible : un label à la seconde
-            // près et une barre de progression n'ont pas besoin de 8 images/s,
-            // et chaque tick reconstruit la vue sur le main. Caché, seul le
-            // suivi opérationnel (récupération/AirPlay) reste actif à 1 Hz.
-            forInterval: CMTime(value: 1, timescale: showControls ? 4 : 1),
+            // Les cues préparés suivent le média à 20 Hz, même sans chrome.
+            // Leur modèle ne publie qu'aux changements de phrase. L'horloge
+            // visible reste limitée à environ 4 Hz.
+            forInterval: CMTime(value: 1, timescale: preparedSubtitles.isAvailable ? 20 : (showControls ? 4 : 1)),
             queue: .main
         ) { time in
-            guard self.player === player, !isDisappeared else { return }
-            if playbackRetryCount > 0, !isScrubbing, !isSeeking,
-               player.timeControlStatus == .playing,
-               time.seconds.isFinite, time.seconds >= retryResetPosition + 2 {
-                playbackRetryCount = 0
-            }
-            let externalPlaybackActive = player.isExternalPlaybackActive
-            if isExternalPlaybackActive != externalPlaybackActive {
-                isExternalPlaybackActive = externalPlaybackActive
-            }
-            // Les sous-titres suivent la vidéo même quand le chrome est masqué :
-            // ce rafraîchissement ne publie que le cue affiché, pas l'horloge.
-            speechProbe.refresh(player: player)
-            guard showControls else { return }
-            let itemDuration = player.currentItem?.duration.seconds ?? 0
-            if itemDuration.isFinite, itemDuration > 0,
-               abs(clock.duration - itemDuration) > 0.01 {
-                clock.duration = itemDuration
-            }
-            if !isScrubbing, !isSeeking, showControls, time.seconds.isFinite {
-                clock.currentTime = time.seconds
-            }
-            // Plage bufferisée : fin la plus avancée des segments chargés —
-            // après un seek en avant, le segment contenant la position peut
-            // ne pas exister encore ; prendre le premier intervalle afficherait
-            // un buffer résiduel derrière le curseur. Borné à la durée.
-            let ranges = player.currentItem?.loadedTimeRanges.map(\.timeRangeValue) ?? []
-            if !ranges.isEmpty {
-                let rawEnd = ranges.map(\.end.seconds).max() ?? 0
-                let clampedEnd = clock.duration.isFinite && clock.duration > 0
-                    ? min(rawEnd, clock.duration)
-                    : rawEnd
-                if abs(clock.bufferedEnd - clampedEnd) > 0.05 {
-                    clock.bufferedEnd = max(0, clampedEnd)
+            // AVPlayer garantit la file .main passée ci-dessus.
+            MainActor.assumeIsolated {
+                guard self.player === player, !isDisappeared else { return }
+                if playbackRetryCount > 0, !isScrubbing, !isSeeking,
+                   player.timeControlStatus == .playing,
+                   time.seconds.isFinite, time.seconds >= retryResetPosition + 2 {
+                    playbackRetryCount = 0
                 }
-            } else if clock.bufferedEnd != 0 {
-                clock.bufferedEnd = 0
+                let externalPlaybackActive = player.isExternalPlaybackActive
+                if isExternalPlaybackActive != externalPlaybackActive {
+                    isExternalPlaybackActive = externalPlaybackActive
+                }
+                // Les sous-titres suivent la vidéo même quand le chrome est masqué :
+                // ce rafraîchissement ne publie que le cue affiché, pas l'horloge.
+                if preparedSubtitles.isAvailable {
+                    preparedSubtitles.refresh(at: time.seconds)
+                } else {
+                    speechProbe.refresh(player: player)
+                }
+                guard showControls else { return }
+                let itemDuration = player.currentItem?.duration.seconds ?? 0
+                if itemDuration.isFinite, itemDuration > 0,
+                   abs(clock.duration - itemDuration) > 0.01 {
+                    clock.duration = itemDuration
+                }
+                if !isScrubbing, !isSeeking, showControls, time.seconds.isFinite,
+                   abs(clock.currentTime - time.seconds) >= 0.2 {
+                    clock.currentTime = time.seconds
+                }
+                // Plage bufferisée : fin la plus avancée des segments chargés —
+                // après un seek en avant, le segment contenant la position peut
+                // ne pas exister encore ; prendre le premier intervalle afficherait
+                // un buffer résiduel derrière le curseur. Borné à la durée.
+                let ranges = player.currentItem?.loadedTimeRanges.map(\.timeRangeValue) ?? []
+                if !ranges.isEmpty {
+                    let rawEnd = ranges.map(\.end.seconds).max() ?? 0
+                    let clampedEnd = clock.duration.isFinite && clock.duration > 0
+                        ? min(rawEnd, clock.duration)
+                        : rawEnd
+                    if abs(clock.bufferedEnd - clampedEnd) > 0.05 {
+                        clock.bufferedEnd = max(0, clampedEnd)
+                    }
+                } else if clock.bufferedEnd != 0 {
+                    clock.bufferedEnd = 0
+                }
             }
         }
     }

@@ -127,7 +127,10 @@ final class SessionStore {
     private func discardMediaLinks() {
         RecentUploadsLoader.shared.clear()
         guard let credential = TokenStore.credentialFingerprint() else { return }
-        Task { await MediaURLCache.shared.clear(credentialFingerprint: credential) }
+        Task {
+            await MediaURLCache.shared.clear(credentialFingerprint: credential)
+            await PreparedSubtitleStore.shared.clear(credential: credential)
+        }
     }
 
     func selectDrive(_ drive: Drive) {
