@@ -33,6 +33,8 @@ jobs:
           python3 -m unittest discover -s Tests -p 'test_subtitle_video_compatibility.py'
           python3 -m unittest discover -s Tests -p 'test_prepared_subtitle_source.py'
           python3 -m unittest discover -s Tests -p 'test_prepared_subtitle_diagnostics.py'
+          python3 -m unittest discover -s Tests -p 'test_prepared_audio_timing.py'
+          python3 -m unittest discover -s Tests -p 'test_prepared_mpeg_timing.py'
           python3 .github/scripts/check_prepared_playback.py
           python3 .github/scripts/check_vlc_playback.py
           python3 .github/scripts/check_video_compatibility.py

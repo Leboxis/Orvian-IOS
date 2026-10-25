@@ -70,6 +70,8 @@ struct OADDecoder {
     double tick;
     double previousPTS;
     double expectedPTS;
+    double inputAnchor;
+    int64_t inputFrames;
     double pendingPTS;
     double anchor;
     int64_t outputFrames;
@@ -417,8 +419,14 @@ static OADStatus oad_prepare_frame(OADDecoder *d) {
         if (!f->extended_data[i]) return OADStatusInvalidSource;
     int64_t pts = f->best_effort_timestamp;
     if (pts == AV_NOPTS_VALUE) pts = f->pts;
-    if (pts == AV_NOPTS_VALUE) return OADStatusInvalidTiming;
-    double time = pts * d->tick - d->origin;
+    if (pts == AV_NOPTS_VALUE && !d->haveTimestamp) return OADStatusInvalidTiming;
+    if (d->haveTimestamp && d->inputRate != f->sample_rate) return OADStatusUnsupportedAudio;
+    /* MPEG PES may timestamp only the first of several decoded audio frames.
+     * Infer untimed frames from the last explicit input anchor, never media zero
+     * or the delayed resampler output clock. Explicit timestamps still win. */
+    double time = pts == AV_NOPTS_VALUE
+        ? d->inputAnchor + (double)d->inputFrames / f->sample_rate
+        : pts * d->tick - d->origin;
     if (!isfinite(time) || fabs(time) > OAD_MAX_TIME) return OADStatusInvalidTiming;
     double tolerance = d->tick + 1e-9;
     if (d->haveTimestamp && (time < d->previousPTS - tolerance ||
@@ -446,7 +454,10 @@ static OADStatus oad_prepare_frame(OADDecoder *d) {
     d->gapDrain = d->haveTimestamp && time > d->expectedPTS + tolerance;
     d->pendingPTS = time;
     d->previousPTS = time;
-    d->expectedPTS = time + (double)f->nb_samples / f->sample_rate;
+    if (pts != AV_NOPTS_VALUE) { d->inputAnchor = time; d->inputFrames = 0; }
+    if (d->inputFrames > INT64_MAX - f->nb_samples) return OADStatusTooLarge;
+    d->inputFrames += f->nb_samples;
+    d->expectedPTS = d->inputAnchor + (double)d->inputFrames / f->sample_rate;
     d->haveTimestamp = 1;
     d->framePending = 1;
     return OADStatusOK;
@@ -485,7 +496,9 @@ static OADStatus oad_convert(OADDecoder *d, int drain, OADAudioBlock *block) {
     block->frameCount = count - skip;
     block->sampleRate = d->outputRate;
     block->channelCount = d->outputChannels;
-    block->startTime = start + (double)skip / d->outputRate;
+    block->segmentStartTime = d->anchor;
+    block->frameOffset = d->outputFrames - count + skip;
+    block->startTime = d->anchor + (double)block->frameOffset / d->outputRate;
     if (block->startTime < 0 && block->startTime > -1e-9) block->startTime = 0;
     return OADStatusOK;
 }
@@ -608,6 +621,8 @@ OADStatus OADSeek(OADDecoder *d, double mediaTime) {
     d->demuxEnd = d->sentEnd = d->decoderEnd = 0;
     d->packetPending = d->framePending = d->gapDrain = d->haveTimestamp = 0;
     d->outputFrames = 0;
+    d->inputAnchor = 0;
+    d->inputFrames = 0;
     d->terminal = OADStatusOK;
     return oad_cancelled(d) ? (d->terminal = OADStatusCancelled) : OADStatusOK;
 }
@@ -617,5 +632,5 @@ double OADDuration(OADDecoder *d) {
 }
 
 const char *OADVersion(void) {
-    return "OrvianAudioDecoder/1 " LIBAVFORMAT_IDENT;
+    return "OrvianAudioDecoder/2 " LIBAVFORMAT_IDENT;
 }

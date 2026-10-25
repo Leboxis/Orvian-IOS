@@ -36,6 +36,10 @@ typedef struct OADAudioBlock {
     int32_t sampleRate;
     int32_t channelCount;
     double startTime;
+    /* Exact within a resampling segment: start = segmentStartTime +
+     * frameOffset/sampleRate. Keep the integer offset across the Swift bridge. */
+    double segmentStartTime;
+    int64_t frameOffset;
 } OADAudioBlock;
 
 /* Each concurrent token user must own a reference, including a cancellation
@@ -58,7 +62,8 @@ OAD_EXPORT OADDecoder *OADOpen(const char *absoluteLocalPath,
 OAD_EXPORT double OADDuration(OADDecoder *decoder);
 /* startTime = source PTS - container start_time (zero if unspecified), with
  * resampling delay accounted for. Initial audio delay and gaps are preserved;
- * PCM before media zero is clipped. Missing/backwards timestamps fail closed.
+ * PCM before media zero is clipped. Missing PTS after an explicit anchor follow
+ * the decoded input sample count; missing initial/backwards PTS fail closed.
  * Samples remain valid only until the next Read, Seek, or Close. Empty output
  * is never returned with OK. At most 1,000,000 frames / 32,000,000 bytes. */
 OAD_EXPORT OADStatus OADRead(OADDecoder *decoder, OADAudioBlock *block);

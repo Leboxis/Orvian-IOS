@@ -233,14 +233,17 @@ actor PreparedSubtitleAnalyzer {
                       duration: Double, continuation: AsyncStream<AnalyzerInput>.Continuation,
                       progress: @escaping @Sendable (Double) async -> Void) async throws {
         if let range { try await decoder.seek(to: range.start.seconds) }
-        var previousTime = -Double.infinity
+        var previousEnd: CMTime?
         var lastProgress = ContinuousClock.now
         while let chunk = try await decoder.read() {
             try Task.checkCancellation()
-            guard chunk.startTime >= previousTime else { throw PreparedSubtitleError.timing }
-            previousTime = chunk.startTime
             if let range, chunk.startTime >= range.end.seconds { break }
             guard let input = try chunk.input(format: format, range: range) else { continue }
+            guard let start = input.bufferStartTime,
+                  previousEnd.map({ CMTimeCompare(start, $0) >= 0 }) ?? true else {
+                throw PreparedSubtitleError.timing
+            }
+            previousEnd = CMTimeAdd(start, CMTime(value: Int64(input.buffer.frameLength), timescale: CMTimeScale(chunk.sampleRate)))
             try await enqueue(input, into: continuation)
             if lastProgress.duration(to: .now) >= .milliseconds(200) {
                 if duration.isFinite, duration > 0 { await progress(min(0.99, chunk.startTime / duration)) }

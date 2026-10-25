@@ -115,7 +115,7 @@ PY
         "$BUILD/$NAME.o" "${LIBS[@]}" -lz -lm -lpthread \
         -Wl,-exported_symbols_list,"$EXPORTS" \
         -Wl,-install_name,"@rpath/$NAME.framework/$NAME" \
-        -Wl,-compatibility_version,1 -Wl,-current_version,1 \
+        -Wl,-compatibility_version,2 -Wl,-current_version,2 \
         -o "$FRAMEWORK/$NAME"
     cp "$NATIVE/$NAME.h" "$FRAMEWORK/Headers/"
     printf 'framework module %s {\n  umbrella header "%s.h"\n  export *\n}\n' "$NAME" "$NAME" > "$FRAMEWORK/Modules/module.modulemap"
@@ -124,7 +124,7 @@ import plistlib, sys
 path, platform, name = sys.argv[1:]
 with open(path, 'wb') as output:
     plistlib.dump(dict(CFBundleExecutable=name, CFBundleIdentifier='com.orvian.audio-decoder', CFBundleName=name,
-        CFBundlePackageType='FMWK', CFBundleShortVersionString='1.0', CFBundleVersion='1',
+        CFBundlePackageType='FMWK', CFBundleShortVersionString='2.0', CFBundleVersion='2',
         MinimumOSVersion='26.0', CFBundleSupportedPlatforms=[platform]), output)
 PY
     verify_framework "$FRAMEWORK"

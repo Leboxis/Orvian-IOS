@@ -120,7 +120,7 @@ xcrun --sdk "$SDK" clang -target "$TARGET" \
   -Wl,-load_hidden,libswresample.a -Wl,-load_hidden,libavutil.a \
   -Wl,-exported_symbols_list,exports.txt \
   -Wl,-install_name,@rpath/OrvianAudioDecoder.framework/OrvianAudioDecoder \
-  -Wl,-compatibility_version,1 -Wl,-current_version,1 \
+  -Wl,-compatibility_version,2 -Wl,-current_version,2 \
   -lz -lm -lpthread -o OrvianAudioDecoder
 ```
 
@@ -135,6 +135,43 @@ appropriate installation method. Supply usable application source/object/relink
 materials and obtain legal review of the intended distribution/signing channel;
 do not impose terms forbidding the LGPL-granted modifications or debugging.
 The bridge's independent licensing must also permit the distributed relink use.
+
+## Audio chronology and bridge ABI 2
+
+The bridge now carries `segmentStartTime` and an integer `frameOffset` alongside
+PCM. Swift represents the segment anchor at a timescale that is a multiple of
+the output sample rate and adds exact integer frame offsets. Independently
+rounding each buffer to nanoseconds can overlap its predecessor at 44.1/48 kHz
+and cause Apple's `audioDisordered` error. The consumer validates complete
+buffer intervals after seek trimming, not just increasing start times. Genuine
+source overlaps still fail rather than silently shifting captions.
+
+MPEG PES may supply one PTS for several decoded frames. After a valid explicit
+anchor, missing intermediate PTS use an integer count of decoded INPUT samples.
+An initial missing timestamp, a sample-rate change or an explicitly contradictory
+timestamp still fails. Explicit forward gaps and the original A/V origin remain
+intact. FFmpeg continues to own timestamp wrap handling.
+
+`OADAudioBlock` changed size: ABI 2 requires rebuilding and distributing the app
+and framework together. Never replace an ABI 1 framework in an old app with this
+one. The native version, framework bundle and dylib versions are 2; the build
+fingerprint includes the changed header and implementation, invalidating old
+cached artifacts.
+
+Host regression commands:
+
+```sh
+python3 -m unittest discover -s Tests -p test_prepared_audio_timing.py
+python3 -m unittest discover -s Tests -p test_prepared_mpeg_timing.py
+```
+
+The first executes the production Swift input constructor with timing-only host
+shims and exact interval comparisons; the second compiles the production native
+input-clock decision block. Neither simulates recognition or proves full codec
+I/O. Hosted `PreparedAudioTests` additionally check real CoreMedia input intervals
+and real decoder output at 16/48 kHz, without speech models or visual capture.
+The user's specific MPEG file was unavailable; missing intermediate PTS is a
+reproduced rejection mechanism, not a confirmed diagnosis of every MPEG file.
 
 ## Validation limits
 

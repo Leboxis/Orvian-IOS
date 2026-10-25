@@ -22,12 +22,23 @@ struct PreparedAudioChunk: Sendable {
     let sampleRate: Int
     let channelCount: Int
     let startTime: Double
+    let segmentStartTime: Double
+    let frameOffset: Int64
+
+    init(samples: [Float], frameCount: Int, sampleRate: Int, channelCount: Int,
+         startTime: Double, segmentStartTime: Double? = nil, frameOffset: Int64 = 0) {
+        self.samples = samples; self.frameCount = frameCount; self.sampleRate = sampleRate
+        self.channelCount = channelCount; self.startTime = startTime
+        self.segmentStartTime = segmentStartTime ?? startTime; self.frameOffset = frameOffset
+    }
 
     /// Trim seeks on the source timeline, then change only the PCM representation.
     func input(format: AVAudioFormat, range: CMTimeRange?) throws -> AnalyzerInput? {
         guard (1...1_000_000).contains(frameCount), (1...8).contains(channelCount),
               (16_000...192_000).contains(sampleRate), samples.count == frameCount * channelCount,
-              startTime.isFinite, startTime >= 0,
+              startTime.isFinite, startTime >= 0, segmentStartTime.isFinite,
+              abs(segmentStartTime) <= 100_000_000, frameOffset >= 0,
+              frameOffset <= 20_000_000_000_000,
               format.sampleRate == Double(sampleRate), Int(format.channelCount) == channelCount else {
             throw PreparedSubtitleError.timing
         }
@@ -64,7 +75,16 @@ struct PreparedAudioChunk: Sendable {
             guard converted.frameLength == frames else { throw PreparedSubtitleError.timing }
             buffer = converted
         }
-        let time = CMTime(seconds: startTime + Double(lower) / Double(sampleRate), preferredTimescale: 1_000_000_000)
+        // A common scale MULTIPLE of the sample rate makes all frame offsets
+        // exact. Rounding every buffer start to nanoseconds can overlap its predecessor.
+        let scale = CMTimeScale(sampleRate * (1_000_000_000 / sampleRate))
+        let anchor = CMTime(seconds: segmentStartTime, preferredTimescale: scale)
+        let offset = CMTime(value: frameOffset + Int64(lower), timescale: CMTimeScale(sampleRate))
+        let time = CMTimeAdd(anchor, offset)
+        guard time.isNumeric, time.seconds >= 0,
+              abs(time.seconds - (startTime + Double(lower) / Double(sampleRate))) <= 1e-7 else {
+            throw PreparedSubtitleError.timing
+        }
         return AnalyzerInput(buffer: buffer, bufferStartTime: time)
     }
 }
@@ -107,7 +127,8 @@ actor PreparedAudioDecoder {
         try Task.checkCancellation()
         return PreparedAudioChunk(samples: copied, frameCount: Int(block.frameCount),
                                   sampleRate: Int(block.sampleRate), channelCount: Int(block.channelCount),
-                                  startTime: block.startTime)
+                                  startTime: block.startTime, segmentStartTime: block.segmentStartTime,
+                                  frameOffset: block.frameOffset)
     }
 
     func seek(to seconds: Double) throws {
