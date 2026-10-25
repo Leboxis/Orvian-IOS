@@ -5,6 +5,7 @@ struct SubtitleModeMenu: View {
     let mode: SubtitleMode
     let isSubtle: Bool
     let sourceLanguage: SubtitleSourceLanguage
+    var allowsCaptions = true
     let selectSource: (SubtitleSourceLanguage) -> Void
     let action: (SubtitleMode) -> Void
 
@@ -34,6 +35,7 @@ struct SubtitleModeMenu: View {
                         Text(option.title)
                     }
                 }
+                .disabled(option != .off && !allowsCaptions)
             }
         } label: {
             Image(systemName: mode == .off ? "captions.bubble" : "captions.bubble.fill")

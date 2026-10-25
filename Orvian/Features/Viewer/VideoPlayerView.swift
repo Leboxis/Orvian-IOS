@@ -532,10 +532,10 @@ struct VideoPlayerView: View {
     private var subtitleButton: some View {
         SubtitleModeMenu(mode: preparedSubtitles.isAvailable ? preparedSubtitles.mode : speechProbe.mode, isSubtle: true,
                          sourceLanguage: speechProbe.sourceLanguage,
+                         allowsCaptions: vlcPlayback == nil || preparedSubtitles.isAvailable,
                          selectSource: { language in subtitleSource = language }) { mode in
             applySubtitleMode(mode)
         }
-        .disabled(vlcPlayback != nil && !preparedSubtitles.isAvailable)
         .accessibilityHint(vlcPlayback == nil || preparedSubtitles.isAvailable ? "" : "La transcription en direct n’est pas disponible avec VLC. Les sous-titres préparés restent pris en charge.")
     }
 
@@ -824,10 +824,10 @@ struct VideoPlayerView: View {
             speedMenu
             SubtitleModeMenu(mode: preparedSubtitles.isAvailable ? preparedSubtitles.mode : speechProbe.mode, isSubtle: false,
                          sourceLanguage: speechProbe.sourceLanguage,
+                         allowsCaptions: vlcPlayback == nil || preparedSubtitles.isAvailable,
                          selectSource: { language in subtitleSource = language }) { mode in
                 applySubtitleMode(mode)
             }
-            .disabled(vlcPlayback != nil && !preparedSubtitles.isAvailable)
             .accessibilityHint(vlcPlayback == nil || preparedSubtitles.isAvailable ? "" : "La transcription en direct n’est pas disponible avec VLC. Les sous-titres préparés restent pris en charge.")
             AirPlayButton()
                 .disabled(vlcPlayback != nil)

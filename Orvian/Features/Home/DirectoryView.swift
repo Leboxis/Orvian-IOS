@@ -377,10 +377,8 @@ struct DirectoryView: View {
         }
         .task(id: DirectoryActivationKey(isActive: isActive, phase: scenePhase)) {
             guard isActive, scenePhase == .active else { return }
-            // Le tri et les filtres sont mémorisés par onglet : le vue-modèle
-            // neuf doit partir du tri restauré, sinon l'écran affichait le tri
-            // choisi mais recevait la liste dans l'ordre d'origine.
-            viewModel.applySort(filters)
+            // Un modèle déjà chargé doit renouveler sa page et son curseur si le tri a changé pendant la recherche.
+            await viewModel.syncSort(with: filters)
             await viewModel.loadIfNeeded()
         }
         .task(id: SearchTaskKey(query: searchText, restricted: searchRestrictedToFolder)) {

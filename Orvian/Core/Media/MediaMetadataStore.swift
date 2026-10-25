@@ -43,6 +43,19 @@ private struct VideoMetadataRequest: Sendable {
     let fileId: Int
     let size: Int?
     let lastModifiedAt: Double?
+    let generation: UUID
+}
+
+private struct VideoMetadataVersion {
+    let size: Int?
+    let lastModifiedAt: Double?
+    let generation: UUID
+
+    func conflicts(size: Int?, lastModifiedAt: Double?) -> Bool {
+        if let size, let known = self.size, size != known { return true }
+        if let lastModifiedAt, let known = self.lastModifiedAt, lastModifiedAt != known { return true }
+        return false
+    }
 }
 
 /// Résout à la volée (et met en cache) la durée, l'orientation et la définition des vidéos.
@@ -90,7 +103,8 @@ final class MediaMetadataStore {
     /// Résolutions en cours, par clé de persistance : la grille et le pager
     /// peuvent appeler `resolveAll` en même temps, une seule analyse doit
     /// partir pour une même vidéo.
-    @ObservationIgnored private var inFlightKeys: Set<String> = []
+    @ObservationIgnored private var inFlightKeys: [String: UUID] = [:]
+    @ObservationIgnored private var versions: [String: VideoMetadataVersion] = [:]
     /// Cache disque, indexé `credential-driveId-fileId` (deux drives peuvent partager un
     /// même identifiant de fichier).
     @ObservationIgnored private var entries: [String: PersistedEntry] = [:]
@@ -149,10 +163,8 @@ final class MediaMetadataStore {
         infos.reserveCapacity(items.count)
         for file in items where file.isVideo {
             let key = prefix + String(file.id)
-            if let info = cache[key] {
-                infos[file.id] = info
-            } else if let restored = persistedInfo(driveId: driveId, file: file) {
-                infos[file.id] = restored
+            if let valid = persistedInfo(key: key, file: file) {
+                infos[file.id] = cache[key] ?? valid
             }
         }
         return VideoMetadataSnapshot(infos: infos)
@@ -184,13 +196,26 @@ final class MediaMetadataStore {
         )
     }
 
-    /// Vrai si cette version du fichier est déjà connue (cache mémoire, entrée
-    /// disque encore valable) ou déjà en cours d'analyse par un autre écran.
-    private func isResolved(credential: String, driveId: Int, file: DriveFile) -> Bool {
-        let key = persistenceKey(credential: credential, driveId: driveId, fileId: file.id)
-        return cache[key] != nil
-            || inFlightKeys.contains(key)
-            || persistedInfo(driveId: driveId, file: file) != nil
+    private func observeVersion(key: String, driveId: Int, file: DriveFile) -> UUID {
+        let previous = versions[key] ?? entries[key].map {
+            VideoMetadataVersion(size: $0.size, lastModifiedAt: $0.lastModifiedAt, generation: UUID())
+        }
+        let changed = previous?.conflicts(size: file.size, lastModifiedAt: file.lastModifiedAt) == true
+        let generation = changed ? UUID() : (previous?.generation ?? UUID())
+        if changed {
+            cache[key] = nil
+            entries[key] = nil
+            inFlightKeys[key] = nil
+            VideoAssetCache.shared.invalidate(driveId: driveId, fileId: file.id)
+            scheduleRevisionUpdate()
+            scheduleSave()
+        }
+        versions[key] = VideoMetadataVersion(
+            size: file.size ?? previous?.size,
+            lastModifiedAt: file.lastModifiedAt ?? previous?.lastModifiedAt,
+            generation: generation
+        )
+        return generation
     }
 
     private func ensurePersistenceLoaded() async {
@@ -248,7 +273,11 @@ final class MediaMetadataStore {
     /// dont la taille ou la date de modification ne correspondent plus est
     /// ignorée (la vidéo a été remplacée par une autre version).
     private func persistedInfo(driveId: Int, file: DriveFile) -> Info? {
-        guard let entry = entries[persistenceKey(driveId: driveId, fileId: file.id)] else {
+        persistedInfo(key: persistenceKey(driveId: driveId, fileId: file.id), file: file)
+    }
+
+    private func persistedInfo(key: String, file: DriveFile) -> Info? {
+        guard let entry = entries[key] else {
             return nil
         }
         if let fileSize = file.size, let entrySize = entry.size, fileSize != entrySize {
@@ -283,7 +312,7 @@ final class MediaMetadataStore {
         defer { publishPendingRevision() }
         let credential = TokenStore.credentialFingerprint()
 
-        var pending: [DriveFile] = []
+        var pending: [VideoMetadataRequest] = []
         var promotedAny = false
         // Une seule lecture de l'empreinte pour toute la passe : chaque clé
         // chaîne « empreinte-drive-fichier » construite par fichier relisait le
@@ -291,6 +320,7 @@ final class MediaMetadataStore {
         let sessionCredential = credential ?? "signed-out"
         for file in items where file.isVideo {
             let key = persistenceKey(credential: sessionCredential, driveId: driveId, fileId: file.id)
+            let generation = observeVersion(key: key, driveId: driveId, file: file)
             guard cache[key] == nil else { continue }
             if let restored = persistedInfo(driveId: driveId, file: file) {
                 // Promotion mémoire : la grille retrouve l'information via
@@ -299,7 +329,10 @@ final class MediaMetadataStore {
                 promotedAny = true
                 continue
             }
-            pending.append(file)
+            pending.append(VideoMetadataRequest(
+                credentialFingerprint: credential, driveId: driveId, fileId: file.id,
+                size: file.size, lastModifiedAt: file.lastModifiedAt, generation: generation
+            ))
         }
         if promotedAny {
             scheduleRevisionUpdate()
@@ -313,25 +346,16 @@ final class MediaMetadataStore {
         while index < pending.count {
             guard !Task.isCancelled, credential == TokenStore.credentialFingerprint() else { return }
             let chunk = Array(pending[index..<min(index + batch, pending.count)])
-            var claimedKeys: [String] = []
-            let requests = chunk.compactMap { file -> VideoMetadataRequest? in
-                guard !isResolved(credential: sessionCredential, driveId: driveId, file: file) else {
-                    return nil
-                }
-                // Réservation avant le lancement : la grille et le pager peuvent
-                // appeler `resolveAll` en même temps, une seule analyse doit
-                // partir pour une même vidéo (l'ancien `inFlight` le garantissait).
-                let key = persistenceKey(credential: sessionCredential, driveId: driveId, fileId: file.id)
-                guard !inFlightKeys.contains(key) else { return nil }
-                inFlightKeys.insert(key)
-                claimedKeys.append(key)
-                return VideoMetadataRequest(
-                    credentialFingerprint: credential,
-                    driveId: driveId,
-                    fileId: file.id,
-                    size: file.size,
-                    lastModifiedAt: file.lastModifiedAt
-                )
+            var claimedKeys: [String: UUID] = [:]
+            let requests = chunk.compactMap { request -> VideoMetadataRequest? in
+                let key = persistenceKey(credential: sessionCredential, driveId: driveId, fileId: request.fileId)
+                guard versions[key]?.generation == request.generation,
+                      cache[key] == nil, inFlightKeys[key] == nil else { return nil }
+                // Réserver cette version, sans qu'une ancienne analyse puisse
+                // libérer la réservation de la vidéo qui l'a remplacée.
+                inFlightKeys[key] = request.generation
+                claimedKeys[key] = request.generation
+                return request
             }
             if !requests.isEmpty {
                 var resolved: [(request: VideoMetadataRequest, info: Info)] = []
@@ -349,8 +373,8 @@ final class MediaMetadataStore {
                 // une fois le groupe terminé — réussites comme échecs : une
                 // réservation jamais libérée exclurait la vidéo de toute
                 // relance ultérieure.
-                for key in claimedKeys {
-                    inFlightKeys.remove(key)
+                for (key, generation) in claimedKeys where inFlightKeys[key] == generation {
+                    inFlightKeys[key] = nil
                 }
                 for entry in resolved {
                     promote(entry.info, request: entry.request)
@@ -392,10 +416,8 @@ final class MediaMetadataStore {
     /// - La session doit être celle qui a lancé l'analyse : un changement de
     ///   compte pendant le vol n'attribue jamais une durée au fichier d'un
     ///   autre compte (l'ancien code revalidait la clé à l'écriture).
-    /// - L'entrée est écrite sans condition : une entrée disque **périmée**
-    ///   (taille ou date ne correspondant plus) est précisément la raison pour
-    ///   laquelle la vidéo est repartie en analyse — la garder l'aurait
-    ///   maintenue inconnue pour toujours.
+    /// - Seule la version encore courante remplace l'entrée disque : une
+    ///   ancienne analyse terminée après son remplacement doit être ignorée.
     private func promote(_ info: Info, request: VideoMetadataRequest) {
         guard request.credentialFingerprint == TokenStore.credentialFingerprint() else { return }
         let key = persistenceKey(
@@ -403,6 +425,7 @@ final class MediaMetadataStore {
             driveId: request.driveId,
             fileId: request.fileId
         )
+        guard versions[key]?.generation == request.generation else { return }
         cache[key] = info
         entries[key] = PersistedEntry(
             info: info,

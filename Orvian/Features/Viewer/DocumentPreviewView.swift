@@ -12,22 +12,22 @@ struct DocumentPreviewScreen: View {
     let file: DriveFile
 
     @Environment(\.dismiss) private var dismiss
-    @State private var localURL: URL?
-    @State private var errorMessage: String?
+    @State private var lifetime = DocumentPreviewLifetime()
+    @State private var retry = 0
 
     var body: some View {
         NavigationStack {
             Group {
-                if let localURL {
-                    DocumentPreviewController(url: localURL, title: file.name)
+                if let copy = lifetime.copy {
+                    DocumentPreviewController(copy: copy, title: file.name)
                         .ignoresSafeArea(edges: .bottom)
-                } else if let errorMessage {
+                } else if let errorMessage = lifetime.errorMessage {
                     ContentUnavailableView {
                         Label("Aperçu impossible", systemImage: "doc.questionmark")
                     } description: {
                         Text(errorMessage)
                     } actions: {
-                        Button("Réessayer") { Task { await load() } }
+                        Button("Réessayer") { retry &+= 1 }
                             .buttonStyle(.borderedProminent)
                     }
                 } else {
@@ -43,60 +43,53 @@ struct DocumentPreviewScreen: View {
                 }
             }
         }
-        .task(id: file.id) { await load() }
-    }
-
-    private func load() async {
-        errorMessage = nil
-        do {
-            localURL = try await DocumentPreviewLoader.localCopy(driveId: driveId, file: file)
-        } catch is CancellationError {
-            return
-        } catch {
-            errorMessage = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+        .task(id: "\(file.id)-\(retry)") {
+            await lifetime.load {
+                try await DocumentPreviewLoader.localCopy(driveId: driveId, file: file)
+            }
         }
+        .onDisappear { lifetime.cancelLoading() }
     }
 }
 
 /// Télécharge une copie locale : QuickLook n'ouvre que des fichiers présents
 /// sur le disque, jamais une URL distante.
 enum DocumentPreviewLoader {
-    static func localCopy(driveId: Int, file: DriveFile) async throws -> URL {
+    static func localCopy(driveId: Int, file: DriveFile) async throws -> DocumentPreviewCopy {
         guard let remoteURL = await MediaURLCache.shared.url(driveId: driveId, fileId: file.id) else {
             throw PreviewError.missingTemporaryURL
         }
-        let (firstURL, response) = try await download(remoteURL, named: file)
+        let (firstCopy, response) = try await download(remoteURL, named: file)
         guard let http = response as? HTTPURLResponse else {
-            removeCopy(firstURL)
             throw PreviewError.invalidResponse
         }
         if (200..<300).contains(http.statusCode) {
-            return firstURL
+            return firstCopy
         }
-        removeCopy(firstURL)
         // Le lien signé expire au bout de 55 minutes : une seule nouvelle
         // demande, comme pour l'éditeur de texte.
         guard [401, 403, 404, 410].contains(http.statusCode),
               let freshURL = await MediaURLCache.shared.freshURL(driveId: driveId, fileId: file.id)
         else { throw PreviewError.http(status: http.statusCode) }
-        let (secondURL, secondResponse) = try await download(freshURL, named: file)
+        let (secondCopy, secondResponse) = try await download(freshURL, named: file)
         guard let secondHTTP = secondResponse as? HTTPURLResponse,
               (200..<300).contains(secondHTTP.statusCode) else {
-            removeCopy(secondURL)
             throw PreviewError.http(status: (secondResponse as? HTTPURLResponse)?.statusCode ?? 0)
         }
-        return secondURL
+        return secondCopy
     }
 
     /// `URLSession` rend un fichier temporaire qui peut disparaître dès que la
     /// session est invalidée : on le déplace tout de suite dans notre propre
     /// dossier, sous un nom sûr.
-    private static func download(_ url: URL, named file: DriveFile) async throws -> (URL, URLResponse) {
+    private static func download(_ url: URL, named file: DriveFile) async throws -> (DocumentPreviewCopy, URLResponse) {
+        try Task.checkCancellation()
         let configuration = URLSessionConfiguration.default
         configuration.timeoutIntervalForResource = 5 * 60
         let session = URLSession(configuration: configuration)
         defer { session.finishTasksAndInvalidate() }
         let (temporaryURL, response) = try await session.download(from: url)
+        try Task.checkCancellation()
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent("OrvianPreviews", isDirectory: true)
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
@@ -104,17 +97,12 @@ enum DocumentPreviewLoader {
             try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
             let destination = directory.appendingPathComponent(safeName(for: file), isDirectory: false)
             try FileManager.default.moveItem(at: temporaryURL, to: destination)
-            return (destination, response)
+            try Task.checkCancellation()
+            return (DocumentPreviewCopy(url: destination), response)
         } catch {
             try? FileManager.default.removeItem(at: directory)
             throw error
         }
-    }
-
-    /// Supprime la copie refusée et son dossier (vide après le retrait).
-    private static func removeCopy(_ url: URL) {
-        try? FileManager.default.removeItem(at: url)
-        try? FileManager.default.removeItem(at: url.deletingLastPathComponent())
     }
 
     /// Le nom vient du serveur : il ne doit jamais créer de sous-dossier.
@@ -154,22 +142,29 @@ enum DocumentPreviewLoader {
 /// Enveloppe `QLPreviewController`, qui gère seul le rendu des PDF, des
 /// documents Office, de l’audio et des archives.
 private struct DocumentPreviewController: UIViewControllerRepresentable {
-    let url: URL
+    let copy: DocumentPreviewCopy
     let title: String
 
-    func makeUIViewController(context: Context) -> QLPreviewController {
-        let controller = QLPreviewController()
+    func makeUIViewController(context: Context) -> RetainingPreviewController {
+        let controller = RetainingPreviewController()
+        controller.retainedItem = context.coordinator.item
         controller.dataSource = context.coordinator
         return controller
     }
 
-    func updateUIViewController(_ controller: QLPreviewController, context: Context) {
-        context.coordinator.item = PreviewItem(url: url, title: title)
+    func updateUIViewController(_ controller: RetainingPreviewController, context: Context) {
+        guard context.coordinator.item.copy !== copy else { return }
+        context.coordinator.item = PreviewItem(copy: copy, title: title)
+        controller.retainedItem = context.coordinator.item
         controller.reloadData()
     }
 
     func makeCoordinator() -> Coordinator {
-        Coordinator(item: PreviewItem(url: url, title: title))
+        Coordinator(item: PreviewItem(copy: copy, title: title))
+    }
+
+    final class RetainingPreviewController: QLPreviewController {
+        var retainedItem: PreviewItem?
     }
 
     final class Coordinator: NSObject, QLPreviewControllerDataSource {
@@ -185,11 +180,12 @@ private struct DocumentPreviewController: UIViewControllerRepresentable {
     }
 
     final class PreviewItem: NSObject, QLPreviewItem {
-        let previewItemURL: URL?
+        let copy: DocumentPreviewCopy
+        var previewItemURL: URL? { copy.url }
         let previewItemTitle: String?
 
-        init(url: URL, title: String) {
-            previewItemURL = url
+        init(copy: DocumentPreviewCopy, title: String) {
+            self.copy = copy
             previewItemTitle = title
         }
     }

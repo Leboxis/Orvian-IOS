@@ -21,6 +21,8 @@ final class VideoAssetCache {
     private var insertionOrder: [Key] = []
     private var prefetchTasks: [Key: Task<Void, Never>] = [:]
     private var refreshRequired: Set<Key> = []
+    private var generations: [Key: UUID] = [:]
+    private var pendingURLInvalidations: [Key: (id: UUID, task: Task<Void, Never>)] = [:]
 
     init() {}
 
@@ -33,16 +35,28 @@ final class VideoAssetCache {
             return asset
         }
 
-        let needsRefresh = refreshRequired.remove(key) != nil
+        let generation = generations[key] ?? UUID()
+        generations[key] = generation
+        if let invalidation = pendingURLInvalidations[key] {
+            await invalidation.task.value
+            guard !Task.isCancelled, generations[key] == generation,
+                  key == makeKey(driveId: driveId, fileId: fileId) else { return nil }
+            if pendingURLInvalidations[key]?.id == invalidation.id {
+                pendingURLInvalidations[key] = nil
+            }
+        }
+        let needsRefresh = refreshRequired.contains(key)
         guard !Task.isCancelled else { return nil }
         let url = needsRefresh
             ? await MediaURLCache.shared.freshURL(driveId: driveId, fileId: fileId)
             : await MediaURLCache.shared.url(driveId: driveId, fileId: fileId)
         guard let url,
-              !Task.isCancelled, key == makeKey(driveId: driveId, fileId: fileId),
+              !Task.isCancelled, generations[key] == generation,
+              key == makeKey(driveId: driveId, fileId: fileId),
               url.scheme?.lowercased() == "https",
               url.host != nil
         else { return nil }
+        refreshRequired.remove(key)
 
         // La résolution d'URL suspend le MainActor : le préchargement et le
         // lecteur peuvent se réveiller ensemble. Réutiliser le premier asset
@@ -96,14 +110,22 @@ final class VideoAssetCache {
     /// nouvelle URL signée à Infomaniak.
     func invalidate(driveId: Int, fileId: Int) {
         let key = makeKey(driveId: driveId, fileId: fileId)
+        generations[key] = UUID()
         prefetchTasks[key]?.cancel()
         prefetchTasks[key] = nil
         assets[key] = nil
         insertionOrder.removeAll { $0 == key }
         refreshRequired.insert(key)
-        Task {
+        // Finish every older invalidation before resolving the replacement URL;
+        // otherwise freshURL can join an obsolete request or be cancelled later.
+        let previous = pendingURLInvalidations[key]?.task
+        let id = UUID()
+        let task = Task { [weak self] in
+            await previous?.value
+            guard let self, key == self.makeKey(driveId: driveId, fileId: fileId) else { return }
             await MediaURLCache.shared.invalidate(driveId: driveId, fileId: fileId)
         }
+        pendingURLInvalidations[key] = (id, task)
     }
 
     private func makeKey(driveId: Int, fileId: Int) -> Key {

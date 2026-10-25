@@ -38,6 +38,40 @@ struct VideoAssetCacheChecks {
         precondition(MediaURLCache.shared.invalidations == 0)
         let afterCancellation = await cache.asset(driveId: 1, fileId: 3)
         precondition(active === afterCancellation)
-        print("Video asset sharing and cancellation checks passed")
+        // An invalidation during URL resolution must reject that old request,
+        // even after a newer request has consumed the refresh flag.
+        let stale = Task { await cache.asset(driveId: 1, fileId: 4) }
+        while MediaURLCache.shared.waiters.isEmpty { await Task.yield() }
+        let staleURL = MediaURLCache.shared.waiters.removeFirst()
+        MediaURLCache.shared.holdInvalidations = true
+        cache.invalidate(driveId: 1, fileId: 4)
+        var supersededStarted = false
+        let superseded = Task {
+            supersededStarted = true
+            return await cache.asset(driveId: 1, fileId: 4)
+        }
+        while !supersededStarted || MediaURLCache.shared.invalidationWaiters.isEmpty { await Task.yield() }
+        cache.invalidate(driveId: 1, fileId: 4)
+        let replacement = Task { await cache.asset(driveId: 1, fileId: 4) }
+        precondition(MediaURLCache.shared.waiters.isEmpty,
+                     "Replacement URL resolution must wait for obsolete URL invalidation")
+        MediaURLCache.shared.invalidationWaiters.removeFirst().resume()
+        let supersededAsset = await superseded.value
+        precondition(supersededAsset == nil)
+        while MediaURLCache.shared.invalidationWaiters.isEmpty { await Task.yield() }
+        precondition(MediaURLCache.shared.waiters.isEmpty,
+                     "Stale invalidation cleanup must preserve the newer invalidation barrier")
+        MediaURLCache.shared.holdInvalidations = false
+        MediaURLCache.shared.invalidationWaiters.removeFirst().resume()
+        while MediaURLCache.shared.waiters.isEmpty { await Task.yield() }
+        MediaURLCache.shared.complete()
+        let currentAsset = await replacement.value
+        precondition(currentAsset != nil)
+        staleURL.resume(returning: URL(string: "https://example.invalid/old-version"))
+        let discarded = await stale.value
+        precondition(discarded == nil, "An obsolete URL request must not republish its asset")
+        let stillCurrent = await cache.asset(driveId: 1, fileId: 4)
+        precondition(stillCurrent === currentAsset, "The replacement asset must remain cached")
+        print("Video asset sharing, cancellation and invalidation checks passed")
     }
 }

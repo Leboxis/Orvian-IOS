@@ -162,12 +162,15 @@ struct FileGridView: View {
             // l'ensemble des résultats, pas seulement leur affichage. Sans ce
             // rechargement, la grille continuerait à paginer l'ancien ensemble.
             .onChange(of: filters) { oldFilters, newFilters in
+                restartPaginationIfNeeded()
                 guard newFilters.requiresServerReload(from: oldFilters, source: viewModel.source) else { return }
                 sortReloadTask?.cancel()
                 sortReloadTask = Task {
                     await viewModel.syncSort(with: newFilters)
                 }
             }
+            .onChange(of: effectiveSearchText) { _, _ in restartPaginationIfNeeded() }
+            .onChange(of: viewModel.source) { _, _ in restartPaginationIfNeeded() }
             .onAppear {
                 onVisibleItemsChanged?(visibleItems)
             }
@@ -195,9 +198,7 @@ struct FileGridView: View {
                 onUpdate: { metadataRevision = $0 }
             ))
             .onDisappear {
-                paginationTask?.cancel()
-                paginationTask = nil
-                paginationRequestID = nil
+                cancelPagination()
                 prefetchTask?.cancel()
                 prefetchTask = nil
                 prefetchRequestID = nil
@@ -611,7 +612,22 @@ struct FileGridView: View {
         await mediaMetadata.resolveAll(driveId: viewModel.driveId, items: items)
     }
 
-    private func requestMoreFiles() {
+    private func cancelPagination() {
+        paginationTask?.cancel()
+        paginationTask = nil
+        paginationRequestID = nil
+        paginationReplayPending = false
+    }
+
+    private func restartPaginationIfNeeded() {
+        let previous = paginationTask
+        let wasRequested = previous != nil || paginationReplayPending
+        cancelPagination()
+        // The same cards may stay mounted after a filter change: preserve their paging demand.
+        if wasRequested { requestMoreFiles(after: previous) }
+    }
+
+    private func requestMoreFiles(after previous: Task<Void, Never>? = nil) {
         guard paginationTask == nil else { return }
         // Un rechargement en cours fait sortir `loadMoreIfNeeded` sans rien
         // charger : la demande serait perdue, on la mémorise pour la rejouer
@@ -630,6 +646,13 @@ struct FileGridView: View {
                     paginationRequestID = nil
                 }
             }
+            // Let the cancelled request release its loading flag before replaying it.
+            await previous?.value
+            guard !Task.isCancelled else { return }
+            if viewModel.isReloading {
+                paginationReplayPending = true
+                return
+            }
             await loadMoreAfterMetadataResolution()
         }
     }
@@ -637,7 +660,18 @@ struct FileGridView: View {
     private func loadMoreAfterMetadataResolution() async {
         await resolveVideoMetadata(for: viewModel.items)
         guard !Task.isCancelled else { return }
-        await viewModel.loadMoreIfNeeded()
+        let visibleIDs = Set(visibleItems.map(\.id))
+        repeat {
+            let previousRevision = viewModel.itemsRevision
+            let previousCount = viewModel.items.count
+            await viewModel.loadMoreIfNeeded()
+            guard !Task.isCancelled, viewModel.itemsRevision != previousRevision,
+                  viewModel.errorMessage == nil else { return }
+            await resolveVideoMetadata(for: Array(viewModel.items.dropFirst(previousCount)))
+            guard !Task.isCancelled else { return }
+            // Older matches stay mounted: a wholly hidden page cannot trigger another onAppear.
+            if visibleItems.contains(where: { !visibleIDs.contains($0.id) }) { return }
+        } while viewModel.hasMore && !viewModel.isReloading && !viewModel.isLoadingMore
     }
 
     struct EmptyFilteredPageTaskKey: Hashable {

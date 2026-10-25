@@ -34,7 +34,8 @@ class VideoFallbackTests(unittest.TestCase):
 
     def test_unsupported_apple_integrations_are_not_offered_for_vlc(self):
         self.assertEqual(PLAYER.count(".disabled(vlcPlayback != nil)"), 2)
-        self.assertEqual(PLAYER.count(".disabled(vlcPlayback != nil && !preparedSubtitles.isAvailable)"), 2)
+        self.assertEqual(PLAYER.count("allowsCaptions: vlcPlayback == nil || preparedSubtitles.isAvailable"), 2)
+        self.assertNotIn(".disabled(vlcPlayback != nil && !preparedSubtitles.isAvailable)", PLAYER)
         self.assertIn("La transcription en direct n’est pas disponible avec VLC", PLAYER)
         self.assertIn("AirPlay vidéo indisponible", PLAYER)
 

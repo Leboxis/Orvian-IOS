@@ -22,7 +22,8 @@ class SubtitleVideoCompatibilityTests(unittest.TestCase):
         mode = player.split("private func applySubtitleMode", 1)[1].split("private func phoneSkipButton", 1)[0]
         self.assertIn("preparedSubtitles.setMode(mode, at: playerTime ?? 0)", mode)
         self.assertIn("guard !requiresVLC", mode)
-        self.assertEqual(player.count(".disabled(vlcPlayback != nil && !preparedSubtitles.isAvailable)"), 2)
+        self.assertEqual(player.count("allowsCaptions: vlcPlayback == nil || preparedSubtitles.isAvailable"), 2)
+        self.assertNotIn(".disabled(vlcPlayback != nil && !preparedSubtitles.isAvailable)", player)
 
     def test_preparation_uses_original_container_and_format_specific_errors(self):
         sheet = source("Orvian/Features/Viewer/PreparedSubtitleSheet.swift")

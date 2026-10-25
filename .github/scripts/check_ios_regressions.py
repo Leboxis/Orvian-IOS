@@ -112,6 +112,7 @@ enum TokenStore {
     static let shared = VideoAssetCache()
     var calls = 0
     func asset(driveId: Int, fileId: Int) async -> AVURLAsset? { calls += 1; return nil }
+    func invalidate(driveId: Int, fileId: Int) {}
 }
 ''', encoding="utf-8")
     metadata_checks = temp / "MediaMetadataChecks.swift"

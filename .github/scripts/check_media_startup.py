@@ -15,6 +15,8 @@ import Foundation
     static let shared = MediaURLCache()
     var calls = 0
     var invalidations = 0
+    var holdInvalidations = false
+    var invalidationWaiters: [CheckedContinuation<Void, Never>] = []
     var waiters: [CheckedContinuation<URL?, Never>] = []
     func url(driveId: Int, fileId: Int) async -> URL? {
         calls += 1
@@ -23,7 +25,12 @@ import Foundation
     func freshURL(driveId: Int, fileId: Int) async -> URL? {
         await url(driveId: driveId, fileId: fileId)
     }
-    func invalidate(driveId: Int, fileId: Int) { invalidations += 1 }
+    func invalidate(driveId: Int, fileId: Int) async {
+        if holdInvalidations {
+            await withCheckedContinuation { invalidationWaiters.append($0) }
+        }
+        invalidations += 1
+    }
     func complete() {
         let pending = waiters
         waiters.removeAll()
