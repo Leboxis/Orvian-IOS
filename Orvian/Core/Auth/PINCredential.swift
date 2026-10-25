@@ -7,31 +7,55 @@ import Security
 /// Les appels de production sont exécutés hors du MainActor.
 enum PINCredential {
     static let prefix = "pbkdf2-sha256$"
+    static let newCodeLength = 6
     private static let rounds: UInt32 = 600_000
 
+    static func requiredLength(for record: String?) -> Int {
+        guard let record else { return newCodeLength }
+        let parts = record.split(separator: "$", omittingEmptySubsequences: false)
+        // Existing SHA-256 and four-field PBKDF2 records were created with four digits.
+        if record.hasPrefix(prefix), parts.count == 5, parts[4] == "6" { return newCodeLength }
+        return 4
+    }
+
     static func make(_ code: String) throws -> String {
-        guard code.utf8.count == 4, code.utf8.allSatisfy({ (48...57).contains($0) }) else {
-            throw CredentialError.invalidCode
-        }
+        guard isValid(code, length: newCodeLength) else { throw CredentialError.invalidCode }
+        return try makeRecord(code)
+    }
+
+    /// Rehash an authenticated old PIN without changing the user's code or padding it.
+    static func upgradeLegacy(_ code: String) throws -> String {
+        guard isValid(code, length: 4) else { throw CredentialError.invalidCode }
+        return try makeRecord(code)
+    }
+
+    private static func isValid(_ code: String, length: Int) -> Bool {
+        code.utf8.count == length && code.utf8.allSatisfy { (48...57).contains($0) }
+    }
+
+    private static func makeRecord(_ code: String) throws -> String {
         var salt = [UInt8](repeating: 0, count: 16)
         guard SecRandomCopyBytes(kSecRandomDefault, salt.count, &salt) == errSecSuccess else {
             throw CredentialError.derivationFailed
         }
         let key = try derive(code, salt: salt, rounds: rounds)
-        return "\(prefix)\(rounds)$\(Data(salt).base64EncodedString())$\(Data(key).base64EncodedString())"
+        return "\(prefix)\(rounds)$\(Data(salt).base64EncodedString())$\(Data(key).base64EncodedString())$\(code.utf8.count)"
     }
 
     static func verify(_ code: String, record: String) throws -> Bool {
         if !record.hasPrefix(prefix) {
+            guard isValid(code, length: 4) else { return false }
             let legacy = SHA256.hash(data: Data(code.utf8)).map { String(format: "%02x", $0) }.joined()
             return equal(Array(legacy.utf8), Array(record.utf8))
         }
         let parts = record.split(separator: "$", omittingEmptySubsequences: false)
-        guard parts.count == 4, let count = UInt32(parts[1]), count == rounds,
+        guard parts.count == 4 || (parts.count == 5 && (parts[4] == "4" || parts[4] == "6")),
+              let count = UInt32(parts[1]), count == rounds,
               let salt = Data(base64Encoded: String(parts[2])), salt.count == 16,
               let expected = Data(base64Encoded: String(parts[3])), expected.count == 32 else {
             throw CredentialError.derivationFailed
         }
+        guard isValid(code, length: requiredLength(for: record)) else { return false }
         return equal(try derive(code, salt: Array(salt), rounds: count), Array(expected))
     }
 

@@ -28,7 +28,7 @@ struct AppLockView: View {
     @State private var isCheckingCode = false
     @State private var retryAfter = AppLockStore.retryAfter
 
-    private let codeLength = 4
+    private var codeLength: Int { AppLockStore.codeLength }
 
     var body: some View {
         ZStack {

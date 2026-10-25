@@ -52,7 +52,10 @@ jobs:
         run: python3 .github/scripts/check_motion_and_isolation.py
 
       - name: Check security, transfers and metadata isolation
-        run: python3 .github/scripts/check_ios_regressions.py
+        run: |
+          python3 .github/scripts/check_pin_length.py
+          python3 -m unittest discover -s Tests -p 'test_pin_length.py'
+          python3 .github/scripts/check_ios_regressions.py
 
       # Ces quatre scripts compilent du vrai code de production avec des
       # doublures : ils vivaient dans le dépôt sans être lancés par personne.

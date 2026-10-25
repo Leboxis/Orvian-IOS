@@ -8,12 +8,27 @@ struct SecurityChecks {
         let vector = try PINCredential.derive("password", salt: Array("salt".utf8), rounds: 1)
         precondition(vector.map { String(format: "%02x", $0) }.joined() ==
                      "120fb6cffcf8b32c43e7225256c4f837a86548c92ccc35480805987cb70be17b")
-        let first = try PINCredential.make("0123")
-        let second = try PINCredential.make("0123")
+        let first = try PINCredential.make("012345")
+        let second = try PINCredential.make("012345")
         precondition(first != second, "Every PIN must have a fresh random salt")
-        let correct = try PINCredential.verify("0123", record: first)
-        let wrong = try PINCredential.verify("0124", record: first)
+        let correct = try PINCredential.verify("012345", record: first)
+        let wrong = try PINCredential.verify("012346", record: first)
         precondition(correct && !wrong)
+        precondition(PINCredential.requiredLength(for: first) == 6)
+        for invalid in ["0123", "12345", "1234567", "12345a", "１２３４５６"] {
+            do {
+                _ = try PINCredential.make(invalid)
+                preconditionFailure("New codes must contain exactly six ASCII digits")
+            } catch PINCredential.CredentialError.invalidCode {}
+        }
+        let oldRecord = try PINCredential.upgradeLegacy("0123")
+        let fourFields = oldRecord.split(separator: "$").dropLast().joined(separator: "$")
+        for old in [oldRecord, fourFields] {
+            precondition(PINCredential.requiredLength(for: old) == 4)
+            let accepted = try PINCredential.verify("0123", record: old)
+            let padded = try PINCredential.verify("012300", record: old)
+            precondition(accepted && !padded, "Existing codes must remain readable without padding")
+        }
         // SHA-256("1234") : migration d'une ancienne installation.
         let legacy = try PINCredential.verify("1234", record:
             "03ac674216f3e15c761ee1a5e255f067953623c8b388b4459e13f978d7c846f4")

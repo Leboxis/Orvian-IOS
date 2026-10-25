@@ -29,7 +29,9 @@ struct AppLockSetupSheet: View {
     @State private var isRecoveringError = false
     @State private var retryAfter = AppLockStore.retryAfter
 
-    private let codeLength = 4
+    private var codeLength: Int {
+        stage == .verifyCurrent ? AppLockStore.codeLength : PINCredential.newCodeLength
+    }
 
     init(flow: Flow) {
         self.flow = flow

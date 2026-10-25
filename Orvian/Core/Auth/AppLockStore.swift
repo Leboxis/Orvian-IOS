@@ -18,6 +18,10 @@ enum AppLockStore {
         return true
     }
 
+    static var codeLength: Int {
+        PINCredential.requiredLength(for: store.current())
+    }
+
     static var retryAfter: Int {
         max(0, Int(ceil(UserDefaults.standard.double(forKey: deadlineKey) - Date().timeIntervalSince1970)))
     }
@@ -41,7 +45,7 @@ enum AppLockStore {
         guard matches else { return false }
         if !record.hasPrefix(PINCredential.prefix) {
             let upgraded = try await Task.detached(priority: .userInitiated) {
-                try PINCredential.make(code)
+                try PINCredential.upgradeLegacy(code)
             }.value
             guard store.save(upgraded) else { throw LockError.unavailable }
         }
