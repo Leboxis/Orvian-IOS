@@ -312,6 +312,52 @@ import Foundation
         await valid.value
         precondition(otherDrive.items.map(\.id) == [1, 2, 3])
         assertUnlocked(otherDrive)
+
+        // Favoris en masse : seuls les fichiers qui changent réellement d'état
+        // déclenchent une requête. Ceux qui sont déjà favoris restent tels quels.
+        let mixedFavorites = seeded(.directory(1))
+        mixedFavorites.items = [
+            DriveFile(id: 1, isFavorite: false),
+            DriveFile(id: 2, isFavorite: true),
+            DriveFile(id: 3, isFavorite: false),
+        ]
+        let addFavorites = Task {
+            await mixedFavorites.setFavorite(ids: [1, 2, 3], favorite: true)
+        }
+        await until { server.writes.count == 2 }
+        precondition(server.writes.count == 2,
+                     "Already-favorite files must not receive an API write")
+        server.finishWrite()
+        server.finishWrite()
+        let addedIDs = await addFavorites.value
+        precondition(addedIDs == [1, 3])
+        precondition(mixedFavorites.items.allSatisfy { $0.isFavorite == true })
+        assertUnlocked(mixedFavorites)
+
+        // Tout retirer quand toute la sélection est déjà favorite : l'onglet
+        // Favoris ne conserve alors aucune carte.
+        let removalGrid = seeded(.favorites)
+        removalGrid.items = [
+            DriveFile(id: 4, isFavorite: true),
+            DriveFile(id: 5, isFavorite: true),
+        ]
+        let removeFavorites = Task {
+            await removalGrid.setFavorite(ids: [4, 5], favorite: false)
+        }
+        await until { server.writes.count == 2 }
+        server.finishWrite()
+        server.finishWrite()
+        let removedIDs = await removeFavorites.value
+        precondition(removedIDs == [4, 5])
+        precondition(removalGrid.items.isEmpty,
+                     "Unfavorited cards must leave the Favorites grid after confirmation")
+
+        // Aucun état à changer : aucune écriture, aucune erreur.
+        let alreadyFavorite = seeded()
+        alreadyFavorite.items = [DriveFile(id: 6, isFavorite: true)]
+        let unchangedIDs = await alreadyFavorite.setFavorite(ids: [6], favorite: true)
+        precondition(unchangedIDs.isEmpty && server.writes.isEmpty)
+
         precondition(server.pages.isEmpty && server.counts.isEmpty && server.writes.isEmpty)
         print("Confirmed mutations survive reload, pagination, count and optimistic callback permutations")
     }

@@ -1013,6 +1013,57 @@ final class FileGridViewModel {
             : String(format: plural, failedCount, detail)
     }
 
+    /// Applique le même état favori à toute une sélection. Les fichiers déjà
+    /// dans l'état demandé ne déclenchent aucune requête. C'est l'appelant qui
+    /// choisit l'état : l'action de sélection ajoute, sauf quand toute la
+    /// sélection est déjà favorite (elle retire alors les favoris).
+    /// Renvoie les identifiants dont le changement a été confirmé par l'API.
+    @discardableResult
+    func setFavorite(ids: Set<Int>, favorite: Bool) async -> Set<Int> {
+        guard isCurrentSession else { return [] }
+        mutationErrorMessage = nil
+        let targets = Set(items.lazy
+            .filter { ids.contains($0.id) && ($0.isFavorite ?? false) != favorite }
+            .map(\.id))
+        guard !targets.isEmpty else { return [] }
+
+        favoriteMutationsInFlight.formUnion(targets)
+        defer { favoriteMutationsInFlight.subtract(targets) }
+
+        let service = self.service
+        let driveId = self.driveId
+        let credential = credentialFingerprint
+        let (changedIDs, firstError) = await performConcurrently(ids: targets) { id in
+            try await service.setFavorite(driveId: driveId, fileId: id, favorite: favorite,
+                                           credentialFingerprint: credential)
+        }
+        guard isCurrentSession else { return [] }
+
+        if !changedIDs.isEmpty {
+            // Une seule révision et un seul instantané pour toute la sélection.
+            withoutSnapshot {
+                for id in changedIDs {
+                    _ = applyFavoriteChange(fileId: id, isFavorite: favorite)
+                }
+            }
+            for id in changedIDs {
+                publish(.favorite(driveId: driveId, fileId: id, isFavorite: favorite))
+            }
+        }
+        reportPartialFailure(
+            total: targets.count,
+            succeeded: changedIDs.count,
+            firstError: firstError,
+            singular: favorite
+                ? "Un élément n’a pas pu être ajouté aux favoris : %@"
+                : "Un élément n’a pas pu être retiré des favoris : %@",
+            plural: favorite
+                ? "%d éléments n’ont pas pu être ajoutés aux favoris : %@"
+                : "%d éléments n’ont pas pu être retirés des favoris : %@"
+        )
+        return changedIDs
+    }
+
     /// Corbeille une sélection entière ; les échecs partiels sont signalés
     /// dans `mutationErrorMessage` sans bloquer les autres suppressions.
     @discardableResult

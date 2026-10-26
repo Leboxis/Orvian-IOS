@@ -28,6 +28,7 @@ struct FavoritesView: View {
     @State private var pendingTags: TagRequest?
     @State private var moveBusy = false
     @State private var deleteBusy = false
+    @State private var favoriteBusy = false
     @State private var showDeleteConfirm = false
     /// Temporisation de la saisie quand la source est un croisement de tags.
     @State private var intersectionSearchTask: Task<Void, Never>?
@@ -98,6 +99,17 @@ struct FavoritesView: View {
 
     private var actionableSelectedIDs: Set<Int> {
         selectedIDs.intersection(visibleSelectionIDs)
+    }
+
+    private var actionableSelectionItems: [DriveFile] {
+        visibleSelectionItems.filter { selectedIDs.contains($0.id) }
+    }
+
+    /// Toute la sélection est déjà favorite : l'action de sélection inverse
+    /// alors son sens et retire les favoris au lieu d'en ajouter.
+    private var actionableSelectionAllFavorites: Bool {
+        let items = actionableSelectionItems
+        return !items.isEmpty && items.allSatisfy { $0.isFavorite == true }
     }
 
     private var allSelected: Bool {
@@ -244,6 +256,19 @@ struct FavoritesView: View {
                         }
                         .accessibilityLabel(allSelected ? "Tout désélectionner" : "Sélectionner les fichiers affichés")
 
+                        if !iPadLayout.isPad {
+                            Button {
+                                Task { await toggleSelectedFavorites() }
+                            } label: {
+                                Label(actionableSelectionAllFavorites ? "Retirer des favoris" : "Ajouter aux favoris",
+                                      systemImage: actionableSelectionAllFavorites ? "star.slash" : "star")
+                            }
+                            .disabled(actionableSelectedIDs.isEmpty || favoriteBusy)
+                            .accessibilityLabel(actionableSelectionAllFavorites
+                                ? "Retirer les favoris de la sélection"
+                                : "Ajouter la sélection aux favoris")
+                        }
+
                         Button {
                             prepareTagSheet()
                         } label: {
@@ -299,14 +324,14 @@ struct FavoritesView: View {
                 }
             }
             .safeAreaInset(edge: .bottom, spacing: 0) {
-                if iPadLayout.isPad && (moveBusy || deleteBusy) {
+                if iPadLayout.isPad && (moveBusy || deleteBusy || favoriteBusy) {
                     busyIndicator
                 }
             }
             .overlay(alignment: .bottom) {
                 if !iPadLayout.isPad {
                     VStack(spacing: 0) {
-                        if moveBusy || deleteBusy {
+                        if moveBusy || deleteBusy || favoriteBusy {
                             busyIndicator
                         }
                     }
@@ -522,6 +547,7 @@ struct FavoritesView: View {
     private var busyMessage: String {
         if deleteBusy { return "Suppression…" }
         if moveBusy { return "Déplacement…" }
+        if favoriteBusy { return "Mise à jour des favoris…" }
         return ""
     }
 
@@ -560,8 +586,25 @@ struct FavoritesView: View {
     }
 
     private func prepareSelectedMove() {
-        let files = visibleSelectionItems.filter { selectedIDs.contains($0.id) }
-        prepareMove(files: files)
+        prepareMove(files: actionableSelectionItems)
+    }
+
+    /// Bascule toute la sélection : ajout des seuls éléments qui ne sont pas
+    /// encore favoris, ou retrait de tous lorsqu'ils le sont déjà. Les éléments
+    /// déjà dans l'état demandé ne produisent aucun appel API.
+    private func toggleSelectedFavorites() async {
+        let files = actionableSelectionItems
+        guard !files.isEmpty, !favoriteBusy else { return }
+        favoriteBusy = true
+        defer { favoriteBusy = false }
+
+        let makeFavorite = !files.allSatisfy { $0.isFavorite == true }
+        _ = await viewModel.setFavorite(ids: Set(files.map(\.id)), favorite: makeFavorite)
+
+        // Dans l'onglet Favoris, les éléments retirés quittent la liste ; la
+        // sélection ne doit conserver que les cartes encore affichées.
+        selectedIDs.formIntersection(visibleSelectionIDs)
+        if selectedIDs.isEmpty { selectionMode = false }
     }
 
     private func prepareTagSheet() {

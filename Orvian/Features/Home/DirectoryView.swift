@@ -48,6 +48,7 @@ struct DirectoryView: View {
     @State private var pendingTags: TagRequest?
     @State private var moveBusy = false
     @State private var deleteBusy = false
+    @State private var favoriteBusy = false
     @State private var showDeleteConfirm = false
     @AppStorage("alwaysShowSearch") private var alwaysShowSearch = false
     @AppStorage("showBreadcrumb") private var showBreadcrumb = true
@@ -222,6 +223,19 @@ struct DirectoryView: View {
                     }
                     .accessibilityLabel(allSelected ? "Tout désélectionner" : "Sélectionner les fichiers affichés")
 
+                    if !iPadLayout.isPad {
+                        Button {
+                            Task { await toggleSelectedFavorites() }
+                        } label: {
+                            Label(actionableSelectionAllFavorites ? "Retirer des favoris" : "Ajouter aux favoris",
+                                  systemImage: actionableSelectionAllFavorites ? "star.slash" : "star")
+                        }
+                        .disabled(actionableSelectedIDs.isEmpty || favoriteBusy)
+                        .accessibilityLabel(actionableSelectionAllFavorites
+                            ? "Retirer les favoris de la sélection"
+                            : "Ajouter la sélection aux favoris")
+                    }
+
                     Button {
                         prepareTagSheet()
                     } label: {
@@ -281,14 +295,14 @@ struct DirectoryView: View {
             }
         }
         .safeAreaInset(edge: .bottom, spacing: 0) {
-            if iPadLayout.isPad && (addBusy || moveBusy || deleteBusy) {
+            if iPadLayout.isPad && (addBusy || moveBusy || deleteBusy || favoriteBusy) {
                 busyIndicator
             }
         }
         .overlay(alignment: .bottom) {
             if !iPadLayout.isPad {
                 VStack(spacing: 0) {
-                    if addBusy || moveBusy || deleteBusy {
+                    if addBusy || moveBusy || deleteBusy || favoriteBusy {
                         busyIndicator
                     }
                     if !selectionMode {
@@ -562,6 +576,17 @@ struct DirectoryView: View {
         selectedIDs.intersection(visibleSelectionIDs)
     }
 
+    private var actionableSelectionItems: [DriveFile] {
+        visibleSelectionItems.filter { selectedIDs.contains($0.id) }
+    }
+
+    /// Toute la sélection est déjà favorite : l'action de sélection inverse
+    /// alors son sens et retire les favoris au lieu d'en ajouter.
+    private var actionableSelectionAllFavorites: Bool {
+        let items = actionableSelectionItems
+        return !items.isEmpty && items.allSatisfy { $0.isFavorite == true }
+    }
+
     private func toggleSelection(_ file: DriveFile) {
         if selectedIDs.contains(file.id) {
             selectedIDs.remove(file.id)
@@ -605,8 +630,35 @@ struct DirectoryView: View {
     }
 
     private func prepareSelectedMove() {
-        let files = visibleSelectionItems.filter { selectedIDs.contains($0.id) }
-        prepareMove(files: files)
+        prepareMove(files: actionableSelectionItems)
+    }
+
+    /// Bascule toute la sélection : ajout des seuls éléments qui ne sont pas
+    /// encore favoris, ou retrait de tous lorsqu'ils le sont déjà. Les éléments
+    /// déjà dans l'état demandé ne produisent aucun appel API.
+    private func toggleSelectedFavorites() async {
+        let files = actionableSelectionItems
+        guard !files.isEmpty, !favoriteBusy else { return }
+        favoriteBusy = true
+        busyMessage = "Mise à jour des favoris…"
+        defer { favoriteBusy = false }
+
+        let makeFavorite = !files.allSatisfy { $0.isFavorite == true }
+        let changedIDs = await activeViewModel.setFavorite(
+            ids: Set(files.map(\.id)),
+            favorite: makeFavorite
+        )
+
+        // La mutation diffusée n'atteint pas le vue-modèle du dossier quand
+        // l'action part des résultats de recherche (il n'est pas monté).
+        if activeViewModel !== viewModel {
+            for id in changedIDs {
+                viewModel.apply(.favorite(driveId: driveId, fileId: id, isFavorite: makeFavorite))
+            }
+        }
+
+        selectedIDs.formIntersection(visibleSelectionIDs)
+        if selectedIDs.isEmpty { selectionMode = false }
     }
 
     private func prepareTagSheet() {

@@ -18,6 +18,7 @@ def grid_source():
         section("    func updateCategories(", "    // MARK: - Suppression"),
         section("    func rename(", "    /// Déplace tous les éléments"),
         section("    func trash(_ file:", "    // MARK: - Actions de masse"),
+        section("    private func performConcurrently(", "    /// Corbeille une sélection entière"),
     ]
     stubs = (ROOT / "Tests/GridMutationDependencies.swift").read_text(encoding="utf-8")
     mutation = (ROOT / "Orvian/Features/Shared/FileGridMutationCenter.swift").read_text(encoding="utf-8")
@@ -64,6 +65,7 @@ def main():
         subprocess.run(["swiftc", "-parse-as-library", "-swift-version", "5",
                          str(grid), str(ROOT / "Orvian/Core/API/APIError.swift"),
                          str(ROOT / "Orvian/Core/API/FileSource+Ordering.swift"),
+                         str(ROOT / "Orvian/Core/Utils/BoundedConcurrency.swift"),
                           str(ROOT / "Orvian/Models/TagIntersection.swift"),
                         str(ROOT / "Tests/GridMutationChecks.swift"), "-o", str(output)], check=True)
         subprocess.run([str(output)], check=True, timeout=60)
