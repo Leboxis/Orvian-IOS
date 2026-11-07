@@ -163,9 +163,15 @@ jobs:
           ls -lh "Orvian-${VERSION}-unsigned.ipa"
 
       - name: Upload artifact
+        # Supprimé uniquement quand la release publiera ces mêmes fichiers :
+        # ses assets ne comptent pas dans le stockage d'artefacts, donc les
+        # dupliquer remplissait le quota à chaque push. Un run manuel ou une
+        # révision dépassée n'a pas de release et garde son artefact.
+        if: ${{ !(github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.publication.outputs.skip != 'true') }}
         uses: actions/upload-artifact@v4
         with:
           name: Orvian-unsigned-ipa
+          retention-days: 2
           path: |
             Orvian-*-unsigned.ipa
             Vendor/OrvianAudioDecoder-relink.tar.gz
