@@ -74,6 +74,13 @@ extension Endpoint {
         Endpoint(path: "/3/drive/\(driveId)/files/\(directoryId)/count")
     }
 
+    /// Nombre total d'éléments du drive entier : comptage récursif
+    /// (`depth=unlimited`) appliqué à la racine technique (id 1).
+    static func driveCount(driveId: Int) -> Endpoint {
+        Endpoint(path: "/3/drive/\(driveId)/files/1/count",
+                 query: [URLQueryItem(name: "depth", value: "unlimited")])
+    }
+
     /// Total des fichiers du dossier et de tous ses descendants, calculé côté serveur.
     static func directorySize(driveId: Int, directoryId: Int) -> Endpoint {
         Endpoint(path: "/2/drive/\(driveId)/files/\(directoryId)/sizes",

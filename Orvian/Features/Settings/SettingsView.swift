@@ -14,6 +14,9 @@ struct SettingsView: View {
 
     @State private var cacheSize: Int = 0
     @State private var showSignOutConfirm = false
+    @State private var driveCounts: DirectoryCount?
+    @State private var isLoadingDriveCounts = false
+    private let service = KDriveService()
 
     @AppStorage("showFileSizes") private var showFileSizes = true
     @AppStorage("showFavoriteStars") private var showFavoriteStars = true
@@ -68,6 +71,9 @@ struct SettingsView: View {
         }
         .task {
             cacheSize = await ThumbnailProvider.shared.diskCacheSize()
+        }
+        .task(id: session.selectedDrive?.id) {
+            await loadDriveCounts()
         }
         .onChange(of: prefetchThumbnails) { _, enabled in
             guard !enabled else { return }
@@ -271,7 +277,9 @@ struct SettingsView: View {
 
     private var storageSummary: String {
         let limit = thumbnailCacheLimitMB == 0 ? "sans limite" : "max \(thumbnailCacheLimitMB >= 1_024 ? "1 Go" : "\(thumbnailCacheLimitMB) Mo")"
-        return "\(ByteFormatter.string(fromBytes: cacheSize)) · \(limit)"
+        let cache = "\(ByteFormatter.string(fromBytes: cacheSize)) · \(limit)"
+        guard let files = driveCounts?.files else { return cache }
+        return "\(files) fichier\(files > 1 ? "s" : "") · \(cache)"
     }
 
     private var securitySummary: String {
@@ -307,6 +315,10 @@ struct SettingsView: View {
             SubtitleSettingsView()
         case .storage:
             StorageSpace(
+                driveName: session.selectedDrive?.name,
+                driveCounts: driveCounts,
+                isLoadingDriveCounts: isLoadingDriveCounts,
+                onRefreshDriveCounts: loadDriveCounts,
                 cacheSize: cacheSize,
                 limitMB: $thumbnailCacheLimitMB,
                 networkLimitMB: $networkCacheLimitMB,
@@ -335,6 +347,14 @@ struct SettingsView: View {
             await ThumbnailProvider.shared.purgeDiskCache()
             cacheSize = await ThumbnailProvider.shared.diskCacheSize()
         }
+    }
+
+    /// Comptage récursif du drive sélectionné (fichiers + dossiers).
+    private func loadDriveCounts() async {
+        guard let drive = session.selectedDrive else { return }
+        isLoadingDriveCounts = true
+        defer { isLoadingDriveCounts = false }
+        driveCounts = try? await service.driveCount(driveId: drive.id)
     }
 
     private var defaultFolderColorBinding: Binding<Color> {
@@ -585,6 +605,10 @@ private struct MediaSpace: View {
 
 private struct StorageSpace: View {
     @Environment(\.iPadLayout) private var iPadLayout
+    let driveName: String?
+    let driveCounts: DirectoryCount?
+    let isLoadingDriveCounts: Bool
+    let onRefreshDriveCounts: () -> Void
     let cacheSize: Int
     @Binding var limitMB: Int
     @Binding var networkLimitMB: Int
@@ -592,6 +616,39 @@ private struct StorageSpace: View {
 
     var body: some View {
         List {
+            Section("Contenu du drive") {
+                VStack(alignment: .leading, spacing: 10) {
+                    HStack {
+                        if let counts = driveCounts {
+                            Text("\(counts.files)")
+                                .font(.title2.weight(.bold).monospacedDigit())
+                            Text(counts.files > 1 ? "fichiers" : "fichier")
+                                .foregroundStyle(.secondary)
+                        } else if isLoadingDriveCounts {
+                            ProgressView()
+                                .accessibilityLabel("Chargement du nombre de fichiers")
+                        } else {
+                            Text("—").foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                        Button {
+                            onRefreshDriveCounts()
+                        } label: {
+                            Image(systemName: "arrow.clockwise")
+                        }
+                        .disabled(isLoadingDriveCounts)
+                        .accessibilityLabel("Actualiser le nombre de fichiers")
+                    }
+                    if let counts = driveCounts {
+                        Text("\(counts.directories) dossier\(counts.directories > 1 ? "s" : "") · \(counts.count) élément\(counts.count > 1 ? "s" : "") au total")
+                            .font(.footnote).foregroundStyle(.secondary)
+                    }
+                    Text("Comptage récursif depuis la racine de « \(driveName ?? "mon drive") ».")
+                        .font(.footnote).foregroundStyle(.secondary)
+                }
+                .padding(.vertical, 4)
+            }
+
             Section("Cache des miniatures") {
                 VStack(alignment: .leading, spacing: 10) {
                     HStack {

@@ -216,4 +216,14 @@ extension KDriveService {
         guard let count = wrapper.data?.count else { throw APIError.invalidResponse }
         return count
     }
+
+    /// Comptage récursif du drive entier (fichiers et dossiers), via l'endpoint
+    /// `count` appliqué à la racine avec `depth=unlimited`. Toujours relu au
+    /// réseau : la statistique affichée dans les réglages doit être courante.
+    func driveCount(driveId: Int) async throws -> DirectoryCount {
+        let wrapper = try await api.get(DataResponse<DirectoryCount>.self, .driveCount(driveId: driveId),
+                                         cachePolicy: .reloadIgnoringLocalCacheData)
+        guard let data = wrapper.data else { throw APIError.invalidResponse }
+        return data
+    }
 }
