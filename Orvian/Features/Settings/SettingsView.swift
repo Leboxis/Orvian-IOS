@@ -318,7 +318,7 @@ struct SettingsView: View {
                 driveName: session.selectedDrive?.name,
                 driveCounts: driveCounts,
                 isLoadingDriveCounts: isLoadingDriveCounts,
-                onRefreshDriveCounts: loadDriveCounts,
+                onRefreshDriveCounts: refreshDriveCounts,
                 cacheSize: cacheSize,
                 limitMB: $thumbnailCacheLimitMB,
                 networkLimitMB: $networkCacheLimitMB,
@@ -355,6 +355,10 @@ struct SettingsView: View {
         isLoadingDriveCounts = true
         defer { isLoadingDriveCounts = false }
         driveCounts = try? await service.driveCount(driveId: drive.id)
+    }
+
+    private func refreshDriveCounts() {
+        Task { await loadDriveCounts() }
     }
 
     private var defaultFolderColorBinding: Binding<Color> {
