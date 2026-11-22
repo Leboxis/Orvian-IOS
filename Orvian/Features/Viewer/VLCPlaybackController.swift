@@ -15,10 +15,12 @@ final class VLCPlaybackController: NSObject, VLCMediaPlayerDelegate {
     private var pendingPosition: Double?
     private var stopping = false
     private var bufferingTimeout: Task<Void, Never>?
+    private var retireTimeout: Task<Void, Never>?
     private var lastObservedTime: Double?
     private var lastProgressAt: ContinuousClock.Instant?
     // libVLC stops asynchronously: never deallocate its player/drawable mid-stop.
     private static var retiring: [ObjectIdentifier: VLCPlaybackController] = [:]
+    var isAttached: Bool { hasStarted || stopping }
     var onTime: ((Double, Double) -> Void)?
     var onEvent: ((Event) -> Void)?
     var rate: Float = 1 {
@@ -96,11 +98,17 @@ final class VLCPlaybackController: NSObject, VLCMediaPlayerDelegate {
             finishStop()
         } else {
             Self.retiring[ObjectIdentifier(self)] = self
+            retireTimeout = Task { @MainActor [weak self] in
+                do { try await Task.sleep(for: .seconds(5)) } catch { return }
+                self?.finishStop()
+            }
             player.stop()
         }
     }
 
     private func finishStop() {
+        retireTimeout?.cancel()
+        retireTimeout = nil
         player.delegate = nil
         player.drawable = nil
         Self.retiring[ObjectIdentifier(self)] = nil
@@ -192,6 +200,7 @@ struct VLCVideoSurface: UIViewRepresentable {
     }
 
     func updateUIView(_ uiView: UIView, context: Context) {
+        guard !playback.isAttached else { return }
         // Defer attachment: libVLC may emit callbacks while SwiftUI is updating.
         Task { @MainActor in playback.attach(to: uiView) }
     }

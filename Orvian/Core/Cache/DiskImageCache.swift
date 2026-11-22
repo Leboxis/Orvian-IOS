@@ -20,6 +20,7 @@ final class DiskImageCache: @unchecked Sendable {
     private let directory: DiskDirectory
 
     private let lock = NSLock()
+    private var cachedNamespace: (fingerprint: String, hash: String)?
     private var estimatedDiskSize: Int = 0
     private var isSizeInitialized = false
     private var isEvicting = false
@@ -52,9 +53,21 @@ final class DiskImageCache: @unchecked Sendable {
     /// ici garantit qu'aucune évolution de sa source ne place un secret brut
     /// ou un composant de chemin arbitraire dans le nom d'un fichier.
     private func credentialNamespace(_ credentialFingerprint: String) -> String {
-        SHA256.hash(data: Data(credentialFingerprint.utf8))
+        lock.lock()
+        if let cached = cachedNamespace, cached.fingerprint == credentialFingerprint {
+            lock.unlock()
+            return cached.hash
+        }
+        lock.unlock()
+
+        let hash = SHA256.hash(data: Data(credentialFingerprint.utf8))
             .map { String(format: "%02x", $0) }
             .joined()
+
+        lock.lock()
+        cachedNamespace = (credentialFingerprint, hash)
+        lock.unlock()
+        return hash
     }
 
     private func url(

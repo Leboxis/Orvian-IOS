@@ -61,9 +61,9 @@ final class FileGridViewModel {
         CategoryLibrary.shared.categories(for: driveId)
     }
 
-    private var cursor: String?
-    private var loadedOnce = false
-    private var fetchedAt = Date.distantPast
+    @ObservationIgnored private var cursor: String?
+    @ObservationIgnored private var loadedOnce = false
+    @ObservationIgnored private var fetchedAt = Date.distantPast
     private let credentialFingerprint = TokenStore.credentialFingerprint()
     private var isCurrentSession: Bool {
         !Task.isCancelled && credentialFingerprint != nil
@@ -81,36 +81,36 @@ final class FileGridViewModel {
     private(set) var isReloading = false
     /// Invalide toute réponse appartenant à un rechargement ou une pagination
     /// antérieur. Un ancien tri ne peut ainsi jamais remplacer le plus récent.
-    private var dataGeneration = 0
+    @ObservationIgnored private var dataGeneration = 0
     /// Un nouveau tri doit obtenir sa première page avant de paginer.
-    private var orderingNeedsReload = false
+    @ObservationIgnored private var orderingNeedsReload = false
     /// Les GET commencés avant une confirmation ne peuvent plus publier ni page
     /// ni compteur. Séparé de dataGeneration : les defer du propriétaire de la
     /// requête libèrent encore les flags, même si une mutation la rend obsolète.
-    private var confirmedMutationGeneration = 0
+    @ObservationIgnored private var confirmedMutationGeneration = 0
     /// Tri serveur en cours (`order_by[]` + sens) : conservé pour que la
     /// pagination continue dans le même ordre que la première page.
-    private var orderBy: [String] = []
-    private var order = "asc"
+    @ObservationIgnored private var orderBy: [String] = []
+    @ObservationIgnored private var order = "asc"
     /// Types kDrive (`types[]`) déjà appliqués par le serveur pour la liste
     /// courante. Conservés comme le tri : chaque page suivante doit demander
     /// exactement le même filtre, sinon la pagination mélangerait deux
     /// ensembles de résultats.
-    private var mediaTypes: [String] = []
+    @ObservationIgnored private var mediaTypes: [String] = []
     /// Empêche deux taps rapides de lancer des valeurs favorites opposées en
     /// parallèle pour le même fichier.
-    private var favoriteMutationsInFlight: Set<Int> = []
+    @ObservationIgnored private var favoriteMutationsInFlight: Set<Int> = []
     /// Regroupement des écritures cache : `mergeUploaded` fait
     /// removeAll + append + sort, soit 3 `didSet`. Sans regroupement, 3
     /// snapshots mémoire (et 3 révisions) pour une seule opération logique.
-    private var snapshotSuppressionDepth = 0
-    private var snapshotDirtyWhileSuppressed = false
+    @ObservationIgnored private var snapshotSuppressionDepth = 0
+    @ObservationIgnored private var snapshotDirtyWhileSuppressed = false
     /// Au moins un `items` muté pendant l'opération groupée en cours : la
     /// révision n'est comptée qu'une fois, quand la profondeur revient à zéro.
-    private var revisionBumpPending = false
+    @ObservationIgnored private var revisionBumpPending = false
     /// Une écriture d'instantané est en attente : les mutations suivantes se
     /// regrouperont avec elle au lieu d'en écrire une chacune.
-    private var snapshotWriteScheduled = false
+    @ObservationIgnored private var snapshotWriteScheduled = false
     /// Mémoïsation du filtre/tri de la grille. Elle vit ici, et non dans un
     /// `@State` de la vue : la muter pendant l'évaluation du `body` est
     /// précisément ce que SwiftUI signale comme écriture d'état pendant une

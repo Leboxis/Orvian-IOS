@@ -172,7 +172,8 @@ extension KDriveService {
     }
 
     private struct FinishedUpload: Decodable {
-        let file: DriveFile
+        let file: DriveFile?
+        let result: Bool?
     }
 
     private struct FinishUploadSessionRequest: Encodable {
@@ -197,16 +198,22 @@ extension KDriveService {
     /// Remplace le contenu d'un fichier existant (nouvelle version) : utilisé
     /// par la visionneuse de texte pour enregistrer les modifications.
     func uploadContent(driveId: Int, fileId: Int, data: Data) async throws {
-        try await api.post(
+        let hash = SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
+        let response = try await api.postDecoded(
+            DataResponse<DriveFile>.self,
             .uploadContent(
                 driveId: driveId,
                 fileId: fileId,
                 totalSize: data.count,
-                lastModifiedAt: Int(Date().timeIntervalSince1970)
+                lastModifiedAt: Int(Date().timeIntervalSince1970),
+                totalChunkHash: "sha256:\(hash)"
             ),
             body: data,
-            contentType: "text/plain; charset=utf-8"
+            contentType: "application/octet-stream"
         )
+        guard response.result == nil || response.result == "success" || response.result == "asynchronous",
+              response.data != nil
+        else { throw APIError.invalidResponse }
     }
 
     /// Upload d'un fichier local par streaming (sans buffer Data en mémoire) dans `directoryId`.
@@ -232,6 +239,7 @@ extension KDriveService {
             )
         }
 
+        let clientToken = UUID().uuidString
         var lastError: Error = APIError.invalidResponse
         for attempt in 1...Self.directUploadMaximumAttempts {
             try Task.checkCancellation()
@@ -243,7 +251,8 @@ extension KDriveService {
                         directoryId: directoryId,
                         fileName: fileName,
                         totalSize: totalSize,
-                        lastModifiedAt: lastModifiedAt
+                        lastModifiedAt: lastModifiedAt,
+                        clientToken: clientToken
                     ),
                     fileURL: fileURL,
                     // L'endpoint reçoit le fichier comme corps binaire brut. Le type
@@ -279,7 +288,7 @@ extension KDriveService {
         lastModifiedAt: Int,
         progress: @escaping @Sendable (Double) -> Void
     ) async throws -> DriveFile {
-        let totalChunks = max(1, Int(ceil(Double(totalSize) / Double(Self.uploadChunkSize))))
+        let totalChunks = max(1, (totalSize + Self.uploadChunkSize - 1) / Self.uploadChunkSize)
         let request = StartUploadSessionRequest(
             totalSize: totalSize,
             fileName: fileName,
@@ -341,6 +350,7 @@ extension KDriveService {
                 originatingCredential: credential.fingerprint
             )
             guard finished.result == nil || finished.result == "success" || finished.result == "asynchronous",
+                  finished.data?.result != false,
                   let file = finished.data?.file
             else { throw APIError.invalidResponse }
             cleanup.confirmed()

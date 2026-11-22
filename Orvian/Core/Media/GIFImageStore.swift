@@ -15,7 +15,8 @@ struct GIFImage {
     let loopCount: Int
     let source: GIFFrameSource
     var aspectRatio: CGFloat {
-        CGFloat(firstFrame.image.width) / CGFloat(firstFrame.image.height)
+        guard firstFrame.image.height > 0 else { return 1 }
+        return CGFloat(firstFrame.image.width) / CGFloat(firstFrame.image.height)
     }
 }
 
@@ -56,7 +57,11 @@ actor GIFFrameSource {
 }
 
 actor GIFImageStore {
-    static let shared = GIFImageStore()
+    static let shared = GIFImageStore(
+        freshURLProvider: { driveId, fileId in
+            await MediaURLCache.shared.freshURL(driveId: driveId, fileId: fileId)
+        }
+    )
 
     private struct Key: Hashable, Sendable {
         let driveId: Int
@@ -92,6 +97,7 @@ actor GIFImageStore {
     private var sessionGeneration: UInt = 0
     private let credentialFingerprint: @Sendable () -> String?
     private let urlProvider: URLProvider
+    private let freshURLProvider: URLProvider?
     private let downloader: Downloader
 
     init(
@@ -103,6 +109,7 @@ actor GIFImageStore {
         urlProvider: @escaping URLProvider = { driveId, fileId in
             await MediaURLCache.shared.url(driveId: driveId, fileId: fileId)
         },
+        freshURLProvider: URLProvider? = nil,
         downloader: @escaping Downloader = { url in
             let (localURL, response) = try await URLSession.shared.download(from: url)
             return (localURL, (response as? HTTPURLResponse)?.statusCode)
@@ -112,6 +119,7 @@ actor GIFImageStore {
         memory.totalCostLimit = max(1, totalCostLimit)
         self.credentialFingerprint = credentialFingerprint
         self.urlProvider = urlProvider
+        self.freshURLProvider = freshURLProvider
         self.downloader = downloader
     }
 
@@ -155,22 +163,33 @@ actor GIFImageStore {
         guard isCurrent(key),
               let url = await urlProvider(key.driveId, key.fileId),
               isCurrent(key) else { return nil }
+        let first = await fetchAndDecode(url: url, for: key)
+        if let image = first.image { return image }
+        guard let status = first.statusCode,
+              [401, 403, 404, 410].contains(status),
+              let freshURLProvider,
+              isCurrent(key),
+              let freshURL = await freshURLProvider(key.driveId, key.fileId),
+              isCurrent(key) else { return nil }
+        return await fetchAndDecode(url: freshURL, for: key).image
+    }
+
+    private func fetchAndDecode(url: URL, for key: Key) async -> (image: GIFImage?, statusCode: Int?) {
         do {
             let download = try await downloader(url)
-            // Transférer la propriété du fichier à la source si le GIF est valide.
             var retained = false
             defer { if !retained { try? FileManager.default.removeItem(at: download.localURL) } }
             guard let statusCode = download.statusCode,
                   (200..<300).contains(statusCode),
                   let image = Self.decode(download.localURL, ownsFile: true)
-            else { return nil }
+            else { return (nil, download.statusCode) }
             retained = true
-            guard isCurrent(key) else { return nil }
+            guard isCurrent(key) else { return (nil, statusCode) }
             let firstFrameCost = image.firstFrame.image.bytesPerRow * image.firstFrame.image.height
             memory.setObject(CachedImage(image), forKey: key.memoryKey, cost: firstFrameCost)
-            return image
+            return (image, statusCode)
         } catch {
-            return nil
+            return (nil, nil)
         }
     }
 

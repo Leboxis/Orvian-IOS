@@ -828,12 +828,20 @@ struct DirectoryView: View {
         crumbs.count > displayedCrumbs.count
     }
 
+    private var ancestorBreadcrumbs: [(index: Int, name: String, id: String)] {
+        var prefix = ""
+        return crumbs.dropLast().enumerated().map { index, name in
+            prefix += "/\(name)"
+            return (index: index, name: name, id: "\(index):\(prefix)")
+        }
+    }
+
     private var breadcrumb: some View {
         Group {
             if let onNavigateAncestor, crumbs.count > 1 {
                 let menu = Menu {
-                    ForEach(Array(crumbs.dropLast().enumerated()), id: \.offset) { index, name in
-                        Button(name) { searchFocused = false; onNavigateAncestor(index) }
+                    ForEach(ancestorBreadcrumbs, id: \.id) { crumb in
+                        Button(crumb.name) { searchFocused = false; onNavigateAncestor(crumb.index) }
                     }
                 } label: {
                     breadcrumbLabel

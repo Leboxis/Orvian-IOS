@@ -32,7 +32,7 @@ struct BrowserToolbar: ToolbarContent {
                     Image(systemName: "dice")
                         .font(.system(size: 17, weight: .medium))
                         .foregroundStyle(Color.accentColor)
-                        .frame(width: 32, height: 32)
+                        .frame(width: 44, height: 44)
                         .contentShape(Rectangle())
                 }
                 .disabled(!canOpenRandom)

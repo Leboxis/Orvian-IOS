@@ -52,6 +52,11 @@ actor HiresImageStore {
         "\(TokenStore.credentialFingerprint() ?? "signed-out")-\(level)-\(driveId)-\(fileId)" as NSString
     }
 
+    func purgeCache() {
+        memory.removeAllObjects()
+        pixelSizes.removeAllObjects()
+    }
+
     func cachedOriginalPixelSize(driveId: Int, fileId: Int) -> CGSize? {
         pixelSizes.object(forKey: memoryKey(level: "dimensions", driveId: driveId, fileId: fileId))?.cgSizeValue
     }
@@ -93,11 +98,19 @@ actor HiresImageStore {
         do {
             let result = try await requests.value(for: taskKey) { [throttler, downloads] in
                 try Task.checkCancellation()
-                guard let url = await MediaURLCache.shared.url(driveId: driveId, fileId: fileId) else {
-                    return ImageResult(image: nil)
+                if let maximumPixelSize, maximumPixelSize > 0,
+                   let previewResult = await Self.downloadPreview(
+                       driveId: driveId,
+                       fileId: fileId,
+                       maximumPixelSize: maximumPixelSize,
+                       throttler: throttler,
+                       downloads: downloads
+                   ) {
+                    return previewResult
                 }
-                return await Self.downloadDecode(
-                    url: url,
+                return await Self.downloadFullOrFallback(
+                    driveId: driveId,
+                    fileId: fileId,
                     maximumPixelSize: maximumPixelSize,
                     throttler: throttler,
                     downloads: downloads
@@ -105,28 +118,78 @@ actor HiresImageStore {
             }
             guard !Task.isCancelled, credential == TokenStore.credentialFingerprint(), let image = result.image else { return nil }
             if let size = result.pixelSize { pixelSizes.setObject(NSValue(cgSize: size), forKey: dimensionsKey) }
-            memory.setObject(image, forKey: memoryKey, cost: Int(image.size.width * image.size.height * image.scale * 4))
+            let byteCost = image.cgImage.map { $0.bytesPerRow * $0.height }
+                ?? Int(image.size.width * image.scale * image.size.height * image.scale * 4)
+            memory.setObject(image, forKey: memoryKey, cost: byteCost)
             return image
         } catch {
             return nil
         }
     }
 
-    /// Téléchargement vers un fichier temporaire puis décodage par ImageIO à la
-    /// taille demandée. Le réseau a deux places, le décodage une seule :
-    /// deux décompressions simultanées (page courante + page suivante du pager)
-    /// formaient un pic mémoire d'environ 400 Mo pour du 48 Mpx, auquel
-    /// s'ajoutaient les images déjà en cache. Un seul décodage à la fois borne
-    /// le pic sans dégrader la qualité affichée. Le fichier source est supprimé
-    /// dans tous les cas ; l'annulation de la tâche interrompt le transfert
-    /// réseau.
+    nonisolated private static func downloadPreview(
+        driveId: Int,
+        fileId: Int,
+        maximumPixelSize: CGFloat,
+        throttler: AsyncThrottler,
+        downloads: AsyncThrottler
+    ) async -> ImageResult? {
+        let side = Int(maximumPixelSize.rounded())
+        do {
+            let (downloadedURL, _) = try await downloads.withPermit {
+                try Task.checkCancellation()
+                return try await APIClient.shared.download(
+                    .preview(driveId: driveId, fileId: fileId, width: side, height: side, quality: 88)
+                )
+            }
+            defer { try? FileManager.default.removeItem(at: downloadedURL) }
+            try Task.checkCancellation()
+            let image: UIImage? = try await throttler.withPermit {
+                try Task.checkCancellation()
+                return Self.decode(fromFile: downloadedURL, maximumPixelSize: maximumPixelSize)
+            }
+            guard let image else { return nil }
+            return ImageResult(image: image, pixelSize: nil)
+        } catch {
+            return nil
+        }
+    }
+
+    nonisolated private static func downloadFullOrFallback(
+        driveId: Int,
+        fileId: Int,
+        maximumPixelSize: CGFloat?,
+        throttler: AsyncThrottler,
+        downloads: AsyncThrottler
+    ) async -> ImageResult {
+        guard let url = await MediaURLCache.shared.url(driveId: driveId, fileId: fileId) else {
+            return ImageResult(image: nil)
+        }
+        let first = await downloadDecode(
+            url: url,
+            maximumPixelSize: maximumPixelSize,
+            throttler: throttler,
+            downloads: downloads
+        )
+        if first.image != nil || Task.isCancelled { return first.result }
+        guard let status = first.statusCode,
+              [401, 403, 404, 410].contains(status),
+              let freshURL = await MediaURLCache.shared.freshURL(driveId: driveId, fileId: fileId)
+        else { return first.result }
+        return await downloadDecode(
+            url: freshURL,
+            maximumPixelSize: maximumPixelSize,
+            throttler: throttler,
+            downloads: downloads
+        ).result
+    }
+
     nonisolated private static func downloadDecode(
         url: URL,
         maximumPixelSize: CGFloat?,
         throttler: AsyncThrottler,
         downloads: AsyncThrottler
-    ) async -> ImageResult {
-        struct DownloadRejected: Error {}
+    ) async -> (result: ImageResult, image: UIImage?, statusCode: Int?) {
         do {
             let (downloadedURL, response) = try await downloads.withPermit {
                 try Task.checkCancellation()
@@ -134,22 +197,41 @@ actor HiresImageStore {
             }
             defer { try? FileManager.default.removeItem(at: downloadedURL) }
             try Task.checkCancellation()
-            guard let http = response as? HTTPURLResponse,
-                  (200..<300).contains(http.statusCode) else { throw DownloadRejected() }
+            guard let http = response as? HTTPURLResponse else {
+                return (ImageResult(image: nil), nil, nil)
+            }
+            guard (200..<300).contains(http.statusCode) else {
+                return (ImageResult(image: nil), nil, http.statusCode)
+            }
             let result: ImageResult = try await throttler.withPermit {
                 try Task.checkCancellation()
-                return ImageResult(image: Self.decode(fromFile: downloadedURL, maximumPixelSize: maximumPixelSize),
-                                   pixelSize: Self.originalPixelSize(fromFile: downloadedURL))
+                return Self.decodeWithOriginalSize(fromFile: downloadedURL, maximumPixelSize: maximumPixelSize)
             }
-            return result
+            return (result, result.image, http.statusCode)
         } catch {
-            return ImageResult(image: nil)
+            return (ImageResult(image: nil), nil, nil)
         }
     }
 
+    nonisolated private static func decodeWithOriginalSize(fromFile url: URL, maximumPixelSize: CGFloat?) -> ImageResult {
+        let sourceOptions = [kCGImageSourceShouldCache: false] as CFDictionary
+        guard let source = CGImageSourceCreateWithURL(url as CFURL, sourceOptions) else {
+            return ImageResult(image: nil)
+        }
+        let pixelSize = Self.originalPixelSize(from: source)
+        let image = Self.decode(from: source, maximumPixelSize: maximumPixelSize)
+        return ImageResult(image: image, pixelSize: pixelSize)
+    }
+
     nonisolated static func originalPixelSize(fromFile url: URL) -> CGSize? {
-        guard let source = CGImageSourceCreateWithURL(url as CFURL, [kCGImageSourceShouldCache: false] as CFDictionary),
-              let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
+        guard let source = CGImageSourceCreateWithURL(url as CFURL, [kCGImageSourceShouldCache: false] as CFDictionary) else {
+            return nil
+        }
+        return originalPixelSize(from: source)
+    }
+
+    nonisolated private static func originalPixelSize(from source: CGImageSource) -> CGSize? {
+        guard let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
               let width = properties[kCGImagePropertyPixelWidth] as? NSNumber,
               let height = properties[kCGImagePropertyPixelHeight] as? NSNumber,
               width.doubleValue > 0, height.doubleValue > 0 else { return nil }
@@ -159,17 +241,13 @@ actor HiresImageStore {
             : CGSize(width: width.doubleValue, height: height.doubleValue)
     }
 
-    /// Décodage depuis le fichier téléchargé.
-    ///
-    /// `maximumPixelSize` non nul réduit l'image **pendant** la décompression
-    /// (ImageIO redimensionne avant de matérialiser les pixels), au lieu de
-    /// décoder la pleine résolution puis de la laisser réduire par le GPU à
-    /// chaque affichage. `kCGImageSourceCreateThumbnailFromImageAlways` avec
-    /// transformation applique l'orientation EXIF ; `ShouldCacheImmediately`
-    /// force la décompression hors du thread appelant.
     nonisolated static func decode(fromFile fileURL: URL, maximumPixelSize: CGFloat?) -> UIImage? {
         let sourceOptions = [kCGImageSourceShouldCache: false] as CFDictionary
         guard let source = CGImageSourceCreateWithURL(fileURL as CFURL, sourceOptions) else { return nil }
+        return decode(from: source, maximumPixelSize: maximumPixelSize)
+    }
+
+    nonisolated private static func decode(from source: CGImageSource, maximumPixelSize: CGFloat?) -> UIImage? {
         var options: [CFString: Any] = [
             kCGImageSourceCreateThumbnailFromImageAlways: true,
             kCGImageSourceCreateThumbnailWithTransform: true,

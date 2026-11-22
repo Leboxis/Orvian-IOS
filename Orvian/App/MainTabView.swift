@@ -44,7 +44,9 @@ struct MainTabView: View {
             if UIDevice.current.userInterfaceIdiom == .pad {
                 if iPadTabBarAtBottom {
                     phoneNavigation
-                        .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { iPadWidth = $0 }
+                        .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { newWidth in
+                            if abs(iPadWidth - newWidth) > 0.5 { iPadWidth = newWidth }
+                        }
                         .environment(\.iPadLayout, IPadLayout(isPad: true, width: iPadWidth,
                                                             largeText: dynamicTypeSize.isAccessibilitySize))
                 } else {
@@ -239,7 +241,7 @@ private struct TransferOverlayChrome: View {
     let uploadManager: UploadManager
     let onShowUploads: () -> Void
 
-    @StateObject private var downloadService = FileDownloadService.shared
+    private let downloadService = FileDownloadService.shared
 
     var body: some View {
         VStack(spacing: 0) {
@@ -288,7 +290,7 @@ private struct TransferOverlayChrome: View {
 /// téléchargement en cours et bouton d'annulation. L'ancien comportement ne
 /// fournissait aucun retour ni moyen d'arrêter un transfert, parfois long.
 private struct DownloadProgressBanner: View {
-    @ObservedObject var service: FileDownloadService
+    let service: FileDownloadService
     let onCancel: () -> Void
 
     var body: some View {

@@ -1,7 +1,7 @@
 import Foundation
 
 /// Mesures de présentation uniquement : aucune préférence persistante n'est réécrite.
-struct IPadLayout {
+struct IPadLayout: Equatable {
     var isPad = false
     var width: CGFloat = 0
     var largeText = false

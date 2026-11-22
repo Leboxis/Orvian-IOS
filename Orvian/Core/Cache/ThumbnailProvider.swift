@@ -1,4 +1,7 @@
 import UIKit
+#if canImport(UIKit)
+import ImageIO
+#endif
 
 /// Pipeline de miniatures : mémoire → disque → réseau avec concurrence bornée.
 ///
@@ -442,7 +445,7 @@ actor ThumbnailProvider {
         return information
     }
 
-    func purgeDiskCache() {
+    func clearMemoryAndPrefetch() {
         Self.memory.removeAllObjects()
         pendingPrefetchKeys.removeAll()
         prefetchTask?.cancel()
@@ -450,26 +453,58 @@ actor ThumbnailProvider {
         prefetchRequestID = nil
         failures.removeAll()
         lastFailures.removeAll()
-        disk.purge()
     }
 
-    func diskCacheSize() -> Int {
-        disk.totalSize()
+    func purgeDiskCache() async {
+        clearMemoryAndPrefetch()
+        let disk = disk
+        await Task.detached(priority: .utility) {
+            disk.purge()
+        }.value
     }
 
-    func enforceDiskLimit() {
-        disk.enforceSizeLimit()
+    func diskCacheSize() async -> Int {
+        let disk = disk
+        return await Task.detached(priority: .utility) {
+            disk.totalSize()
+        }.value
+    }
+
+    func enforceDiskLimit() async {
+        let disk = disk
+        await Task.detached(priority: .utility) {
+            disk.enforceSizeLimit()
+        }.value
     }
 }
 
 private extension UIImage {
-    /// Décodage et décompression d'image préparée pour l'affichage (exécuté hors du MainActor).
+    /// Décodage et réduction bornée via ImageIO (exécuté hors du MainActor).
     static func decode(_ data: Data) -> UIImage? {
+        #if canImport(UIKit)
+        let sourceOptions = [kCGImageSourceShouldCache: false] as CFDictionary
+        if let source = CGImageSourceCreateWithData(data as CFData, sourceOptions) {
+            let options: [CFString: Any] = [
+                kCGImageSourceCreateThumbnailFromImageAlways: true,
+                kCGImageSourceCreateThumbnailWithTransform: true,
+                kCGImageSourceShouldCacheImmediately: true,
+                kCGImageSourceThumbnailMaxPixelSize: 512,
+            ]
+            if let cgImage = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary) {
+                return UIImage(cgImage: cgImage)
+            }
+        }
+        #endif
         guard let image = UIImage(data: data) else { return nil }
         return image.preparingForDisplay() ?? image
     }
 
     var estimatedByteSize: Int {
-        Int(size.width * size.height * 4)
+        #if canImport(UIKit)
+        if let cgImage { return cgImage.bytesPerRow * cgImage.height }
+        return Int(size.width * scale * size.height * scale * 4)
+        #else
+        return Int(size.width * size.height * 4)
+        #endif
     }
 }

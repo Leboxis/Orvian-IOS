@@ -21,6 +21,7 @@ struct ProfileView: View {
     @State private var previewVisitID: UUID?
     @State private var isRefreshingStorage = false
     @State private var storageRefreshFailed = false
+    @State private var lastStorageRefreshAt: Date?
 
     private let recentUploadsLoader = RecentUploadsLoader.shared
     private var showsRecentPlaceholders: Bool {
@@ -43,25 +44,17 @@ struct ProfileView: View {
             .navigationTitle("Profil")
             .navigationBarTitleDisplayMode(.large)
         }
-        .task(id: session.selectedDrive?.id) {
+        .task(id: "\(session.selectedDrive?.id ?? -1)-\(isSelected)") {
+            guard isSelected else { return }
             await loadPreviews()
             await refreshStorage()
         }
-        .onChange(of: isSelected) { _, selected in
-            if selected {
-                Task {
-                    await loadPreviews()
-                    await refreshStorage()
-                }
-            }
-        }
-        .onChange(of: refreshRequest) { _, _ in
-            Task {
-                // Retour à la racine par second appui sur l'onglet : lecture
-                // réseau explicite, hors seuil de fraîcheur.
-                await loadPreviews(forceNetwork: true)
-                await refreshStorage()
-            }
+        .task(id: refreshRequest) {
+            guard refreshRequest > 0 else { return }
+            // Retour à la racine par second appui sur l'onglet : lecture
+            // réseau explicite, hors seuil de fraîcheur.
+            await loadPreviews(forceNetwork: true)
+            await refreshStorage(force: true)
         }
         .onReceive(FileGridMutationCenter.shared.mutations) { mutation in
             guard case let .uploaded(driveId, files) = mutation,
@@ -384,12 +377,14 @@ struct ProfileView: View {
         isLoadingRecents = false
     }
 
-    private func refreshStorage() async {
+    private func refreshStorage(force: Bool = false) async {
         guard !Task.isCancelled, !isRefreshingStorage, isSelected else { return }
+        if !force, let last = lastStorageRefreshAt, Date().timeIntervalSince(last) < 60 { return }
         isRefreshingStorage = true
         defer { isRefreshingStorage = false }
         do {
             try await session.reloadDrives()
+            lastStorageRefreshAt = Date()
             storageRefreshFailed = false
         } catch {
             if !Task.isCancelled { storageRefreshFailed = true }

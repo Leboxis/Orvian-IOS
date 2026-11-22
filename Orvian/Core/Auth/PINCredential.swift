@@ -50,7 +50,7 @@ enum PINCredential {
         }
         let parts = record.split(separator: "$", omittingEmptySubsequences: false)
         guard parts.count == 4 || (parts.count == 5 && (parts[4] == "4" || parts[4] == "6")),
-              let count = UInt32(parts[1]), count == rounds,
+              let count = UInt32(parts[1]), count >= rounds && count <= 2_000_000,
               let salt = Data(base64Encoded: String(parts[2])), salt.count == 16,
               let expected = Data(base64Encoded: String(parts[3])), expected.count == 32 else {
             throw CredentialError.derivationFailed

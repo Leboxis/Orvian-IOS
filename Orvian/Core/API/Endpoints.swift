@@ -41,11 +41,18 @@ struct Endpoint {
 
 extension Endpoint {
     /// Comptes accessibles avec le token courant.
-    static var accounts: Endpoint { Endpoint(path: "/1/account") }
+    static var accounts: Endpoint { Endpoint(path: "/1/accounts") }
 
     /// Drives d'un compte.
     static func drives(accountId: Int) -> Endpoint {
-        Endpoint(path: "/2/drive", query: [URLQueryItem(name: "account_id", value: String(accountId))])
+        Endpoint(path: "/2/drive", query: [
+            URLQueryItem(name: "account_id", value: String(accountId)),
+            URLQueryItem(name: "per_page", value: "100"),
+        ])
+    }
+
+    static func driveInfo(driveId: Int) -> Endpoint {
+        Endpoint(path: "/2/drive/\(driveId)")
     }
 
     /// Contenu d'un dossier (dossiers en premier, puis fichiers, par nom).
@@ -245,6 +252,21 @@ extension Endpoint {
         Endpoint(path: "/2/drive/\(driveId)/trash/\(fileId)/restore")
     }
 
+    /// Aperçu image redimensionné côté serveur (v2, 10…10 000 px, qualité 1…100).
+    static func preview(driveId: Int, fileId: Int, width: Int, height: Int, quality: Int = 88) -> Endpoint {
+        let clampedWidth = min(max(width, 10), 10_000)
+        let clampedHeight = min(max(height, 10), 10_000)
+        let clampedQuality = min(max(quality, 1), 100)
+        return Endpoint(
+            path: "/2/drive/\(driveId)/files/\(fileId)/preview",
+            query: [
+                URLQueryItem(name: "width", value: String(clampedWidth)),
+                URLQueryItem(name: "height", value: String(clampedHeight)),
+                URLQueryItem(name: "quality", value: String(clampedQuality)),
+            ]
+        )
+    }
+
     /// URL temporaire signée pour l'accès au contenu d'un fichier.
     static func temporaryURL(driveId: Int, fileId: Int, duration: Int = 3600) -> Endpoint {
         Endpoint(
@@ -282,19 +304,21 @@ extension Endpoint {
         directoryId: Int,
         fileName: String,
         totalSize: Int,
-        lastModifiedAt: Int
+        lastModifiedAt: Int,
+        clientToken: String? = nil
     ) -> Endpoint {
-        Endpoint(
-            path: "/3/drive/\(driveId)/upload",
-            query: [
-                URLQueryItem(name: "directory_id", value: String(directoryId)),
-                URLQueryItem(name: "file_name", value: fileName),
-                URLQueryItem(name: "total_size", value: String(totalSize)),
-                URLQueryItem(name: "last_modified_at", value: String(lastModifiedAt)),
-                URLQueryItem(name: "conflict", value: "rename"),
-                URLQueryItem(name: "with", value: "capabilities,conversion_capabilities,sorted_name"),
-            ]
-        )
+        var query = [
+            URLQueryItem(name: "directory_id", value: String(directoryId)),
+            URLQueryItem(name: "file_name", value: fileName),
+            URLQueryItem(name: "total_size", value: String(totalSize)),
+            URLQueryItem(name: "last_modified_at", value: String(lastModifiedAt)),
+            URLQueryItem(name: "conflict", value: "rename"),
+            URLQueryItem(name: "with", value: "capabilities,conversion_capabilities,sorted_name"),
+        ]
+        if let clientToken, !clientToken.isEmpty {
+            query.append(URLQueryItem(name: "client_token", value: clientToken))
+        }
+        return Endpoint(path: "/3/drive/\(driveId)/upload", query: query)
     }
 
     /// Ouvre une session pour les fichiers volumineux.
@@ -304,16 +328,23 @@ extension Endpoint {
 
     /// Remplace le contenu d'un fichier existant (nouvelle version) : avec
     /// `file_id`, le nom, le dossier et le conflit sont déduits par l'API.
-    static func uploadContent(driveId: Int, fileId: Int, totalSize: Int, lastModifiedAt: Int) -> Endpoint {
-        Endpoint(
-            path: "/3/drive/\(driveId)/upload",
-            query: [
-                URLQueryItem(name: "file_id", value: String(fileId)),
-                URLQueryItem(name: "total_size", value: String(totalSize)),
-                URLQueryItem(name: "last_modified_at", value: String(lastModifiedAt)),
-                URLQueryItem(name: "with", value: "capabilities,conversion_capabilities,sorted_name"),
-            ]
-        )
+    static func uploadContent(
+        driveId: Int,
+        fileId: Int,
+        totalSize: Int,
+        lastModifiedAt: Int,
+        totalChunkHash: String? = nil
+    ) -> Endpoint {
+        var query = [
+            URLQueryItem(name: "file_id", value: String(fileId)),
+            URLQueryItem(name: "total_size", value: String(totalSize)),
+            URLQueryItem(name: "last_modified_at", value: String(lastModifiedAt)),
+            URLQueryItem(name: "with", value: "capabilities,conversion_capabilities,sorted_name"),
+        ]
+        if let totalChunkHash, !totalChunkHash.isEmpty {
+            query.append(URLQueryItem(name: "total_chunk_hash", value: totalChunkHash))
+        }
+        return Endpoint(path: "/3/drive/\(driveId)/upload", query: query)
     }
 
     /// Ferme la session et renvoie le fichier définitivement créé.

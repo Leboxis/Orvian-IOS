@@ -47,6 +47,7 @@ enum TemporaryFileSweeper {
                 options: [.skipsHiddenFiles]
             )) ?? []
             for entry in entries where entry.lastPathComponent.hasPrefix(chunkPrefix)
+                || entry.lastPathComponent.hasPrefix("OrvianDownload-")
                 || entry.lastPathComponent.hasPrefix("fluidaudio-streaming-") {
                 try? manager.removeItem(at: entry)
             }

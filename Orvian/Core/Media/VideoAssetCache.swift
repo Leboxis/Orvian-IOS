@@ -106,6 +106,16 @@ final class VideoAssetCache {
         prefetchTasks.removeAll()
     }
 
+    func clear() {
+        cancelPrefetch()
+        assets.removeAll()
+        insertionOrder.removeAll()
+        refreshRequired.removeAll()
+        generations.removeAll()
+        pendingURLInvalidations.values.forEach { $0.task.cancel() }
+        pendingURLInvalidations.removeAll()
+    }
+
     /// Oublie l'asset et force la prochaine préparation à demander une
     /// nouvelle URL signée à Infomaniak.
     func invalidate(driveId: Int, fileId: Int) {

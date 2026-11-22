@@ -22,6 +22,10 @@ actor AsyncPermitPool {
                 return
             }
             try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+                if Task.isCancelled {
+                    continuation.resume(throwing: CancellationError())
+                    return
+                }
                 order.append(id)
                 waiters[id] = continuation
             }

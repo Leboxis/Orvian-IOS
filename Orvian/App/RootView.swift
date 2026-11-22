@@ -39,11 +39,10 @@ struct RootView: View {
         .onAppear { privacy.contentDidAppear() }
         .allowsHitTesting(privacy.allowsInteraction(snapshot))
         .disabled(!privacy.allowsInteraction(snapshot))
-        .environment(\.canImportFiles, { driveId in
-            privacy.allowsInteraction(privacy.snapshot)
-                && privacy.snapshot.phase == .active
-                && session.selectedDrive?.id == driveId
-        })
+        .environment(\.canImportFiles, ImportEligibility(
+            isAllowed: privacy.allowsInteraction(snapshot) && snapshot.phase == .active,
+            driveId: session.selectedDrive?.id
+        ))
         .accessibilityHidden(!privacy.allowsInteraction(snapshot))
         .background { AppPrivacyWindow(state: privacy) }
         .onReceive(NotificationCenter.default.publisher(for: .apiUnauthorized)) { notification in

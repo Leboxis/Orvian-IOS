@@ -31,7 +31,9 @@ struct IPadTabView<Content: View>: View {
             }
         }
         .tabViewStyle(.tabBarOnly)
-        .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { width = $0 }
+        .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { newWidth in
+            if abs(width - newWidth) > 0.5 { width = newWidth }
+        }
         .environment(\.iPadLayout, IPadLayout(isPad: true, width: width, largeText: dynamicTypeSize.isAccessibilitySize))
     }
 }

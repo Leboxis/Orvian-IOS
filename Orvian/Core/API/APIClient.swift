@@ -76,9 +76,15 @@ actor APIClient {
     /// L'annulation de la session, elle, n'a jamais lieu : elle tuerait les
     /// requêtes en vol.
     func applyCacheSettings() {
-        let previous = session.configuration.urlCache
+        let previousSession = session
+        let previous = previousSession.configuration.urlCache
         session = URLSession(configuration: Self.apiConfiguration())
         previous?.removeAllCachedResponses()
+        previousSession.finishTasksAndInvalidate()
+    }
+
+    func clearHTTPCache() {
+        session.configuration.urlCache?.removeAllCachedResponses()
     }
 
     /// Snapshot privé, conservé uniquement le temps d'un upload et de son nettoyage.
@@ -144,9 +150,52 @@ actor APIClient {
             let (data, response, _) = try await self.transmit(
                 request: request, measuredMethod: "GET", measuredPath: measuredPath
             )
+            if let http = response as? HTTPURLResponse,
+               (http.statusCode == 429 || http.statusCode == 503),
+               let delay = Self.retryDelay(for: http) {
+                try await Task.sleep(for: delay)
+                try Task.checkCancellation()
+                let (retryData, retryResponse, _) = try await self.transmit(
+                    request: request, measuredMethod: "GET", measuredPath: measuredPath
+                )
+                try Self.check(response: retryResponse, data: retryData, credentialFingerprint: fingerprint)
+                return retryData
+            }
             try Self.check(response: response, data: data, credentialFingerprint: fingerprint)
             return data
         }
+    }
+
+    func download(
+        _ endpoint: Endpoint,
+        cachePolicy: URLRequest.CachePolicy = .reloadIgnoringLocalCacheData
+    ) async throws -> (URL, HTTPURLResponse) {
+        let req = try request(for: endpoint, method: "GET", cachePolicy: cachePolicy)
+        let credentialFingerprint = Self.credentialFingerprint(for: req)
+        let (fileURL, response): (URL, URLResponse)
+        do {
+            (fileURL, response) = try await session.download(for: req)
+        } catch {
+            if error is CancellationError { throw error }
+            if let urlError = error as? URLError, urlError.code == .cancelled {
+                throw CancellationError()
+            }
+            throw APIError.network(error)
+        }
+        guard let http = response as? HTTPURLResponse else {
+            try? FileManager.default.removeItem(at: fileURL)
+            throw APIError.invalidResponse
+        }
+        guard (200..<300).contains(http.statusCode) else {
+            try? FileManager.default.removeItem(at: fileURL)
+            if http.statusCode == 401, let credentialFingerprint {
+                Task { @MainActor in
+                    NotificationCenter.default.post(name: .apiUnauthorized, object: credentialFingerprint)
+                }
+            }
+            throw APIError.http(status: http.statusCode, code: nil, description: nil)
+        }
+        return (fileURL, http)
     }
 
     /// Requête authentifiée décodée en JSON.
@@ -447,10 +496,16 @@ actor APIClient {
             || host.hasSuffix(".upload.kdrive.infomaniak.com")
     }
 
-    /// `/1/account` est appelé pendant la validation du token : accepter
-    /// l'absence de token ne concernerait aucun autre endpoint de toute façon.
     private func requiresAuth(_ endpoint: Endpoint) -> Bool {
-        !endpoint.path.hasPrefix("/1/")
+        true
+    }
+
+    private static func retryDelay(for response: HTTPURLResponse) -> Duration? {
+        if let header = response.value(forHTTPHeaderField: "Retry-After")?.trimmingCharacters(in: .whitespacesAndNewlines),
+           let seconds = Double(header), seconds.isFinite, seconds >= 0 {
+            return .milliseconds(Int64(min(seconds, 5) * 1_000))
+        }
+        return .seconds(1)
     }
 
     private static func check(response: URLResponse, data: Data, credentialFingerprint: String?) throws {
@@ -463,6 +518,13 @@ actor APIClient {
             }
             let apiError = decodeError(data: data)
             throw APIError.http(status: http.statusCode, code: apiError?.code, description: apiError?.description)
+        }
+        if data.count <= 16_384,
+           let contentType = http.value(forHTTPHeaderField: "Content-Type")?.lowercased(),
+           contentType.contains("json"),
+           let envelope = try? JSONDecoder.api.decode(ErrorEnvelope.self, from: data),
+           envelope.result == "error" {
+            throw APIError.http(status: http.statusCode, code: envelope.error?.code, description: envelope.error?.description)
         }
     }
 
@@ -597,6 +659,7 @@ private struct ErrorEnvelope: Decodable {
         let description: String?
     }
 
+    let result: String?
     let error: Inner?
 }
 

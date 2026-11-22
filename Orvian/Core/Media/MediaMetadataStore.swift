@@ -108,9 +108,9 @@ final class MediaMetadataStore {
     /// Cache disque, indexé `credential-driveId-fileId` (deux drives peuvent partager un
     /// même identifiant de fichier).
     @ObservationIgnored private var entries: [String: PersistedEntry] = [:]
-    private var persistenceLoaded = false
-    private var persistenceLoadTask: Task<[String: PersistedEntry], Never>?
-    private var pendingSaveTask: Task<Void, Never>?
+    @ObservationIgnored private var persistenceLoaded = false
+    @ObservationIgnored private var persistenceLoadTask: Task<[String: PersistedEntry], Never>?
+    @ObservationIgnored private var pendingSaveTask: Task<Void, Never>?
     @ObservationIgnored private var pendingRevisionTask: Task<Void, Never>?
     /// Limite douce du cache disque ; l'écriture écarte les entrées les plus
     /// anciennes au-delà (des milliers de vidéos restent couvertes).
@@ -401,7 +401,9 @@ final class MediaMetadataStore {
         guard let asset = await VideoAssetCache.shared.asset(driveId: request.driveId, fileId: request.fileId) else {
             return nil
         }
-        guard let duration = try? await asset.load(.duration) else { return nil }
+        guard let duration = try? await asset.load(.duration),
+              duration.seconds.isFinite,
+              duration.seconds >= 0 else { return nil }
         let properties = await videoProperties(of: asset)
         guard !Task.isCancelled else { return nil }
         return Info(
@@ -409,6 +411,14 @@ final class MediaMetadataStore {
             orientation: properties.orientation,
             maximumDimension: properties.maximumDimension
         )
+    }
+
+    func clearMemory() {
+        pendingRevisionTask?.cancel()
+        pendingRevisionTask = nil
+        cache.removeAll()
+        inFlightKeys.removeAll()
+        versions.removeAll()
     }
 
     /// Promotion d'une résolution terminée en arrière-plan.

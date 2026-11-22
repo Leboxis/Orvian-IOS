@@ -51,7 +51,7 @@ struct MediaPagerView: View {
     @State private var tagSheetFile: DriveFile?
     @State private var favoriteErrorMessage: String?
 
-    @State private var mutationCredentialFingerprint = TokenStore.credentialFingerprint()
+    @State private var mutationCredentialFingerprint: String?
     private let service = KDriveService()
 
     init(context: MediaViewerContext) {
@@ -62,6 +62,7 @@ struct MediaPagerView: View {
         _selectedFileID = State(initialValue: firstID)
         _settled = State(initialValue: context.files)
         _indexByFileID = State(initialValue: Self.indexMap(context.files))
+        _mutationCredentialFingerprint = State(initialValue: TokenStore.credentialFingerprint())
     }
 
     /// Table `fileId → position` dans `settled`.
@@ -711,7 +712,7 @@ private struct ZoomablePhotoPage: View {
         .task(id: wantsFullResolution) {
             // Une seule fois par page : le zoom suivant réutilise l'image déjà
             // chargée, qui reste attachée à la page tant qu'elle est montée.
-            guard wantsFullResolution, fullImage == nil else { return }
+            guard wantsFullResolution, !file.isGIF, fullImage == nil else { return }
             await loadFullResolutionImage()
         }
         .onChange(of: isActive) { wasActive, isNowActive in
@@ -757,8 +758,8 @@ private struct ZoomablePhotoPage: View {
     /// l'image sur les grands écrans.
 
     private func topBarClearance(in proxy: GeometryProxy) -> CGFloat {
-        let safeTop = proxy.safeAreaInsets.top
-        return min(160, safeTop + 56)
+        // `TabView` respecte déjà la safe area haute : ne pas réappliquer `proxy.safeAreaInsets.top`.
+        return 56
     }
 
     @ViewBuilder
@@ -785,14 +786,9 @@ private struct ZoomablePhotoPage: View {
     /// À l'échelle normale, aucun drag n'est attaché à l'image : le pager
     /// horizontal reçoit donc toute sa surface. Une fois zoomée, l'image prend
     /// la priorité afin qu'un panoramique ne change pas de page.
-    @ViewBuilder
     private func interactiveImage(in screenSize: CGSize) -> some View {
-        if isZoomed {
-            displayedImage(in: screenSize)
-                .highPriorityGesture(zoomedPanGesture(in: screenSize))
-        } else {
-            displayedImage(in: screenSize)
-        }
+        displayedImage(in: screenSize)
+            .highPriorityGesture(zoomedPanGesture(in: screenSize), isEnabled: isZoomed)
     }
 
     private func displayedImage(in screenSize: CGSize) -> some View {

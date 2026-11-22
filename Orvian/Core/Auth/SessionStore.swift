@@ -126,10 +126,18 @@ final class SessionStore {
 
     private func discardMediaLinks() {
         RecentUploadsLoader.shared.clear()
-        guard let credential = TokenStore.credentialFingerprint() else { return }
+        VideoAssetCache.shared.clear()
+        MediaMetadataStore.shared.clearMemory()
+        let credential = TokenStore.credentialFingerprint()
         Task {
-            await MediaURLCache.shared.clear(credentialFingerprint: credential)
-            await PreparedSubtitleStore.shared.clear(credential: credential)
+            if let credential {
+                await MediaURLCache.shared.clear(credentialFingerprint: credential)
+                await PreparedSubtitleStore.shared.clear(credential: credential)
+            }
+            await HiresImageStore.shared.purgeCache()
+            await GIFImageStore.shared.purgeCache()
+            await ThumbnailProvider.shared.clearMemoryAndPrefetch()
+            await APIClient.shared.clearHTTPCache()
         }
     }
 

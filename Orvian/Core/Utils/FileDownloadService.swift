@@ -1,31 +1,33 @@
+import Observation
 import SwiftUI
 import UIKit
 
 /// Service de téléchargement et d'export/partage de fichiers kDrive.
 @MainActor
-final class FileDownloadService: ObservableObject {
+@Observable
+final class FileDownloadService {
     static let shared = FileDownloadService()
 
-    @Published var isDownloading = false
+    var isDownloading = false
     /// Progression du téléchargement courant (0…1) ; reste à 0 tant que le
     /// serveur n'annonce pas de taille totale (progression indéterminée).
-    @Published var progress: Double = 0
-    @Published var downloadingFileName: String?
-    @Published var errorMessage: String?
+    var progress: Double = 0
+    var downloadingFileName: String?
+    var errorMessage: String?
 
-    private var downloadTask: Task<Void, Never>?
-    private var sessionGeneration = 0
-    private var presentationAllowed = false
-    private weak var presentationWindow: UIWindow?
-    private weak var activityController: UIActivityViewController?
-    private var sharedDirectory: URL?
+    @ObservationIgnored private var downloadTask: Task<Void, Never>?
+    @ObservationIgnored private var sessionGeneration = 0
+    @ObservationIgnored private var presentationAllowed = false
+    @ObservationIgnored private weak var presentationWindow: UIWindow?
+    @ObservationIgnored private weak var activityController: UIActivityViewController?
+    @ObservationIgnored private var sharedDirectory: URL?
     private struct PendingShare {
         let fileURL: URL
         let directory: URL
         let credential: String
     }
-    private var pendingShare: PendingShare?
-    private let currentCredential: () -> String?
+    @ObservationIgnored private var pendingShare: PendingShare?
+    @ObservationIgnored private let currentCredential: () -> String?
 
     init(currentCredential: @escaping () -> String? = { TokenStore.credentialFingerprint() }) {
         self.currentCredential = currentCredential

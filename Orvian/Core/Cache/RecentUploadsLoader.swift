@@ -279,6 +279,7 @@ final class RecentUploadsLoader {
     /// Profile mounts. No disk preview or thumbnail request precedes this GET.
     func prefetch(driveId: Int) {
         guard let credential = TokenStore.credentialFingerprint() else { return }
+        profileVisit?.task.cancel()
         let visitGeneration = generation
         let task = Task<RefreshOutcome?, Never> {
             guard credential == TokenStore.credentialFingerprint(), visitGeneration == generation else { return nil }

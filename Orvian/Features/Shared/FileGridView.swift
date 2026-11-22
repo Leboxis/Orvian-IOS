@@ -280,6 +280,7 @@ struct FileGridView: View {
                 if isMissing(detailRequest) { detailRequest = nil }
                 if isMissing(tagsRequest) { tagsRequest = nil }
                 if isMissing(colorRequest) { colorRequest = nil }
+                if isMissing(subtitleRequest) { subtitleRequest = nil }
                 if isMissing(deleteRequest) { deleteRequest = nil }
                 if isMissing(renameRequest) { renameRequest = nil }
             }

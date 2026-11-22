@@ -151,7 +151,7 @@ extension DriveFile {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         id = try c.decode(Int.self, forKey: .id)
         name = try c.decode(String.self, forKey: .name)
-        type = try c.decode(String.self, forKey: .type)
+        type = (try c.decodeIfPresent(String.self, forKey: .type)) ?? "file"
         size = try c.decodeIfPresent(Int.self, forKey: .size)
         path = try c.decodeIfPresent(String.self, forKey: .path)
         mimeType = Self.decode(c, camel: .mimeType, snake: .mimeTypeSnake)
@@ -166,7 +166,7 @@ extension DriveFile {
         // Repli sur `last_modified_at` pour les réponses qui n'exposent pas
         // `updated_at` (entrées d'activités notamment).
         updatedAt = Self.decode(c, camel: .updatedAt, snake: .updatedAtSnake)
-            ?? (try? c.decode(Double.self, forKey: .lastModifiedAtSnake))
+            ?? lastModifiedAt
     }
 
     /// Décode une valeur en essayant d'abord la clé camelCase, puis la clé

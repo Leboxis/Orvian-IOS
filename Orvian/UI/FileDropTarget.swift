@@ -1,8 +1,17 @@
 import SwiftUI
 import UniformTypeIdentifiers
 
+struct ImportEligibility: Equatable, Sendable {
+    var isAllowed = false
+    var driveId: Int? = nil
+
+    func callAsFunction(_ targetDriveId: Int) -> Bool {
+        isAllowed && driveId == targetDriveId
+    }
+}
+
 extension EnvironmentValues {
-    @Entry var canImportFiles: (Int) -> Bool = { _ in false }
+    @Entry var canImportFiles = ImportEligibility()
 }
 
 /// Provider URLs expire at the end of their callback; stage before switching actors.

@@ -11,10 +11,10 @@ final class CategoryLibrary {
     static let shared = CategoryLibrary()
 
     private var categoriesByDrive: [Int: [Int: Category]] = [:]
-    private var refreshGenerationByDrive: [Int: Int] = [:]
+    @ObservationIgnored private var refreshGenerationByDrive: [Int: Int] = [:]
 
-    private var loadingByDrive: [Int: Task<Void, Never>] = [:]
-    private var sessionGeneration = 0
+    @ObservationIgnored private var loadingByDrive: [Int: Task<Void, Never>] = [:]
+    @ObservationIgnored private var sessionGeneration = 0
 
     private init() {}
 

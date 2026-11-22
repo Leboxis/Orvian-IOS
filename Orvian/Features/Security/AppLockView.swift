@@ -113,11 +113,14 @@ struct AppLockView: View {
 
     private var lockIdentity: some View {
         VStack(spacing: 20) {
-            AppMark()
-                .font(.system(size: 40, weight: .bold))
-                .onTapGesture(perform: authenticateWithBiometrics)
-                .accessibilityLabel(biometricsAvailable ? "Déverrouiller avec \(biometryName)" : "Logo Orvian")
-                .accessibilityHint(biometricsAvailable ? "Lance l'authentification biométrique" : "")
+            Button(action: authenticateWithBiometrics) {
+                AppMark()
+                    .font(.system(size: 40, weight: .bold))
+            }
+            .buttonStyle(.plain)
+            .disabled(!biometricsAvailable)
+            .accessibilityLabel(biometricsAvailable ? "Déverrouiller avec \(biometryName)" : "Logo Orvian")
+            .accessibilityHint(biometricsAvailable ? "Lance l'authentification biométrique" : "")
 
             VStack(spacing: 6) {
                 Text("Orvian verrouillé")

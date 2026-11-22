@@ -74,12 +74,7 @@ struct TextFileViewer: View {
                             withAnimation(Motion.animation(.snappy(duration: 0.2))) {
                                 isSearching.toggle()
                             }
-                            if isSearching {
-                                // Le focus doit être posé après l'animation d'apparition.
-                                DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
-                                    isSearchFieldFocused = true
-                                }
-                            } else {
+                            if !isSearching {
                                 searchQuery = ""
                             }
                         } label: {
@@ -133,6 +128,12 @@ struct TextFileViewer: View {
                     .accessibilityLabel("Fermer")
                 }
             }
+        }
+        .task(id: isSearching) {
+            guard isSearching else { return }
+            try? await Task.sleep(for: .milliseconds(250))
+            guard !Task.isCancelled, isSearching else { return }
+            isSearchFieldFocused = true
         }
         .task {
             await load()
